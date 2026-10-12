@@ -24,6 +24,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Check TypeScript and build frontend
         run: npm run build
+      - name: Check backend JavaScript syntax
+        run: node --check Server/index.mjs
       - name: Validate PowerShell script syntax
         shell: powershell
         run: |
