@@ -82,7 +82,7 @@ try {
     if ($selected.Count -eq 0) {
         if ($null -ne $active) {
             Write-Host 'No open mergeable PR remains; stopping prior preview.'
-            Run-Preview @('-Stop')
+            Run-Preview -parameters @('-Stop')
             Remove-Item -LiteralPath $activeFile -Force
         } else {
             Write-Host 'No open mergeable PR to preview.'
@@ -125,7 +125,7 @@ try {
 
     Write-Host "Starting isolated browser preview for PR #$number, commit $($sha.Substring(0,7))"
     try {
-        Run-Preview @('-PullRequest', [string]$number)
+        Run-Preview -parameters @('-PullRequest', [string]$number)
         # Check the checkout actually matches the observed GitHub PR head.
         $checkedOut = (& git -C (Join-Path $homePath 'Projects\family-calendar-preview') rev-parse HEAD).Trim()
         if ($LASTEXITCODE -ne 0 -or $checkedOut -ne $sha) {
