@@ -1,6 +1,6 @@
 # Approved GitHub updates: preview and automatic laptop deployment
 
-**Goal:** edit through ChatGPT / GitHub, preview frontend and backend on a separate URL, then merge the reviewed PR. The laptop checks private GitHub \`main\` every **15 minutes** and automatically runs the existing guarded frontend **or backend** deployment. A brief Node restart is allowed for backend updates. The gaming desktop can be unplugged.
+**Goal:** edit through ChatGPT / GitHub, preview frontend and backend on a separate URL, then merge the reviewed PR. The laptop checks private GitHub `main` every **15 minutes** and automatically runs the existing guarded frontend **or backend** deployment. A brief Node restart is allowed for backend updates. The gaming desktop can be unplugged.
 
 **Current rollout:** scripts prepared in this PR, **not enabled on the laptop** until installed and verified. PR merge alone cannot install a Windows task or configure your SSH agent remotely. Database migrations, dependency changes, and unknown file types still require special/manual handling; the existing deployers reject them. An interrupted backend rollout can temporarily take the calendar offline; automatic attempts stop after a failure.
 
@@ -21,7 +21,7 @@ Start-Service ssh-agent
 ssh-add "$env:USERPROFILE\.ssh\id_ed25519_github"
 ```
 
-Enter the existing SSH key passphrase into the local Windows SSH prompt. The watcher uses \`BatchMode=yes\` and **will not** prompt while unattended. Verify after a reboot that the agent can still authenticate.
+Enter the existing SSH key passphrase into the local Windows SSH prompt. The watcher uses `BatchMode=yes` and **will not** prompt while unattended. Verify after a reboot that the agent can still authenticate.
 
 3. Read-only readiness test (checks noninteractive GitHub authentication; **does not install** anything):
 
@@ -35,9 +35,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\install-auto-
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\install-auto-release.ps1" -Install
 ```
 
-The installer asks locally for the laptop **Windows account password (not Windows Hello PIN)** so Task Scheduler can run under the existing elevated account even when no desktop session is open. It does not copy a password or private key into GitHub. Task name: **Family Calendar Auto Deploy**. The watcher is copied outside GitHub into \`C:\Users\bobby\AppData\Local\FamilyCalendar\auto-release\` for a stable trusted task target. It uses the same guarded \`scripts/release.ps1 -Apply\` process that has already been tested manually. It never runs as SYSTEM and never writes to live SQLite directly.
+The installer asks locally for the laptop **Windows account password (not Windows Hello PIN)** so Task Scheduler can run under the existing elevated account even when no desktop session is open. It does not copy a password or private key into GitHub. Task name: **Family Calendar Auto Deploy**. The watcher is copied outside GitHub into `C:\Users\bobby\AppData\Local\FamilyCalendar\auto-release` for a stable trusted task target. It uses the same guarded `scripts/release.ps1 -Apply` process that has already been tested manually. It never runs as SYSTEM and never writes to live SQLite directly.
 
-The task checks GitHub every 15 minutes, deploys only after an approved PR is **merged into main**, and exits if already up to date. It checks repository remotes and clean source folders, uses the known read-only SSH identity in noninteractive mode, and runs the existing test build and safety checks. Bad connectivity causes a later retry without changing live. If testing/release fails, the task writes \`REQUIRES-REVIEW.txt\` and does **not** retry another release until the hold is reviewed and manually cleared; investigate rollback results first. The separate \`DEPLOYMENT-IN-PROGRESS.txt\` marker also blocks retries after an interrupted or force-stopped deployment; do not clear either marker until the server and files are verified. Logs: \`C:\Users\bobby\AppData\Local\FamilyCalendar\auto-release\auto-release.log\`.
+The task checks GitHub every 15 minutes, deploys only after an approved PR is **merged into main**, and exits if already up to date. It checks repository remotes and clean source folders, uses the existing SSH key to fetch in noninteractive mode, and runs the existing test build and safety checks. Bad connectivity causes a later retry without changing live. If testing/release fails, the task writes `REQUIRES-REVIEW.txt` and does **not** retry another release until the hold is reviewed and manually cleared; investigate rollback results first. The separate `DEPLOYMENT-IN-PROGRESS.txt` marker also blocks retries after an interrupted or force-stopped deployment; do not clear either marker until the server and files are verified. Logs: `C:\Users\bobby\AppData\Local\FamilyCalendar\auto-release\auto-release.log`.
 
 Manual emergency stop:
 
@@ -55,7 +55,7 @@ After these scripts are merged, each **future PR** can be previewed from the lap
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\preview-pr.ps1" -PullRequest 9
 ```
 
-Replace \`9\` with the actual PR number. The preview appears at the laptop's **Tailscale IPv4 address, port 13002**. It's sourced from the unmerged PR, and runs out of a third checkout \`C:\Users\bobby\Projects\family-calendar-preview\` with a separate SQLite copy of the **test** DB and separate uploads. Live remains at port 3001. On later preview starts, test-only changes in the preview DB persist. Do not use random untrusted PRs: the Windows process is not a security sandbox even though the database path is isolated. The server and Ollama share laptop CPU/GPU resources. Existing live photos may not be available in preview.
+Replace `9` with the actual PR number. The preview appears at the laptop's **Tailscale IPv4 address, port 13002**. It's sourced from the unmerged PR, and runs out of a third checkout `C:\Users\bobby\Projects\family-calendar-preview` with a separate SQLite copy of the **test** DB and separate uploads. Live remains at port 3001. On later preview starts, test-only changes in the preview DB persist. Do not use random untrusted PRs: the Windows process is not a security sandbox even though the database path is isolated. The server and Ollama share laptop CPU/GPU resources. Existing live photos may not be available in preview.
 
 Stop the preview:
 
@@ -182,7 +182,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "node .\scripts\verif
 
 The script makes a consistent backup via the built-in Node SQLite backup API while the live server keeps running. It copies the snapshot into a separate disposable restore file, compares hashes, opens both as read-only SQLite databases, runs `PRAGMA integrity_check`, and verifies key application tables and row counts. It deletes only the disposable restore file, **not** the retained recovery snapshot.
 
-Snapshots are saved locally under `C:\Users\bobby\Projects\family-calendar-release-backups\sqlite\`, outside the GitHub repository. They contain private household data and should never be uploaded to GitHub. Existing backup task retention is separate; do not assume these snapshots are automatically cleaned up.
+Snapshots are saved locally under `C:\Users\bobby\Projects\family-calendar-release-backups\sqlite`, outside the GitHub repository. They contain private household data and should never be uploaded to GitHub. Existing backup task retention is separate; do not assume these snapshots are automatically cleaned up.
 
 Passing the restore test proves recovery of that snapshot into a separate file. It does not itself test live restoration, stop/start behavior, or downgrade-safe database migrations.
 
