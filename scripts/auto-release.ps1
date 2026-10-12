@@ -34,7 +34,11 @@ $mutex = [System.Threading.Mutex]::new($false, 'Global\FamilyCalendarAutoRelease
 $locked = $false
 $transcribing = $false
 try {
-    $locked = $mutex.WaitOne(0)
+    try {
+        $locked = $mutex.WaitOne(0)
+    } catch [System.Threading.AbandonedMutexException] {
+        $locked = $true
+    }
     if (-not $locked) { return }
     Start-Transcript -LiteralPath $logFile -Append -ErrorAction Stop | Out-Null
     $transcribing = $true
@@ -116,9 +120,10 @@ try {
             throw 'Release failed; automatic retries are now disabled.'
         }
         $deployed = (& git -C $live rev-parse HEAD).Trim()
+        $tested = (& git -C $test rev-parse HEAD).Trim()
         $health = Invoke-RestMethod 'http://127.0.0.1:3001/api/health' -TimeoutSec 10
-        if ($deployed -ne $approved -or $health.status -ne 'ok') {
-            $msg = "Post-release validation failed at $(Get-Date -Format o). Live: $deployed; expected: $approved. Check $logFile."
+        if ($deployed -ne $tested -or $health.status -ne 'ok') {
+            $msg = "Post-release validation failed at $(Get-Date -Format o). Live: $deployed; tested version: $tested. Check $logFile."
             Set-Content -LiteralPath $holdFile -Value $msg -Encoding UTF8
             throw 'Post-release check failed; further automatic releases disabled.'
         }
