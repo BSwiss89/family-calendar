@@ -4,7 +4,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-if ([Security.Principal.WindowsIdentity]::GetCurrent().Name -eq 'NT AUTHORITY\\SYSTEM') {
+if ([Security.Principal.WindowsIdentity]::GetCurrent().Name -eq 'NT AUTHORITY\SYSTEM') {
     throw 'Run this script in your interactive Bobby PowerShell session, not as SYSTEM.'
 }
 
