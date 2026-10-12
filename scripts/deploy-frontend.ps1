@@ -13,6 +13,10 @@ $test = Join-Path $env:USERPROFILE 'Projects\family-calendar-test'
 $remote = 'git@github.com:BSwiss89/family-calendar.git'
 $backupParent = Join-Path $env:USERPROFILE 'Projects\family-calendar-release-backups'
 
+if ([Security.Principal.WindowsIdentity]::GetCurrent().Name -eq 'NT AUTHORITY\SYSTEM') {
+    throw 'Deploy from an interactive PowerShell session, not as SYSTEM.'
+}
+
 function Check-Repo([string]$folder, [string]$label) {
     if (-not (Test-Path (Join-Path $folder '.git'))) {
         throw "$label repository not found: $folder"
