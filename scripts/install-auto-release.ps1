@@ -67,10 +67,10 @@ $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Password -RunLe
 $definition = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -Principal $principal
 
 Write-Host 'Windows will ask for your ACCOUNT PASSWORD, not your Windows Hello PIN.'
-Write-Host 'The password is passed directly to Windows Task Scheduler and is not printed or saved by this script.'
-$creds = Get-Credential -UserName $user -Message 'Enter your laptop Windows account password to allow deployment while logged out'
-if ($creds.UserName -ne $user) { throw 'Windows account did not match; task not installed.' }
-$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($creds.Password)
+Write-Host 'The password is passed to Windows Task Scheduler; it is not echoed or saved in a script or GitHub.'
+$securePassword = Read-Host 'Enter laptop Windows ACCOUNT password (not PIN)' -AsSecureString
+if ($securePassword.Length -eq 0) { throw 'No password entered; task not installed.' }
+$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
 try {
     $password = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
     Register-ScheduledTask -TaskName $taskName -InputObject $definition -User $user -Password $password -ErrorAction Stop | Out-Null
