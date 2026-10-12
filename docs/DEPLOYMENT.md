@@ -1,3 +1,72 @@
+# Approved GitHub updates: preview and automatic laptop deployment
+
+**Goal:** edit through ChatGPT / GitHub, preview frontend and backend on a separate URL, then merge the reviewed PR. The laptop checks private GitHub \`main\` every **15 minutes** and automatically runs the existing guarded frontend **or backend** deployment. A brief Node restart is allowed for backend updates. The gaming desktop can be unplugged.
+
+**Current rollout:** scripts prepared in this PR, **not enabled on the laptop** until installed and verified. PR merge alone cannot install a Windows task or configure your SSH agent remotely. Database migrations, dependency changes, and unknown file types still require special/manual handling; the existing deployers reject them. An interrupted backend rollout can temporarily take the calendar offline; automatic attempts stop after a failure.
+
+## Enable unattended deployments after merging this setup PR
+
+1. On the laptop via elevated VS Code Remote-SSH PowerShell, pull the approved scripts into the **test** folder:
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+git pull --ff-only origin main
+```
+
+2. Windows OpenSSH agent must be running and hold the **existing passphrase-protected key**; do not remove its passphrase or share it with GitHub:
+
+```powershell
+Set-Service ssh-agent -StartupType Automatic
+Start-Service ssh-agent
+ssh-add "$env:USERPROFILE\.ssh\id_ed25519_github"
+```
+
+Enter the existing SSH key passphrase into the local Windows SSH prompt. The watcher uses \`BatchMode=yes\` and **will not** prompt while unattended. Verify after a reboot that the agent can still authenticate.
+
+3. Read-only readiness test (checks noninteractive GitHub authentication; **does not install** anything):
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\install-auto-release.ps1"
+```
+
+4. **Only after reviewing the output and validating a preview**, install the task:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\install-auto-release.ps1" -Install
+```
+
+The installer asks locally for the laptop **Windows account password (not Windows Hello PIN)** so Task Scheduler can run under the existing elevated account even when no desktop session is open. It does not copy a password or private key into GitHub. Task name: **Family Calendar Auto Deploy**. The watcher is copied outside GitHub into \`C:\Users\bobby\AppData\Local\FamilyCalendar\auto-release\` for a stable trusted task target. It uses the same guarded \`scripts/release.ps1 -Apply\` process that has already been tested manually. It never runs as SYSTEM and never writes to live SQLite directly.
+
+The task checks GitHub every 15 minutes, deploys only after an approved PR is **merged into main**, and exits if already up to date. It checks repository remotes and clean source folders, uses the known read-only SSH identity in noninteractive mode, and runs the existing test build and safety checks. Bad connectivity causes a later retry without changing live. If testing/release fails, the task writes \`REQUIRES-REVIEW.txt\` and does **not** retry another release until the hold is reviewed and manually cleared; investigate rollback results first. Logs: \`C:\Users\bobby\AppData\Local\FamilyCalendar\auto-release\auto-release.log\`.
+
+Manual emergency stop:
+
+```powershell
+Disable-ScheduledTask -TaskName "Family Calendar Auto Deploy"
+```
+
+Keep backups, including the laptop's independent SQLite snapshots and retrying desktop backup transfers, separate from GitHub. GitHub is source control, not a backup destination for household records.
+
+## Interactive PR browser preview (before merge)
+
+After these scripts are merged, each **future PR** can be previewed from the laptop with both its frontend and backend. Use an interactive PowerShell terminal:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\preview-pr.ps1" -PullRequest 9
+```
+
+Replace \`9\` with the actual PR number. The preview appears at the laptop's **Tailscale IPv4 address, port 13002**. It's sourced from the unmerged PR, and runs out of a third checkout \`C:\Users\bobby\Projects\family-calendar-preview\` with a separate SQLite copy of the **test** DB and separate uploads. Live remains at port 3001. On later preview starts, test-only changes in the preview DB persist. Do not use random untrusted PRs: the Windows process is not a security sandbox even though the database path is isolated. The server and Ollama share laptop CPU/GPU resources. Existing live photos may not be available in preview.
+
+Stop the preview:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\preview-pr.ps1" -Stop
+```
+
+If the URL works locally but cannot be opened through Tailscale, check the Windows Firewall rule for inbound TCP **13002** on the Tailscale interface only. Never open this port to public Internet/FirstNet hotspot. A PR preview currently requires launching the command on the laptop; automatically creating preview instances for every PR is not yet included in this stage.
+
+---
+
 # Family Calendar: GitHub release workflow
 
 The normal workflow is: ChatGPT prepares a pull request, you review and merge it, GitHub Actions checks the build, and **you explicitly deploy** from your laptop. Nothing deploys automatically when a PR is merged.
