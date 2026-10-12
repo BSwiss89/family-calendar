@@ -13,6 +13,7 @@ $live = Join-Path $homePath 'Projects\family-calendar'
 $release = Join-Path $test 'scripts\release.ps1'
 $state = Join-Path $homePath 'AppData\Local\FamilyCalendar\auto-release'
 $holdFile = Join-Path $state 'REQUIRES-REVIEW.txt'
+$inProgressFile = Join-Path $state 'DEPLOYMENT-IN-PROGRESS.txt'
 $logFile = Join-Path $state 'auto-release.log'
 $sshKey = Join-Path $homePath '.ssh\id_ed25519_github'
 
@@ -41,6 +42,10 @@ try {
 
     if (Test-Path -LiteralPath $holdFile) {
         Write-Host 'AUTO DEPLOYMENT PAUSED due to prior failure. Review REQUIRES-REVIEW.txt; nothing changed.'
+        return
+    }
+    if (Test-Path -LiteralPath $inProgressFile) {
+        Write-Warning 'A previous deployment was interrupted. DEPLOYMENT-IN-PROGRESS.txt exists; no automatic retry.'
         return
     }
     foreach ($folder in @($live, $test)) {
@@ -82,6 +87,12 @@ try {
         }
         Write-Host "New approved version $($approved.Substring(0,7)); current $($current.Substring(0,7))."
         Write-Host 'Running existing guarded frontend/backend release and recovery checks...'
+        $busyBackup = @(Get-ScheduledTask | Where-Object { $_.TaskName -like 'Family Calendar Backup*' -and $_.State -eq 'Running' })
+        if ($busyBackup.Count -gt 0) {
+            Write-Host 'Backup task is still running; defer deployment until the next scheduled check.'
+            return
+        }
+        Set-Content -LiteralPath $inProgressFile -Value "Started $(Get-Date -Format o); current $current; approved $approved" -Encoding UTF8
 
         $exitCode = 1
         try {
@@ -111,6 +122,7 @@ try {
             Set-Content -LiteralPath $holdFile -Value $msg -Encoding UTF8
             throw 'Post-release check failed; further automatic releases disabled.'
         }
+        Remove-Item -LiteralPath $inProgressFile -Force
         Write-Host "AUTOMATIC DEPLOYMENT PASSED: $($deployed.Substring(0,7))"
     } finally {
         [Environment]::SetEnvironmentVariable('GIT_SSH_COMMAND', $oldGitSshCommand, 'Process')
