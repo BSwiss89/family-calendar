@@ -68,7 +68,7 @@ try {
     $oldGitSshCommand = [Environment]::GetEnvironmentVariable('GIT_SSH_COMMAND', 'Process')
     try {
         # BatchMode prevents a background task from hanging on passphrase/host prompts.
-        $env:GIT_SSH_COMMAND = 'ssh -i C:/Users/bobby/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20'
+        $env:GIT_SSH_COMMAND = 'C:/Windows/System32/OpenSSH/ssh.exe -i C:/Users/bobby/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20'
         $remote = @(& git -C $test ls-remote origin refs/heads/main)
         if ($LASTEXITCODE -ne 0 -or $remote.Count -ne 1) {
             # Network / auth faults do not cause a deployment or a permanent hold.
