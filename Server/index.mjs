@@ -7,7 +7,14 @@ import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 
 const app = express()
-const PORT = 3001
+// The live server defaults to 3001 / all interfaces.
+// The isolated test server sets its own loopback-only port through environment variables.
+const PORT = Number(process.env.FAMILY_CALENDAR_PORT ?? '3001')
+const HOST = process.env.FAMILY_CALENDAR_HOST ?? '0.0.0.0'
+
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+  throw new Error('Invalid FAMILY_CALENDAR_PORT')
+}
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -6991,6 +6998,6 @@ app.get(/.*/, (request, response) => {
   response.sendFile(path.join(distFolder, 'index.html'))
 })
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, HOST, () => {
   console.log(`Family Calendar server running at http://127.0.0.1:${PORT}`)
 })
