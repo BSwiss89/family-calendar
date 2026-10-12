@@ -1,4 +1,38 @@
-# Family Calendar: frontend deployment
+# Family Calendar: GitHub release workflow
+
+The normal workflow is: ChatGPT prepares a pull request, you review and merge it, GitHub Actions checks the build, and **you explicitly deploy** from your laptop. Nothing deploys automatically when a PR is merged.
+
+## One-command deployment (recommended)
+
+Run from your laptop's **interactive VS Code PowerShell terminal**, not as SYSTEM. After merging a pull request:
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\release.ps1"
+```
+
+The default command updates **only the separate test copy**, installs/builds it, compares it against the live Git commit, then previews the appropriate guarded frontend or backend deployer. It does **not** deploy to live.
+
+After reading the changed files and confirming the preview is safe, deploy explicitly:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\release.ps1" -Apply
+```
+
+This repeats the test and runs the existing guarded deployer. Frontend-only changes use a no-restart release. Server changes and unknown file types are passed to the strict backend deployer for additional checks (and potentially rejected). Backend releases require an **elevated, interactive PowerShell session**, briefly restart the calendar, and create verified private backups. Dependency updates and known startup database migration changes remain blocked by the backend deployer.
+
+**First use only:** after merging the PR that introduces `release.ps1`, download that script into the test checkout before invoking it:
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+git pull --ff-only origin main
+```
+
+Never edit your live checkout, restore SQLite data, or force deployment to bypass guards. If deployment or recovery fails, stop and inspect the result before retrying. The private database, photos/uploads, environment settings, and Windows startup scripts are **never committed to GitHub**.
+
+---
+
+## Existing direct deployment scripts (advanced/diagnostic)
 
 Two laptop folders:
 - LIVE: `C:/Users/bobby/Projects/family-calendar` — scheduled Node server, port 3001
