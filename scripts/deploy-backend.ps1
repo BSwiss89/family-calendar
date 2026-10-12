@@ -139,6 +139,8 @@ $didStop = $false
 $didUpdate = $false
 $didMove = $false
 try {
+    $busyBeforeStop = @(Get-ScheduledTask | Where-Object { $_.TaskName -like 'Family Calendar Backup*' -and $_.State -eq 'Running' })
+    Ensure ($busyBeforeStop.Count -eq 0) 'No backup process running immediately before restart'
     $didStop = $true
     Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
     if (-not (AwaitStopped)) { throw 'Old Node still listening; refused to modify code.' }
