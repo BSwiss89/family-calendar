@@ -51,7 +51,7 @@ function Get-Plan {
     $changed = @(& git -C $test diff --name-only "$from..$to")
     if ($LASTEXITCODE -ne 0) { throw 'Could not compare versions.' }
 
-    $allowed = '^(src/|public/|\.github/|scripts/|index\.html$|README\.md$|\.gitignore$|eslint\.config\.js$|vite\.config\.ts$|tsconfig(?:\.[^/]+)?\.json$)'
+    $allowed = '^(src/|public/|\.github/|scripts/|docs/|index\.html$|README\.md$|\.gitignore$|eslint\.config\.js$|vite\.config\.ts$|tsconfig(?:\.[^/]+)?\.json$)'
     $blocked = @($changed | Where-Object { $_ -notmatch $allowed })
 
     [pscustomobject]@{
