@@ -82,3 +82,26 @@ The script makes a consistent backup via the built-in Node SQLite backup API whi
 Snapshots are saved locally under `C:\Users\bobby\Projects\family-calendar-release-backups\sqlite\`, outside the GitHub repository. They contain private household data and should never be uploaded to GitHub. Existing backup task retention is separate; do not assume these snapshots are automatically cleaned up.
 
 Passing the restore test proves recovery of that snapshot into a separate file. It does not itself test live restoration, stop/start behavior, or downgrade-safe database migrations.
+
+## Controlled server restart test
+
+After verifying a fresh SQLite restore and checking backend preflight, verify the existing Windows scheduled task can stop and restart the live Node server without rebooting the laptop.
+
+First run a **read-only preview** from the laptop's elevated VS Code Remote-SSH PowerShell terminal:
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\test-server-restart.ps1"
+```
+
+The preview requires a healthy server, correct SYSTEM-owned scheduled task and startup action, clean repositories, a recent local independent database snapshot, and no actively running Family Calendar backup tasks. It makes no changes.
+
+Only when ready for a short calendar outage, run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\test-server-restart.ps1" -Run
+```
+
+The command requests `Stop-ScheduledTask`, verifies port 3001 is released, requests `Start-ScheduledTask`, and checks a **new** Node PID plus live health. If startup fails, it attempts to start the original scheduled task again. It will not terminate arbitrary processes or start a second server while port 3001 remains occupied. This tests the original scheduler startup mechanism; it does not install new code or touch SQLite. Keep your VS Code SSH session available for troubleshooting.
+
+If the command reports a failed or incomplete recovery, do not proceed with backend deployment; inspect the task state, listener, and startup logs first.
