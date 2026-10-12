@@ -40,3 +40,17 @@ If deployment validation fails, restoration of the previous frontend and Git ver
 - The current SSH key passphrase must be entered when fetching from GitHub.
 - Never run deployment as SYSTEM or edit live source concurrently with it.
 - GitHub is not a substitute for the independent backups of live SQLite data and personal uploads.
+
+## Isolated backend testing (before backend deployment)
+
+After merging a backend-related pull request, update the test folder. The test folder must contain an independent SQLite database snapshot in `Server/data/calendar.db`. This file stays on the laptop and is ignored by Git.
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\update-test.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\test-backend.ps1"
+```
+
+The temporary test server runs on `127.0.0.1:13001` and uses the testing folder's own database and uploads folder. It checks both its health endpoint and the live server's health; it stops its own test process afterward. Error logs remain in the ignored test `logs` directory.
+
+This smoke test does not exercise every API, integration, or migration scenario. It does not deploy backend code. `deploy-frontend.ps1` will continue to reject backend changes. A separate restart-aware backend release/rollback mechanism must be implemented and tested before deploying backend changes to the live server.
