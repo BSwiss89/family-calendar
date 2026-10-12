@@ -13,7 +13,7 @@ $source = Join-Path $test 'scripts\auto-release.ps1'
 $state = Join-Path $homePath 'AppData\Local\FamilyCalendar\auto-release'
 $installed = Join-Path $state 'auto-release.ps1'
 $taskName = 'Family Calendar Auto Deploy'
-$ssh = 'ssh -i C:/Users/bobby/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20'
+$ssh = 'C:/Windows/System32/OpenSSH/ssh.exe -i C:/Users/bobby/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20'
 
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()
 $admin = ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
