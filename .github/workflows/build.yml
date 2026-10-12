@@ -26,6 +26,8 @@ jobs:
         run: npm run build
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
+      - name: Check recovery test JavaScript syntax
+        run: node --check scripts/verify-sqlite-recovery.mjs
       - name: Validate PowerShell script syntax
         shell: powershell
         run: |
