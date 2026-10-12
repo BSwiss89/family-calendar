@@ -18,7 +18,7 @@ git pull --ff-only origin main
 ```powershell
 Set-Service ssh-agent -StartupType Automatic
 Start-Service ssh-agent
-ssh-add "$env:USERPROFILE\.ssh\id_ed25519_github"
+& "$env:WINDIR\System32\OpenSSH\ssh-add.exe" "$env:USERPROFILE\.ssh\id_ed25519_github"
 ```
 
 Enter the existing SSH key passphrase into the local Windows SSH prompt. The watcher uses `BatchMode=yes` and **will not** prompt while unattended. Verify after a reboot that the agent can still authenticate.
