@@ -105,3 +105,29 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\test-server-r
 The command requests `Stop-ScheduledTask`, verifies port 3001 is released, requests `Start-ScheduledTask`, and checks a **new** Node PID plus live health. If startup fails, it attempts to start the original scheduled task again. It will not terminate arbitrary processes or start a second server while port 3001 remains occupied. This tests the original scheduler startup mechanism; it does not install new code or touch SQLite. Keep your VS Code SSH session available for troubleshooting.
 
 If the command reports a failed or incomplete recovery, do not proceed with backend deployment; inspect the task state, listener, and startup logs first.
+
+## Guarded manual backend deployment (preview first)
+
+Only use this after PR review and merge, successful isolated testing, and a verified recovery snapshot. The first backend release should be performed while you can monitor the calendar through VS Code Remote-SSH.
+
+Update the test checkout, then run the **non-modifying preview**:
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\update-test.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\deploy-backend.ps1"
+```
+
+Read the entire changed-file list. The deployer accepts reviewed changes to Server/index.mjs and supported frontend/CI/scripts/docs files, but blocks dependency changes and edits to the known database startup/migration block. This is a limited safety guard, not proof that arbitrary backend edits cannot modify data or schema. Any actual database migration requires a separate, reviewed migration plan.
+
+Only after inspecting the preview and allowing a brief calendar outage, explicitly apply:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\deploy-backend.ps1" -Apply
+```
+
+The apply step updates and rebuilds the test clone, runs the isolated backend smoke test, checks that GitHub main still matches, stages a new frontend, stops the existing SYSTEM-owned scheduled task, verifies a **fresh SQLite backup and restore test while the live server is stopped**, preserves uploaded files, fast-forwards live Git, swaps the frontend, starts the existing scheduled task, and checks the new process and served homepage. The private backup is retained under the laptop's family-calendar-release-backups folder.
+
+On failure, the script attempts to stop the candidate server, restore the previous Git code and frontend, then restart the original task. **It never automatically restores the database**, since data created after the snapshot could otherwise be lost. If any rollback or health check fails, do not retry until the problem is investigated. Git/code rollback does not always reverse schema changes.
+
+This deployer is **manual**, not an unattended updater, and it doesn't provide a guarantee that a healthy endpoint means every feature is working. Check event creation, editing, photos, and AI features manually afterward. Do not edit live code while the release script is running.
