@@ -8,6 +8,12 @@ node scripts/preflight-migrations.mjs --self-test
 
 This uses *generated dummy records*, never the household DB. It exercises the production preservation validators: an added table and column must pass, running that migration twice must pass, changing an existing event must be rejected, and dropping a table must be rejected. The live-snapshot smoke test (`node scripts/preflight-migrations.mjs`) remains a separate laptop-only check. These tests do not yet authorize unattended schema changes or dependency installs.
 
+## Stage 3: Enforce migration safeguards before backend deployment
+
+For every **guarded backend deployment** (including ordinary API changes), `scripts/deploy-backend.ps1` now runs the synthetic SQLite regression fixtures and the complete disposable-snapshot migration preflight **before stopping the live service**. Either failure stops deployment before it touches the running calendar. The existing release script still rejects startup migration edits and dependency/lockfile changes: this PR **does not** automatically authorize migrations or dependency installations.
+
+When inspecting a successful backend release log, expect `MIGRATION SAFETY FIXTURES PASSED`, `ADDITIVE SQLITE MIGRATION PREFLIGHT PASSED`, then the existing verified offline recovery snapshot and `BACKEND DEPLOYMENT PASSED`. This is a preparatory safety gate; rollback/staging of dependencies and explicit additive-schema rollout restrictions must be implemented and exercised before relaxing the existing block.
+
 ## Stage 1: Guarded database migration preflight
 
 The existing automated release task has now been proven to restart the backend and recover a SQLite backup successfully. **Database schema changes and package dependency/lockfile changes remain blocked from automatic live deployment.** This stage adds a disposable migration-safety preflight; it does not relax those blocks.
