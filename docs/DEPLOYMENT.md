@@ -1,3 +1,21 @@
+## Stage 1: Guarded database migration preflight
+
+The existing automated release task has now been proven to restart the backend and recover a SQLite backup successfully. **Database schema changes and package dependency/lockfile changes remain blocked from automatic live deployment.** This stage adds a disposable migration-safety preflight; it does not relax those blocks.
+
+After merging this PR and confirming the laptop has fetched the approved scripts, run from the elevated laptop PowerShell terminal:
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+node .\scripts\preflight-migrations.mjs
+```
+
+The preflight uses Node's SQLite backup API to take a consistent short-lived snapshot of the running live database into an ignored local testing folder. It launches the candidate backend only against a **disposable DB on localhost:13003**, validates SQLite integrity and foreign keys, verifies existing tables/columns/data were preserved, starts it a second time to test repeatability, and then launches the previous live backend against a second copy of the migrated test DB to check code-rollback compatibility. It cleans up the temporary snapshot and reports pass/fail without touching live port 3001, live data, or scheduled tasks.
+
+This is intentionally a **strict additive-schema gate**: data backfills, column renames/drops, table rebuilds, irreversible migrations, or existing-record changes require a special reviewed plan. Running arbitrary new backend code against a temporary database on the **same Windows laptop is not a full security sandbox**; review PRs before using it. Native dependencies must already pass `npm ci` and the separate test backend check.
+
+**Next stage:** wire migration preflight into the guarded backend release and add dependency staging/rollback. Only after that is tested with a synthetic migration and a dependency update will we permit those releases unattended. Until then the existing safety block is intentional.
+
+---
 ## GitHub SSH automation compatibility (October 2026)
 
 The laptop's existing repository-local Git/SSH configuration works (verified by an SSH-agent-backed background `git ls-remote` job). Do not force a global `GIT_SSH_COMMAND` override in the preview/deployment watchers: that override was observed to hang even when normal `git pull` succeeded.
