@@ -1,3 +1,13 @@
+### Synthetic migration safety regression test
+
+Before we let a schema change deploy automatically, the preflight must prove it can distinguish **safe additive changes** from **destructive changes**. GitHub Actions now runs:
+
+```powershell
+node scripts/preflight-migrations.mjs --self-test
+```
+
+This uses *generated dummy records*, never the household DB. It exercises the production preservation validators: an added table and column must pass, running that migration twice must pass, changing an existing event must be rejected, and dropping a table must be rejected. The live-snapshot smoke test (`node scripts/preflight-migrations.mjs`) remains a separate laptop-only check. These tests do not yet authorize unattended schema changes or dependency installs.
+
 ## Stage 1: Guarded database migration preflight
 
 The existing automated release task has now been proven to restart the backend and recover a SQLite backup successfully. **Database schema changes and package dependency/lockfile changes remain blocked from automatic live deployment.** This stage adds a disposable migration-safety preflight; it does not relax those blocks.
