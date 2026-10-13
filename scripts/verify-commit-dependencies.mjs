@@ -28,7 +28,14 @@ function inspectEvidence({ candidate, commit, expectedManifest, expectedLock }) 
     requireSafe(fs.existsSync(file) && fs.statSync(file).isFile(), 'Missing candidate file: ' + path.basename(file))
     requireSafe(!fs.lstatSync(file).isSymbolicLink(), 'Unexpected linked candidate file: ' + path.basename(file))
   }
-  const meta = JSON.parse(read(metadataFile).toString('utf8'))
+  // Windows PowerShell 5.1's Set-Content -Encoding UTF8 prepends EF BB BF.
+  // Accept that standard BOM for previously preserved candidates, but do not
+  // silently strip any other unexpected metadata bytes.
+  const metadataBytes = read(metadataFile)
+  const hasUtf8Bom = metadataBytes.length >= 3 &&
+    metadataBytes[0] === 0xef && metadataBytes[1] === 0xbb && metadataBytes[2] === 0xbf
+  const metadataJson = metadataBytes.subarray(hasUtf8Bom ? 3 : 0).toString('utf8')
+  const meta = JSON.parse(metadataJson)
   requireSafe(meta.approvedCommit === commit, 'Metadata points to a different approved commit.')
   requireSafe(meta.status === 'prepared-not-applied', 'Candidate is not marked as prepared and unapplied.')
   requireSafe(typeof meta.createdAt === 'string' && !Number.isNaN(Date.parse(meta.createdAt)), 'Candidate creation date is invalid.')
@@ -73,6 +80,14 @@ function syntheticTests() {
     save()
     check()
     console.log('[PASS] Authentic commit-bound candidate metadata accepted.')
+    // Exercise actual EF BB BF bytes emitted by Windows PowerShell 5.1.
+    fs.writeFileSync(metaFile, Buffer.concat([
+      Buffer.from([0xef, 0xbb, 0xbf]),
+      Buffer.from(JSON.stringify(meta)),
+    ]))
+    check()
+    console.log('[PASS] PowerShell UTF-8 BOM metadata accepted without changing hashes.')
+    save()
     meta.approvedCommit = 'b'.repeat(40)
     save()
     expectReject(check, 'metadata referencing another GitHub commit')
