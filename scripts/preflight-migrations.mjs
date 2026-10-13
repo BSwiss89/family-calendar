@@ -199,7 +199,80 @@ async function main() {
   }
 }
 
-await main().catch(error => {
-  console.error('SQLITE MIGRATION PREFLIGHT FAILED: ' + error.message)
+// CI-friendly fixtures exercise the SAME preservation checks used on the
+// disposable household snapshot, without reading or copying household data.
+async function selfTest() {
+  const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'calendar-migration-guards-'))
+  const source = path.join(stage, 'original.db')
+  const additive = path.join(stage, 'additive.db')
+  const modified = path.join(stage, 'modified.db')
+  const removed = path.join(stage, 'removed.db')
+  try {
+    const fixture = new DatabaseSync(source)
+    try {
+      for (const name of required) {
+        fixture.exec('CREATE TABLE ' + quote(name) + ' (id INTEGER PRIMARY KEY, value TEXT NOT NULL)')
+        fixture.prepare('INSERT INTO ' + quote(name) + ' (id, value) VALUES (?, ?)').run(1, name + ' record')
+      }
+    } finally { fixture.close() }
+    const original = readSchemaAndRows(source)
+
+    await consistentCopy(source, additive)
+    function syntheticMigration() {
+      const db = new DatabaseSync(additive)
+      try {
+        db.exec('CREATE TABLE IF NOT EXISTS simulated_bills (id INTEGER PRIMARY KEY, amount INTEGER NOT NULL)')
+        const columns = db.prepare('PRAGMA table_info(events)').all().map(c => c.name)
+        if (!columns.includes('migration_test')) {
+          db.exec("ALTER TABLE events ADD COLUMN migration_test TEXT DEFAULT 'ok'")
+        }
+      } finally { db.close() }
+    }
+
+    syntheticMigration()
+    comparePreservation(original, readSchemaAndRows(additive), 'Additive fixture')
+    oldColumnsUnchanged(source, additive, original)
+    console.log('[PASS] Adding a new table/column preserves existing data')
+
+    syntheticMigration()
+    comparePreservation(original, readSchemaAndRows(additive), 'Repeated additive fixture')
+    oldColumnsUnchanged(source, additive, original)
+    console.log('[PASS] Applying the same synthetic migration twice is safe')
+
+    function mustReject(run, label) {
+      let rejected = false
+      try { run() } catch { rejected = true }
+      assert(rejected, 'Safety checker did not reject ' + label)
+      console.log('[PASS] Rejected ' + label)
+    }
+
+    await consistentCopy(additive, modified)
+    const edit = new DatabaseSync(modified)
+    try { edit.exec("UPDATE events SET value = 'unexpected change' WHERE id = 1") }
+    finally { edit.close() }
+    mustReject(() => oldColumnsUnchanged(source, modified, original), 'changed existing record')
+
+    await consistentCopy(additive, removed)
+    const drop = new DatabaseSync(removed)
+    try { drop.exec('DROP TABLE lists') } finally { drop.close() }
+    mustReject(() => comparePreservation(original, readSchemaAndRows(removed), 'Dropped table fixture'),
+      'removed existing table')
+
+    console.log('')
+    console.log('MIGRATION SAFETY FIXTURES PASSED')
+    console.log('All operations used synthetic databases inside a temporary folder.')
+  } finally {
+    fs.rmSync(stage, { recursive: true, force: true })
+  }
+}
+
+const selfTestOnly = process.argv.length === 3 && process.argv[2] === '--self-test'
+if (process.argv.length > 2 && !selfTestOnly) {
+  throw new Error('Only the --self-test option is supported.')
+}
+
+await (selfTestOnly ? selfTest() : main()).catch(error => {
+  console.error((selfTestOnly ? 'MIGRATION SAFETY FIXTURES' : 'SQLITE MIGRATION PREFLIGHT') +
+    ' FAILED: ' + error.message)
   process.exitCode = 1
 })
