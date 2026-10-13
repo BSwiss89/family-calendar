@@ -39,6 +39,9 @@ jobs:
       - name: Exercise isolated package switch and rollback scenarios
         shell: powershell
         run: .\\scripts\\test-dependency-rollback.ps1
+      - name: Rehearse real npm package activation, corruption detection, and rollback
+        shell: powershell
+        run: .\\scripts\\rehearse-real-dependency-rollback.ps1
       - name: Confirm dependency gates execute before live backend shutdown
         shell: powershell
         run: |
