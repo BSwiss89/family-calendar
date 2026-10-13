@@ -181,6 +181,27 @@ app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
     Require-Test ((Get-Content -LiteralPath (Join-Path $activeDist 'index.html') -Raw) -eq '<html>candidate frontend</html>') 'Candidate frontend not activated.'
     Write-Host '[PASS] Backend Git commit, frontend HTML and real npm candidate activated together.'
 
+    # A pre-existing rejected-assets location must block recovery before any
+    # package, dist, or Git mutation. Remove only our disposable collision.
+    New-Item -ItemType Directory -Path $rejectedDist -ErrorAction Stop | Out-Null
+    $refusedCollision = $false
+    try {
+        Restore-FamilyCalendarReleaseBundle -Repository $app `
+            -PreviousCommit $oldCommit -CandidateCommit $newCommit `
+            -ActiveFrontend $activeDist -PreviousFrontend $previousDist -RejectedFrontend $rejectedDist `
+            -ActiveDependencies $activePackages -PreviousDependencies $previousPackages -RejectedDependencies $rejectedPackages
+    } catch {
+        $refusedCollision = $true
+    }
+    Require-Test $refusedCollision 'Existing recovery destination should refuse the restore.'
+    $headAfterRefusal = (& $git -C $app rev-parse HEAD).Trim()
+    Check-Git 'inspect Git after refused recovery'
+    Require-Test ($headAfterRefusal -eq $newCommit -and
+        (Test-Path -LiteralPath $previousPackages -PathType Container) -and
+        (Test-Path -LiteralPath $previousDist -PathType Container)) 'Refused recovery modified a source or candidate.'
+    Remove-Item -LiteralPath $rejectedDist -Force -ErrorAction Stop
+    Write-Host '[PASS] Existing rejected-asset collision blocks recovery without changes.'
+
     $server = Start-RehearsalServer 'expected-startup-failure'
     $server.WaitForExit(10000) | Out-Null
     $server.Refresh()
