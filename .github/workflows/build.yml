@@ -58,6 +58,10 @@ jobs:
             throw 'Dependency-change blocker was unexpectedly removed'
           }
           Write-Host 'BACKEND DEPENDENCY GATES VERIFIED BEFORE SERVER SHUTDOWN'
+      - name: Validate commit-pinned candidate verifier syntax
+        run: node --check scripts/verify-commit-dependencies.mjs
+      - name: Exercise preserved candidate metadata and tamper protection
+        run: node scripts/verify-commit-dependencies.mjs --self-test
       - name: Validate PowerShell script syntax
         shell: powershell
         run: |
