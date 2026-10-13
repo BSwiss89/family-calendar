@@ -1,3 +1,19 @@
+## Stage 11: Combined code, frontend, package and HTTP rollback rehearsal
+
+After the laptop proved automatic rollout of `a6b53f4` and a successful isolated npm-dependent Node restart/recovery, Stage 11 exercises a **complete release recovery path together**, instead of testing the individual subsystems separately. `scripts/test-combined-release-rollback.ps1` creates a unique disposable folder in Windows Temp and a local Git repository containing a miniature Express/Sharp HTTP backend, a frontend `index.html`, and two real npm production dependency installations.
+
+The rehearsal starts the old backend and verifies both API health and rendered HTML, stops it, uses the already-tested package switch helper, fast-forwards the disposable Git checkout to a deliberately broken backend commit, and swaps the disposable frontend. It detects the resulting Node startup failure, then restores the previous npm installation, frontend folder, and Git commit. Finally, it starts a fresh Node process and verifies the old health API, native Sharp image encoding, original HTML, and clean Git repository. It retains rejected assets during the test and cleans them up with the temporary directory.
+
+The Windows GitHub CI runs the same test. After this PR merges and the laptop receives it, from the TEST checkout run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\test-combined-release-rollback.ps1"
+```
+
+Expected: `COMBINED BACKEND FRONTEND DEPENDENCY ROLLBACK PASSED`. This confirms isolated components can be recovered **together** after a failed backend process start. It does not execute the actual production `deploy-backend.ps1` transaction, so we must still implement and validate guarded production integration, persistent preflight snapshots, complete failure holds, and controlled live rollback. Automatic package/lockfile-changing releases remain blocked. Neither the live server, its packages, its SQLite database, nor port 3001 are touched by this rehearsal.
+
+---
+
 ## Stage 10: Rehearse stopping/restarting real Node across package rollback
 
 After the laptop passed preserved commit-pinned candidate verification on approved commit `aff722a`, phase 10 adds `scripts/rehearse-node-dependency-restart.ps1`. It tests actual Node process lifecycle **without touching the live server**:
