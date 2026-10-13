@@ -73,6 +73,10 @@ jobs:
             throw 'Shared release recovery helper not imported before server stop'
           }
           Write-Host 'BACKEND DEPENDENCY GATES VERIFIED BEFORE SERVER SHUTDOWN'
+      - name: Validate isolated real-backend candidate test syntax
+        run: node --check scripts/test-real-backend-candidate.mjs
+      - name: Boot actual calendar API against isolated npm and synthetic SQLite
+        run: node scripts/test-real-backend-candidate.mjs --self-test
       - name: Validate read-only dependency cutover scope checker syntax
         run: node --check scripts/check-dependency-change-scope.mjs
       - name: Reject unauthorized npm scope and database migration modifications
