@@ -1,3 +1,25 @@
+## Stage 4: Isolated runtime dependency installation
+
+A package or lockfile update can install new third-party code and native Windows modules, which must not be installed directly into a running calendar. The new read-only-to-live `scripts/stage-dependencies.ps1` command verifies GitHub `main` in the separate TEST checkout, creates a disposable ignored folder under `family-calendar-test/logs`, copies the approved `package.json` and `package-lock.json`, and runs:
+
+```powershell
+npm ci --omit=dev --no-audit --no-fund
+npm ls --omit=dev --depth=0
+```
+
+It verifies direct dependency resolution, successful Express/Multer loading, native Sharp image encoding, and unchanged hashes of the approved manifests. The staged directory is removed even if a check fails; the live `node_modules`, live DB, calendar service, and the test working tree remain untouched. GitHub CI also checks runtime dependencies and Sharp on Windows.
+
+After the automated task installs this change, run the following in the laptop's PowerShell (not from the phone):
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\stage-dependencies.ps1"
+```
+
+**IMPORTANT:** This does **not** yet install packages into the live app or lift the existing deployment block on `package.json` / `package-lock.json`. Installing packages executes dependency lifecycle scripts and is not a full sandbox; only approve trusted PRs. The next phase must stage versioned runtime dependencies for the exact GitHub commit, swap them only with the backend stopped, and restore the previous dependency tree and code if health checks fail. We will test that rollback path before enabling unattended dependency-changing merges.
+
+---
+
 ### Synthetic migration safety regression test
 
 Before we let a schema change deploy automatically, the preflight must prove it can distinguish **safe additive changes** from **destructive changes**. GitHub Actions now runs:

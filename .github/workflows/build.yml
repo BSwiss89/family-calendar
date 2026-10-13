@@ -32,6 +32,10 @@ jobs:
         run: node --check scripts/preflight-migrations.mjs
       - name: Exercise SQLite migration safety fixtures
         run: node scripts/preflight-migrations.mjs --self-test
+      - name: Validate installed runtime packages and Sharp image support
+        run: node scripts/verify-staged-dependencies.mjs .
+      - name: Check runtime dependency verifier JavaScript syntax
+        run: node --check scripts/verify-staged-dependencies.mjs
       - name: Validate PowerShell script syntax
         shell: powershell
         run: |
