@@ -1,3 +1,50 @@
+# Automatic browser previews for open GitHub pull requests
+
+**Once installed:** the laptop checks GitHub approximately every **10 minutes** and starts the newest open, mergeable PR in the **separate preview checkout**. The browser link remains:
+
+- **PREVIEW** — http://100.124.58.19:13002 (available only while a PR preview has started)
+- **LIVE** — http://100.124.58.19:3001
+
+Open the preview address in any desktop browser or iPhone Safari **while connected to Tailscale**. Its frontend, backend, test database, and uploads folder are separate from live. Changes to preview events, recipes, and lists should not change real household records. Existing live photos may be missing in preview. Both servers share laptop CPU/GPU (including Ollama), so AI activity could slow down live briefly.
+
+## One-time setup after this PR is merged
+
+Use the **elevated** laptop VS Code Remote-SSH PowerShell terminal one last time for initial setup. The encrypted GitHub SSH key must already be added to Windows ssh-agent so background jobs can fetch without prompts:
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+git pull --ff-only origin main
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\install-auto-preview.ps1"
+```
+
+The preview installer defaults to **readiness checks only**. If it passes, explicitly install its Windows Scheduled Task:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\install-auto-preview.ps1" -Install
+```
+
+It asks for the Windows **account password**, not Windows Hello PIN, so the task can run while you're logged out. This task is called **Family Calendar Auto Preview**. It is distinct from **Family Calendar Auto Deploy**, which must also be installed separately following the instructions below. Installing the preview task does not enable live automatic deployment.
+
+The newest open PR with a GitHub temporary merge ref is selected (GitHub may not expose one for PRs with merge conflicts). The watcher fetches and builds its **unmerged PR code**, starts the isolated Node server on the laptop's Tailscale address on port 13002, and verifies the preview health endpoint. It updates the preview when the PR changes, and stops the preview when no mergeable PRs are open. Only one PR preview runs at a time. You may still start a preview manually with \`preview-pr.ps1 -PullRequest N\` if a PR cannot be selected automatically.
+
+**Safety limits:** a separate SQLite path prevents accidental normal API edits to the live database, but executing PR backend code on the same Windows laptop is **not a security sandbox**. Preview only branches you and ChatGPT trust. Never add code that accesses live files via hard-coded paths; never expose port 13002 to the public Internet. The normal Windows firewall might require an inbound rule restricted to the Tailscale interface, which we'll verify before opening it. A failed preview is not automatically deployed. GitHub merge remains the explicit approval for the live deployment watcher.
+
+To inspect automation:
+
+```powershell
+Get-ScheduledTask -TaskName "Family Calendar Auto Preview","Family Calendar Auto Deploy" |
+    Select-Object TaskName, State
+```
+
+Stop future automatic previews (the current Node preview may need to be stopped separately):
+
+```powershell
+Disable-ScheduledTask -TaskName "Family Calendar Auto Preview"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\preview-pr.ps1" -Stop
+```
+
+---
+
 # Approved GitHub updates: preview and automatic laptop deployment
 
 **Goal:** edit through ChatGPT / GitHub, preview frontend and backend on a separate URL, then merge the reviewed PR. The laptop checks private GitHub `main` every **15 minutes** and automatically runs the existing guarded frontend **or backend** deployment. A brief Node restart is allowed for backend updates. The gaming desktop can be unplugged.
