@@ -160,6 +160,9 @@ async function main() {
     fs.mkdirSync(path.join(oldRoot, 'dist'), { recursive: true })
     // Because the staged folders sit under test/logs, Node resolves imports from test/node_modules.
     for (const [folder, entry] of [[newRoot, candidate], [oldRoot, previous]]) {
+      fs.mkdirSync(path.join(folder, 'scripts'), { recursive: true })
+      fs.copyFileSync(path.join(test, 'scripts', 'dependency-release-boot-guard.mjs'),
+        path.join(folder, 'scripts', 'dependency-release-boot-guard.mjs'))
       fs.copyFileSync(entry, path.join(folder, 'Server', 'index.mjs'))
       fs.copyFileSync(path.join(test, 'dist', 'index.html'), path.join(folder, 'dist', 'index.html'))
     }
