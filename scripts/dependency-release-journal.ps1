@@ -64,7 +64,13 @@ function Save-FamilyCalendarAtomicJournal {
             }
             # Windows atomic replace: never remove the old journal before
             # recording the next state. A power loss keeps old OR new marker.
-            [System.IO.File]::Replace($temp, $Path, $null)
+            # Windows PowerShell 5.1/.NET Framework requires a valid backup
+            # destination for File.Replace; null is not a legal path.
+            $atomicBackup = Join-Path $parent ('.release-journal-replaced-' + [guid]::NewGuid().ToString('N') + '.bak')
+            [System.IO.File]::Replace($temp, $Path, $atomicBackup)
+            if (Test-Path -LiteralPath $atomicBackup) {
+                Remove-Item -LiteralPath $atomicBackup -Force -ErrorAction Stop
+            }
         }
     } finally {
         if (Test-Path -LiteralPath $temp) {
