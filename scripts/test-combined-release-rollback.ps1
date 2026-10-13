@@ -135,14 +135,16 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, '..', 'dist', 'inde
 app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
 '@
     [IO.File]::WriteAllText($serverFile, $oldCode)
+    # These are release artifacts, not Git-tracked contents of the toy Server file.
+    [IO.File]::WriteAllText((Join-Path $app '.gitignore'), "node_modules/`ndist/`n")
     & $git init -b main $app | Out-Null
     Check-Git 'init'
     & $git -C $app config user.name 'Calendar Release Safety Test'
     Check-Git 'set user name'
     & $git -C $app config user.email 'test@localhost.invalid'
     Check-Git 'set user email'
-    & $git -C $app add Server/index.cjs
-    Check-Git 'stage old backend'
+    & $git -C $app add Server/index.cjs package.json package-lock.json .gitignore
+    Check-Git 'stage old backend and approved manifests'
     & $git -C $app commit -m 'Previous working backend' | Out-Null
     Check-Git 'record previous backend'
     $oldCommit = (& $git -C $app rev-parse HEAD).Trim()
@@ -199,7 +201,9 @@ app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
     Require-Test ($restored -eq $oldCommit) 'Backend Git did not roll back.'
     Require-Test ((Test-Path -LiteralPath $rejectedPackages -PathType Container)) 'Rejected npm packages not preserved.'
     Require-Test ((Test-Path -LiteralPath $rejectedDist -PathType Container)) 'Rejected frontend not preserved.'
-    Require-Test (@(& $git -C $app status --porcelain).Count -eq 0) 'Backend Git checkout is dirty after rollback.'
+    $gitStatus = @(& $git -C $app status --porcelain)
+    Check-Git 'inspect final Git checkout'
+    Require-Test ($gitStatus.Count -eq 0) 'Backend Git checkout is dirty after rollback.'
     $server = Start-RehearsalServer 'recovered-after-rejected-release'
     Wait-OldHealthy $server
     Require-Test ($server.Id -ne $oldPid) 'Restored backend did not start in a new Node process.'
