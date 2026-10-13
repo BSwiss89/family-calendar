@@ -13,7 +13,6 @@ $source = Join-Path $test 'scripts\auto-release.ps1'
 $state = Join-Path $homePath 'AppData\Local\FamilyCalendar\auto-release'
 $installed = Join-Path $state 'auto-release.ps1'
 $taskName = 'Family Calendar Auto Deploy'
-$ssh = 'C:/Windows/System32/OpenSSH/ssh.exe -i C:/Users/bobby/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20'
 
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()
 $admin = ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -34,17 +33,12 @@ foreach ($folder in @($test,$live)) {
     if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw "Dirty checkout: $folder" }
 }
 Write-Host 'CHECKING NONINTERACTIVE GITHUB ACCESS'
-$oldSsh = [Environment]::GetEnvironmentVariable('GIT_SSH_COMMAND','Process')
-try {
-    $env:GIT_SSH_COMMAND = $ssh
-    $head = @(& git -C $test ls-remote origin refs/heads/main)
-    if ($LASTEXITCODE -ne 0 -or $head.Count -ne 1) {
-        throw 'Unattended SSH failed. Configure Windows ssh-agent for the current GitHub key before installing.'
-    }
-} finally {
-    [Environment]::SetEnvironmentVariable('GIT_SSH_COMMAND',$oldSsh,'Process')
+. (Join-Path $test 'scripts\get-github-refs.ps1')
+$head = @(Get-FamilyCalendarGitHubRefs -Repository $test -Type Main)
+if ($head.Count -ne 1 -or [string]$head[0] -notmatch '^[a-f0-9]{40}\s+refs/heads/main$') {
+    throw 'GitHub main did not return one valid commit.'
 }
-Write-Host 'PASS: GitHub fetch can authenticate without prompting for an SSH passphrase.'
+Write-Host 'PASS: GitHub main query completed using repository-local Git configuration.'
 Write-Host 'PASS: Live and test folders exist and are clean.'
 if (-not $Install) {
     Write-Host 'READINESS TEST PASSED. No background task installed or changed.'
