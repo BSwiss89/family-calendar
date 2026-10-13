@@ -39,6 +39,23 @@ jobs:
       - name: Exercise isolated package switch and rollback scenarios
         shell: powershell
         run: .\\scripts\\test-dependency-rollback.ps1
+      - name: Keep interrupted package recovery manual-only
+        shell: powershell
+        run: |
+          $module = Get-Content scripts/dependency-swap.ps1 -Raw
+          $fixture = Get-Content scripts/test-dependency-rollback.ps1 -Raw
+          $deployer = Get-Content scripts/deploy-backend.ps1 -Raw
+          $auto = Get-Content scripts/auto-release.ps1 -Raw
+          foreach ($needed in @('Get-FamilyCalendarDependencySwapState', 'Restore-FamilyCalendarInterruptedPackageMove', 'INTERRUPTED PACKAGE SWAP SAFETY FIXTURES PASSED')) {
+            if (-not ($module.Contains($needed) -or $fixture.Contains($needed))) { throw "Missing interruption recovery coverage: $needed" }
+          }
+          if ($deployer.Contains('Restore-FamilyCalendarInterruptedPackageMove') -or $auto.Contains('Restore-FamilyCalendarInterruptedPackageMove')) {
+            throw 'Manual-only interrupted npm recovery was wired into unattended deployment'
+          }
+          if ($deployer -notmatch 'Dependency/unknown file changes require separate review') {
+            throw 'Existing package-changing release blocker was removed'
+          }
+          Write-Host 'POWER-LOSS RECOVERY REMAINS MANUAL AND DEPENDENCY CHANGES BLOCKED'
       - name: Rehearse real npm package activation, corruption detection, and rollback
         shell: powershell
         run: .\\scripts\\rehearse-real-dependency-rollback.ps1
