@@ -1,3 +1,18 @@
+## Stage 6: Require dependency preflights in each guarded backend release
+
+The previously tested isolated npm installation and synthetic directory rollback are now **mandatory pre-restart checks** for every guarded backend deployment. After the test-backend and SQLite migration preflights pass, `scripts/deploy-backend.ps1` executes:
+
+```powershell
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\test-dependency-rollback.ps1
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\stage-dependencies.ps1
+```
+
+Both must succeed **before** the live `Family Calendar Server` task is stopped. If either fails, deployment aborts without replacing the live packages, code or SQLite. CI also asserts that both checks remain before the first live-server stop instruction and that the dependency-change block remains intact. The log prints `[PASS] Dependency switch/rollback fixtures and isolated npm staging` when both checks pass.
+
+**Important limitation:** This is a preflight gate, not yet a real production package swap. `package.json`, `package-lock.json`, and database migration edits remain blocked from unattended live deployment. A safe actual dependency-changing release still requires staging the approved candidate tree, stopping Node, preserving the previous live dependency directory, switching the candidate in, validating the restarted app, and restoring old code/packages if needed. That path will be enabled only after a controlled live rollback drill.
+
+---
+
 ## Stage 5: Dependency rollback safety fixtures
 
 Before changing any packages in the live calendar, the Windows CI workflow now exercises the same directory moves we intend to use for production releases. `scripts/dependency-swap.ps1` defines **inactive, explicit-use** dependency switch and restoration functions. It **does not execute a package switch by itself**. The test `scripts/test-dependency-rollback.ps1` runs entirely on generated synthetic package directories under the Windows temporary folder:
