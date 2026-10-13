@@ -28,6 +28,8 @@ jobs:
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
         run: node --check scripts/verify-sqlite-recovery.mjs
+      - name: Check migration preflight JavaScript syntax
+        run: node --check scripts/preflight-migrations.mjs
       - name: Validate PowerShell script syntax
         shell: powershell
         run: |
