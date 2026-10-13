@@ -1,3 +1,20 @@
+## Stage 7: Rehearse rollback using real npm-installed packages
+
+The synthetic package swap tests, isolated npm installation, and production backend preflight have all succeeded on the laptop. The next step tests the **actual module directory operations** using two independent `npm ci --omit=dev` installations. `scripts/rehearse-real-dependency-rollback.ps1` creates its entire test fixture in a unique temporary folder, installs the current lockfile twice, and validates both trees with Express, Multer and Sharp.
+
+The rehearsal moves the former installed `node_modules` to a preserved directory, switches in the candidate tree, and verifies packages work **from the new location**. It then deliberately renames Sharp **inside the disposable candidate folder**, verifies the broken runtime is detected, restores the entire previous `node_modules` directory using the same `Restore-FamilyCalendarDependencies` helper intended for production, and verifies it is healthy again. It preserves the rejected candidate separately until the disposable rehearsal directory is removed. It also runs as part of the Windows CI checks.
+
+Run this from the laptop once the release reaches your test checkout:
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\rehearse-real-dependency-rollback.ps1"
+```
+
+Expected: `REAL NPM DEPENDENCY ROLLBACK REHEARSAL PASSED`. This proves the directory swap and rollback with real packages, **not** a safe live version upgrade: both test installations use the same approved lockfile, and no real server is stopped or restarted here. Deployment still blocks package/lockfile changes. Before allowing them we must integrate a commit-matched candidate package installation with guarded server stop/restart, comprehensive rollback and operator-visible failure holds, then complete a controlled recovery drill on the live laptop.
+
+---
+
 ## Stage 6: Require dependency preflights in each guarded backend release
 
 The previously tested isolated npm installation and synthetic directory rollback are now **mandatory pre-restart checks** for every guarded backend deployment. After the test-backend and SQLite migration preflights pass, `scripts/deploy-backend.ps1` executes:
