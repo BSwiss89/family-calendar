@@ -4391,12 +4391,13 @@ function startCalendarAddHold() {
   calendarAddHoldTimerRef.current = window.setTimeout(() => {
     calendarAddHoldTimerRef.current = null
     calendarAddLongPressRef.current = true
-    setQuickAddOpen(false)
     setAiCommandText('')
     setAiCommandResult('')
-    setAiCommandOpen(true)
 
+    // Keep the overlay closed while the finger is down: it would cover the
+    // mobile + button and interrupt the pointer-up gesture.
     if (!arneySpeechAvailable()) {
+      setAiCommandOpen(true)
       setAiCommandResult('Speech recognition is unavailable in this browser. Type your command instead.')
       return
     }
@@ -4406,14 +4407,21 @@ function startCalendarAddHold() {
       if (result.kind === 'transcript') {
         setAiCommandText(result.text)
         if (arneySpeechReleasedRef.current) {
+          setAiCommandOpen(true)
           void submitAiCommand(result.text)
         }
       } else if (result.kind === 'error') {
+        setAiCommandOpen(true)
         setAiCommandResult('Microphone error: ' + result.reason + '. You can type your command instead.')
       } else {
+        setAiCommandOpen(true)
         setAiCommandResult('No speech detected. Hold + and try again, or type your command.')
       }
     }, setArneyListening)
+    if (!arneySpeechSessionRef.current) {
+      setAiCommandOpen(true)
+      setAiCommandResult('Could not start speech recognition. Type your command instead.')
+    }
   }, 350)
 }
 
