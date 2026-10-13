@@ -1,3 +1,11 @@
+## Windows PowerShell UTF-8 candidate metadata fix
+
+The first laptop commit-pinned verifier run for `2380f76` found that Windows PowerShell 5.1 writes a UTF-8 byte-order mark (BOM) when `Set-Content -Encoding UTF8` creates `candidate.json`. The npm installation, native Sharp smoke test and SHA-256 collection had all passed before Node tried to parse that JSON. The saved candidate was preserved for inspection; no live dependencies or database were changed.
+
+New candidate metadata is written using BOM-free UTF-8. The verifier also recognizes the exact standard three-byte UTF-8 BOM from previously created candidates, while continuing to require all original commit, lockfile, manifest and runtime checks. The CI self-test reproduces actual `EF BB BF` bytes and confirms they parse successfully. Do not manually edit or delete preserved candidate files to work around this issue.
+
+---
+
 ## Stage 9: Verify preserved commit-pinned dependencies before they can be reused
 
 The laptop successfully staged all 96 production packages under the exact GitHub merge commit using `scripts/prepare-commit-dependencies.ps1`. Stage 9 adds `scripts/verify-commit-dependencies.mjs`, a **read-only** validator for an existing preserved candidate. It checks that the TEST checkout matches the candidate's full 40-character SHA, checks the remote GitHub `main` again, rejects mismatched or already-applied candidate metadata, compares SHA-256 of candidate `package.json` and `package-lock.json` with both the recorded metadata and approved TEST checkout, then reopens the installed package tree and smoke-tests Express, Multer and native Sharp.

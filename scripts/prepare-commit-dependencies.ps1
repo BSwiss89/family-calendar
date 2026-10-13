@@ -104,7 +104,13 @@ try {
         createdAt = (Get-Date).ToUniversalTime().ToString('o')
         status = 'prepared-not-applied'
     }
-    $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $working 'candidate.json') -Encoding UTF8
+    # Explicit BOM-free UTF-8 works with Node JSON.parse and PowerShell alike.
+    $metadataJson = $metadata | ConvertTo-Json
+    [System.IO.File]::WriteAllText(
+        (Join-Path $working 'candidate.json'),
+        $metadataJson,
+        ([System.Text.UTF8Encoding]::new($false))
+    )
     # Rename only a candidate directory under the backup parent, never live files.
     [IO.Directory]::Move($working, $final)
     # Reopen the preserved tree and independently recheck SHA binding and imports.
