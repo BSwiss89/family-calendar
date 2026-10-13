@@ -1,3 +1,21 @@
+## Stage 12: Extract shared, fail-closed release rollback helper
+
+The laptop confirmed that a disposable Git backend, frontend build, npm packages and Node process all restored successfully after a simulated startup failure. The next step extracts the actual coordinated restore operations into a **shared helper**, `scripts/release-bundle-rollback.ps1`, rather than leaving them exclusively inside a test script.
+
+The function `Restore-FamilyCalendarReleaseBundle` is defined on import and does **nothing** until explicitly called. Before any mutation, it requires distinct full previous and candidate Git commit IDs, a clean local `main` checkout currently at the candidate commit, the previous commit available as an ancestor, existing old/new package and frontend trees, non-overlapping paths, and unused rejection-backup destinations. It then uses the established package restore helper, restores the old frontend, resets the candidate Git checkout to the old commit, and checks that Git and the file trees are present and consistent. Rejected packages and frontend are retained separately rather than destroyed.
+
+The combined recovery rehearsal now **calls this same shared helper** from its throwaway test checkout. It also deliberately creates a conflicting rejection folder and verifies that the helper refuses to touch any assets until the collision is resolved. Windows CI runs the unchanged overall end-to-end recovery scenario.
+
+After merging, run the existing automatic deployment task once and execute from the TEST checkout:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\test-combined-release-rollback.ps1"
+```
+
+Expected: `RELEASE BUNDLE FILE RESTORATION PASSED` and `COMBINED BACKEND FRONTEND DEPENDENCY ROLLBACK PASSED`. **This phase does not enable package updates**, and it does not call the shared helper from the live deployer. Its caller is responsible for positively stopping the correct Node process first, and must not start the service if any restore step fails. Next, we must integrate the helper into the guarded production deployer's error handling, with the existing backup, health, and review-hold protections preserved and confirmed by a controlled restart drill.
+
+---
+
 ## Stage 11: Combined code, frontend, package and HTTP rollback rehearsal
 
 After the laptop proved automatic rollout of `a6b53f4` and a successful isolated npm-dependent Node restart/recovery, Stage 11 exercises a **complete release recovery path together**, instead of testing the individual subsystems separately. `scripts/test-combined-release-rollback.ps1` creates a unique disposable folder in Windows Temp and a local Git repository containing a miniature Express/Sharp HTTP backend, a frontend `index.html`, and two real npm production dependency installations.

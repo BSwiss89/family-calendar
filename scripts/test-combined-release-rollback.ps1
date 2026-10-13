@@ -3,7 +3,7 @@
 # Never invoke a production task, listener, Git repository or household database.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'dependency-swap.ps1')
+. (Join-Path $PSScriptRoot 'release-bundle-rollback.ps1')
 
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $sourceManifest = Join-Path $repo 'package.json'
@@ -181,6 +181,27 @@ app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
     Require-Test ((Get-Content -LiteralPath (Join-Path $activeDist 'index.html') -Raw) -eq '<html>candidate frontend</html>') 'Candidate frontend not activated.'
     Write-Host '[PASS] Backend Git commit, frontend HTML and real npm candidate activated together.'
 
+    # A pre-existing rejected-assets location must block recovery before any
+    # package, dist, or Git mutation. Remove only our disposable collision.
+    New-Item -ItemType Directory -Path $rejectedDist -ErrorAction Stop | Out-Null
+    $refusedCollision = $false
+    try {
+        Restore-FamilyCalendarReleaseBundle -Repository $app `
+            -PreviousCommit $oldCommit -CandidateCommit $newCommit `
+            -ActiveFrontend $activeDist -PreviousFrontend $previousDist -RejectedFrontend $rejectedDist `
+            -ActiveDependencies $activePackages -PreviousDependencies $previousPackages -RejectedDependencies $rejectedPackages
+    } catch {
+        $refusedCollision = $true
+    }
+    Require-Test $refusedCollision 'Existing recovery destination should refuse the restore.'
+    $headAfterRefusal = (& $git -C $app rev-parse HEAD).Trim()
+    Check-Git 'inspect Git after refused recovery'
+    Require-Test ($headAfterRefusal -eq $newCommit -and
+        (Test-Path -LiteralPath $previousPackages -PathType Container) -and
+        (Test-Path -LiteralPath $previousDist -PathType Container)) 'Refused recovery modified a source or candidate.'
+    Remove-Item -LiteralPath $rejectedDist -Force -ErrorAction Stop
+    Write-Host '[PASS] Existing rejected-asset collision blocks recovery without changes.'
+
     $server = Start-RehearsalServer 'expected-startup-failure'
     $server.WaitForExit(10000) | Out-Null
     $server.Refresh()
@@ -190,12 +211,12 @@ app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
     $server = $null
     Write-Host '[PASS] Deliberate candidate backend process failure detected after whole-release activation.'
 
-    # Roll back all three release assets while the throwaway server is stopped.
-    Restore-FamilyCalendarDependencies -Active $activePackages -Previous $previousPackages -Rejected $rejectedPackages
-    Move-Item -LiteralPath $activeDist -Destination $rejectedDist -ErrorAction Stop
-    Move-Item -LiteralPath $previousDist -Destination $activeDist -ErrorAction Stop
-    & $git -C $app reset --hard $oldCommit | Out-Null
-    Check-Git 'restore previous backend commit'
+    # Reuse the same rollback primitive intended for guarded production.
+    # The throwaway Node process is stopped before this function is invoked.
+    Restore-FamilyCalendarReleaseBundle -Repository $app `
+        -PreviousCommit $oldCommit -CandidateCommit $newCommit `
+        -ActiveFrontend $activeDist -PreviousFrontend $previousDist -RejectedFrontend $rejectedDist `
+        -ActiveDependencies $activePackages -PreviousDependencies $previousPackages -RejectedDependencies $rejectedPackages
     $restored = (& $git -C $app rev-parse HEAD).Trim()
     Check-Git 'inspect restored commit'
     Require-Test ($restored -eq $oldCommit) 'Backend Git did not roll back.'
