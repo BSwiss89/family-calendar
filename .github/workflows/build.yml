@@ -45,6 +45,9 @@ jobs:
       - name: Rehearse isolated real Node restart and failed dependency recovery
         shell: powershell
         run: .\scripts\rehearse-node-dependency-restart.ps1
+      - name: Rehearse combined Git frontend and npm rollback after failed backend startup
+        shell: powershell
+        run: .\scripts\test-combined-release-rollback.ps1
       - name: Confirm dependency gates execute before live backend shutdown
         shell: powershell
         run: |
