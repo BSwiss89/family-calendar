@@ -9,7 +9,7 @@
   "theme_color": "#4f46e5",
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "/calendar-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
