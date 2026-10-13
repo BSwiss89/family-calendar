@@ -5,6 +5,7 @@ import path from 'node:path'
 import multer from 'multer'
 import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
+import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 
 const app = express()
 // The live server defaults to 3001 / all interfaces.
@@ -18,6 +19,10 @@ if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+// This runs before any SQLite or uploads are opened. A crash/power loss during
+// a future approved npm cutover must not boot against mixed package assets.
+assertCalendarReleaseBootSafe(path.resolve(__dirname, '..'))
 
 const dataFolder = path.join(__dirname, 'data')
 const uploadFolder = path.join(__dirname, 'uploads')
