@@ -117,6 +117,15 @@ Write-Host 'Rebuilding and smoke-testing the test copy...'
 if ($LASTEXITCODE -ne 0) { throw 'Test rebuild failed.' }
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $test 'scripts\test-backend.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Test backend failed.' }
+# Execute migration and schema-preservation guards before the live service is stopped.
+# This is required even for API-only backend changes; it also verifies startup compatibility.
+# Dependency and migration file changes remain blocked in ReleasePlan above.
+Write-Host 'Checking database migration safety using disposable SQLite snapshots...'
+& node (Join-Path $test 'scripts\preflight-migrations.mjs') --self-test
+if ($LASTEXITCODE -ne 0) { throw 'SQLite migration safety fixtures failed. Live calendar unchanged.' }
+& node (Join-Path $test 'scripts\preflight-migrations.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Disposable SQLite migration preflight failed. Live calendar unchanged.' }
+Write-Host '[PASS] Disposable SQLite migration preflight and synthetic safety fixtures'
 $plan = ReleasePlan
 Ensure ($plan.From -ne $plan.To) 'Update available'
 & git -C $live fetch origin main
