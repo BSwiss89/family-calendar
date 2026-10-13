@@ -1,3 +1,26 @@
+## Stage 16: Test genuinely different npm dependency versions and rollback
+
+The laptop independently prepared and verified `92cc093`'s real packages and started the actual Family Calendar backend from those preserved, commit-pinned packages against a disposable copy of the TEST SQLite database. Both checks passed. Those were the **same npm versions already in production**; a future live package-changing release needs additional version-change coverage.
+
+This stage extends **only isolated tests**, leaving current strict dependency-change deployment blocks untouched:
+
+- `scripts/test-real-backend-candidate.mjs --self-test` now boots the actual backend twice: first with its baseline fresh production npm installation, then again after changing a **pinned Express version** in both the disposable `package.json` and `package-lock.json` and installing those packages from scratch. The changed-backend smoke test checks health, frontend HTML, people and lists APIs on a unique loopback port, with synthetic SQLite data. It never uses or edits household SQLite.
+- `scripts/test-combined-release-rollback.ps1` now creates an intentionally different candidate Express package version, tracked manifest and lockfile, and a broken candidate backend **inside a temporary Git repository**. After switching actual package trees and frontend, it simulates the bad backend start, then uses the shared full-bundle rollback function to recover the original Express version, manifest, lockfile, backend commit, frontend and HTTP health. It verifies the rejected **different-version** package tree is preserved.
+- The existing code/frontend-only rollback scenario now uses a **separate code-only commit**, rather than a simulated commit that also changes the npm manifest. This more accurately matches the strict production backend deployer's existing blocker.
+
+GitHub Windows CI executes both real-version-change drills and checks the fixture protections persist.
+
+After merging this PR and allowing the existing safe release task to update both checkouts, run in the laptop TEST checkout:
+
+```powershell
+node ".\scripts\test-real-backend-candidate.mjs" --self-test
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\test-combined-release-rollback.ps1"
+```
+
+Expected: `REAL CALENDAR BACKEND WITH CHANGED NPM VERSION PASSED`, `COMBINED BACKEND FRONTEND DEPENDENCY ROLLBACK PASSED`, and a pass for restoring the **original** Express version and tracked manifest/lockfile. **No live npm package change, live database modification, or real calendar restart is introduced by this phase.**
+
+---
+
 ## Stage 15: Smoke test the actual backend with an isolated npm installation
 
 After the laptop passed the read-only dependency-scope fixtures, this stage adds `scripts/test-real-backend-candidate.mjs` to prove that **the real production `Server/index.mjs`** (not a miniature Express simulation) starts and answers HTTP requests using the selected production dependency tree. It does not enable dependency replacement.
