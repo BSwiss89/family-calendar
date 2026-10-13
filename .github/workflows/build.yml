@@ -48,6 +48,18 @@ jobs:
       - name: Rehearse combined Git frontend and npm rollback after failed backend startup
         shell: powershell
         run: .\scripts\test-combined-release-rollback.ps1
+      - name: Confirm dependency-version-changing drills retain separate manifest and code-only paths
+        shell: powershell
+        run: |
+          $combined = Get-Content scripts/test-combined-release-rollback.ps1 -Raw
+          $backend = Get-Content scripts/test-real-backend-candidate.mjs -Raw
+          foreach ($marker in @('Real npm dependency difference:', 'Previous Express version, original manifest and lockfile restored', 'approved-code-only', 'Restore-FamilyCalendarReleaseBundle')) {
+            if (-not $combined.Contains($marker)) { throw "Missing package-changing rollback fixture: $marker" }
+          }
+          if (-not $backend.Contains('REAL CALENDAR BACKEND WITH CHANGED NPM VERSION PASSED')) {
+            throw 'Real backend has no changed npm version startup fixture'
+          }
+          Write-Host 'GENUINELY CHANGED DEPENDENCY AND CODE-ONLY DRILLS VERIFIED'
       - name: Confirm dependency gates execute before live backend shutdown
         shell: powershell
         run: |
