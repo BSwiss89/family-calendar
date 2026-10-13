@@ -37,7 +37,9 @@ try {
     New-Item -ItemType Directory -Path $normal | Out-Null
     Create-Package $active 'original-package-version'
     Create-Package $stage 'candidate-package-version'
+    Assert-Fixture ((Get-FamilyCalendarDependencySwapState -Active $active -Staged $stage -Previous $backup) -eq 'PreparedNotSwitched') 'Expected a ready-to-switch transaction'
     Switch-FamilyCalendarDependencies -Active $active -Staged $stage -Previous $backup
+    Assert-Fixture ((Get-FamilyCalendarDependencySwapState -Active $active -Staged $stage -Previous $backup) -eq 'CandidateActivatedOldPreserved') 'Expected a candidate-active transaction'
     Assert-Fixture (Has-Identity $active 'candidate-package-version') 'Candidate was not activated'
     Assert-Fixture (Has-Identity $backup 'original-package-version') 'Original version was not preserved'
     Assert-Fixture (-not (Test-Path $stage)) 'Staging folder should have moved into active'
@@ -63,6 +65,51 @@ try {
     Assert-Fixture (-not (Test-Path $backup2)) 'Backup should have moved back into active after interruption'
     Write-Host '[PASS] Interrupted directory switch immediately restores the original version'
 
+    # Simulate power loss between the TWO separate directory move operations.
+    # Unlike an exception thrown by a running PowerShell process, a power
+    # outage skips the catch block that normally restores the previous tree.
+    $crash = Join-Path $root 'crash-between-moves'
+    New-Item -ItemType Directory -Path $crash | Out-Null
+    $crashActive = Join-Path $crash 'active'
+    $crashStaged = Join-Path $crash 'stage'
+    $crashPrevious = Join-Path $crash 'previous'
+    Create-Package $crashActive 'working-version-before-power-failure'
+    Create-Package $crashStaged 'candidate-not-yet-activated'
+    Move-Item -LiteralPath $crashActive -Destination $crashPrevious -ErrorAction Stop
+    Assert-Fixture ((Get-FamilyCalendarDependencySwapState -Active $crashActive -Staged $crashStaged -Previous $crashPrevious) -eq 'InterruptedAfterPreservingOld') 'Power loss after preserving old packages was not detected'
+    Restore-FamilyCalendarInterruptedPackageMove -Active $crashActive -Staged $crashStaged -Previous $crashPrevious
+    Assert-Fixture (Has-Identity $crashActive 'working-version-before-power-failure') 'Power-loss recovery did not restore old packages'
+    Assert-Fixture (Has-Identity $crashStaged 'candidate-not-yet-activated') 'Power-loss recovery lost the staged candidate'
+    Expect-Rejection {
+        Restore-FamilyCalendarInterruptedPackageMove -Active $crashActive -Staged $crashStaged -Previous $crashPrevious
+    } 'replaying already-completed interruption recovery'
+
+    # Refuse ambiguous three-present folders rather than risking overwrite.
+    $collision = Join-Path $root 'ambiguous-interruption'
+    New-Item -ItemType Directory -Path $collision | Out-Null
+    $collisionActive = Join-Path $collision 'active'
+    $collisionStaged = Join-Path $collision 'stage'
+    $collisionPrevious = Join-Path $collision 'previous'
+    Create-Package $collisionActive 'active-original'
+    Create-Package $collisionStaged 'staged-original'
+    Create-Package $collisionPrevious 'backup-original'
+    Expect-Rejection {
+        Get-FamilyCalendarDependencySwapState -Active $collisionActive -Staged $collisionStaged -Previous $collisionPrevious
+    } 'ambiguous existing active, staged and previous package paths'
+    Expect-Rejection {
+        Restore-FamilyCalendarInterruptedPackageMove -Active $collisionActive -Staged $collisionStaged -Previous $collisionPrevious
+    } 'restoring an ambiguous package transaction'
+    Assert-Fixture ((Has-Identity $collisionActive 'active-original') -and
+        (Has-Identity $collisionStaged 'staged-original') -and
+        (Has-Identity $collisionPrevious 'backup-original')) 'Ambiguous transaction moved or overwrote packages'
+
+    $missing = Join-Path $root 'incomplete-interruption'
+    New-Item -ItemType Directory -Path $missing | Out-Null
+    Expect-Rejection {
+        Restore-FamilyCalendarInterruptedPackageMove -Active (Join-Path $missing 'absent-active') -Staged (Join-Path $missing 'absent-stage') -Previous (Join-Path $missing 'absent-previous')
+    } 'recovering without previous and staged package backups'
+    Write-Host '[PASS] Abrupt power-loss gap can be identified and manually recovered without candidate activation.'
+
     $blocked = Join-Path $root 'blocked'
     $active3 = Join-Path $blocked 'active'
     $stage3 = Join-Path $blocked 'stage'
@@ -87,6 +134,7 @@ try {
     Assert-Fixture (Has-Identity $active3 'safe-blocked') 'Invalid-path tests modified original packages'
 
     Write-Host ''
+    Write-Host 'INTERRUPTED PACKAGE SWAP SAFETY FIXTURES PASSED'
     Write-Host 'DEPENDENCY SWITCH AND ROLLBACK FIXTURES PASSED'
     Write-Host 'Only synthetic package folders under the Windows temporary directory were used.'
     Write-Host 'No live application, data, or service was modified.'
