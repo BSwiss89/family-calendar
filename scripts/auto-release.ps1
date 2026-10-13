@@ -14,6 +14,7 @@ $release = Join-Path $test 'scripts\release.ps1'
 $state = Join-Path $homePath 'AppData\Local\FamilyCalendar\auto-release'
 $holdFile = Join-Path $state 'REQUIRES-REVIEW.txt'
 $inProgressFile = Join-Path $state 'DEPLOYMENT-IN-PROGRESS.txt'
+$dependencyJournal = Join-Path $state 'DEPENDENCY-RELEASE-IN-PROGRESS.json'
 $logFile = Join-Path $state 'auto-release.log'
 $sshKey = Join-Path $homePath '.ssh\id_ed25519_github'
 
@@ -50,6 +51,13 @@ try {
     }
     if (Test-Path -LiteralPath $inProgressFile) {
         Write-Warning 'A previous deployment was interrupted. DEPLOYMENT-IN-PROGRESS.txt exists; no automatic retry.'
+        return
+    }
+    # A package transaction may have been interrupted by a system shutdown.
+    # This holds even ordinary Git/frontend changes until a human reconciles
+    # the previous package tree and manually clears the durable journal.
+    if (Test-Path -LiteralPath $dependencyJournal) {
+        Write-Warning 'Dependency release journal exists; automatic deployment paused. Do not clear before recovery verification.'
         return
     }
     foreach ($folder in @($live, $test)) {
