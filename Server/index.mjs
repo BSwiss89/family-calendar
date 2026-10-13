@@ -1473,6 +1473,7 @@ app.get('/api/health', (request, response) => {
   response.json({
     status: 'ok',
     message: 'Family Calendar server is running',
+    uptimeSeconds: Math.floor(process.uptime()),
   })
 })
 
