@@ -1,3 +1,23 @@
+## Stage 5: Dependency rollback safety fixtures
+
+Before changing any packages in the live calendar, the Windows CI workflow now exercises the same directory moves we intend to use for production releases. `scripts/dependency-swap.ps1` defines **inactive, explicit-use** dependency switch and restoration functions. It **does not execute a package switch by itself**. The test `scripts/test-dependency-rollback.ps1` runs entirely on generated synthetic package directories under the Windows temporary folder:
+
+- New packages move into the active directory while prior packages are preserved in a separate backup directory.
+- A simulated failed health check restores the previous packages and preserves the rejected candidate.
+- An injected failure between the two directory moves restores the original active packages.
+- Backup collisions, nested directories, or missing stages are refused without changing the active packages.
+
+Windows GitHub Actions runs this fixture suite automatically. It can also be run by hand after this PR deploys:
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\test-dependency-rollback.ps1"
+```
+
+**Auto-deploy still blocks dependency updates.** Before enabling them, the guarded backend release must stop and confirm the live Node process has exited; bind a staged package tree to the exact approved GitHub commit; preserve the old `node_modules`, code and frontend; activate new packages; health-check; and restore the old package directory and code on failure. The synthetic tests above do not demonstrate these live safeguards. Never remove the deployment hold flag without investigating a failed deployment.
+
+---
+
 ## Stage 4: Isolated runtime dependency installation
 
 A package or lockfile update can install new third-party code and native Windows modules, which must not be installed directly into a running calendar. The new read-only-to-live `scripts/stage-dependencies.ps1` command verifies GitHub `main` in the separate TEST checkout, creates a disposable ignored folder under `family-calendar-test/logs`, copies the approved `package.json` and `package-lock.json`, and runs:
