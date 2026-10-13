@@ -207,6 +207,9 @@ async function main() {
   try {
     fs.mkdirSync(path.join(app, 'Server', 'data'), { recursive: true })
     fs.mkdirSync(path.join(app, 'dist'), { recursive: true })
+    fs.mkdirSync(path.join(app, 'scripts'), { recursive: true })
+    fs.copyFileSync(path.join(source, 'scripts', 'dependency-release-boot-guard.mjs'),
+      path.join(app, 'scripts', 'dependency-release-boot-guard.mjs'))
     for (const name of ['package.json', 'package-lock.json']) {
       fs.copyFileSync(path.join(source, name), path.join(app, name))
     }
