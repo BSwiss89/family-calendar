@@ -14,7 +14,6 @@ $state = Join-Path $homePath 'AppData\Local\FamilyCalendar\auto-preview'
 $installed = Join-Path $state 'auto-preview.ps1'
 $taskName = 'Family Calendar Auto Preview'
 $expectedRemote = 'git@github.com:BSwiss89/family-calendar.git'
-$sshCommand = 'C:/Windows/System32/OpenSSH/ssh.exe -i C:/Users/bobby/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20'
 
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()
 $admin = ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -35,14 +34,9 @@ if (-not (Test-Path (Join-Path $test 'scripts\preview-pr.ps1')) -or
     throw 'Isolated PR preview dependencies are missing.'
 }
 Write-Host 'CHECKING AUTOMATIC PREVIEW READINESS'
-$oldSsh = [Environment]::GetEnvironmentVariable('GIT_SSH_COMMAND','Process')
-try {
-    $env:GIT_SSH_COMMAND = $sshCommand
-    $refs = @(& git -C $test ls-remote origin 'refs/pull/*/merge' 'refs/pull/*/head')
-    if ($LASTEXITCODE -ne 0) { throw 'Background SSH key authentication failed. Load key into Windows ssh-agent first.' }
-} finally {
-    [Environment]::SetEnvironmentVariable('GIT_SSH_COMMAND',$oldSsh,'Process')
-}
+. (Join-Path $test 'scripts\get-github-refs.ps1')
+$refs = @(Get-FamilyCalendarGitHubRefs -Repository $test -Type PullRequests)
+Write-Host "PASS: GitHub PR reference query completed ($($refs.Count) refs)."
 $tailscale = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
 if (-not (Test-Path $tailscale)) { throw 'Tailscale executable is missing.' }
 $ips = @(& $tailscale ip -4)
@@ -50,7 +44,7 @@ if ($LASTEXITCODE -ne 0 -or $ips.Count -ne 1) { throw 'Tailscale IPv4 is not cur
 if (-not (Test-Path (Join-Path $test 'Server\data\calendar.db'))) {
     throw 'Separate test database is missing. Live data will not be used for the preview.'
 }
-Write-Host 'PASS: GitHub can be accessed without SSH prompts.'
+Write-Host 'PASS: GitHub can be accessed using the working repository-local Git configuration.'
 Write-Host "PASS: Tailscale preview address $($ips[0]):13002"
 Write-Host 'PASS: Separate test database is present.'
 if (-not $Install) {
