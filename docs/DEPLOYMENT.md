@@ -1,3 +1,19 @@
+## Stage 13: Integrate fail-closed code/frontend recovery into guarded backend deployment
+
+The laptop passed the full shared rollback fixture on deployed commit `90b1c2c`. This phase adds a **code/frontend-only recovery mode** alongside the previously validated full code/frontend/npm rollback primitive. It is expressly for existing backend releases that prohibit package.json/lockfile changes.
+
+`Restore-FamilyCalendarCodeAndFrontend` checks the release's exact old and deployed candidate Git SHA, clean `main`, ancestry, available previous frontend backup, and unused rejection destination **before modifying any files**. It restores the previous frontend and Git commit while deliberately leaving `node_modules` and the SQLite database untouched.
+
+The guarded production `scripts/deploy-backend.ps1` now imports the rollback module before stopping the server. If a backend release fails **after** the new Git commit and frontend have both activated, and after stopping the failed Node process, it invokes this shared code/frontend-only helper. If a release failed earlier during a partial frontend activation, it retains its pre-existing partial-stage recovery path. **Critically, the production failure handler now refuses to restart Node if any restoration problem has already been detected**; the automatic scheduler's existing `REQUIRES-REVIEW.txt` hold prevents unattended retries when a release fails.
+
+Windows CI performs real separate npm installations, disposable local Git commits, intentional Node startup failures and restored health for both the full bundle and production code-only rollback paths. It includes a conflicting recovery destination fixture and checks npm's Express package hash remains unchanged in the code/frontend-only branch. Static CI also verifies the package-change blocker and stop/restart guard are present.
+
+This change **does not authorize npm package replacements** or alter the existing restriction on `package.json`, `package-lock.json`, and database migrations. It does not deliberately break or stop your real calendar to exercise the error path. To validate on the laptop after merge and a manual automatic-deployment trigger, run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\test-combined-release-rollback.ps1"` inside TEST. Expected additional outputs include `CODE AND FRONTEND FILE RESTORATION PASSED` and `COMBINED BACKEND FRONTEND DEPENDENCY ROLLBACK PASSED`.
+
+**Remaining work:** design and review a separately authorized candidate-pin-aware live npm swap, plus a controlled production restart drill, without weakening the current automatic change filters.
+
+---
+
 ## Stage 12: Extract shared, fail-closed release rollback helper
 
 The laptop confirmed that a disposable Git backend, frontend build, npm packages and Node process all restored successfully after a simulated startup failure. The next step extracts the actual coordinated restore operations into a **shared helper**, `scripts/release-bundle-rollback.ps1`, rather than leaving them exclusively inside a test script.

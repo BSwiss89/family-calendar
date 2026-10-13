@@ -63,6 +63,15 @@ jobs:
           if ($source -notmatch "Dependency/unknown file changes require separate review") {
             throw 'Dependency-change blocker was unexpectedly removed'
           }
+          if ($source -notmatch 'Restore-FamilyCalendarCodeAndFrontend') {
+            throw 'Guarded backend deployment is not using shared code/frontend rollback'
+          }
+          if ($source -notmatch [regex]::Escape('if ($didStop -and $problems.Count -eq 0')) {
+            throw 'Guarded backend deployment could restart before failed recovery is resolved'
+          }
+          if ($source -notmatch 'release-bundle-rollback.ps1') {
+            throw 'Shared release recovery helper not imported before server stop'
+          }
           Write-Host 'BACKEND DEPENDENCY GATES VERIFIED BEFORE SERVER SHUTDOWN'
       - name: Validate commit-pinned candidate verifier syntax
         run: node --check scripts/verify-commit-dependencies.mjs
