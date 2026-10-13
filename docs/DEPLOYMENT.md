@@ -1,3 +1,24 @@
+## Stage 15: Smoke test the actual backend with an isolated npm installation
+
+After the laptop passed the read-only dependency-scope fixtures, this stage adds `scripts/test-real-backend-candidate.mjs` to prove that **the real production `Server/index.mjs`** (not a miniature Express simulation) starts and answers HTTP requests using the selected production dependency tree. It does not enable dependency replacement.
+
+Two explicit modes are available:
+
+- `--self-test` is safe immediately after this PR: the script builds a fresh `npm ci --omit=dev` production installation in a **unique Windows temp directory**, creates a synthetic SQLite database with the legacy event/person mapping table expected by startup migrations, copies the current real backend source and built `dist/index.html`, and runs the real application on an OS-assigned `127.0.0.1` port. It verifies the health, frontend HTML, people and lists API responses, then stops only its own child Node process. GitHub Windows CI runs this mode.
+- `--commit <full Git SHA>` is reserved for a **future commit-matched, preserved dependency candidate** prepared via `prepare-commit-dependencies.ps1`. The test requires the approved laptop TEST checkout, independently re-verifies the preserved candidate against GitHub main and source SHA hashes, **copies** its npm tree into a disposable app, then makes a read-only consistent SQLite backup of the **TEST database** (not the live household database). It runs and checks the real candidate backend with that independent temporary SQLite snapshot and loopback HTTP endpoint. It never consumes the original preserved candidate.
+
+This stage does **not** allow changes to `package.json` or `package-lock.json` through automatic deployment; the existing strict release filters remain in effect. Production SQLite, uploads, live npm modules, and the `Family Calendar Server` scheduled task are never changed by this rehearsal.
+
+After merging this PR and manually triggering the existing `Family Calendar Auto Deploy` task, run the following inside the updated laptop TEST checkout:
+
+```powershell
+node ".\scripts\test-real-backend-candidate.mjs" --self-test
+```
+
+Expected: `REAL CALENDAR BACKEND WITH ISOLATED NPM FIXTURE PASSED`. A later real package update must still satisfy the separate commit pin, change scope, and cutover checks, and the production cutover remains disabled until separately reviewed and authorized.
+
+---
+
 ## Stage 14: Read-only approved dependency cutover preview
 
 The laptop passed the guarded production recovery integration and isolated full-bundle/code-only rollback test on commit `4cfecdf`. Before implementing any actual live npm package replacement, this stage establishes a separate, **read-only** preflight for **future** commits that intentionally change both `package.json` and `package-lock.json`.
