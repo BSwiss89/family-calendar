@@ -1,3 +1,22 @@
+## Stage 8: Preserve commit-pinned npm dependency candidates before a live swap
+
+After the laptop verified two independent real npm installations could be switched, deliberately broken and rolled back, we need to ensure the **candidate package tree belongs to the exact approved release**. `scripts/prepare-commit-dependencies.ps1` now prepares a **durable staging folder outside both live and test repositories**. It checks clean Git repositories, the TEST checkout on `main`, and verifies its 40-character commit against a bounded live GitHub main reference query. It refuses any requested commit that does not match. It then installs the exact TEST checkout's lockfile with `npm ci --omit=dev`, validates the installed dependency tree, Express/Multer, and Sharp, and checks package and lockfile SHA-256 hashes before atomically renaming the prepared directory into:
+
+`C:\Users\bobby\Projects\family-calendar-release-backups\dependency-candidates\<full Git commit SHA>`
+
+The directory contains `package.json`, `package-lock.json`, `node_modules`, and `candidate.json` metadata for the matched approved commit and input hashes. Existing candidates are never overwritten. The final candidate directory intentionally persists for later controlled release tests. It occupies additional local disk space; do not delete it while a release or rollback is being investigated.
+
+After this PR merges and is automatically distributed to the laptop, run from the laptop PowerShell session:
+
+```powershell
+Set-Location "$env:USERPROFILE\Projects\family-calendar-test"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\prepare-commit-dependencies.ps1"
+```
+
+Look for `COMMIT-PINNED DEPENDENCY CANDIDATE PASSED`. This only stages packages and creates metadata under release-backups; it does **not** change live `node_modules`, the server task, live SQLite or current calendar UI. The existing deployment policy still **blocks package.json and package-lock.json changes**. Before enabling live dependency switches, the guarded backend deployer must verify the staged commit, code/manifest hashes, active package tree, process shutdown and atomic rollback and complete a controlled restart/recovery drill. npm install lifecycle scripts can execute arbitrary code: only merge trusted reviews and do not treat temporary folders as a security sandbox.
+
+---
+
 ## Stage 7: Rehearse rollback using real npm-installed packages
 
 The synthetic package swap tests, isolated npm installation, and production backend preflight have all succeeded on the laptop. The next step tests the **actual module directory operations** using two independent `npm ci --omit=dev` installations. `scripts/rehearse-real-dependency-rollback.ps1` creates its entire test fixture in a unique temporary folder, installs the current lockfile twice, and validates both trees with Express, Multer and Sharp.
