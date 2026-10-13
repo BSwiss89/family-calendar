@@ -3,7 +3,7 @@
 # Never invoke a production task, listener, Git repository or household database.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'dependency-swap.ps1')
+. (Join-Path $PSScriptRoot 'release-bundle-rollback.ps1')
 
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $sourceManifest = Join-Path $repo 'package.json'
@@ -190,12 +190,12 @@ app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
     $server = $null
     Write-Host '[PASS] Deliberate candidate backend process failure detected after whole-release activation.'
 
-    # Roll back all three release assets while the throwaway server is stopped.
-    Restore-FamilyCalendarDependencies -Active $activePackages -Previous $previousPackages -Rejected $rejectedPackages
-    Move-Item -LiteralPath $activeDist -Destination $rejectedDist -ErrorAction Stop
-    Move-Item -LiteralPath $previousDist -Destination $activeDist -ErrorAction Stop
-    & $git -C $app reset --hard $oldCommit | Out-Null
-    Check-Git 'restore previous backend commit'
+    # Reuse the same rollback primitive intended for guarded production.
+    # The throwaway Node process is stopped before this function is invoked.
+    Restore-FamilyCalendarReleaseBundle -Repository $app `
+        -PreviousCommit $oldCommit -CandidateCommit $newCommit `
+        -ActiveFrontend $activeDist -PreviousFrontend $previousDist -RejectedFrontend $rejectedDist `
+        -ActiveDependencies $activePackages -PreviousDependencies $previousPackages -RejectedDependencies $rejectedPackages
     $restored = (& $git -C $app rev-parse HEAD).Trim()
     Check-Git 'inspect restored commit'
     Require-Test ($restored -eq $oldCommit) 'Backend Git did not roll back.'
