@@ -126,6 +126,15 @@ if ($LASTEXITCODE -ne 0) { throw 'SQLite migration safety fixtures failed. Live 
 & node (Join-Path $test 'scripts\preflight-migrations.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Disposable SQLite migration preflight failed. Live calendar unchanged.' }
 Write-Host '[PASS] Disposable SQLite migration preflight and synthetic safety fixtures'
+# Ensure production npm packages can be installed into a disposable folder,
+# and simulate dependency switch/rollback before ever stopping the live calendar.
+# This does NOT permit package.json or lockfile changes (ReleasePlan still blocks them).
+Write-Host 'Checking runtime dependency staging and rollback safety before live restart...'
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $test 'scripts\test-dependency-rollback.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Dependency rollback safety fixtures failed. Live calendar unchanged.' }
+& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $test 'scripts\stage-dependencies.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Isolated dependency staging failed. Live calendar unchanged.' }
+Write-Host '[PASS] Dependency switch/rollback fixtures and isolated npm staging'
 $plan = ReleasePlan
 Ensure ($plan.From -ne $plan.To) 'Update available'
 & git -C $live fetch origin main
