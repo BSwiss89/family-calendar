@@ -30,6 +30,8 @@ jobs:
         run: node --check scripts/verify-sqlite-recovery.mjs
       - name: Check migration preflight JavaScript syntax
         run: node --check scripts/preflight-migrations.mjs
+      - name: Exercise SQLite migration safety fixtures
+        run: node scripts/preflight-migrations.mjs --self-test
       - name: Validate PowerShell script syntax
         shell: powershell
         run: |
