@@ -1,3 +1,21 @@
+## Stage 14: Read-only approved dependency cutover preview
+
+The laptop passed the guarded production recovery integration and isolated full-bundle/code-only rollback test on commit `4cfecdf`. Before implementing any actual live npm package replacement, this stage establishes a separate, **read-only** preflight for **future** commits that intentionally change both `package.json` and `package-lock.json`.
+
+`scripts/check-dependency-change-scope.mjs` reads the exact old/live and new/test Git commits without fetching or writing. It requires the old commit to be an ancestor of the candidate, both npm manifest and lockfile explicitly modified, every changed file within the existing approved code/frontend/documentation paths, and no edits to the known SQLite startup migration section. It rejects unknown configuration, household data, missing backend migration anchors, and single-file-only npm changes. `--self-test` exercises both valid examples and fail-closed negative fixtures.
+
+`scripts/preview-dependency-cutover.ps1` is for the laptop **only when a future approved commit actually changes npm dependencies** and has already been prepared by `prepare-commit-dependencies.ps1`. It independently requires clean expected Git repos, current approved GitHub main and commit-matched preserved metadata (via the existing `verify-commit-dependencies.mjs`), runtime loading of staged and existing npm modules, independent SQLite files, built frontend files, the recovery parent and healthy live HTTP API. It only reads local files and remote GitHub approval. It cannot stop a service, replace packages, write a backup, or advance Git. It prints `READ-ONLY DEPENDENCY CUTOVER PREVIEW PASSED` only when all the prerequisites hold.
+
+Because Stage 14 itself does **not** change package manifests, trying the laptop preflight immediately after merging this PR is expected to reject the release. For this stage, after merging and manually triggering the existing safe automatic deployment, run this fixture inside the laptop TEST checkout instead:
+
+```powershell
+node ".\scripts\check-dependency-change-scope.mjs" --self-test
+```
+
+Expected: `DEPENDENCY CUTOVER SCOPE SAFETY FIXTURES PASSED`. GitHub Windows CI also exercises these checks and statically verifies the preview does not stop tasks or modify files. **This phase does not enable actual package-changing releases**; both the automatic release and current manual backend release continue to reject them. Further separate design, authorization, crash-recovery checks, and controlled dry-runs are required before any live npm activation.
+
+---
+
 ## Stage 13: Integrate fail-closed code/frontend recovery into guarded backend deployment
 
 The laptop passed the full shared rollback fixture on deployed commit `90b1c2c`. This phase adds a **code/frontend-only recovery mode** alongside the previously validated full code/frontend/npm rollback primitive. It is expressly for existing backend releases that prohibit package.json/lockfile changes.
