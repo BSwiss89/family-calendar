@@ -119,16 +119,17 @@ async function runServer(entry, label) {
     assert(healthy && child.exitCode === null, label + ' did not become healthy. ' + output.slice(-1000))
     console.log('[PASS] ' + label + ' started and answered isolated HTTP health check')
   } finally {
-    if (child.exitCode === null) {
+    if (child.exitCode === null && child.signalCode === null) {
       const exited = new Promise(resolve => child.once('exit', resolve))
       child.kill()
       await Promise.race([exited, sleep(5000)])
-      if (child.exitCode === null) {
+      if (child.exitCode === null && child.signalCode === null) {
         child.kill('SIGKILL')
         await Promise.race([exited, sleep(3000)])
       }
     }
-    assert(child.exitCode !== null, label + ' subprocess would not exit; manual investigation required')
+    assert(child.exitCode !== null || child.signalCode !== null,
+      label + ' subprocess would not exit; manual investigation required')
   }
 }
 
