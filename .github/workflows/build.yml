@@ -56,6 +56,35 @@ jobs:
             throw 'Existing package-changing release blocker was removed'
           }
           Write-Host 'POWER-LOSS RECOVERY REMAINS MANUAL AND DEPENDENCY CHANGES BLOCKED'
+      - name: Rehearse durable release journal across power-loss boundaries
+        shell: powershell
+        run: .\scripts\test-dependency-release-journal.ps1
+      - name: Verify boot hold for corrupt, empty, and complete-but-present journals
+        run: node scripts/test-dependency-release-boot-guard.mjs
+      - name: Keep live npm updates blocked and journal checks before any server files
+        shell: powershell
+        run: |
+          $backend = Get-Content Server/index.mjs -Raw
+          $auto = Get-Content scripts/auto-release.ps1 -Raw
+          $deployer = Get-Content scripts/deploy-backend.ps1 -Raw
+          if ($deployer -notmatch 'Dependency/unknown file changes require separate review') {
+            throw 'Package-changing production release blocker removed'
+          }
+          $guard = $backend.IndexOf('assertCalendarReleaseBootSafe(')
+          $database = $backend.IndexOf('new DatabaseSync(databasePath)')
+          if ($guard -lt 0 -or $database -lt 0 -or $guard -ge $database) {
+            throw 'Production startup guard absent or too late after SQLite opened'
+          }
+          $hold = $auto.IndexOf('if (Test-Path -LiteralPath $dependencyJournal)')
+          $git = $auto.IndexOf('foreach ($folder in @($live, $test))')
+          if ($hold -lt 0 -or $git -lt 0 -or $hold -ge $git) {
+            throw 'Automatic release journal hold absent or runs after Git checks'
+          }
+          $journal = Get-Content scripts/dependency-release-journal.ps1 -Raw
+          foreach ($must in @('[System.IO.File]::Replace', '$stream.Flush($true)', 'Invalid journal transition')) {
+            if (-not $journal.Contains($must)) { throw "Missing atomic release-journal feature: $must" }
+          }
+          Write-Host 'BOOT/JOURNAL FAIL-CLOSED GATES VERIFIED; LIVE NPM DEPLOYMENT STILL BLOCKED'
       - name: Rehearse real npm package activation, corruption detection, and rollback
         shell: powershell
         run: .\\scripts\\rehearse-real-dependency-rollback.ps1

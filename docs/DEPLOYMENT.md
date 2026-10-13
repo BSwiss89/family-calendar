@@ -1,3 +1,19 @@
+## Consolidated release-safety milestone: durable crash journal and startup hold
+
+The laptop passed the earlier package-change simulation and the interrupted-directory-move test on commit `4bfbede`, with a healthy production calendar and no deployment holds. To reduce unnecessary one-feature pull requests, this milestone combines the next related safeguards and their Windows CI tests.
+
+**Release crash journal.** `scripts/dependency-release-journal.ps1` contains manually invoked, testable primitives to create a write-ahead, commit-pinned dependency transaction record, advance it through strictly validated phases, and inspect it for corruption. It writes BOM-free UTF-8, flushes the journal bytes to disk and uses atomic file rename or Windows file replacement. An existing journal cannot be silently overwritten, untrusted metadata and incorrect transaction identities are refused, and illegal phase skips fail closed. **Importing the module does nothing; it is not yet wired to a live npm-changing cutover.** No script automatically deletes the journal.
+
+**Block unsafe restarts.** The real `Server/index.mjs` imports `scripts/dependency-release-boot-guard.mjs` and checks for the durable release marker before creating upload directories or opening SQLite. Only the specifically configured production checkout `C:\Users\bobby\Projects\family-calendar` is held; separate TEST, preview and temporary backend servers remain independent. Any present marker, even empty, corrupt or claiming `HealthVerified`, refuses production Node startup until someone verifies filesystem and service health and explicitly clears it. The `Family Calendar Auto Deploy` task likewise refuses every new update if the marker exists, in addition to its existing text holds. **No automated repair or retry is attempted from this marker.**
+
+**Crash regression tests.** `scripts/test-dependency-release-journal.ps1` runs only on disposable package directories. It simulates power loss immediately after moving old packages aside and after candidate activation, verifies the journal survives, refuses incorrect identity and skipped phases, tests the narrow manually authorized old-package restore, holds even after a verified rollback, and rejects corrupt JSON. `scripts/test-dependency-release-boot-guard.mjs` checks clear, empty, corrupt and success-claimed markers plus unaffected isolated backends. The actual backend smoke test and SQLite migration preflight now copy the shared guard module into their disposable test folders.
+
+After merging and triggering the normal 15-minute auto-deploy task manually, one laptop check can run the two new crash tests, the existing recovery regression and the HTTP health check; GitHub Windows CI also exercises the full preexisting test suite.
+
+**The existing production npm dependency-change blocker remains in place.** This milestone does not make package-changing release transactions write journal phases automatically, perform automatic power-loss recovery, or authorize any unattended package cutover. Those require a separate explicit, complete implementation and review; the presence of a journal must always hold further deploys until manually verified.
+
+---
+
 ## Stage 17: Power-loss gap between npm package directory moves
 
 On the laptop, the phase 16 tests passed with a **genuine Express 5.2.1 → 5.1.0 change**, and rollback restored the old package tree, original manifest/lockfile, Git backend, frontend and HTTP health. Existing automatic package releases remain blocked.
