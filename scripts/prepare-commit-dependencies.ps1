@@ -107,6 +107,11 @@ try {
     $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $working 'candidate.json') -Encoding UTF8
     # Rename only a candidate directory under the backup parent, never live files.
     [IO.Directory]::Move($working, $final)
+    # Reopen the preserved tree and independently recheck SHA binding and imports.
+    & $node (Join-Path $test 'scripts\verify-commit-dependencies.mjs') --commit $head
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Preserved commit candidate verification failed. Inspect existing candidate before retrying.'
+    }
     Write-Host ''
     Write-Host 'COMMIT-PINNED DEPENDENCY CANDIDATE PASSED'
     Write-Host "Commit: $head"

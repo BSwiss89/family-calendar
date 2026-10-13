@@ -1,3 +1,25 @@
+## Stage 9: Verify preserved commit-pinned dependencies before they can be reused
+
+The laptop successfully staged all 96 production packages under the exact GitHub merge commit using `scripts/prepare-commit-dependencies.ps1`. Stage 9 adds `scripts/verify-commit-dependencies.mjs`, a **read-only** validator for an existing preserved candidate. It checks that the TEST checkout matches the candidate's full 40-character SHA, checks the remote GitHub `main` again, rejects mismatched or already-applied candidate metadata, compares SHA-256 of candidate `package.json` and `package-lock.json` with both the recorded metadata and approved TEST checkout, then reopens the installed package tree and smoke-tests Express, Multer and native Sharp.
+
+The preparation script now runs this second verification **after** the candidate folder is renamed into its permanent location, before reporting success. A failed verification leaves the candidate in place for manual inspection; **do not overwrite or reuse failed candidates**. The CI self-tests exercise correct metadata, changed commit, changed hashes, altered manifest/lockfile, replayed state, and absent installed modules. This detects accidental changes and some tampering but is not a full guarantee of npm supply-chain integrity.
+
+Once the merged commit has auto-deployed, run from the laptop TEST checkout:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\prepare-commit-dependencies.ps1"
+```
+
+After it succeeds, check the candidate's full SHA shown in the output with:
+
+```powershell
+node .\scripts\verify-commit-dependencies.mjs --commit <full SHA from output>
+```
+
+Do not paste the angle-bracket placeholder literally; use the full commit value. **No production packages, services or household databases are touched.** The existing automatic deployment ban on package and lockfile updates remains in effect. A future integration must stage a candidate for the pending GitHub commit and verify it before stopping Node, and reliably restore old dependencies and code on failure.
+
+---
+
 ## Stage 8: Preserve commit-pinned npm dependency candidates before a live swap
 
 After the laptop verified two independent real npm installations could be switched, deliberately broken and rolled back, we need to ensure the **candidate package tree belongs to the exact approved release**. `scripts/prepare-commit-dependencies.ps1` now prepares a **durable staging folder outside both live and test repositories**. It checks clean Git repositories, the TEST checkout on `main`, and verifies its 40-character commit against a bounded live GitHub main reference query. It refuses any requested commit that does not match. It then installs the exact TEST checkout's lockfile with `npm ci --omit=dev`, validates the installed dependency tree, Express/Multer, and Sharp, and checks package and lockfile SHA-256 hashes before atomically renaming the prepared directory into:
