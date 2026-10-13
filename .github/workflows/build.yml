@@ -36,6 +36,9 @@ jobs:
         run: node scripts/verify-staged-dependencies.mjs .
       - name: Check runtime dependency verifier JavaScript syntax
         run: node --check scripts/verify-staged-dependencies.mjs
+      - name: Exercise isolated package switch and rollback scenarios
+        shell: powershell
+        run: .\\scripts\\test-dependency-rollback.ps1
       - name: Validate PowerShell script syntax
         shell: powershell
         run: |
