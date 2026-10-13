@@ -76,7 +76,7 @@ jobs:
             throw 'Production startup guard absent or too late after SQLite opened'
           }
           $hold = $auto.IndexOf('if (Test-Path -LiteralPath $dependencyJournal)')
-          $git = $auto.IndexOf("foreach ($folder in @($live, $test))")
+          $git = $auto.IndexOf('foreach ($folder in @($live, $test))')
           if ($hold -lt 0 -or $git -lt 0 -or $hold -ge $git) {
             throw 'Automatic release journal hold absent or runs after Git checks'
           }
