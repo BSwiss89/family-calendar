@@ -80,6 +80,9 @@ function ReleasePlan {
     return [pscustomobject]@{ From = $from; To = $to; Changed = $changed }
 }
 
+# Define fail-closed recovery helpers BEFORE any server stop. No actions on import.
+. (Join-Path $test 'scripts\release-bundle-rollback.ps1')
+
 Write-Host 'FAMILY CALENDAR - GUARDED BACKEND RELEASE'
 if (-not $Apply) { Write-Host 'PREVIEW ONLY; no changes will be made.' }
 $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -205,7 +208,31 @@ try {
             if (-not (AwaitStopped)) { throw 'Port still occupied; cannot safely replace files.' }
         } catch { $problems.Add("Stop new code: $($_.Exception.Message)") }
     }
-    if ($problems.Count -eq 0) {
+    # If all normal release assets were activated, use the independently
+    # rehearsed shared rollback helper to restore backend Git and frontend together.
+    # This deployment never switches npm packages; dependency changes are blocked.
+    $restoredTogether = $false
+    if ($problems.Count -eq 0 -and $didUpdate -and $didMove -and
+        (Test-Path -LiteralPath $distLive -PathType Container)) {
+        try {
+            $restoreArguments = @{
+                Repository = $live
+                PreviousCommit = $plan.From
+                CandidateCommit = $plan.To
+                ActiveFrontend = $distLive
+                PreviousFrontend = $oldDist
+                RejectedFrontend = (Join-Path $release 'failed-dist')
+            }
+            Restore-FamilyCalendarCodeAndFrontend @restoreArguments
+            $restoredTogether = $true
+        } catch {
+            $problems.Add("Shared backend/frontend restoration: $($_.Exception.Message)")
+        }
+    }
+
+    # Preserve existing recovery paths for partially staged releases, where
+    # frontend activation may not have finished.
+    if ($problems.Count -eq 0 -and -not $restoredTogether) {
         if ($didMove) {
             try {
                 if (Test-Path $distLive) { Move-Item $distLive (Join-Path $release 'failed-dist') }
@@ -222,7 +249,10 @@ try {
             } catch { $problems.Add("Restore backend: $($_.Exception.Message)") }
         }
     }
-    if ($didStop -and @(ListeningPids).Count -eq 0) {
+
+    # CRITICAL: never start Node against a known-incomplete restoration.
+    # A failure holds automatic release for manual investigation.
+    if ($didStop -and $problems.Count -eq 0 -and @(ListeningPids).Count -eq 0) {
         try {
             Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
             $recovered = AwaitHealthy $oldPid
