@@ -104,6 +104,27 @@ New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
 try {
     Build-Packages $oldSeed
     Build-Packages $newSeed
+
+    # Make this a real package upgrade/downgrade rehearsal, not two identical
+    # node_modules trees. Change ONLY disposable candidate manifest + lockfile.
+    $previousExpress = (Get-Content -LiteralPath (Join-Path $oldSeed 'node_modules\express\package.json') -Raw | ConvertFrom-Json).version
+    $alternateExpress = if ($previousExpress -eq '5.1.0') { '5.2.1' } else { '5.1.0' }
+    Push-Location $newSeed
+    try {
+        & $npm install ('express@' + $alternateExpress) --save-exact --package-lock-only --ignore-scripts --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw 'Disposable candidate manifest/lockfile change failed.' }
+        & $npm ci --omit=dev --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw 'Changed candidate npm installation failed.' }
+    } finally { Pop-Location }
+    & $node $checker $newSeed
+    if ($LASTEXITCODE -ne 0) { throw 'Changed candidate npm dependency verification failed.' }
+    $candidateExpress = (Get-Content -LiteralPath (Join-Path $newSeed 'node_modules\express\package.json') -Raw | ConvertFrom-Json).version
+    Require-Test ($candidateExpress -eq $alternateExpress -and $candidateExpress -ne $previousExpress) 'Candidate must have a different installed Express version.'
+    $originalManifestHash = (Get-FileHash -LiteralPath $sourceManifest -Algorithm SHA256).Hash
+    $originalLockHash = (Get-FileHash -LiteralPath $sourceLock -Algorithm SHA256).Hash
+    Require-Test ((Get-FileHash -LiteralPath (Join-Path $newSeed 'package.json') -Algorithm SHA256).Hash -ne $originalManifestHash) 'Candidate package.json must differ from original.'
+    Require-Test ((Get-FileHash -LiteralPath (Join-Path $newSeed 'package-lock.json') -Algorithm SHA256).Hash -ne $originalLockHash) 'Candidate lockfile must differ from original.'
+    Write-Host "[PASS] Real npm dependency difference: Express $previousExpress -> $candidateExpress; manifest and lockfile both changed."
     New-Item -ItemType Directory -Path (Join-Path $app 'Server') -Force -ErrorAction Stop | Out-Null
     New-Item -ItemType Directory -Path $activeDist -ErrorAction Stop | Out-Null
     New-Item -ItemType Directory -Path $stagedDist -ErrorAction Stop | Out-Null
@@ -151,8 +172,10 @@ app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
     Check-Git 'identify old commit'
 
     [IO.File]::WriteAllText($serverFile, "throw new Error('Injected candidate startup failure')" + [Environment]::NewLine)
-    & $git -C $app add Server/index.cjs
-    Check-Git 'stage failing backend'
+    Copy-Item -LiteralPath (Join-Path $newSeed 'package.json') -Destination (Join-Path $app 'package.json') -Force -ErrorAction Stop
+    Copy-Item -LiteralPath (Join-Path $newSeed 'package-lock.json') -Destination (Join-Path $app 'package-lock.json') -Force -ErrorAction Stop
+    & $git -C $app add Server/index.cjs package.json package-lock.json
+    Check-Git 'stage failing backend and changed npm manifest/lockfile'
     & $git -C $app commit -m 'Candidate intentionally fails startup' | Out-Null
     Check-Git 'record failing backend'
     $newCommit = (& $git -C $app rev-parse HEAD).Trim()
@@ -222,6 +245,12 @@ app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
     Require-Test ($restored -eq $oldCommit) 'Backend Git did not roll back.'
     Require-Test ((Test-Path -LiteralPath $rejectedPackages -PathType Container)) 'Rejected npm packages not preserved.'
     Require-Test ((Test-Path -LiteralPath $rejectedDist -PathType Container)) 'Rejected frontend not preserved.'
+    $restoredExpress = (Get-Content -LiteralPath (Join-Path $activePackages 'express\package.json') -Raw | ConvertFrom-Json).version
+    $rejectedExpress = (Get-Content -LiteralPath (Join-Path $rejectedPackages 'express\package.json') -Raw | ConvertFrom-Json).version
+    Require-Test ($restoredExpress -eq $previousExpress -and $rejectedExpress -eq $candidateExpress) 'Rollback failed to recover original npm version or retain changed candidate.'
+    Require-Test ((Get-FileHash -LiteralPath (Join-Path $app 'package.json') -Algorithm SHA256).Hash -eq $originalManifestHash) 'Rollback did not restore original package manifest.'
+    Require-Test ((Get-FileHash -LiteralPath (Join-Path $app 'package-lock.json') -Algorithm SHA256).Hash -eq $originalLockHash) 'Rollback did not restore original package lockfile.'
+    Write-Host '[PASS] Previous Express version, original manifest and lockfile restored; different candidate packages preserved.'
     $gitStatus = @(& $git -C $app status --porcelain)
     Check-Git 'inspect final Git checkout'
     Require-Test ($gitStatus.Count -eq 0) 'Backend Git checkout is dirty after rollback.'
@@ -232,12 +261,23 @@ app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
     Stop-RehearsalServer $server
     $server = $null
 
-    # Test the production-used code/frontend-only branch against this same
-    # disposable Git checkout. The working npm tree must remain unchanged.
+    # Create a DIFFERENT candidate commit from original code, without any
+    # package changes, to match the guarded production code-only release policy.
+    [IO.File]::WriteAllText($serverFile, "throw new Error('Injected code-only startup failure')" + [Environment]::NewLine)
+    & $git -C $app add Server/index.cjs
+    Check-Git 'stage separate code-only candidate'
+    & $git -C $app commit -m 'Different candidate with only backend code changed' | Out-Null
+    Check-Git 'commit code-only candidate'
+    $codeOnlyCommit = (& $git -C $app rev-parse HEAD).Trim()
+    Check-Git 'read code-only commit'
+    & $git -C $app branch approved-code-only $codeOnlyCommit
+    Check-Git 'mark separate code-only ref'
+    & $git -C $app reset --hard $oldCommit | Out-Null
+    Check-Git 'reset temporary checkout before code-only rehearsal'
     $unchangedModule = Join-Path $activePackages 'express/package.json'
     $beforeModules = (Get-FileHash -LiteralPath $unchangedModule -Algorithm SHA256).Hash
-    & $git -C $app merge --ff-only approved-candidate | Out-Null
-    Check-Git 'activate code-only failing candidate'
+    & $git -C $app merge --ff-only approved-code-only | Out-Null
+    Check-Git 'activate separate code-only failing candidate'
     $previousDistOnly = Join-Path $recovery 'previous-code-only-dist'
     $rejectedDistOnly = Join-Path $recovery 'rejected-code-only-dist'
     Move-Item -LiteralPath $activeDist -Destination $previousDistOnly -ErrorAction Stop
@@ -249,7 +289,7 @@ app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
     $codeOnlyRestore = @{
         Repository = $app
         PreviousCommit = $oldCommit
-        CandidateCommit = $newCommit
+        CandidateCommit = $codeOnlyCommit
         ActiveFrontend = $activeDist
         PreviousFrontend = $previousDistOnly
         RejectedFrontend = $rejectedDistOnly
@@ -263,7 +303,7 @@ app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
     Require-Test $collisionRefused 'Code-only recovery must refuse backup destination collision.'
     $collidedHead = (& $git -C $app rev-parse HEAD).Trim()
     Check-Git 'inspect refused code-only recovery'
-    Require-Test ($collidedHead -eq $newCommit -and
+    Require-Test ($collidedHead -eq $codeOnlyCommit -and
         (Test-Path -LiteralPath $previousDistOnly -PathType Container) -and
         (Test-Path -LiteralPath $activeDist -PathType Container)) 'Refused code-only restore modified checkout or frontend.'
     Remove-Item -LiteralPath $rejectedDistOnly -Force -ErrorAction Stop
