@@ -65,73 +65,72 @@ try {
     }
 
     if (-not (Test-Path -LiteralPath $sshKey)) { throw 'Configured GitHub SSH key missing.' }
-    $oldGitSshCommand = [Environment]::GetEnvironmentVariable('GIT_SSH_COMMAND', 'Process')
+    # Avoid overriding the SSH configuration that already works with git pull.
+    # The read-only remote check has a timeout and never contacts the live database.
+    . (Join-Path $test 'scripts\get-github-refs.ps1')
     try {
-        # BatchMode prevents a background task from hanging on passphrase/host prompts.
-        $env:GIT_SSH_COMMAND = 'C:/Windows/System32/OpenSSH/ssh.exe -i C:/Users/bobby/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20'
-        $remote = @(& git -C $test ls-remote origin refs/heads/main)
-        if ($LASTEXITCODE -ne 0 -or $remote.Count -ne 1) {
-            # Network / auth faults do not cause a deployment or a permanent hold.
-            Write-Warning 'Could not reach GitHub unattended. No changes; will check next scheduled run.'
-            return
-        }
-        $approved = ($remote[0] -split '\s+')[0]
-        if ($approved -notmatch '^[a-f0-9]{40}$') {
-            throw 'GitHub returned an invalid main SHA.'
-        }
-        $current = (& git -C $live rev-parse HEAD).Trim()
-        if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the live commit.' }
-        if ($current -eq $approved) {
-            Write-Host "Live already matches GitHub main $($approved.Substring(0,7))."
-            return
-        }
-
-        if (-not (Test-Path -LiteralPath $release)) {
-            throw 'Approved release script missing from test checkout.'
-        }
-        Write-Host "New approved version $($approved.Substring(0,7)); current $($current.Substring(0,7))."
-        Write-Host 'Running existing guarded frontend/backend release and recovery checks...'
-        $busyBackup = @(Get-ScheduledTask | Where-Object { $_.TaskName -like 'Family Calendar Backup*' -and $_.State -eq 'Running' })
-        if ($busyBackup.Count -gt 0) {
-            Write-Host 'Backup task is still running; defer deployment until the next scheduled check.'
-            return
-        }
-        Set-Content -LiteralPath $inProgressFile -Value "Started $(Get-Date -Format o); current $current; approved $approved" -Encoding UTF8
-
-        $exitCode = 1
-        try {
-            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $release -Apply
-            $exitCode = $LASTEXITCODE
-        } catch {
-            Write-Warning "Guarded release threw: $($_.Exception.Message)"
-        }
-        if ($exitCode -ne 0) {
-            $msg = @(
-                "Automatic deployment requires manual investigation."
-                "Time: $(Get-Date -Format o)"
-                "Previous live: $current"
-                "GitHub main: $approved"
-                "Guarded release exit code: $exitCode"
-                "No automatic retries will occur until this file is reviewed and removed manually."
-                "Check: $logFile"
-                "Do not delete this hold if the guarded release reported incomplete rollback."
-            ) -join [Environment]::NewLine
-            Set-Content -LiteralPath $holdFile -Value $msg -Encoding UTF8
-            throw 'Release failed; automatic retries are now disabled.'
-        }
-        $deployed = (& git -C $live rev-parse HEAD).Trim()
-        $tested = (& git -C $test rev-parse HEAD).Trim()
-        $health = Invoke-RestMethod 'http://127.0.0.1:3001/api/health' -TimeoutSec 10
-        if ($deployed -ne $tested -or $health.status -ne 'ok') {
-            $msg = "Post-release validation failed at $(Get-Date -Format o). Live: $deployed; tested version: $tested. Check $logFile."
-            Set-Content -LiteralPath $holdFile -Value $msg -Encoding UTF8
-            throw 'Post-release check failed; further automatic releases disabled.'
-        }
-        Remove-Item -LiteralPath $inProgressFile -Force
-        Write-Host "AUTOMATIC DEPLOYMENT PASSED: $($deployed.Substring(0,7))"
-    } finally {
-        [Environment]::SetEnvironmentVariable('GIT_SSH_COMMAND', $oldGitSshCommand, 'Process')
+        $remote = @(Get-FamilyCalendarGitHubRefs -Repository $test -Type Main)
+    } catch {
+        Write-Warning "GitHub temporarily unavailable: $($_.Exception.Message). No changes; retry next scheduled run."
+        return
     }
+    if ($remote.Count -ne 1) {
+        throw 'GitHub returned an unexpected main reference count.'
+    }
+    $approved = ($remote[0] -split '\s+')[0]
+    if ($approved -notmatch '^[a-f0-9]{40}$') {
+        throw 'GitHub returned an invalid main SHA.'
+    }
+    $current = (& git -C $live rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the live commit.' }
+    if ($current -eq $approved) {
+        Write-Host "Live already matches GitHub main $($approved.Substring(0,7))."
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $release)) {
+        throw 'Approved release script missing from test checkout.'
+    }
+    Write-Host "New approved version $($approved.Substring(0,7)); current $($current.Substring(0,7))."
+    Write-Host 'Running existing guarded frontend/backend release and recovery checks...'
+    $busyBackup = @(Get-ScheduledTask | Where-Object { $_.TaskName -like 'Family Calendar Backup*' -and $_.State -eq 'Running' })
+    if ($busyBackup.Count -gt 0) {
+        Write-Host 'Backup task is still running; defer deployment until the next scheduled check.'
+        return
+    }
+    Set-Content -LiteralPath $inProgressFile -Value "Started $(Get-Date -Format o); current $current; approved $approved" -Encoding UTF8
+
+    $exitCode = 1
+    try {
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $release -Apply
+        $exitCode = $LASTEXITCODE
+    } catch {
+        Write-Warning "Guarded release threw: $($_.Exception.Message)"
+    }
+    if ($exitCode -ne 0) {
+        $msg = @(
+            "Automatic deployment requires manual investigation."
+            "Time: $(Get-Date -Format o)"
+            "Previous live: $current"
+            "GitHub main: $approved"
+            "Guarded release exit code: $exitCode"
+            "No automatic retries will occur until this file is reviewed and removed manually."
+            "Check: $logFile"
+            "Do not delete this hold if the guarded release reported incomplete rollback."
+        ) -join [Environment]::NewLine
+        Set-Content -LiteralPath $holdFile -Value $msg -Encoding UTF8
+        throw 'Release failed; automatic retries are now disabled.'
+    }
+    $deployed = (& git -C $live rev-parse HEAD).Trim()
+    $tested = (& git -C $test rev-parse HEAD).Trim()
+    $health = Invoke-RestMethod 'http://127.0.0.1:3001/api/health' -TimeoutSec 10
+    if ($deployed -ne $tested -or $health.status -ne 'ok') {
+        $msg = "Post-release validation failed at $(Get-Date -Format o). Live: $deployed; tested version: $tested. Check $logFile."
+        Set-Content -LiteralPath $holdFile -Value $msg -Encoding UTF8
+        throw 'Post-release check failed; further automatic releases disabled.'
+    }
+    Remove-Item -LiteralPath $inProgressFile -Force
+    Write-Host "AUTOMATIC DEPLOYMENT PASSED: $($deployed.Substring(0,7))"
 } catch {
     # Task Scheduler records failure and the log preserves diagnostics.
     Write-Warning ("AUTO RELEASE ERROR: " + $_.Exception.Message)

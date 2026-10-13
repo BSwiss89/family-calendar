@@ -1,3 +1,12 @@
+## GitHub SSH automation compatibility (October 2026)
+
+The laptop's existing repository-local Git/SSH configuration works (verified by an SSH-agent-backed background `git ls-remote` job). Do not force a global `GIT_SSH_COMMAND` override in the preview/deployment watchers: that override was observed to hang even when normal `git pull` succeeded.
+
+All scheduled GitHub reference checks now run in separate short-lived PowerShell jobs with a 25-second timeout, using the existing repository-local Git configuration and `GIT_TERMINAL_PROMPT=0`. A query timeout skips the check without modifying the live calendar. The preview runner and guarded deployment process use the existing configured SSH key.
+
+After merging the SSH fix, pull `main` into the test repo and rerun both installers without `-Install` to verify readiness. Confirm the background tasks can authenticate after Windows restarts before depending on fully unattended deployments.
+
+---
 # Automatic browser previews for open GitHub pull requests
 
 **Once installed:** the laptop checks GitHub approximately every **10 minutes** and starts the newest open, mergeable PR in the **separate preview checkout**. The browser link remains:

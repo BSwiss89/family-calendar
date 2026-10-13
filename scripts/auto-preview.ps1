@@ -28,7 +28,6 @@ New-Item -ItemType Directory -Path $stateFolder -Force | Out-Null
 $mutex = [System.Threading.Mutex]::new($false, 'Global\FamilyCalendarAutoPreview')
 $locked = $false
 $transcribing = $false
-$priorSsh = [Environment]::GetEnvironmentVariable('GIT_SSH_COMMAND', 'Process')
 
 function Run-Preview([string[]]$parameters) {
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner @parameters
@@ -54,11 +53,13 @@ try {
         throw 'Preview script or existing GitHub SSH key missing.'
     }
 
-    # Prevent background SSH credential prompts. Transient network/auth errors are retried.
-    $env:GIT_SSH_COMMAND = 'C:/Windows/System32/OpenSSH/ssh.exe -i C:/Users/bobby/.ssh/id_ed25519_github -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20'
-    $refs = @(& git -C $test ls-remote origin 'refs/pull/*/merge' 'refs/pull/*/head')
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning 'GitHub is currently unavailable without prompting. No preview change.'
+    # Use the same working repository-local SSH configuration as manual git pull.
+    # The GitHub query is bounded so background checks cannot hang indefinitely.
+    . (Join-Path $test 'scripts\get-github-refs.ps1')
+    try {
+        $refs = @(Get-FamilyCalendarGitHubRefs -Repository $test -Type PullRequests)
+    } catch {
+        Write-Warning "GitHub PR query unavailable: $($_.Exception.Message). No preview change."
         return
     }
 
@@ -142,7 +143,6 @@ try {
         throw
     }
 } finally {
-    [Environment]::SetEnvironmentVariable('GIT_SSH_COMMAND', $priorSsh, 'Process')
     if ($transcribing) { Stop-Transcript | Out-Null }
     if ($locked) { $mutex.ReleaseMutex() }
     $mutex.Dispose()
