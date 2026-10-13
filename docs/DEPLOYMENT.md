@@ -1,3 +1,28 @@
+## Stage 17: Power-loss gap between npm package directory moves
+
+On the laptop, the phase 16 tests passed with a **genuine Express 5.2.1 → 5.1.0 change**, and rollback restored the old package tree, original manifest/lockfile, Git backend, frontend and HTTP health. Existing automatic package releases remain blocked.
+
+The next uncovered scenario is a sudden power loss between the two filesystem moves required to activate staged `node_modules`. A normal PowerShell exception can be caught and rolled back immediately, but a system reboot interrupts the process without executing `catch`.
+
+`scripts/dependency-swap.ps1` now includes two **manual-only, non-automatic** primitives:
+
+- `Get-FamilyCalendarDependencySwapState` is **read-only**. It recognizes exactly the three expected package directory layouts: previous active and staged present, old packages moved aside with active missing, and candidate active with previous preserved. Missing/colliding/ambiguous layouts fail closed; no guessing from the paths.
+- `Restore-FamilyCalendarInterruptedPackageMove` handles **only** the narrow interrupted state where active packages are missing but both the previous package directory and unactivated staged directory exist. After the caller independently identifies and stops its own Node service and verifies preserved backups, it returns the previous directory to the active location, preserving the candidate. Calls in other states are refused. It never touches Git, frontend, SQLite, uploads or scheduled tasks, and it does not restart the server.
+
+`scripts/test-dependency-rollback.ps1` simulates an abrupt interruption immediately after the first package move (which skips the ordinary in-process exception-recovery path), inspects the incomplete directory state, restores the original package folder, verifies the candidate remains staged, and refuses a repeated restore. It additionally verifies that three overlapping transaction directories or absent backups cannot be recovered automatically. GitHub Windows CI runs this synthetic fixture and checks that neither the live backend deployer nor the automatic release script invokes manual recovery or enables package updates.
+
+After merging, trigger the ordinary safe automatic deployment task and run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\test-dependency-rollback.ps1"
+```
+
+inside the laptop TEST checkout. Expected: `INTERRUPTED PACKAGE DIRECTORY MOVE RECOVERY PASSED` and `INTERRUPTED PACKAGE SWAP SAFETY FIXTURES PASSED`.
+
+**Important limits:** This is not a complete automatic power-loss recovery system. It covers one precise interrupted move, and manual reconciliation is still required for other phases. Before permitting a real production npm update, we must add a durable release journal, startup/boot safeguards and a controlled recovery workflow that validates previous/candidate identity and service state. Automatic package-changing updates remain categorically blocked.
+
+---
+
 ## Stage 16: Test genuinely different npm dependency versions and rollback
 
 The laptop independently prepared and verified `92cc093`'s real packages and started the actual Family Calendar backend from those preserved, commit-pinned packages against a disposable copy of the TEST SQLite database. Both checks passed. Those were the **same npm versions already in production**; a future live package-changing release needs additional version-change coverage.

@@ -99,3 +99,62 @@ function Restore-FamilyCalendarDependencies {
     }
     Write-Host '[PASS] Previous dependencies restored; rejected candidate preserved.'
 }
+
+
+# Read-only classification of the three directory states surrounding the two
+# rename operations in Switch-FamilyCalendarDependencies.
+# Requires no journal and NEVER guesses if an unexpected extra/missing directory
+# is found. This is deliberately NOT invoked by live automatic deployment.
+function Get-FamilyCalendarDependencySwapState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Active,
+        [Parameter(Mandatory)][string]$Staged,
+        [Parameter(Mandatory)][string]$Previous
+    )
+    Assert-IndependentDependencyPaths @($Active, $Staged, $Previous)
+
+    foreach ($folder in @($Active, $Staged, $Previous)) {
+        if ((Test-Path -LiteralPath $folder) -and
+            -not (Test-Path -LiteralPath $folder -PathType Container)) {
+            throw "Unexpected non-directory package path: $folder"
+        }
+    }
+
+    $a = Test-Path -LiteralPath $Active -PathType Container
+    $s = Test-Path -LiteralPath $Staged -PathType Container
+    $p = Test-Path -LiteralPath $Previous -PathType Container
+
+    if ($a -and $s -and -not $p) { return 'PreparedNotSwitched' }
+    if (-not $a -and $s -and $p) { return 'InterruptedAfterPreservingOld' }
+    if ($a -and -not $s -and $p) { return 'CandidateActivatedOldPreserved' }
+    throw 'Ambiguous dependency swap state; manual investigation required.'
+}
+
+# Narrow manual-only recovery primitive for an abrupt process/OS interruption
+# BETWEEN moving old node_modules to Previous and activating staged packages.
+# Caller must independently prove the correct Node service is fully stopped,
+# confirm the previous tree belongs to this transaction, and verify health after
+# recovery. Never called by the automatic release task.
+function Restore-FamilyCalendarInterruptedPackageMove {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Active,
+        [Parameter(Mandatory)][string]$Staged,
+        [Parameter(Mandatory)][string]$Previous
+    )
+
+    $state = Get-FamilyCalendarDependencySwapState -Active $Active -Staged $Staged -Previous $Previous
+    if ($state -ne 'InterruptedAfterPreservingOld') {
+        throw "Interrupted-package recovery refused: state is $state."
+    }
+    Move-Item -LiteralPath $Previous -Destination $Active -ErrorAction Stop
+    if (-not (Test-Path -LiteralPath $Active -PathType Container) -or
+        -not (Test-Path -LiteralPath $Staged -PathType Container) -or
+        (Test-Path -LiteralPath $Previous)) {
+        throw 'Interrupted-package recovery verification failed. Do not restart Node.'
+    }
+    Write-Host '[PASS] Previously preserved packages restored after interrupted first directory move.'
+    Write-Host '[PASS] Unactivated candidate packages remain staged and untouched.'
+    Write-Host 'INTERRUPTED PACKAGE DIRECTORY MOVE RECOVERY PASSED'
+}
