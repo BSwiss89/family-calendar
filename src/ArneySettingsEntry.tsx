@@ -5,16 +5,15 @@ import './ArneySettingsEntry.css'
 
 export default function ArneySettingsEntry() {
   const [open, setOpen] = useState(false)
-  const [targets, setTargets] = useState<{ sidebar: Element | null; mobile: Element | null }>({ sidebar: null, mobile: null })
+  const [targets, setTargets] = useState<{ sidebar: Element | null }>({ sidebar: null })
 
   useEffect(() => {
     const updateTargets = () => {
       const sidebar = document.querySelector('.app-sidebar')
-      const mobile = document.querySelector('.mobile-bottom-controls')
       setTargets(current =>
-        current.sidebar === sidebar && current.mobile === mobile
+        current.sidebar === sidebar
           ? current
-          : { sidebar, mobile },
+          : { sidebar },
       )
     }
     updateTargets()
@@ -49,7 +48,7 @@ export default function ArneySettingsEntry() {
   return (
     <>
       {targets.sidebar && createPortal(button(false), targets.sidebar)}
-      {targets.mobile && createPortal(button(true), targets.mobile)}
+      {createPortal(button(true), document.body)}
       {open && createPortal(
         <div className="arney-settings-backdrop" onMouseDown={event => {
           if (event.target === event.currentTarget) setOpen(false)
