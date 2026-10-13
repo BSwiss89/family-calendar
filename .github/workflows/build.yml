@@ -39,6 +39,22 @@ jobs:
       - name: Exercise isolated package switch and rollback scenarios
         shell: powershell
         run: .\\scripts\\test-dependency-rollback.ps1
+      - name: Confirm dependency gates execute before live backend shutdown
+        shell: powershell
+        run: |
+          $source = Get-Content scripts/deploy-backend.ps1 -Raw
+          $stop = $source.IndexOf('Stop-ScheduledTask -TaskName $taskName')
+          if ($stop -lt 0) { throw 'Live backend stop was not found' }
+          foreach ($gate in @('test-dependency-rollback.ps1', 'stage-dependencies.ps1')) {
+            $offset = $source.IndexOf($gate)
+            if ($offset -lt 0 -or $offset -ge $stop) {
+              throw "Dependency gate missing or occurs after live stop: $gate"
+            }
+          }
+          if ($source -notmatch "Dependency/unknown file changes require separate review") {
+            throw 'Dependency-change blocker was unexpectedly removed'
+          }
+          Write-Host 'BACKEND DEPENDENCY GATES VERIFIED BEFORE SERVER SHUTDOWN'
       - name: Validate PowerShell script syntax
         shell: powershell
         run: |
