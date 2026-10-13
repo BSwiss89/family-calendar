@@ -232,6 +232,58 @@ app.listen(Number(process.env.CALENDAR_COMBINED_REHEARSAL_PORT), '127.0.0.1')
     Stop-RehearsalServer $server
     $server = $null
 
+    # Test the production-used code/frontend-only branch against this same
+    # disposable Git checkout. The working npm tree must remain unchanged.
+    $unchangedModule = Join-Path $activePackages 'express/package.json'
+    $beforeModules = (Get-FileHash -LiteralPath $unchangedModule -Algorithm SHA256).Hash
+    & $git -C $app merge --ff-only approved-candidate | Out-Null
+    Check-Git 'activate code-only failing candidate'
+    $previousDistOnly = Join-Path $recovery 'previous-code-only-dist'
+    $rejectedDistOnly = Join-Path $recovery 'rejected-code-only-dist'
+    Move-Item -LiteralPath $activeDist -Destination $previousDistOnly -ErrorAction Stop
+    New-Item -ItemType Directory -Path $activeDist -ErrorAction Stop | Out-Null
+    [IO.File]::WriteAllText((Join-Path $activeDist 'index.html'), '<html>failing code-only frontend</html>')
+
+    # Refuse a collision before moving frontend or resetting Git.
+    New-Item -ItemType Directory -Path $rejectedDistOnly -ErrorAction Stop | Out-Null
+    $codeOnlyRestore = @{
+        Repository = $app
+        PreviousCommit = $oldCommit
+        CandidateCommit = $newCommit
+        ActiveFrontend = $activeDist
+        PreviousFrontend = $previousDistOnly
+        RejectedFrontend = $rejectedDistOnly
+    }
+    $collisionRefused = $false
+    try {
+        Restore-FamilyCalendarCodeAndFrontend @codeOnlyRestore
+    } catch {
+        $collisionRefused = $true
+    }
+    Require-Test $collisionRefused 'Code-only recovery must refuse backup destination collision.'
+    $collidedHead = (& $git -C $app rev-parse HEAD).Trim()
+    Check-Git 'inspect refused code-only recovery'
+    Require-Test ($collidedHead -eq $newCommit -and
+        (Test-Path -LiteralPath $previousDistOnly -PathType Container) -and
+        (Test-Path -LiteralPath $activeDist -PathType Container)) 'Refused code-only restore modified checkout or frontend.'
+    Remove-Item -LiteralPath $rejectedDistOnly -Force -ErrorAction Stop
+    Write-Host '[PASS] Code-only restore rejects a recovery collision before making changes.'
+
+    $server = Start-RehearsalServer 'code-only-expected-failure'
+    $server.WaitForExit(10000) | Out-Null
+    $server.Refresh()
+    Require-Test ($server.HasExited -and $server.ExitCode -ne 0) 'Deliberately broken code-only server did not fail startup.'
+    Stop-RehearsalServer $server
+    $server = $null
+    Restore-FamilyCalendarCodeAndFrontend @codeOnlyRestore
+    $afterModules = (Get-FileHash -LiteralPath $unchangedModule -Algorithm SHA256).Hash
+    Require-Test ($beforeModules -eq $afterModules) 'Code/frontend rollback unexpectedly changed npm modules.'
+    $server = Start-RehearsalServer 'code-only-recovered'
+    Wait-OldHealthy $server
+    Stop-RehearsalServer $server
+    $server = $null
+    Write-Host '[PASS] Code/frontend-only failure recovered with unchanged npm packages and healthy Node HTTP response.'
+
     Write-Host ''
     Write-Host 'COMBINED BACKEND FRONTEND DEPENDENCY ROLLBACK PASSED'
     Write-Host 'All Git, npm, Node and frontend changes were isolated to a disposable temporary folder.'
