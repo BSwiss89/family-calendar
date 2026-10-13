@@ -1469,7 +1469,9 @@ function getRequestedPeople(personIds, legacyPerson) {
   return []
 }
 
-// Health route stays functionally identical. This backend-only comment tests the\n// automatic release gates for isolated npm staging and dependency rollback.\napp.get('/api/health', (request, response) => {
+// Health route stays functionally identical. This backend-only comment tests the
+// automatic release gates for isolated npm staging and dependency rollback.
+app.get('/api/health', (request, response) => {
   response.json({
     status: 'ok',
     message: 'Family Calendar server is running',
