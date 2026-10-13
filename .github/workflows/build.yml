@@ -73,6 +73,24 @@ jobs:
             throw 'Shared release recovery helper not imported before server stop'
           }
           Write-Host 'BACKEND DEPENDENCY GATES VERIFIED BEFORE SERVER SHUTDOWN'
+      - name: Validate read-only dependency cutover scope checker syntax
+        run: node --check scripts/check-dependency-change-scope.mjs
+      - name: Reject unauthorized npm scope and database migration modifications
+        run: node scripts/check-dependency-change-scope.mjs --self-test
+      - name: Confirm existing package-changing auto-deployment remains blocked
+        shell: powershell
+        run: |
+          $backend = Get-Content scripts/deploy-backend.ps1 -Raw
+          if ($backend -notmatch 'Dependency/unknown file changes require separate review') {
+            throw 'Backend release dependency-change blocker was removed'
+          }
+          $preview = Get-Content scripts/preview-dependency-cutover.ps1 -Raw
+          foreach ($forbidden in @('Stop-ScheduledTask', 'Start-ScheduledTask', 'Move-Item', 'Remove-Item', 'npm ci', 'git fetch', 'git merge', 'git reset')) {
+            if ($preview.Contains($forbidden)) {
+              throw "Read-only cutover preview contains forbidden operation: $forbidden"
+            }
+          }
+          Write-Host 'READ-ONLY PREVIEW AND EXISTING DEPENDENCY BLOCK VERIFIED'
       - name: Validate commit-pinned candidate verifier syntax
         run: node --check scripts/verify-commit-dependencies.mjs
       - name: Exercise preserved candidate metadata and tamper protection
