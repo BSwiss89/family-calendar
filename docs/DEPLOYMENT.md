@@ -1,3 +1,24 @@
+## Stage 10: Rehearse stopping/restarting real Node across package rollback
+
+After the laptop passed preserved commit-pinned candidate verification on approved commit `aff722a`, phase 10 adds `scripts/rehearse-node-dependency-restart.ps1`. It tests actual Node process lifecycle **without touching the live server**:
+
+1. Install two independent real production `node_modules` trees into a unique Windows temp directory using the same approved package lockfile.
+2. Start a throwaway Express+Sharp health server on an OS-assigned **127.0.0.1-only** port (never 3001, 13001, or 13002), verify its reported PID, package identity and real Sharp image encoding; stop it and confirm it released the port.
+3. Move the candidate `node_modules` into the app using the existing production-intended `Switch-FamilyCalendarDependencies` helper. Start a new Node process and confirm healthy HTTP response and new PID.
+4. Stop it; deliberately break the candidate's Express package **inside the disposable directory**; confirm the next Node start exits unsuccessfully.
+5. Restore the original modules using the existing `Restore-FamilyCalendarDependencies` helper, preserve the failed candidate and verify the original Node server starts and answers its health API.
+6. Tear down the temporary server and delete the disposable folder.
+
+The Windows GitHub CI includes this process-backed rehearsal. After merging and automatic deployment on the laptop, run in the TEST checkout:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\rehearse-node-dependency-restart.ps1"
+```
+
+Expected: `ISOLATED NODE PROCESS DEPENDENCY RECOVERY PASSED`. A passing rehearsal validates restart mechanics but **does not** authorize changing live dependencies. The live calendar's SYSTEM task, port 3001, SQLite and production node_modules are untouched. We still need carefully guarded live release integration with snapshots, code-and-package rollback and manual failure holds. Continue blocking package and lockfile changes through the automatic release pipeline.
+
+---
+
 ## Windows PowerShell UTF-8 candidate metadata fix
 
 The first laptop commit-pinned verifier run for `2380f76` found that Windows PowerShell 5.1 writes a UTF-8 byte-order mark (BOM) when `Set-Content -Encoding UTF8` creates `candidate.json`. The npm installation, native Sharp smoke test and SHA-256 collection had all passed before Node tried to parse that JSON. The saved candidate was preserved for inspection; no live dependencies or database were changed.
