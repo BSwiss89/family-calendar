@@ -9,9 +9,9 @@ $source = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $manifest = Join-Path $source 'package.json'
 $lockfile = Join-Path $source 'package-lock.json'
 $checker = Join-Path $PSScriptRoot 'verify-staged-dependencies.mjs'
-foreach ($input in @($manifest, $lockfile, $checker)) {
-    if (-not (Test-Path -LiteralPath $input -PathType Leaf)) {
-        throw "Missing npm dependency test input: $input"
+foreach ($requiredPath in @($manifest, $lockfile, $checker)) {
+    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+        throw "Missing npm dependency test input: $requiredPath"
     }
 }
 $node = (Get-Command node.exe -ErrorAction Stop).Source
@@ -49,7 +49,7 @@ function Prepare-Install([string]$directory, [string]$identity) {
     }
     & $node $checker $directory
     if ($LASTEXITCODE -ne 0) { throw "Runtime package checks failed for $identity" }
-    Set-Content -LiteralPath (Join-Path $directory 'node_modules' $marker) -Value $identity -NoNewline
+    Set-Content -LiteralPath (Join-Path (Join-Path $directory 'node_modules') $marker) -Value $identity -NoNewline
 }
 
 if (Test-Path -LiteralPath $root) { throw 'Unexpected duplicate disposable test folder.' }
