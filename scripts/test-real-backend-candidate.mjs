@@ -52,6 +52,26 @@ function installTempPackages(folder) {
   requireSafe(result.status === 0, 'disposable npm ci failed')
 }
 
+function switchDisposableExpressVersion(folder, version) {
+  const win = process.platform === 'win32'
+  const command = win ? 'cmd.exe' : 'npm'
+  const args = win
+    ? ['/d', '/s', '/c', 'npm install express@' + version + ' --save-exact --package-lock-only --ignore-scripts --no-audit --no-fund']
+    : ['install', 'express@' + version, '--save-exact', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund']
+  const result = spawnSync(command, args, {
+    cwd: folder,
+    stdio: 'inherit',
+    timeout: 120000,
+    windowsHide: true,
+  })
+  requireSafe(result.status === 0, 'could not update disposable manifest and lockfile')
+  installTempPackages(folder)
+  const installed = JSON.parse(fs.readFileSync(path.join(folder, 'node_modules', 'express', 'package.json'), 'utf8')).version
+  const manifest = JSON.parse(fs.readFileSync(path.join(folder, 'package.json'), 'utf8'))
+  requireSafe(installed === version && manifest.dependencies.express === version,
+    'fresh npm install does not match pinned alternate Express version')
+}
+
 function seedSyntheticSqlite(dbPath) {
   const db = new DatabaseSync(dbPath)
   try {
@@ -211,6 +231,21 @@ async function main() {
     runNode([path.join(scriptDir, 'verify-staged-dependencies.mjs'), app])
     const port = await unusedLoopbackPort()
     await exerciseBackend(app, port)
+    if (fixtureMode) {
+      // Prove a genuinely DIFFERENT package.json, package-lock.json, and
+      // node_modules tree still boots the actual application. This fixture
+      // exists only inside the OS temporary app.
+      const originalVersion = JSON.parse(fs.readFileSync(
+        path.join(app, 'node_modules', 'express', 'package.json'), 'utf8'
+      )).version
+      const alternateVersion = originalVersion === '5.1.0' ? '5.2.1' : '5.1.0'
+      switchDisposableExpressVersion(app, alternateVersion)
+      requireSafe(originalVersion !== alternateVersion, 'npm fixture did not change its dependency version')
+      runNode([path.join(scriptDir, 'verify-staged-dependencies.mjs'), app])
+      await exerciseBackend(app, port)
+      console.log('[PASS] Real Calendar backend remained healthy after changing a pinned npm dependency.')
+      console.log('REAL CALENDAR BACKEND WITH CHANGED NPM VERSION PASSED')
+    }
     console.log('')
     console.log(fixtureMode
       ? 'REAL CALENDAR BACKEND WITH ISOLATED NPM FIXTURE PASSED'
