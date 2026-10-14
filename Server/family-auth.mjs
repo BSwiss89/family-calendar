@@ -50,6 +50,7 @@ export function createFamilyAuthTables(database) {
     'username TEXT NOT NULL UNIQUE,',
     'display_name TEXT NOT NULL,',
     'password_hash TEXT NOT NULL,',
+    "account_kind TEXT NOT NULL DEFAULT 'person' CHECK(account_kind IN ('person','hub')),",
     'disabled INTEGER NOT NULL DEFAULT 0',
     ') STRICT;',
     'CREATE TABLE IF NOT EXISTS family_sessions (',
@@ -65,9 +66,18 @@ export function createFamilyAuthTables(database) {
     'CREATE INDEX IF NOT EXISTS family_sessions_user_idx ON family_sessions(user_id);',
     'CREATE INDEX IF NOT EXISTS family_sessions_expiry_idx ON family_sessions(expires_at);',
   ].join('\n'))
+  // Old central identity databases created before hub-account roles should
+  // retain all logins and sessions, never be dropped/rebuilt for this change.
+  const columns = database.prepare('PRAGMA table_info(family_users)').all()
+  if (!columns.some(column => column.name === 'account_kind')) {
+    database.exec("ALTER TABLE family_users ADD COLUMN account_kind TEXT NOT NULL DEFAULT 'person' CHECK(account_kind IN ('person','hub'))")
+  }
 }
 
-export function setFamilyAccount(database, username, displayName, password) {
+export function setFamilyAccount(database, username, displayName, password, { accountKind = 'person' } = {}) {
+  if (!['person', 'hub'].includes(accountKind)) {
+    throw new Error('A family account must represent a person or a household hub.')
+  }
   const name = normalizedUsername(username)
   if (!name) throw new Error('Username must be 3–40 letters, digits, dots, dashes, or underscores.')
   if (typeof displayName !== 'string' || !displayName.trim() || displayName.trim().length > 80) {
@@ -79,13 +89,13 @@ export function setFamilyAccount(database, username, displayName, password) {
   try {
     const existing = database.prepare('SELECT id FROM family_users WHERE username = ?').get(name)
     if (existing) {
-      database.prepare('UPDATE family_users SET display_name = ?, password_hash = ?, disabled = 0 WHERE id = ?')
-        .run(displayName.trim(), passwordHash, existing.id)
+      database.prepare('UPDATE family_users SET display_name = ?, password_hash = ?, account_kind = ?, disabled = 0 WHERE id = ?')
+        .run(displayName.trim(), passwordHash, accountKind, existing.id)
       // A password reset revokes all trusted devices.
       database.prepare('DELETE FROM family_sessions WHERE user_id = ?').run(existing.id)
     } else {
-      database.prepare('INSERT INTO family_users(username, display_name, password_hash) VALUES (?, ?, ?)')
-        .run(name, displayName.trim(), passwordHash)
+      database.prepare('INSERT INTO family_users(username, display_name, password_hash, account_kind) VALUES (?, ?, ?, ?)')
+        .run(name, displayName.trim(), passwordHash, accountKind)
     }
     database.exec('COMMIT')
   } catch (error) {
@@ -152,7 +162,7 @@ function getSession(database, request, response, touch = true) {
   if (!token) return null
   const now = Date.now()
   const session = database.prepare([
-    'SELECT s.id, s.user_id, s.device_label, s.last_seen_at, u.username, u.display_name',
+    'SELECT s.id, s.user_id, s.device_label, s.last_seen_at, u.username, u.display_name, u.account_kind',
     'FROM family_sessions s JOIN family_users u ON u.id = s.user_id',
     'WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ? AND u.disabled = 0',
   ].join(' ')).get(sha256(token), now)
@@ -213,7 +223,10 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
     response.json({
       enabled: true,
       authenticated: Boolean(session),
-      ...(session ? { displayName: session.display_name, username: session.username } : {}),
+      ...(session ? {
+        displayName: session.display_name, username: session.username,
+        accountKind: session.account_kind,
+      } : {}),
     })
   })
 
