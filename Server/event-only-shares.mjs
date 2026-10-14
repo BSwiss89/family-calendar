@@ -1,4 +1,5 @@
-// Draft PR #46: offline per-event sharing. Not connected to HTTP or production.
+// Draft PR #46: individual-event sharing model for a private test gateway.
+// Never publicly expose until full tenancy, backup and invitation review.
 // Authenticated identities come from trusted server sessions. sourceDatabase
 // MUST be the resolved SQLite DB belonging to sourceHouseholdId, not user input.
 import { lookupGrantedHouseholdForSessionUser } from './household-memberships.mjs'
@@ -68,7 +69,42 @@ export function createEventShareTables(db) {
     ') STRICT;',
     'CREATE INDEX IF NOT EXISTS event_share_recipient_idx',
     'ON event_share_grants(recipient_household_id, status);',
+    'CREATE TABLE IF NOT EXISTS event_share_connections (',
+    'source_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
+    'recipient_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
+    'PRIMARY KEY (source_household_id, recipient_household_id),',
+    'CHECK(source_household_id != recipient_household_id)',
+    ') STRICT;',
   ].join('\n'))
+}
+
+/**
+ * Only trusted, offline administration can connect two households for event
+ * invitations. The browser may NEVER create household connections by itself.
+ * This is a contact/recipient allowlist, NOT permission to see any events.
+ */
+export function registerTrustedShareConnection(db, { sourceHouseholdId, recipientHouseholdId }) {
+  const from = activeHousehold(db, recipient(sourceHouseholdId))
+  const to = activeHousehold(db, recipient(recipientHouseholdId))
+  if (!from || !to || from === to) throw new Error('Two distinct active households required.')
+  db.prepare([
+    'INSERT INTO event_share_connections (source_household_id, recipient_household_id)',
+    'VALUES (?, ?)',
+  ].join(' ')).run(from, to)
+}
+
+export function listTrustedEventShareRecipients(db, { serverVerifiedUserId, sourceHouseholdId }) {
+  membership(db, serverVerifiedUserId, sourceHouseholdId)
+  return db.prepare([
+    'SELECT target.storage_id AS householdId, target.display_name AS displayName',
+    'FROM event_share_connections connected',
+    'JOIN household_registry source ON source.id = connected.source_household_id',
+    'JOIN household_registry target ON target.id = connected.recipient_household_id',
+    'WHERE source.storage_id = ? AND source.disabled = 0 AND target.disabled = 0',
+    'ORDER BY target.display_name, target.storage_id',
+  ].join(' ')).all(sourceHouseholdId).map(r => ({
+    householdId: r.householdId, displayName: r.displayName,
+  }))
 }
 
 /**
@@ -95,6 +131,11 @@ export function inviteSelectedEvents(db, {
     if (slug === sourceHouseholdId) throw new Error('Cannot share an event with its own household.')
     const target = activeHousehold(db, slug)
     if (!target) throw new Error('Recipient household is not available.')
+    const connected = db.prepare([
+      'SELECT 1 AS allowed FROM event_share_connections',
+      'WHERE source_household_id = ? AND recipient_household_id = ?',
+    ].join(' ')).get(from, target)
+    if (!connected) throw new Error('Recipient household is not connected for event sharing.')
     return { slug, target }
   })
   const summaries = events.map(eventId => ({
@@ -124,7 +165,7 @@ export function inviteSelectedEvents(db, {
   }
 }
 
-function grantForActor(db, shareId, actor, direction) {
+function grantForActor(db, shareId, actor, direction, actorHouseholdId) {
   id(shareId, 'share ID')
   const row = db.prepare([
     'SELECT s.*, source.storage_id AS sourceHouseholdId,',
@@ -135,15 +176,21 @@ function grantForActor(db, shareId, actor, direction) {
     'WHERE s.id = ? AND source.disabled = 0 AND target.disabled = 0',
   ].join(' ')).get(shareId)
   if (!row) throw new Error('Share not available.')
-  membership(db, actor, direction === 'recipient'
-    ? row.recipientHouseholdId : row.sourceHouseholdId)
+  const targetHouseholdId = direction === 'recipient'
+    ? row.recipientHouseholdId : row.sourceHouseholdId
+  // A user who belongs to more than one family can only act on the
+  // family they explicitly selected in their verified device session.
+  if (actorHouseholdId !== targetHouseholdId) {
+    throw new Error('Share is not available to the selected household.')
+  }
+  membership(db, actor, targetHouseholdId)
   return row
 }
 
 /** Accept or decline only a pending invitation addressed to this household. */
-export function respondToEventInvitation(db, { serverVerifiedUserId, shareId, decision }) {
+export function respondToEventInvitation(db, { serverVerifiedUserId, recipientHouseholdId, shareId, decision }) {
   if (!['accepted', 'declined'].includes(decision)) throw new Error('Invalid invitation response.')
-  const row = grantForActor(db, shareId, serverVerifiedUserId, 'recipient')
+  const row = grantForActor(db, shareId, serverVerifiedUserId, 'recipient', recipientHouseholdId)
   if (row.status !== 'pending') throw new Error('Invitation is no longer pending.')
   const now = Date.now()
   const changed = db.prepare([
@@ -155,8 +202,8 @@ export function respondToEventInvitation(db, { serverVerifiedUserId, shareId, de
 }
 
 /** Revoke this specific event-to-recipient grant only. */
-export function revokeSelectedEventShare(db, { serverVerifiedUserId, shareId }) {
-  grantForActor(db, shareId, serverVerifiedUserId, 'source')
+export function revokeSelectedEventShare(db, { serverVerifiedUserId, sourceHouseholdId, shareId }) {
+  grantForActor(db, shareId, serverVerifiedUserId, 'source', sourceHouseholdId)
   const changed = db.prepare([
     "UPDATE event_share_grants SET status = 'revoked', updated_at = ?",
     "WHERE id = ? AND status IN ('pending','accepted','declined')",
