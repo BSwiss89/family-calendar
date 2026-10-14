@@ -9,6 +9,9 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import SharedEventsOverlay from './SharedEventsOverlay'
+import { useSharedEventFeed } from './useSharedEventFeed'
+import { sharedEventsInRange } from './sharedEventOverlay'
 import { arneySpeechAvailable, beginArneySpeech, speakArneyReply, type ArneySpeechResult, type ArneySpeechSession } from './arneySpeech'
 import { readArneyPreferences } from './arneyPreferences'
 import { shouldOfferArneyTextFallback } from './arneyWakePhrase'
@@ -3744,6 +3747,8 @@ const [
   () => window.innerWidth <= 1200
 )
   const [events, setEvents] = useState<CalendarEvent[]>([])
+  // Accepted snapshots are NOT editable local events; their IDs are separate.
+  const receivedSharedEvents = useSharedEventFeed(page === 'calendar')
 
 function positionMobileScheduleTimeline(
   targetDate: Date
@@ -13967,6 +13972,24 @@ const homeTodayMeals =
 
 const homeListPreview =
   lists.slice(0, 4)
+
+const sharedViewStart =
+  calendarView === 'day'
+    ? getDateKeyFromDate(dayViewDate)
+    : calendarView === 'week'
+      ? getDateKeyFromDate(weekDates[0])
+      : calendarView === 'schedule'
+        ? getDateKeyFromDate(scheduleDisplayDates[0])
+        : getDateKeyFromDate(new Date(year, month, 1))
+const sharedViewEnd =
+  calendarView === 'day'
+    ? getDateKeyFromDate(dayViewDate)
+    : calendarView === 'week'
+      ? getDateKeyFromDate(weekDates[6])
+      : calendarView === 'schedule'
+        ? getDateKeyFromDate(scheduleDisplayDates[scheduleDisplayDates.length - 1])
+        : getDateKeyFromDate(new Date(year, month + 1, 0))
+
 return (
     <main className="calendar-app">
       <header
@@ -16343,6 +16366,12 @@ createPortal(
 </div>
 </div>
 
+<SharedEventsOverlay
+  events={receivedSharedEvents}
+  startDate={sharedViewStart}
+  endDate={sharedViewEnd}
+/>
+
 {calendarView === 'month' && (
   <div
     className="calendar-swipe-surface month-swipe-surface"
@@ -16466,6 +16495,18 @@ const dayMultiDayLaneCount =
     },
     0
   )
+const daySharedEventKey =
+  getDateKeyForMonth(
+    targetYear,
+    targetMonth,
+    day
+  )
+const sharedEventsForDay =
+  sharedEventsInRange(
+    receivedSharedEvents,
+    daySharedEventKey,
+    daySharedEventKey
+  )
 const maximumVisibleDayEventCount =
   Math.max(
     0,
@@ -16473,7 +16514,8 @@ const maximumVisibleDayEventCount =
       isCompactMonthLayout
         ? 3
         : 4
-    ) - dayMultiDayLaneCount
+    ) - dayMultiDayLaneCount -
+      (sharedEventsForDay.length > 0 ? 1 : 0)
   )
            const dayEvents = events
   .filter(
@@ -16635,6 +16677,28 @@ const visibleDayEventCount =
                         </button>
                       )
                     })}
+
+                  {sharedEventsForDay.slice(0, 1).map((sharedEvent) => (
+                    <div
+                      className="month-shared-event-chip"
+                      key={`shared-${sharedEvent.shareId}`}
+                      role="note"
+                      title={`${sharedEvent.title} — shared by ${sharedEvent.sharedBy}; read only`}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <span aria-hidden="true">↗ </span>
+                      {sharedEvent.time && (
+                        <span>{sharedEvent.time} </span>
+                      )}
+                      <span>{sharedEvent.title}</span>
+                      <span className="month-shared-event-source">
+                        · {sharedEvent.sharedBy}
+                        {sharedEventsForDay.length > 1
+                          ? ` +${sharedEventsForDay.length - 1}`
+                          : ''}
+                      </span>
+                    </div>
+                  ))}
 
                  {dayEvents.length > visibleDayEventCount && (
   <button
