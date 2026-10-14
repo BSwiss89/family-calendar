@@ -179,24 +179,37 @@ export async function startHouseholdBrowserDemo() {
     createHouseholdMembershipTables(central)
     createEventShareTables(central)
 
+    registerHousehold(central, {
+      householdId: 'family-a', displayName: 'Demo Family A',
+    })
+    registerHousehold(central, {
+      householdId: 'family-b', displayName: 'Demo Family B',
+    })
+    // Distinct personal users share Family A's calendar by explicit
+    // membership; its hub has a separate authenticated identity.
     const accounts = [
-      { username: 'demo-family-a', displayName: 'Demo Family A',
-        householdId: 'family-a', password: 'Demo-' + randomBytes(20).toString('base64url') },
-      { username: 'demo-family-b', displayName: 'Demo Family B',
-        householdId: 'family-b', password: 'Demo-' + randomBytes(20).toString('base64url') },
-    ]
+      { username: 'demo-family-a', displayName: 'Family A Member One',
+        householdId: 'family-a', accountKind: 'person', role: 'owner' },
+      { username: 'demo-family-b', displayName: 'Family B Member',
+        householdId: 'family-b', accountKind: 'person', role: 'owner' },
+      { username: 'demo-family-a-member', displayName: 'Family A Member Two',
+        householdId: 'family-a', accountKind: 'person', role: 'member' },
+      { username: 'demo-family-a-hub', displayName: 'Family A Hub',
+        householdId: 'family-a', accountKind: 'hub', role: 'member' },
+    ].map(account => ({
+      ...account,
+      password: 'Demo-' + randomBytes(20).toString('base64url'),
+    }))
     for (const account of accounts) {
-      setFamilyAccount(central, account.username, account.displayName, account.password)
-      registerHousehold(central, {
-        householdId: account.householdId, displayName: account.displayName,
-      })
+      setFamilyAccount(central, account.username, account.displayName,
+        account.password, { accountKind: account.accountKind })
       const row = central.prepare(
         'SELECT id FROM family_users WHERE username = ?'
       ).get(account.username)
       grantHouseholdMembership(central, {
         serverVerifiedUserId: row.id,
         householdId: account.householdId,
-        role: 'owner',
+        role: account.role,
       })
     }
     // Both families are preapproved contacts, but NO events are pre-shared.
@@ -213,9 +226,9 @@ export async function startHouseholdBrowserDemo() {
       'family-a': await chooseFreeLoopbackPort(used),
       'family-b': await chooseFreeLoopbackPort(used),
     }
-    for (const account of accounts) {
+    for (const householdId of ['family-a', 'family-b']) {
       backends.push(startHouseholdBackend(
-        storageRoot, account.householdId, ports[account.householdId],
+        storageRoot, householdId, ports[householdId],
       ))
     }
     await Promise.all(backends.map(awaitHealthy))
@@ -291,6 +304,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === filePath) {
     console.log('Family A TEMPORARY password: ' + demo.accounts[0].password)
     console.log('Family B username: ' + demo.accounts[1].username)
     console.log('Family B TEMPORARY password: ' + demo.accounts[1].password)
+    console.log('Family A second member username: ' + demo.accounts[2].username)
+    console.log('Family A second member TEMPORARY password: ' + demo.accounts[2].password)
+    console.log('Family A HUB username: ' + demo.accounts[3].username)
+    console.log('Family A HUB TEMPORARY password: ' + demo.accounts[3].password)
     console.log('Suggested event for sharing: DEMO A — BBQ to share (' +
       demo.sample.sharedCandidateDate + ')')
     console.log('')
