@@ -64,5 +64,7 @@ jobs:
         run: node --test scripts/test-private-household-gateway.mjs
       - name: Test explicitly selected event-only sharing and private calendar boundaries
         run: node --test scripts/test-event-only-shares.mjs
+      - name: Test safe read-only shared event calendar overlays
+        run: node --experimental-strip-types --test scripts/test-shared-event-overlay.mjs
       - name: Build frontend
         run: npm run build
