@@ -194,6 +194,22 @@ test('central authenticated gateway denies one family access to another family b
     const cookieB = await login(gateway.base, 'familyadminb')
     assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieA })).value.authenticated, true)
     assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieB })).value.authenticated, true)
+    assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieA })).value.username, 'familyadmina')
+    assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieB })).value.username, 'familyadminb')
+
+    // The Account UI switches by username, not by bypassing membership checks.
+    // Switching to a different account requires a fresh password login.
+    const accountPage = await fetch(gateway.base + '/account', {
+      headers: { Cookie: cookieA }, redirect: 'manual',
+    })
+    assert.equal(accountPage.status, 200)
+    const accountHtml = await accountPage.text()
+    assert.match(accountHtml, /id="profile-username"/)
+    assert.match(accountHtml, /id="switch-profile"/)
+    assert.doesNotMatch(accountHtml, /id="household-switch-form"/)
+    const accountJavaScript = await fetch(gateway.base + '/auth/account.js')
+    assert.equal(accountJavaScript.status, 200)
+    assert.match(await accountJavaScript.text(), /switchProfile\.addEventListener\('click', signOutToLogin\)/)
     const householdsA = await json(gateway.base, '/api/households', { cookie: cookieA })
     const householdsB = await json(gateway.base, '/api/households', { cookie: cookieB })
     assert.deepEqual(householdsA.value.households.map(h => h.householdId), ['family-a'])
@@ -230,6 +246,24 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal(eventsB.response.status, 200)
     assert.deepEqual(eventsA.value.map(e => e.title), ['Family A private calendar'])
     assert.deepEqual(eventsB.value.map(e => e.title), ['Family B private calendar'])
+
+    // Simulate clicking "Switch username": logout kills only that trusted
+    // session; signing into a different username opens only its own family.
+    const beforeSwitch = await login(gateway.base, 'familyadmina')
+    const signOut = await json(gateway.base, '/api/auth/logout', {
+      cookie: beforeSwitch, body: {},
+    })
+    assert.equal(signOut.response.status, 200)
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: beforeSwitch,
+    })).response.status, 401)
+    const afterSwitch = await login(gateway.base, 'familyadminb')
+    assert.deepEqual((await json(gateway.base, '/api/events', {
+      cookie: afterSwitch,
+    })).value.map(e => e.title), ['Family B private calendar'])
+    assert.deepEqual((await json(gateway.base, '/api/events', {
+      cookie: cookieA,
+    })).value.map(e => e.title), ['Family A private calendar'])
 
     await json(gateway.base, '/api/lists', { cookie: cookieA, body: { name: 'Family A list' } })
     await json(gateway.base, '/api/lists', { cookie: cookieB, body: { name: 'Family B list' } })
