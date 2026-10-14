@@ -470,7 +470,7 @@ test('central authenticated gateway denies one family access to another family b
     assert.deepEqual((await json(gateway.base, '/api/events', {
       cookie: cookieA,
     })).value.map(e => e.title),
-    ['Family A BBQ time changed', 'A SECRET APPOINTMENT'])
+    ['A SECRET APPOINTMENT', 'Family A BBQ time changed'])
 
     const unknownAuth = await json(gateway.base, '/api/auth/whatever', { cookie: cookieA })
     assert.equal(unknownAuth.response.status, 404)
