@@ -14,3 +14,5 @@
 .arney-listening-indicator{position:fixed;right:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 95px);z-index:1600;pointer-events:none;border-radius:14px;padding:12px 16px;background:#312e81;color:#fff;font-weight:700;box-shadow:0 8px 24px #0005}
 .arney-voice-transcript{min-height:58px;padding:14px;border:1px solid #c7d2fe;border-radius:10px;background:#eef2ff;color:#312e81;line-height:1.5}
 .arney-voice-transcript button{display:inline-block;margin-left:12px;padding:4px 8px;border:1px solid #818cf8;border-radius:6px;background:white;color:#312e81;cursor:pointer}
+
+.arney-response{margin-top:10px;padding:12px 14px;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:10px;background:#eef2ff;color:#312e81;line-height:1.5;font-size:14px}
