@@ -16,7 +16,7 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   createEventShareTables, inviteSelectedEvents,
   listTrustedEventShareRecipients, listEventShareInvitations,
-  listAcceptedSharedEvents, respondToEventInvitation,
+  listOutgoingEventShares, listAcceptedSharedEvents, respondToEventInvitation,
   revokeSelectedEventShare, synchronizeSelectedEventShare,
 } from './event-only-shares.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
@@ -288,6 +288,17 @@ export async function startPrivateHouseholdGateway({
       invitations: listEventShareInvitations(identityDatabase, {
         serverVerifiedUserId: request.familyAccount.user_id,
         recipientHouseholdId: household.householdId,
+      }),
+    })
+  })
+  app.get('/api/shared-events/sent', (request, response) => {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    response.set('Cache-Control', 'no-store')
+    response.json({
+      shares: listOutgoingEventShares(identityDatabase, {
+        serverVerifiedUserId: request.familyAccount.user_id,
+        sourceHouseholdId: household.householdId,
       }),
     })
   })
