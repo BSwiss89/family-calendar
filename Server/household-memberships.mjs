@@ -48,6 +48,11 @@ export function createHouseholdMembershipTables(identityDatabase) {
     ') STRICT;',
     'CREATE INDEX IF NOT EXISTS household_memberships_household_idx',
     'ON household_memberships(household_id);',
+    'CREATE TABLE IF NOT EXISTS household_session_selections (',
+    'session_id INTEGER PRIMARY KEY REFERENCES family_sessions(id) ON DELETE CASCADE,',
+    'household_id INTEGER NOT NULL REFERENCES household_registry(id) ON DELETE CASCADE,',
+    'selected_at INTEGER NOT NULL',
+    ') STRICT;',
   ].join('\n'))
 }
 
@@ -141,4 +146,81 @@ export function listGrantedHouseholdsForSessionUser(identityDatabase, {
     displayName: row.displayName,
     role: row.role,
   }))
+}
+
+
+/**
+ * An explicit browser selection is just a preference bound to one VERIFIED
+ * central-login session. It NEVER creates or grants household membership.
+ * The caller must use request.familyAccount.id/user_id, not browser fields.
+ *
+ * Returns null without changing selection when the account, membership,
+ * household, or session is inactive. Each selection is persisted per device.
+ */
+export function selectHouseholdForVerifiedSession(identityDatabase, {
+  serverVerifiedSessionId,
+  serverVerifiedUserId,
+  requestedHouseholdId,
+}) {
+  if (!Number.isSafeInteger(serverVerifiedSessionId) || serverVerifiedSessionId <= 0
+      || !Number.isSafeInteger(serverVerifiedUserId) || serverVerifiedUserId <= 0) {
+    return null
+  }
+
+  const membership = lookupGrantedHouseholdForSessionUser(identityDatabase, {
+    serverVerifiedUserId,
+    requestedHouseholdId,
+  })
+  if (!membership) return null
+
+  const session = identityDatabase.prepare([
+    'SELECT id FROM family_sessions',
+    'WHERE id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?',
+  ].join(' ')).get(serverVerifiedSessionId, serverVerifiedUserId, Date.now())
+  if (!session) return null
+
+  const household = identityDatabase.prepare([
+    'SELECT id FROM household_registry WHERE storage_id = ? AND disabled = 0',
+  ].join(' ')).get(membership.householdId)
+  if (!household) return null
+
+  identityDatabase.prepare([
+    'INSERT INTO household_session_selections(session_id, household_id, selected_at)',
+    'VALUES (?, ?, ?)',
+    'ON CONFLICT(session_id) DO UPDATE SET',
+    'household_id = excluded.household_id, selected_at = excluded.selected_at',
+  ].join(' ')).run(serverVerifiedSessionId, household.id, Date.now())
+  return membership
+}
+
+/**
+ * Fetch one device's selected household, revalidating central login, account,
+ * membership and household at the time of EACH request. A revoked membership
+ * or device never retains authorization through a saved selection.
+ */
+export function getSelectedHouseholdForVerifiedSession(identityDatabase, {
+  serverVerifiedSessionId,
+  serverVerifiedUserId,
+}) {
+  if (!Number.isSafeInteger(serverVerifiedSessionId) || serverVerifiedSessionId <= 0
+      || !Number.isSafeInteger(serverVerifiedUserId) || serverVerifiedUserId <= 0) {
+    return null
+  }
+  const row = identityDatabase.prepare([
+    'SELECT h.storage_id AS householdId, h.display_name AS displayName,',
+    'm.role AS role',
+    'FROM household_session_selections selected',
+    'JOIN family_sessions s ON s.id = selected.session_id',
+    'JOIN family_users u ON u.id = s.user_id',
+    'JOIN household_registry h ON h.id = selected.household_id',
+    'JOIN household_memberships m ON m.user_id = s.user_id AND m.household_id = h.id',
+    'WHERE selected.session_id = ? AND s.user_id = ?',
+    'AND s.revoked_at IS NULL AND s.expires_at > ?',
+    'AND u.disabled = 0 AND m.disabled = 0 AND h.disabled = 0',
+  ].join(' ')).get(serverVerifiedSessionId, serverVerifiedUserId, Date.now())
+  return row ? {
+    householdId: row.householdId,
+    displayName: row.displayName,
+    role: row.role,
+  } : null
 }
