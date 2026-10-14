@@ -227,6 +227,37 @@ function recipientRows(db, { serverVerifiedUserId, recipientHouseholdId }, statu
     'ORDER BY s.date, s.time, s.id',
   ].join(' ')).all(recipientHouseholdId, status).map(row => ({ ...row }))
 }
+/**
+ * Show only this signed-in household's own outgoing, individually selected
+ * event invitations. Returning one recipient's share ID does not grant the
+ * source account access to any recipient calendar.
+ */
+export function listOutgoingEventShares(db, { serverVerifiedUserId, sourceHouseholdId }) {
+  membership(db, serverVerifiedUserId, sourceHouseholdId)
+  return db.prepare([
+    'SELECT share.id AS shareId, share.source_event_id AS sourceEventId,',
+    'recipient.storage_id AS recipientHouseholdId,',
+    'recipient.display_name AS recipientDisplayName, share.status,',
+    'share.title, share.date, share.time',
+    'FROM event_share_grants share',
+    'JOIN household_registry source ON source.id = share.source_household_id',
+    'JOIN household_registry recipient ON recipient.id = share.recipient_household_id',
+    'WHERE source.storage_id = ?',
+    "AND share.status IN ('pending','accepted')",
+    'AND source.disabled = 0 AND recipient.disabled = 0',
+    'ORDER BY share.date, share.id',
+  ].join(' ')).all(sourceHouseholdId).map(row => ({
+    shareId: row.shareId,
+    sourceEventId: row.sourceEventId,
+    recipientHouseholdId: row.recipientHouseholdId,
+    recipientDisplayName: row.recipientDisplayName,
+    status: row.status,
+    title: row.title,
+    date: row.date,
+    time: row.time,
+  }))
+}
+
 export function listEventShareInvitations(db, args) {
   return recipientRows(db, args, 'pending')
 }
