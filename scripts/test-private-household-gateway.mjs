@@ -18,6 +18,9 @@ import {
   grantHouseholdMembership,
 } from '../Server/household-memberships.mjs'
 import { setFamilyAccount } from '../Server/family-auth.mjs'
+import {
+  createEventShareTables, registerTrustedShareConnection,
+} from '../Server/event-only-shares.mjs'
 
 const serverDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../Server')
 const entry = path.join(serverDirectory, 'index.mjs')
@@ -145,6 +148,10 @@ test('central authenticated gateway denies one family access to another family b
     setFamilyAccount(central, 'familyadminb', 'Family B admin', testPassword)
     registerHousehold(central, { householdId: 'family-a', displayName: 'Family A' })
     registerHousehold(central, { householdId: 'family-b', displayName: 'Family B' })
+    createEventShareTables(central)
+    registerTrustedShareConnection(central, {
+      sourceHouseholdId: 'family-a', recipientHouseholdId: 'family-b',
+    })
     const idA = central.prepare('SELECT id FROM family_users WHERE username = ?').get('familyadmina').id
     const idB = central.prepare('SELECT id FROM family_users WHERE username = ?').get('familyadminb').id
     grantHouseholdMembership(central, { serverVerifiedUserId: idA, householdId: 'family-a', role: 'owner' })
@@ -168,6 +175,15 @@ test('central authenticated gateway denies one family access to another family b
 
     const unauthEvents = await json(gateway.base, '/api/events')
     assert.equal(unauthEvents.response.status, 401)
+    for (const route of [
+      '/api/shared-events/recipients', '/api/shared-events/invitations',
+      '/api/shared-events/accepted',
+    ]) {
+      assert.equal((await json(gateway.base, route)).response.status, 401)
+    }
+    assert.equal((await json(gateway.base, '/api/shared-events/invite', {
+      body: { eventIds: [1], recipientHouseholdIds: ['family-b'] },
+    })).response.status, 401)
     assert.equal((await json(gateway.base, '/api/households')).response.status, 401)
     assert.equal((await json(gateway.base, '/api/households/select', {
       body: { householdId: 'family-a' },
@@ -287,6 +303,96 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal(imageA.value, 'ONLY family A photo bytes')
     assert.equal(imageB.value, 'ONLY family B photo bytes')
     assert.equal(imageA.response.headers.get('set-cookie'), null)
+
+    // A can share ONE handpicked event with connected B, but never A's
+    // entire calendar or a private second event. B must explicitly accept.
+    const privateA = await json(gateway.base, '/api/events', {
+      cookie: cookieA,
+      body: {
+        date: '2026-12-23', title: 'A SECRET APPOINTMENT',
+        time: '10:00', notes: 'PRIVATE MEDICAL NOTE',
+      },
+    })
+    assert.equal(privateA.response.status, 201)
+    const idToShare = eventsA.value[0].id
+    assert.equal(Number.isSafeInteger(idToShare), true)
+    assert.equal((await json(gateway.base, '/api/shared-events/recipients', {
+      cookie: cookieA,
+    })).value.recipients[0].householdId, 'family-b')
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/recipients', {
+      cookie: cookieB,
+    })).value.recipients, [])
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events, [])
+
+    const invalidSelection = await json(gateway.base, '/api/shared-events/invite', {
+      cookie: cookieA, body: { eventIds: ['*'], recipientHouseholdIds: ['family-b'] },
+    })
+    assert.equal(invalidSelection.response.status, 400)
+    const invalidRecipient = await json(gateway.base, '/api/shared-events/invite', {
+      cookie: cookieA, body: { eventIds: [idToShare], recipientHouseholdIds: ['family-c'] },
+    })
+    assert.equal(invalidRecipient.response.status, 400)
+    assert.equal((await json(gateway.base, '/api/shared-events/invitations', {
+      cookie: cookieB,
+    })).value.invitations.length, 0)
+
+    const shared = await json(gateway.base, '/api/shared-events/invite', {
+      cookie: cookieA,
+      body: { eventIds: [idToShare], recipientHouseholdIds: ['family-b'] },
+    })
+    assert.equal(shared.response.status, 201, JSON.stringify(shared.value))
+    const sharedId = shared.value.invitations[0].shareId
+    assert.ok(Number.isSafeInteger(sharedId))
+    assert.equal((await json(gateway.base, '/api/shared-events/invitations', {
+      cookie: cookieA,
+    })).value.invitations.length, 0)
+    const invitationB = await json(gateway.base, '/api/shared-events/invitations', {
+      cookie: cookieB,
+    })
+    assert.equal(invitationB.value.invitations.length, 1)
+    assert.equal(invitationB.value.invitations[0].title, 'Family A private calendar')
+    assert.equal(invitationB.value.invitations[0].sharedBy, 'Family A')
+    assert.doesNotMatch(JSON.stringify(invitationB.value), /SECRET|PRIVATE MEDICAL|HOME ADDRESS/)
+
+    // Wrong family and guessed IDs must never let A accept B's invitation.
+    assert.equal((await json(gateway.base, '/api/shared-events/' + sharedId + '/respond', {
+      cookie: cookieA, body: { decision: 'accepted' },
+    })).response.status, 404)
+    assert.equal((await json(gateway.base, '/api/shared-events/' + sharedId + '/respond', {
+      cookie: cookieB, body: { decision: 'accepted' },
+      headers: { Origin: 'https://evil.example' },
+    })).response.status, 403)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events, [])
+    const accepted = await json(gateway.base, '/api/shared-events/' + sharedId + '/respond', {
+      cookie: cookieB, body: { decision: 'accepted' },
+    })
+    assert.equal(accepted.response.status, 200)
+    const approved = await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })
+    assert.deepEqual(approved.value.events.map(e => e.title), ['Family A private calendar'])
+    assert.doesNotMatch(JSON.stringify(approved.value), /SECRET|PRIVATE MEDICAL|location|notes|person/)
+    assert.deepEqual((await json(gateway.base, '/api/events', {
+      cookie: cookieB,
+    })).value.map(e => e.title), ['Family B private calendar'])
+
+    // The selected event alone can be revoked; no calendar subscription.
+    assert.equal((await json(gateway.base, '/api/shared-events/' + sharedId + '/revoke', {
+      cookie: cookieB,
+    })).response.status, 404)
+    assert.equal((await json(gateway.base, '/api/shared-events/' + sharedId + '/revoke', {
+      cookie: cookieA,
+    })).response.status, 200)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events, [])
+    assert.equal((await json(gateway.base, '/api/shared-events/made-up', {
+      cookie: cookieB,
+    })).response.status, 404)
 
     const unknownAuth = await json(gateway.base, '/api/auth/whatever', { cookie: cookieA })
     assert.equal(unknownAuth.response.status, 404)
@@ -415,6 +521,9 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 401)
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB2 })).response.status, 401)
 
+    console.log('[PASS] One selected event is invited, accepted and individually revoked over authenticated APIs.')
+    console.log('[PASS] No unrelated event or private fields reach another household through event-sharing API.')
+    console.log('[PASS] Only centrally connected households can receive event invitations.')
     console.log('[PASS] One secure login gateway routes each authenticated user only to their household.')
     console.log('[PASS] Guessed tenant selectors cannot read unrelated events, lists or images.')
     console.log('[PASS] Invalid cookies, revoked memberships and disabled accounts block requests.')
