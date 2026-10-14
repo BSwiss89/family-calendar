@@ -326,12 +326,22 @@ this is code and automated tests only.
 
 ## Explicit individual-event invitations in Calendar UI
 
-The calendar now also includes a **Share events & invitations** control,
-which is shown ONLY when the authenticated gateway successfully supports
-all three JSON endpoints for trusted recipient families, incoming invitations
-and the sender's existing outgoing grants. On the original legacy backend
-(with missing endpoints) the entire control is hidden without showing
-errors to family users or enabling dangerous unprotected actions.
+The event-specific UI now includes a **Share Events & Invitations**
+control on the month-view **Events** window, plus a contextual **Share Event**
+button inside an individual event's details window. The contextual button
+preselects ONLY that opened, non-recurring event, leaving the recipient
+selection empty until the user explicitly chooses it. Both buttons open a
+centered modal dialog **over the Events/Event Details window** in a
+high-z-index document-body portal, rather than expanding an inline panel
+across the calendar. The dialog has a dimmed backdrop, internal scrolling,
+Escape-to-close, keyboard focus containment and focus return to its button.
+
+These buttons are shown ONLY when the authenticated gateway successfully
+supports all three JSON endpoints for trusted recipient families, incoming
+invitations and the sender's existing outgoing grants. On the original
+legacy backend (with missing endpoints) the entire control is hidden
+without showing errors to family users or enabling dangerous unprotected
+actions.
 
 The panel offers checkboxes for *specific* non-recurring source events
 (up to 20), checkboxes for *specific* administrator-connected recipient
