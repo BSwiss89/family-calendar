@@ -2,15 +2,22 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { extractArneyWakeCommand, shouldOfferArneyTextFallback } from '../src/arneyWakePhrase.ts'
 
-test('wake words accept the three requested phrases', () => {
+test('wake words accept Arney, Chrome-transcribed Arnie, and Computer', () => {
   assert.equal(extractArneyWakeCommand('Hey Arney, what is tomorrow?'), 'what is tomorrow?')
   assert.equal(extractArneyWakeCommand('arney'), '')
+  assert.equal(extractArneyWakeCommand("hey Arnie what's on my calendar today"), "what's on my calendar today")
+  assert.equal(extractArneyWakeCommand('ARNIE, read my calendar'), 'read my calendar')
+  assert.equal(extractArneyWakeCommand('hey arnie'), '')
   assert.equal(extractArneyWakeCommand('Computer, cancel my meeting'), 'cancel my meeting')
 })
 test('wake words do not trigger on incidental mentions', () => {
   assert.equal(extractArneyWakeCommand('I met Arney yesterday'), null)
   assert.equal(extractArneyWakeCommand('computerize this'), null)
   assert.equal(extractArneyWakeCommand('hey Barney'), null)
+  assert.equal(extractArneyWakeCommand('hey Ernie'), null)
+  assert.equal(extractArneyWakeCommand('arnies'), null)
+  assert.equal(extractArneyWakeCommand('I said Arnie'), null)
+  assert.equal(extractArneyWakeCommand('hey Armie'), null)
 })
 test('text fallback appears on the third failure', () => {
   assert.equal(shouldOfferArneyTextFallback(0), false)
