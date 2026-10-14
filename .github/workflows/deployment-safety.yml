@@ -54,5 +54,7 @@ jobs:
         run: node --experimental-strip-types --test scripts/test-arney-commands.mjs
       - name: Test family authentication and trusted-device security
         run: node --test scripts/test-family-auth.mjs
+      - name: Test isolated household data and upload boundaries
+        run: node --test scripts/test-household-storage.mjs
       - name: Build frontend
         run: npm run build
