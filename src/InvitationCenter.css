@@ -1,0 +1,183 @@
+/* Household invitation acceptance is separate from event editing. */
+.invitation-center-page {
+  box-sizing: border-box;
+  margin: 16px auto;
+  padding: 22px;
+  width: min(920px, calc(100% - 36px));
+  min-width: 0;
+  color: #293c50;
+  background: #f8fbff;
+  border-radius: 16px;
+  border: 1px solid #d2dfed;
+  overflow-y: auto;
+  max-height: calc(100dvh - 110px);
+}
+.invitation-center-page header h2 { margin: 0 0 6px; }
+.invitation-center-page header p {
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: #596e84;
+}
+.invitation-center-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 12px;
+}
+.invitation-center-item {
+  box-sizing: border-box;
+  border: 1px solid #ccdaea;
+  border-left: 4px solid #5786b8;
+  border-radius: 12px;
+  background: #fff;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.invitation-center-source {
+  font-size: 12px;
+  color: #526c89;
+}
+.invitation-center-item strong {
+  font-size: 16px;
+  color: #253e5b;
+}
+.invitation-center-date {
+  font-size: 13px;
+  color: #52657c;
+}
+.invitation-center-actions {
+  margin-top: 9px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.invitation-center-actions button,
+.mobile-invitations-remind {
+  min-height: 42px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.invitation-center-actions button:disabled { opacity: .6; cursor: wait; }
+.invitation-accept {
+  color: #fff;
+  border: 1px solid #287147;
+  background: #287147;
+}
+.invitation-decline {
+  color: #6a2830;
+  border: 1px solid #dfbcc1;
+  background: #fff4f4;
+}
+.invitation-center-empty {
+  margin: 20px 0;
+  font-size: 14px;
+  color: #556c85;
+}
+.invitation-center-error {
+  color: #a32731;
+  font-size: 13px;
+  margin-top: 14px;
+}
+.invitation-sidebar-count {
+  margin-left: auto;
+  flex: 0 0 auto;
+  background: #234f86;
+  color: white;
+  border-radius: 50px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mobile-invitations-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 29000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 10px;
+  box-sizing: border-box;
+}
+.mobile-invitations-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(18, 24, 36, .64);
+  backdrop-filter: blur(4px);
+}
+.mobile-invitations-dialog {
+  position: relative;
+  box-sizing: border-box;
+  width: min(470px, 100%);
+  max-height: calc(100dvh - 20px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #c8d8ea;
+  border-radius: 17px;
+  padding: 17px;
+  background: #f6faff;
+  color: #263c56;
+  box-shadow: 0 20px 75px rgba(0,0,0,.33);
+}
+.mobile-invitations-dialog:focus { outline: none; }
+.mobile-invitations-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mobile-invitations-header span {
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: .07em;
+  color: #59738c;
+}
+.mobile-invitations-header h2 {
+  margin: 5px 0;
+  font-size: 21px;
+}
+.mobile-invitations-header button {
+  min-width: 38px;
+  height: 38px;
+  border: 1px solid #c2d5e8;
+  border-radius: 9px;
+  background: white;
+  font-size: 24px;
+  cursor: pointer;
+}
+.mobile-invitations-description {
+  margin: 8px 0 16px;
+  line-height: 1.5;
+  font-size: 12px;
+  color: #526980;
+}
+.mobile-invitations-dialog .invitation-center-items {
+  grid-template-columns: minmax(0, 1fr);
+}
+.mobile-invitations-dialog .invitation-center-item { padding: 12px; }
+.mobile-invitations-dialog .invitation-center-actions > button { flex: 1 1 110px; }
+.mobile-invitations-remind {
+  margin-top: 14px;
+  width: 100%;
+  background: #fff;
+  color: #365c84;
+  border: 1px solid #bbcee3;
+}
+.mobile-invitations-footnote {
+  color: #6a7e92;
+  font-size: 11px;
+  text-align: center;
+  line-height: 1.4;
+  margin: 9px 0 0;
+}
+.invitation-center-page button:focus-visible,
+.mobile-invitations-dialog button:focus-visible {
+  outline: 3px solid #4e91df;
+  outline-offset: 2px;
+}
