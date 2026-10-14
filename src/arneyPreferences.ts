@@ -3,6 +3,7 @@ export type ArneyVoiceResponseMode = 'always' | 'needed' | 'silent'
 export type ArneyPreferences = {
   responseMode: ArneyVoiceResponseMode
   wakeWordsEnabled: boolean
+  browserSpeechEnabled: boolean
   confirmBeforeChanges: boolean
 }
 
@@ -11,6 +12,7 @@ export const ARNEY_PREFERENCES_KEY = 'family-calendar:arney-preferences:v1'
 export const DEFAULT_ARNEY_PREFERENCES: ArneyPreferences = {
   responseMode: 'always',
   wakeWordsEnabled: false,
+  browserSpeechEnabled: false,
   confirmBeforeChanges: true,
 }
 
@@ -32,6 +34,10 @@ export function normalizeArneyPreferences(value: unknown): ArneyPreferences {
       validResponseModes.has(input.responseMode as ArneyVoiceResponseMode)
         ? (input.responseMode as ArneyVoiceResponseMode)
         : DEFAULT_ARNEY_PREFERENCES.responseMode,
+    browserSpeechEnabled:
+      typeof input.browserSpeechEnabled === 'boolean'
+        ? input.browserSpeechEnabled
+        : DEFAULT_ARNEY_PREFERENCES.browserSpeechEnabled,
     wakeWordsEnabled:
       typeof input.wakeWordsEnabled === 'boolean'
         ? input.wakeWordsEnabled
