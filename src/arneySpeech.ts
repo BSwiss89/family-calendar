@@ -183,6 +183,13 @@ export function beginArneySpeech(
   }
 }
 
+/** Prevent Arney from listening to its own browser-generated voice. */
+export function arneyReplyAudioActive(): boolean {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return false
+  const synthesis = window.speechSynthesis
+  return synthesis.speaking || synthesis.pending || synthesis.paused
+}
+
 /** Speech replies never send text to a paid API. */
 export function speakArneyReply(text: string): void {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
