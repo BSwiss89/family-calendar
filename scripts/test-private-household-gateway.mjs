@@ -530,7 +530,7 @@ test('central authenticated gateway denies one family access to another family b
       (await json(gateway.base, '/api/events?household=family-b', {
         cookie: cookieB, headers: { 'X-Household-Id': 'family-b' },
       })).value.map(e => e.title),
-      ['Family A private calendar', 'A SECRET APPOINTMENT'],
+      ['A SECRET APPOINTMENT', 'Family A BBQ time changed'],
     )
     assert.equal((await json(gateway.base, '/api/lists', {
       cookie: cookieB,
@@ -559,7 +559,7 @@ test('central authenticated gateway denies one family access to another family b
     })).value.map(e => e.title), ['Family B private calendar'])
     assert.deepEqual((await json(gateway.base, '/api/events', {
       cookie: cookieB,
-    })).value.map(e => e.title), ['Family A private calendar', 'A SECRET APPOINTMENT'])
+    })).value.map(e => e.title), ['A SECRET APPOINTMENT', 'Family A BBQ time changed'])
 
     const chooseB = await json(gateway.base, '/api/households/select', {
       cookie: cookieB,
