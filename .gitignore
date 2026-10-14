@@ -67,3 +67,8 @@ start-calendar*.cmd.bak-*
 *.bak-*
 src/App-before-people-remove.tsx
 
+
+# Generated PWA icons (created by npm prebuild)
+/public/apple-touch-icon.png
+/public/calendar-icon-192.png
+/public/calendar-icon-512.png
