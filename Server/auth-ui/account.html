@@ -14,16 +14,12 @@
       <a class="back-link" href="/">← Back to calendar</a>
       <h1 id="account-title">Family account</h1>
       <p id="whoami" class="muted">Loading account…</p>
-      <section id="household-section" class="household-section" aria-labelledby="household-heading" hidden>
-        <h2 id="household-heading">Your household calendar</h2>
-        <p id="household-description" class="small muted">Only households you have permission to access appear here.</p>
-        <form id="household-switch-form" hidden>
-          <label for="household-select">Choose a household</label>
-          <select id="household-select" required></select>
-          <button id="household-switch-button" type="submit">Open selected calendar</button>
-        </form>
-        <p id="household-current" class="household-current" hidden></p>
-        <p id="household-message" class="small" role="status" aria-live="polite"></p>
+      <section class="profile-section" aria-labelledby="profile-heading">
+        <h2 id="profile-heading">Current profile</h2>
+        <p class="small muted">Your username identifies your account. The calendar chooses only the family calendars that account has permission to access.</p>
+        <p class="current-username">Username: <strong id="profile-username">Loading…</strong></p>
+        <button id="switch-profile" type="button" class="secondary-button">Switch username</button>
+        <p class="small muted">Switching accounts signs out this device. Sign in with the other username and its password.</p>
       </section>
       <h2>Trusted devices</h2>
       <p class="small muted">You stay signed in on devices you use. Revoke access to a device that was lost or is no longer trusted.</p>
