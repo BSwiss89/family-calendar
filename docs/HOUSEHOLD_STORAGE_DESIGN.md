@@ -1,9 +1,11 @@
 # Phase 2 foundation: isolated storage per household
 
-Status: **draft / offline library and tests only**. The current Family Calendar
-server continues to use its original SQLite database. This module is NOT wired
-into the HTTP server, does NOT create any household at startup, does NOT expose
-another calendar and does NOT change the existing preview or live data.
+Status: **draft / private test-only**. The regular Family Calendar server
+continues to use its original SQLite database. The storage resolver is wired
+into the backend only behind an explicit test flag with a loopback-only
+listener on a nonproduction port. No households are created at startup.
+This PR does NOT expose another calendar to outside devices and does NOT
+change existing preview or live data.
 
 Tracking: issue #45. Depends on draft auth PR #44 and Arney PR #43.
 
@@ -44,6 +46,21 @@ writes family-A-only data, and confirms no such data appears in family B.
 The tests also exercise refusal of path traversal, missing marker, missing DB,
 overlapping source checkout and repeat provisioning. No live data is read.
 
+## Real two-household backend smoke test
+
+scripts/test-household-instance-isolation.mjs creates two disposable empty
+households outside all checkouts, starts two real backend Node instances on
+separate random 127.0.0.1 ports, and verifies events, lists, and identically
+named uploaded files remain isolated. It stops both servers and removes the
+disposable databases. This is a physical-storage test, not an authentication
+or public-gateway test.
+
+When both environment settings FAMILY_CALENDAR_HOUSEHOLD_STORAGE_ROOT and
+FAMILY_CALENDAR_HOUSEHOLD_ID are set, the backend also demands
+FAMILY_CALENDAR_HOUSEHOLD_TEST_ONLY=YES, HOST=127.0.0.1, and a
+nonproduction port. An unknown household is rejected before accessing any
+SQLite database. Without those settings, legacy behavior remains unchanged.
+
 ## Important: not yet multi-family login
 
 PR #44's accounts are currently associated with ONE SQLite database, and all
@@ -58,10 +75,8 @@ calendar data and image uploads before any such move.
 
 ## Next small implementation slices
 
-1. In a separate review, wire this validated path selection behind an
-   explicit server-side opt-in in Server/index.mjs. Require distinct
-   **loopback-only** listeners for test household instances. Verify each
-   actual running backend only touches its assigned empty DB/uploads.
+1. Completed in this PR: a private, loopback-only opt-in with real two-server
+   isolation tests. This feature is NOT a deployable multi-household gateway.
 2. Build a central identity/household membership registry and authenticated
    router/gateway. The gateway determines authorized household context
    from server-side membership. User input must not select arbitrary tenants.
