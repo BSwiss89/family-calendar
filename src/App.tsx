@@ -14105,7 +14105,8 @@ return (
               <span>Hold the + button to speak. Text becomes available after three failed attempts or if speech is unavailable.</span>
             )}
           </div>
-        )}aiCancellationPreview?.status ===
+        )}
+{aiCancellationPreview?.status ===
   'needs_clarification' &&
   aiCancellationPreview.matches?.length === 0 && (
     <div className="ai-cancel-confirmation">
