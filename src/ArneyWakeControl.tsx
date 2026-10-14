@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { arneySpeechAvailable, beginArneySpeech, type ArneySpeechSession } from './arneySpeech'
+import { arneyReplyAudioActive, arneySpeechAvailable, beginArneySpeech, type ArneySpeechSession } from './arneySpeech'
 import { extractArneyWakeCommand } from './arneyWakePhrase'
 import { readArneyPreferences } from './arneyPreferences'
 import './ArneyWakeControl.css'
@@ -15,12 +15,16 @@ export default function ArneyWakeControl() {
   const [wakeFeedback, setWakeFeedback] = useState('')
   const activeRef = useRef(false)
   const waitingRef = useRef(false)
+  // The listener stays enabled while a command is being handled, but no
+  // microphone session runs until processing and spoken output have finished.
+  const commandPendingRef = useRef(false)
   const sessionRef = useRef<ArneySpeechSession | null>(null)
   const timerRef = useRef<number | null>(null)
 
   function stopWake() {
     activeRef.current = false
     waitingRef.current = false
+    commandPendingRef.current = false
     if (timerRef.current !== null) window.clearTimeout(timerRef.current)
     timerRef.current = null
     sessionRef.current?.cancel()
@@ -35,6 +39,28 @@ export default function ArneyWakeControl() {
       timerRef.current = null
       if (activeRef.current) listenRound(waitingForCommand)
     }, 350)
+  }
+
+  function resumeWhenReplyFinishes() {
+    if (!activeRef.current || commandPendingRef.current) return
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current)
+    // A brief delay also allows browser speech synthesis to start after Arney
+    // queues its reply. The poll keeps listening off while speech is playing.
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null
+      if (!activeRef.current || commandPendingRef.current) return
+      if (document.visibilityState !== 'visible') {
+        stopWake()
+        return
+      }
+      if (arneyReplyAudioActive()) {
+        setStatus('Waiting for Arney to finish speaking…')
+        resumeWhenReplyFinishes()
+        return
+      }
+      setWakeFeedback('')
+      listenRound(false)
+    }, 650)
   }
 
   function listenRound(waitingForCommand: boolean) {
@@ -75,9 +101,12 @@ export default function ArneyWakeControl() {
       }
       setWakeFeedback('Wake phrase and command recognized.')
 
-      // Stop recognition before handing the command to Arney, so it cannot
-      // hear its own synthesized reply or submit the same command again.
-      stopWake()
+      // The recognition adapter has already stopped this audio session.
+      // Stay opted-in, but do not open a new microphone session until Arney
+      // finishes processing the command (and any spoken reply).
+      commandPendingRef.current = true
+      waitingRef.current = false
+      setStatus('Arney is processing your command…')
       window.dispatchEvent(new CustomEvent<string>('arney:voice-command', {
         detail: command,
       }))
@@ -97,6 +126,7 @@ export default function ArneyWakeControl() {
     if (document.visibilityState !== 'visible') return
     activeRef.current = true
     waitingRef.current = false
+    commandPendingRef.current = false
     setWakeFeedback('')
     setActive(true)
     listenRound(false)
@@ -110,6 +140,19 @@ export default function ArneyWakeControl() {
       window.removeEventListener('arney:preferences-changed', refresh)
       window.removeEventListener('storage', refresh)
     }
+  }, [])
+
+  useEffect(() => {
+    // Only an accepted desktop wake-word command triggers this event. Manual
+    // Stop, browser tab hiding, or disabling consent prevents automatic resume.
+    const onCommandFinished = () => {
+      if (!activeRef.current || !commandPendingRef.current) return
+      commandPendingRef.current = false
+      setStatus('Preparing to listen again…')
+      resumeWhenReplyFinishes()
+    }
+    window.addEventListener('arney:command-finished', onCommandFinished)
+    return () => window.removeEventListener('arney:command-finished', onCommandFinished)
   }, [])
 
   useEffect(() => {
