@@ -124,6 +124,27 @@ switcher, examine every endpoint including local AI and backup jobs, and
 run dedicated recovery and security reviews. No existing preview or live
 accounts are migrated by this test.
 
+## Username-based profiles (Account UI)
+
+The Family Account page now displays the authenticated username and a
+**Switch username** control. This signs out the current trusted-device
+session and returns to the username/password login. The next login selects
+the identity account, and the server checks which household(s) that
+identity has been granted. A username is NOT itself proof of access.
+
+Two usernames can share one household (one family calendar) through their
+own explicit memberships; a different username can be a member of a
+different household. The private gateway automatically selects a household
+when the account belongs to exactly one household. Advanced accounts with
+multiple household memberships still have protected server-side selection
+support, but are NOT given an account-page household picker in this
+username-focused design. The existing preview still has only its
+legacy familyadmin identity until central account provisioning/migration.
+
+Never silently change an account by typing a new username in a request
+header, URL, or local setting, and never switch without authenticating
+that separate account.
+
 ## Important: not yet multi-family login
 
 PR #44's accounts are currently associated with ONE SQLite database, and all
