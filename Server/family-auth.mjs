@@ -142,6 +142,7 @@ function isSameSecureOrigin(request) {
 function securityHeaders(response) {
   response.set('Cache-Control', 'no-store')
   response.set('X-Content-Type-Options', 'nosniff')
+  response.set('Strict-Transport-Security', 'max-age=31536000')
   response.set('Referrer-Policy', 'no-referrer')
   response.set('X-Frame-Options', 'DENY')
 }
@@ -225,17 +226,18 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
       response.set('Retry-After', String(Math.max(1, Math.ceil((LOGIN_WINDOW_MS - (now - failures.started)) / 1000))))
       return response.status(429).json({ error: 'Too many attempts. Try again later.' })
     }
+    // Count each attempt before awaiting scrypt, so parallel guesses cannot
+    // bypass the limit and overwhelm the laptop with password hashing.
+    failures.count++
     const username = normalizedUsername(request.body?.username)
     const password = request.body?.password
     if (!username || typeof password !== 'string' || password.length < 1 || password.length > 200) {
-      failures.count++
       return response.status(401).json({ error: 'Incorrect username or password.' })
     }
     try {
       const user = database.prepare('SELECT id, username, display_name, password_hash FROM family_users WHERE username = ? AND disabled = 0').get(username)
       const valid = await verifyFamilyPassword(password, user?.password_hash)
       if (!user || !valid) {
-        failures.count++
         return response.status(401).json({ error: 'Incorrect username or password.' })
       }
       loginFailures.delete(key)
