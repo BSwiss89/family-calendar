@@ -109,3 +109,69 @@ test('interim Safari transcript survives stop and diagnostic contains no spoken 
     globalThis.window = original
   }
 })
+
+
+test('wake mode submits once on final result even if the browser never ends', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognition
+  let aborts = 0
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognition = this }
+      start() {}
+      stop() { throw Error('wake mode must not need stop') }
+      abort() { aborts++ }
+    },
+  }
+  try {
+    const received = []
+    const session = beginArneySpeech(
+      result => received.push(result),
+      undefined,
+      { finishOnFinalResult: true },
+    )
+    assert.ok(session)
+    assert.equal(recognition.continuous, true)
+    recognition.onresult?.({
+      results: [Object.assign([{ transcript: 'Hey Arney, add milk' }], { isFinal: false })],
+    })
+    assert.deepEqual(received, [], 'interim speech must not submit commands')
+    recognition.onresult?.({
+      results: [Object.assign([{ transcript: 'Hey Arney, add milk to groceries' }], { isFinal: true })],
+    })
+    assert.deepEqual(received, [{ kind: 'transcript', text: 'Hey Arney, add milk to groceries' }])
+    assert.equal(aborts, 1)
+    recognition.onend?.()
+    assert.equal(received.length, 1, 'a late browser end cannot resubmit')
+  } finally {
+    globalThis.window = original
+  }
+})
+
+test('push-to-talk still waits for release when Chrome reports a final result', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognition
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognition = this }
+      start() {}
+      stop() { this.onend?.() }
+      abort() {}
+    },
+  }
+  try {
+    const received = []
+    const session = beginArneySpeech(result => received.push(result))
+    assert.equal(recognition.continuous, false)
+    recognition.onresult?.({
+      results: [Object.assign([{ transcript: 'What is on the calendar today?' }], { isFinal: true })],
+    })
+    assert.deepEqual(received, [], 'push-to-talk must wait for release')
+    session.stop()
+    assert.deepEqual(received, [{ kind: 'transcript', text: 'What is on the calendar today?' }])
+  } finally {
+    globalThis.window = original
+  }
+})
