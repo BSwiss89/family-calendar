@@ -11,8 +11,10 @@ import { createPortal } from 'react-dom'
 import './App.css'
 import SharedEventsOverlay from './SharedEventsOverlay'
 import FamilyEventSharing from './FamilyEventSharing'
+import { DesktopInvitations, MobileInvitationReminder } from './InvitationCenter'
+import { useInvitationInbox } from './useInvitationInbox'
 import { useSharedEventFeed } from './useSharedEventFeed'
-import { sharedEventsInRange } from './sharedEventOverlay'
+import { sharedEventsInRange, formatSharedTime } from './sharedEventOverlay'
 import { arneySpeechAvailable, beginArneySpeech, speakArneyReply, type ArneySpeechResult, type ArneySpeechSession } from './arneySpeech'
 import { readArneyPreferences } from './arneyPreferences'
 import { shouldOfferArneyTextFallback } from './arneyWakePhrase'
@@ -1866,6 +1868,7 @@ const [page, setPage] =
     'meals' |
     'people' |
     'lists' |
+    'invitations' |
     'capture'
   >('home')
 
@@ -3750,6 +3753,7 @@ const [
   const [events, setEvents] = useState<CalendarEvent[]>([])
   // Accepted snapshots are NOT editable local events; their IDs are separate.
   const receivedSharedEvents = useSharedEventFeed(page === 'calendar')
+  const invitationInbox = useInvitationInbox()
 
 function positionMobileScheduleTimeline(
   targetDate: Date
@@ -14068,6 +14072,24 @@ return (
     <span>Lists</span>
   </button>
 
+  {invitationInbox.available && (
+    <button
+      type="button"
+      className={`sidebar-nav-button ${
+        page === 'invitations' ? 'active-sidebar-nav' : ''
+      }`}
+      onClick={() => setPage('invitations')}
+    >
+      <span className="sidebar-nav-icon">✉</span>
+      <span>Invitations</span>
+      {invitationInbox.invitations.length > 0 && (
+        <span className="invitation-sidebar-count">
+          {invitationInbox.invitations.length}
+        </span>
+      )}
+    </button>
+  )}
+
   <button
     type="button"
     className="sidebar-nav-button"
@@ -14111,6 +14133,7 @@ return (
   </button>
 </nav>
       </header>
+      <MobileInvitationReminder {...invitationInbox} />
       <div className="mobile-bottom-controls">
   <div
     className={`mobile-page-slider ${
@@ -16052,6 +16075,10 @@ createPortal(
   </section>
 )}
 
+      {page === 'invitations' && (
+        <DesktopInvitations {...invitationInbox} />
+      )}
+
       {page === 'calendar' && (
        <section
   className={`dashboard ${
@@ -17825,7 +17852,10 @@ const visibleMultiDayLaneCount =
             <strong>Today's Events</strong>
 
             <span>
-              {dayViewEvents.length}
+              {dayViewEvents.length +
+                sharedEventsInRange(
+                  receivedSharedEvents, dayViewDateKey, dayViewDateKey
+                ).length}
             </span>
           </div>
 
@@ -17881,6 +17911,21 @@ const visibleMultiDayLaneCount =
                 )
               }
             )}
+            {sharedEventsInRange(
+              receivedSharedEvents, dayViewDateKey, dayViewDateKey
+            ).map(shared => (
+              <article className="day-summary-event day-summary-received-event"
+                key={`shared-event-${shared.shareId}`}
+                aria-label={`${shared.title}, shared by ${shared.sharedBy}, read only`}>
+                <span className="day-summary-event-color"
+                  style={{ background: '#5d8bbf' }} />
+                <span className="day-summary-event-text">
+                  <strong>{shared.title}</strong>
+                  <small>{formatSharedTime(shared.time)} · Shared by {shared.sharedBy}</small>
+                  <small>Read only</small>
+                </span>
+              </article>
+            ))}
           </div>
         </section>
       </aside>
