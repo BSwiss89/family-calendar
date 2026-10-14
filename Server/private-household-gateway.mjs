@@ -21,6 +21,10 @@ import {
 } from './event-only-shares.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import {
+  createEventCreatorAuditTables, recordAuthenticatedEventCreator,
+  listAuthenticatedEventCreators, cleanupDeletedEventCreator,
+} from './event-creator-audit.mjs'
+import {
   listGrantedHouseholdsForSessionUser,
   getSelectedHouseholdForVerifiedSession,
   selectHouseholdForVerifiedSession,
@@ -129,13 +133,31 @@ function proxyRequest(request, response, upstreamPort, onCompletedMutation = nul
     // private test hook is not yet a durable queue for crash recovery.
     if (onCompletedMutation && upstreamResponse.statusCode >= 200
         && upstreamResponse.statusCode < 300) {
+      const captured = []
+      let received = 0
+      let tooLarge = false
+      // Only small 201 POST /api/events responses need their server-created
+      // ID to write unspoofable actor attribution. Always stream the original
+      // bytes to the client unchanged; never accept a client-provided creator.
+      if (request.method === 'POST' && upstreamResponse.statusCode === 201) {
+        upstreamResponse.on('data', chunk => {
+          received += chunk.length
+          if (received > 16384) {
+            tooLarge = true
+            captured.length = 0
+          } else if (!tooLarge) {
+            captured.push(chunk)
+          }
+        })
+      }
       upstreamResponse.once('end', () => {
         try {
-          onCompletedMutation()
+          onCompletedMutation(!tooLarge && captured.length
+            ? Buffer.concat(captured).toString('utf8') : null)
         } catch (error) {
-          // The source event may already be committed. We must NOT pretend
-          // rolling it back is possible. Keep logging for eventual replay.
-          console.error('Private event-share update hook failed:', error)
+          // A backend commit cannot be rolled back by a central DB failure.
+          // Durable reconciliation is required before public deployment.
+          console.error('Private event mutation identity/sync hook failed:', error)
         }
       })
     }
@@ -187,6 +209,7 @@ export async function startPrivateHouseholdGateway({
   // bodies, including multipart uploads, must stream through unchanged.
   app.use('/api/auth/login', express.json({ limit: '32kb' }))
   installFamilyAuth(app, identityDatabase, serverDirectory, 'required')
+  createEventCreatorAuditTables(identityDatabase)
 
   app.get('/api/health', (_request, response) => {
     response.json({ status: 'ok' })
@@ -264,6 +287,35 @@ export async function startPrivateHouseholdGateway({
     }
     return target
   }
+
+  // Only authorship of events in this verified household is exposed.
+  // This does not fetch any other family's members, events or event creators.
+  app.get('/api/event-creators', (request, response) => {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    let sourceDb
+    try {
+      const resolved = resolveHouseholdStorage({
+        serverDirectory, storageRoot, householdId: household.householdId,
+      })
+      sourceDb = new DatabaseSync(resolved.databasePath, { readOnly: true })
+      response.set('Cache-Control', 'no-store')
+      response.json({
+        creators: listAuthenticatedEventCreators(identityDatabase, {
+          verifiedUserId: request.familyAccount.user_id,
+          verifiedHouseholdId: household.householdId,
+          trustedSourceDb: sourceDb,
+        }),
+      })
+    } catch {
+      response.status(503).json({ error: 'Event creator information unavailable.' })
+    } finally {
+      sourceDb?.close()
+    }
+  })
+  app.use('/api/event-creators', (_request, response) => {
+    response.status(404).json({ error: 'Not found.' })
+  })
 
   // Event sharing is an overlay of explicitly granted EVENT snapshots.
   // These routes are registered only in the local private test gateway,
@@ -395,27 +447,51 @@ export async function startPrivateHouseholdGateway({
     const shouldSync = eventMutation && ['PUT', 'DELETE'].includes(request.method)
     const sourceEventId = shouldSync ? Number(eventMutation[1]) : null
     const safeEventId = Number.isSafeInteger(sourceEventId) && sourceEventId > 0
-    const sync = shouldSync && safeEventId
-      ? () => {
-        const path = resolveHouseholdStorage({
+    const isCreate = request.method === 'POST' &&
+      /^\/api\/events(?:\?[^#]*)?$/.test(request.originalUrl)
+    const mutationHook = (shouldSync && safeEventId) || isCreate
+      ? (backendResponseBody) => {
+        const resolved = resolveHouseholdStorage({
           serverDirectory,
           storageRoot,
           householdId: household.householdId,
-        }).databasePath
-        const sourceDatabase = new DatabaseSync(path, { readOnly: true })
+        })
+        const sourceDatabase = new DatabaseSync(resolved.databasePath, { readOnly: true })
         try {
-          synchronizeSelectedEventShare(identityDatabase, {
-            serverVerifiedUserId: request.familyAccount.user_id,
-            sourceHouseholdId: household.householdId,
-            sourceEventId,
-            sourceDatabase,
-          })
+          if (isCreate && typeof backendResponseBody === 'string') {
+            let created
+            try { created = JSON.parse(backendResponseBody) } catch { created = null }
+            if (Number.isSafeInteger(created?.id) && created.id > 0) {
+              recordAuthenticatedEventCreator(identityDatabase, {
+                verifiedUserId: request.familyAccount.user_id,
+                verifiedHouseholdId: household.householdId,
+                eventId: created.id,
+                trustedSourceDb: sourceDatabase,
+              })
+            }
+          } else if (shouldSync && safeEventId) {
+            synchronizeSelectedEventShare(identityDatabase, {
+              serverVerifiedUserId: request.familyAccount.user_id,
+              sourceHouseholdId: household.householdId,
+              sourceEventId,
+              sourceDatabase,
+            })
+            if (request.method === 'DELETE') {
+              cleanupDeletedEventCreator(identityDatabase, {
+                verifiedUserId: request.familyAccount.user_id,
+                verifiedHouseholdId: household.householdId,
+                eventId: sourceEventId,
+                trustedSourceDb: sourceDatabase,
+              })
+            }
+          }
         } finally {
           sourceDatabase.close()
         }
       }
       : null
-    proxyRequest(request, response, portByHousehold.get(household.householdId), sync)
+    proxyRequest(request, response,
+      portByHousehold.get(household.householdId), mutationHook)
   })
 
   const server = http.createServer(app)
