@@ -61,6 +61,28 @@ FAMILY_CALENDAR_HOUSEHOLD_TEST_ONLY=YES, HOST=127.0.0.1, and a
 nonproduction port. An unknown household is rejected before accessing any
 SQLite database. Without those settings, legacy behavior remains unchanged.
 
+## Offline household membership grant model
+
+The new Server/household-memberships.mjs module builds tables for household
+names and user-to-household role grants in a **separate, central identity
+database**. It reuses the PR #44 family_users model for the *future central*
+identity registry; it does NOT transfer or read any existing passwords or
+sessions. Only a server-authenticated user's identity may be passed to the
+lookup function. The requested household name is an untrusted *filter*, not
+permission to access its storage.
+
+The lookup returns a household only when that account is active, the
+household is active, and a non-revoked membership exists. Synthetic tests
+cover guessed household IDs, disabled users, revoked memberships, duplicate
+grants, and deliberate shared memberships. No membership HTTP endpoints
+or administrative provisioning UI exist yet.
+
+CRITICAL: This registry is still **unconnected to network routing**. The
+temporary household backend instances intentionally disable login and bind
+only to 127.0.0.1 for tests. They are NOT safe to publish, including through
+a reverse proxy that lacks an authenticated, membership-checking gateway.
+Do not invite additional families yet.
+
 ## Important: not yet multi-family login
 
 PR #44's accounts are currently associated with ONE SQLite database, and all
