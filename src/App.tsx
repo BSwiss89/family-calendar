@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useCallback,
   useLayoutEffect,
   useRef,
   useState,
@@ -9,13 +10,14 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
-import SharedEventsOverlay from './SharedEventsOverlay'
+import SharedEventDetails from './SharedEventDetails'
+import './SharedEventsOverlay.css'
 import FamilyEventSharing from './FamilyEventSharing'
 import { DesktopInvitations, MobileInvitationReminder } from './InvitationCenter'
 import { useInvitationInbox } from './useInvitationInbox'
 import { useAuthenticatedCalendarIdentity } from './useAuthenticatedCalendarIdentity'
 import { useSharedEventFeed } from './useSharedEventFeed'
-import { sharedEventsInRange, formatSharedTime } from './sharedEventOverlay'
+import { sharedEventsInRange, formatSharedTime, type AcceptedSharedEvent } from './sharedEventOverlay'
 import { arneySpeechAvailable, beginArneySpeech, speakArneyReply, type ArneySpeechResult, type ArneySpeechSession } from './arneySpeech'
 import { readArneyPreferences } from './arneyPreferences'
 import { shouldOfferArneyTextFallback } from './arneyWakePhrase'
@@ -3754,6 +3756,8 @@ const [
   const [events, setEvents] = useState<CalendarEvent[]>([])
   // Accepted snapshots are NOT editable local events; their IDs are separate.
   const receivedSharedEvents = useSharedEventFeed(page === 'calendar')
+  const [selectedReceivedEvent, setSelectedReceivedEvent] = useState<AcceptedSharedEvent | null>(null)
+  const closeReceivedDetails = useCallback(() => setSelectedReceivedEvent(null), [])
   const invitationInbox = useInvitationInbox()
   const { account: signedInAccount, creators: verifiedEventCreators } =
     useAuthenticatedCalendarIdentity(events)
@@ -12367,6 +12371,20 @@ positionMobileScheduleTimeline(
         </div>
       )}
 
+      {sharedEventsInRange(receivedSharedEvents, targetDateKey, targetDateKey).length > 0 && (
+        <div className="mobile-schedule-all-day shared-mobile-event-group">
+          <span className="mobile-schedule-all-day-label">Shared</span>
+          <div className="mobile-schedule-all-day-events">
+            {sharedEventsInRange(receivedSharedEvents, targetDateKey, targetDateKey).map(shared => (
+              <button type="button" className="mobile-schedule-all-day-event shared-schedule-event"
+                key={`mobile-shared-${shared.shareId}-${targetDateKey}`}
+                onClick={() => setSelectedReceivedEvent(shared)}>
+                ↗ {shared.title} · {formatSharedTime(shared.time)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div
   className="mobile-schedule-timeline-scroll"
  
@@ -12912,6 +12930,19 @@ setIsAddingEvent(true)
 )}
             
               <div className="event-list">
+                {sharedEventsInRange(receivedSharedEvents, dateKey, dateKey).map(shared => (
+                  <button type="button" className="event shared-week-event"
+                    key={`shared-week-${shared.shareId}-${dateKey}`}
+                    onClick={(click) => {
+                      click.stopPropagation()
+                      if (!suppressWeekPagerClick()) setSelectedReceivedEvent(shared)
+                    }}>
+                    <div className="event-title">↗ {shared.title}</div>
+                    <div className="event-bottom-row">
+                      <span className="event-time">{formatSharedTime(shared.time)} · {shared.sharedBy}</span>
+                    </div>
+                  </button>
+                ))}
                 {dayEvents.map(
                   (calendarEvent) => {
                     const background =
@@ -13980,23 +14011,6 @@ const homeTodayMeals =
 
 const homeListPreview =
   lists.slice(0, 4)
-
-const sharedViewStart =
-  calendarView === 'day'
-    ? getDateKeyFromDate(dayViewDate)
-    : calendarView === 'week'
-      ? getDateKeyFromDate(weekDates[0])
-      : calendarView === 'schedule'
-        ? getDateKeyFromDate(scheduleDisplayDates[0])
-        : getDateKeyFromDate(new Date(year, month, 1))
-const sharedViewEnd =
-  calendarView === 'day'
-    ? getDateKeyFromDate(dayViewDate)
-    : calendarView === 'week'
-      ? getDateKeyFromDate(weekDates[6])
-      : calendarView === 'schedule'
-        ? getDateKeyFromDate(scheduleDisplayDates[scheduleDisplayDates.length - 1])
-        : getDateKeyFromDate(new Date(year, month + 1, 0))
 
 return (
     <main className="calendar-app">
@@ -16421,11 +16435,7 @@ createPortal(
 </div>
 </div>
 
-<SharedEventsOverlay
-  events={receivedSharedEvents}
-  startDate={sharedViewStart}
-  endDate={sharedViewEnd}
-/>
+<SharedEventDetails event={selectedReceivedEvent} onClose={closeReceivedDetails} />
 
 {calendarView === 'month' && (
   <div
@@ -16734,12 +16744,13 @@ const visibleDayEventCount =
                     })}
 
                   {sharedEventsForDay.slice(0, 1).map((sharedEvent) => (
-                    <div
+                    <button
+                      type="button"
                       className="month-shared-event-chip"
                       key={`shared-${sharedEvent.shareId}`}
-                      role="note"
                       title={`${sharedEvent.title} — shared by ${sharedEvent.sharedBy}; read only`}
-                      onClick={(event) => event.stopPropagation()}
+                      aria-label={`View shared event ${sharedEvent.title} from ${sharedEvent.sharedBy}`}
+                      onClick={(event) => { event.stopPropagation(); setSelectedReceivedEvent(sharedEvent) }}
                     >
                       <span aria-hidden="true">↗ </span>
                       {sharedEvent.time && (
@@ -16752,7 +16763,7 @@ const visibleDayEventCount =
                           ? ` +${sharedEventsForDay.length - 1}`
                           : ''}
                       </span>
-                    </div>
+                    </button>
                   ))}
 
                  {dayEvents.length > visibleDayEventCount && (
@@ -17323,6 +17334,14 @@ const visibleMultiDayLaneCount =
   </div>
 )}
                 <div className="schedule-all-day-events">
+                  {sharedEventsInRange(receivedSharedEvents, dateKey, dateKey).map(shared => (
+                    <button type="button" className="schedule-all-day-event shared-schedule-event"
+                      key={`schedule-shared-${shared.shareId}-${dateKey}`}
+                      title={`Shared by ${shared.sharedBy} · ${formatSharedTime(shared.time)}`}
+                      onClick={() => setSelectedReceivedEvent(shared)}>
+                      ↗ {shared.title} · {formatSharedTime(shared.time)}
+                    </button>
+                  ))}
                   {visibleAllDayEvents
                     .map(
                       (calendarEvent) => (
@@ -17941,9 +17960,10 @@ const visibleMultiDayLaneCount =
             {sharedEventsInRange(
               receivedSharedEvents, dayViewDateKey, dayViewDateKey
             ).map(shared => (
-              <article className="day-summary-event day-summary-received-event"
+              <button type="button" className="day-summary-event day-summary-received-event"
                 key={`shared-event-${shared.shareId}`}
-                aria-label={`${shared.title}, shared by ${shared.sharedBy}, read only`}>
+                onClick={() => setSelectedReceivedEvent(shared)}
+                aria-label={`View shared event ${shared.title}, from ${shared.sharedBy}`}>
                 <span className="day-summary-event-color"
                   style={{ background: '#5d8bbf' }} />
                 <span className="day-summary-event-text">
@@ -17951,7 +17971,7 @@ const visibleMultiDayLaneCount =
                   <small>{formatSharedTime(shared.time)} · Shared by {shared.sharedBy}</small>
                   <small>Read only</small>
                 </span>
-              </article>
+              </button>
             ))}
           </div>
         </section>
