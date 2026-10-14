@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   parseTrustedShareRecipients, parseIncomingInvitations,
   parseOutgoingInvitations,
@@ -18,6 +19,8 @@ type LocalEventChoice = {
 
 type Props = {
   events: readonly LocalEventChoice[]
+  preselectedEventId?: number
+  buttonLabel?: string
 }
 
 async function readSharingJson(url: string): Promise<unknown> {
@@ -60,7 +63,9 @@ function formatChoiceDate(date: string, time: string | null): string {
  * No form sends a household selection, source DB path, calendar subscription
  * or full event details. Only explicit event IDs and named contact IDs.
  */
-export default function FamilyEventSharing({ events }: Props) {
+export default function FamilyEventSharing({
+  events, preselectedEventId, buttonLabel = 'Share Events & Invitations',
+}: Props) {
   const [supported, setSupported] = useState(false)
   const [open, setOpen] = useState(false)
   const [recipients, setRecipients] = useState<TrustedShareRecipient[]>([])
@@ -74,6 +79,10 @@ export default function FamilyEventSharing({ events }: Props) {
   const [busy, setBusy] = useState(false)
   const mounted = useRef(true)
   const loadGeneration = useRef(0)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const dialogId = useId()
+  const titleId = useId()
 
   const eligibleEvents = useMemo(() => events.filter(event =>
     Number.isSafeInteger(event.id) && event.id > 0 &&
@@ -137,6 +146,53 @@ export default function FamilyEventSharing({ events }: Props) {
       window.clearInterval(timer)
     }
   }, [])
+
+  // The sharing dialog lives in a document.body portal, above the existing
+  // Events and Event Details popup instead of expanding over the calendar.
+  // Trap keyboard focus, close with Escape and restore focus to the trigger.
+  useEffect(() => {
+    if (!open) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    dialogRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+        return
+      }
+      if (event.key !== 'Tab') return
+      const dialog = dialogRef.current
+      if (!dialog) return
+      const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
+        'textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+      )).filter(element => element.getClientRects().length > 0)
+      if (!focusables.length) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      if (event.shiftKey && (document.activeElement === first ||
+        !dialog.contains(document.activeElement))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (document.activeElement === last ||
+        !dialog.contains(document.activeElement))) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true)
+      document.body.style.overflow = previousOverflow
+      triggerRef.current?.focus()
+    }
+  }, [open])
 
   function toggleEvent(id: number) {
     setSelectedEvents(current =>
@@ -251,15 +307,23 @@ export default function FamilyEventSharing({ events }: Props) {
   return (
     <section className="family-event-sharing" aria-label="Individual event sharing">
       <button type="button" className="family-event-sharing-toggle"
-        aria-expanded={open} aria-controls="family-event-sharing-panel"
+        ref={triggerRef}
+        aria-expanded={open} aria-haspopup="dialog" aria-controls={dialogId}
         onClick={() => {
-          setOpen(wasOpen => !wasOpen)
+          if (open) {
+            setOpen(false)
+            return
+          }
+          setSelectedEvents(preselectedEventId !== undefined &&
+            eligibleEvents.some(event => event.id === preselectedEventId)
+            ? [preselectedEventId] : [])
+          setOpen(true)
           setError('')
           setMessage('')
           void refresh()
         }}>
         <span aria-hidden="true">↗</span>
-        Share events &amp; invitations
+        {buttonLabel}
         {incoming.length > 0 && (
           <span className="family-event-sharing-count">
             {incoming.length} pending
@@ -267,11 +331,26 @@ export default function FamilyEventSharing({ events }: Props) {
         )}
       </button>
 
-      {open && (
-        <div id="family-event-sharing-panel" className="family-event-sharing-panel">
+      {open && createPortal(
+        <div className="family-sharing-dialog-layer">
+          <button
+            type="button"
+            className="family-sharing-dialog-backdrop"
+            aria-label="Close sharing window"
+            onClick={() => setOpen(false)}
+          />
+          <div
+            id={dialogId}
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            tabIndex={-1}
+            className="family-event-sharing-panel"
+          >
           <div className="family-event-sharing-panel-header">
             <div>
-              <h3>Share specific events</h3>
+              <h3 id={titleId}>Share specific events</h3>
               <p>Select only the events and households you intend to share with.
                 No other family calendar information is shared.</p>
             </div>
@@ -382,7 +461,9 @@ export default function FamilyEventSharing({ events }: Props) {
 
           {error && <p className="family-sharing-error" role="alert">{error}</p>}
           {message && <p className="family-sharing-message" role="status">{message}</p>}
-        </div>
+          </div>
+        </div>,
+        document.body
       )}
     </section>
   )
