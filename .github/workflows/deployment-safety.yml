@@ -62,5 +62,7 @@ jobs:
         run: node --test scripts/test-household-memberships.mjs
       - name: Exercise authenticated private household gateway end-to-end
         run: node --test scripts/test-private-household-gateway.mjs
+      - name: Test explicitly selected event-only sharing and private calendar boundaries
+        run: node --test scripts/test-event-only-shares.mjs
       - name: Build frontend
         run: npm run build
