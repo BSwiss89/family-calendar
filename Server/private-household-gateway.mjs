@@ -1,8 +1,10 @@
 // PRIVATE TEST HARNESS ONLY. Not a deployable public multi-household gateway.
 //
 // Every calendar request is gated by the central account's valid server-side
-// session AND an active household membership. A household is never selected
-// by a request URL, header, form value or client-side cookie field.
+// session AND an active household membership. If one account belongs to several
+// households, the user must explicitly select an authorized household via a
+// CSRF-protected endpoint that saves only a per-device SERVER-side preference.
+// A URL, header, cookie field or unvalidated form value can NEVER grant access.
 //
 // The gateway is deliberately bound to an OS-selected 127.0.0.1 port; it has
 // no configurable public listener. Household backends MUST also be loopback
@@ -11,7 +13,11 @@
 import express from 'express'
 import http from 'node:http'
 import { installFamilyAuth } from './family-auth.mjs'
-import { listGrantedHouseholdsForSessionUser } from './household-memberships.mjs'
+import {
+  listGrantedHouseholdsForSessionUser,
+  getSelectedHouseholdForVerifiedSession,
+  selectHouseholdForVerifiedSession,
+} from './household-memberships.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 
 const BLOCKED_PORTS = new Set([3001, 13001, 13002, 13003, 11434])
@@ -166,6 +172,46 @@ export async function startPrivateHouseholdGateway({
     response.status(404).json({ error: 'Not found.' })
   })
 
+  // Only the authenticated gateway owns household discovery and selection.
+  // No household name, role or member information is available without a
+  // valid session. Never proxy these URLs to an unauthenticated backend.
+  app.get('/api/households', (request, response) => {
+    const verified = request.familyAccount
+    const households = listGrantedHouseholdsForSessionUser(identityDatabase, {
+      serverVerifiedUserId: verified.user_id,
+    })
+    const selected = households.length === 1
+      ? households[0]
+      : getSelectedHouseholdForVerifiedSession(identityDatabase, {
+        serverVerifiedSessionId: verified.id,
+        serverVerifiedUserId: verified.user_id,
+      })
+    response.json({
+      households,
+      selectedHouseholdId: selected?.householdId ?? null,
+    })
+  })
+
+  app.post('/api/households/select', express.json({ limit: '8kb' }), (request, response) => {
+    const selected = selectHouseholdForVerifiedSession(identityDatabase, {
+      serverVerifiedSessionId: request.familyAccount.id,
+      serverVerifiedUserId: request.familyAccount.user_id,
+      requestedHouseholdId: request.body?.householdId,
+    })
+    if (!selected) {
+      response.status(403).json({ error: 'That household is not available to your account.' })
+      return
+    }
+    response.json({
+      selectedHouseholdId: selected.householdId,
+      displayName: selected.displayName,
+    })
+  })
+
+  app.use('/api/households', (_request, response) => {
+    response.status(404).json({ error: 'Not found.' })
+  })
+
   app.use((request, response) => {
     // installFamilyAuth has already validated the session and CSRF Origin.
     // Re-query memberships for EVERY request so changes take effect instantly.
@@ -176,13 +222,18 @@ export async function startPrivateHouseholdGateway({
       response.status(403).json({ error: 'No household access granted.' })
       return
     }
-    if (grants.length !== 1) {
-      // No implicit "first household" and no client-supplied tenant override.
-      // A future user-controlled switcher must check each selected membership.
-      response.status(409).json({ error: 'Multiple households require explicit selection support.' })
+    const target = grants.length === 1
+      ? grants[0]
+      : getSelectedHouseholdForVerifiedSession(identityDatabase, {
+        serverVerifiedSessionId: request.familyAccount.id,
+        serverVerifiedUserId: request.familyAccount.user_id,
+      })
+    if (!target) {
+      // No implicit "first household" and no untrusted selection override.
+      response.status(409).json({ error: 'Select an authorized household to continue.' })
       return
     }
-    const backendPort = portByHousehold.get(grants[0].householdId)
+    const backendPort = portByHousehold.get(target.householdId)
     if (!backendPort) {
       response.status(503).json({ error: 'Household service unavailable.' })
       return
