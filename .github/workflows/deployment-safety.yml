@@ -68,6 +68,8 @@ jobs:
         run: node --experimental-strip-types --test scripts/test-shared-event-overlay.mjs
       - name: Test event invitation UI field allowlists and trusted recipients
         run: node --experimental-strip-types --test scripts/test-event-sharing-ui-model.mjs
+      - name: Check Share Events modal placement over Events page
+        run: node --test scripts/test-event-sharing-modal-placement.mjs
       - name: Build frontend
         run: npm run build
       - name: Rehearse disposable two-family browser demo over localhost
