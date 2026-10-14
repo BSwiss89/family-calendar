@@ -12,6 +12,7 @@ export default function ArneyWakeControl() {
   const [preferences, setPreferences] = useState(readArneyPreferences)
   const [active, setActive] = useState(false)
   const [status, setStatus] = useState('Off')
+  const [wakeFeedback, setWakeFeedback] = useState('')
   const activeRef = useRef(false)
   const waitingRef = useRef(false)
   const sessionRef = useRef<ArneySpeechSession | null>(null)
@@ -47,10 +48,12 @@ export default function ArneyWakeControl() {
       if (!activeRef.current) return
       if (result.kind === 'error') {
         stopWake()
-        setStatus('Microphone unavailable: ' + result.reason)
+        setStatus('Speech recognition stopped: ' + result.reason)
+        setWakeFeedback('Browser recognition error: ' + result.reason)
         return
       }
       if (result.kind !== 'transcript') {
+        setWakeFeedback('No speech recognized in the last listening round.')
         scheduleRound(waitingForCommand)
         return
       }
@@ -60,14 +63,17 @@ export default function ArneyWakeControl() {
         : extractArneyWakeCommand(result.text)
 
       if (command === null) {
+        setWakeFeedback('Speech recognized, but the wake phrase did not match.')
         scheduleRound(false)
         return
       }
       if (!command) {
+        setWakeFeedback('Wake phrase recognized. Now say your command.')
         waitingRef.current = true
         scheduleRound(true)
         return
       }
+      setWakeFeedback('Wake phrase and command recognized.')
 
       // Stop recognition before handing the command to Arney, so it cannot
       // hear its own synthesized reply or submit the same command again.
@@ -75,7 +81,7 @@ export default function ArneyWakeControl() {
       window.dispatchEvent(new CustomEvent<string>('arney:voice-command', {
         detail: command,
       }))
-    })
+    }, undefined, { finishOnFinalResult: true })
     if (!sessionRef.current && activeRef.current) {
       stopWake()
       setStatus('Speech recognition could not start')
@@ -91,6 +97,7 @@ export default function ArneyWakeControl() {
     if (document.visibilityState !== 'visible') return
     activeRef.current = true
     waitingRef.current = false
+    setWakeFeedback('')
     setActive(true)
     listenRound(false)
   }
@@ -140,6 +147,7 @@ export default function ArneyWakeControl() {
         {active ? '■ Stop Arney listening' : '🎙 Start Arney wake words'}
       </button>
       <span>{available ? status : 'Speech unavailable in this browser'}</span>
+      {wakeFeedback && <span>{wakeFeedback}</span>}
       {!preferences.browserSpeechEnabled && <span>Allow browser speech in Arney settings</span>}
     </div>
   )
