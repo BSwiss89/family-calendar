@@ -1,18 +1,55 @@
 const form = document.getElementById('login-form')
 const message = document.getElementById('login-message')
 const button = document.getElementById('login-button')
+const checking = document.getElementById('session-check')
+const content = document.getElementById('login-content')
 
-if (location.protocol !== 'https:') {
-  message.textContent = 'A secure HTTPS connection is required to sign in.'
-  button.disabled = true
+function showLoginForm() {
+  checking.hidden = true
+  content.hidden = false
 }
 
-fetch('/api/auth/status', { cache: 'no-store' })
-  .then((response) => response.ok ? response.json() : null)
-  .then((status) => {
-    if (status?.authenticated) location.replace('/')
-  })
-  .catch(() => {})
+async function checkRememberedLogin() {
+  if (location.protocol !== 'https:') {
+    showLoginForm()
+    message.textContent = 'A secure HTTPS connection is required to sign in.'
+    button.disabled = true
+    return
+  }
+
+  // Keep the sign-in form hidden while the server checks the existing device.
+  // This is presentation-only. Server-side session checks enforce all access.
+  checking.hidden = false
+  content.hidden = true
+
+  try {
+    const response = await fetch('/api/auth/status', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal: AbortSignal.timeout(8000),
+    })
+    if (response.ok) {
+      const status = await response.json()
+      if (status.authenticated === true) {
+        location.replace('/')
+        return
+      }
+    }
+    showLoginForm()
+  } catch {
+    // If the status lookup fails or times out, still let the user log in.
+    showLoginForm()
+    message.textContent = 'Could not check your saved login. Try refreshing, or sign in.'
+  }
+}
+
+void checkRememberedLogin()
+
+// Browser back/forward cache can restore the old login DOM even when a device
+// has an active session. Revalidate instead of briefly showing the old form.
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) void checkRememberedLogin()
+})
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault()
