@@ -68,5 +68,7 @@ jobs:
         run: node --experimental-strip-types --test scripts/test-shared-event-overlay.mjs
       - name: Test event invitation UI field allowlists and trusted recipients
         run: node --experimental-strip-types --test scripts/test-event-sharing-ui-model.mjs
+      - name: Rehearse disposable two-family browser demo over localhost
+        run: node --test scripts/test-household-browser-demo.mjs
       - name: Build frontend
         run: npm run build
