@@ -4077,6 +4077,7 @@ async function confirmAiCancellation() {
         ? 'Recurring event occurrence canceled.'
         : 'Event canceled.'
     )
+    arneyReply('Event canceled successfully.')
   } catch (error) {
     showAppNotification(
       error instanceof Error
@@ -4159,6 +4160,7 @@ async function confirmAiReschedule() {
     setAiCommandOpen(false)
 
     showAppNotification('Event rescheduled successfully.')
+    arneyReply('Event rescheduled successfully.')
   } catch (error) {
     showAppNotification(
       error instanceof Error
@@ -4300,6 +4302,7 @@ setArneyEventPreview(null)
 
   try {
     const simple = parseArneySimpleCommand(command, lists)
+    if (simple) arneyFailuresRef.current = 0
     if (simple?.kind === 'list-query') {
       const message = simple.items.length
         ? simple.listName + ': ' + simple.items.join(', ') + '.'
@@ -4423,6 +4426,7 @@ setArneyEventPreview(null)
       setAiReschedulePreview(previewData)
     } 
 
+arneyFailuresRef.current = 0
 setAiCommandResult(
   previewData.status === 'ready_for_confirmation'
     ? 'I found an event. Review the details and confirm below.'
@@ -4444,7 +4448,7 @@ arneyReply(previewData.status === 'ready_for_confirmation'
         2
       )
     )
-    arneyReply('I could not process that command.', true)
+    arneyVoiceFailure('I could not process that command.')
   } finally {
     arneyCommandBusyRef.current = false
     setAiCommandLoading(false)
