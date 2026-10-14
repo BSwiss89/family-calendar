@@ -12,6 +12,13 @@
 // deployment/backup review before exposing anything externally.
 import express from 'express'
 import http from 'node:http'
+import { DatabaseSync } from 'node:sqlite'
+import {
+  createEventShareTables, inviteSelectedEvents,
+  listTrustedEventShareRecipients, listEventShareInvitations,
+  listAcceptedSharedEvents, respondToEventInvitation,
+  revokeSelectedEventShare,
+} from './event-only-shares.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import {
   listGrantedHouseholdsForSessionUser,
@@ -155,6 +162,9 @@ export async function startPrivateHouseholdGateway({
   const portByHousehold = validateUpstreams({
     identityDatabase, serverDirectory, storageRoot, backendPorts,
   })
+  // Central share records are separate from either family's calendar DB.
+  // No migrations to live/preview data occur; this gateway is test-only.
+  createEventShareTables(identityDatabase)
   const app = express()
   app.disable('x-powered-by')
   // Login is the only endpoint that needs parsed JSON. All calendar request
@@ -212,15 +222,15 @@ export async function startPrivateHouseholdGateway({
     response.status(404).json({ error: 'Not found.' })
   })
 
-  app.use((request, response) => {
-    // installFamilyAuth has already validated the session and CSRF Origin.
-    // Re-query memberships for EVERY request so changes take effect instantly.
+  // Resolve all tenant context from a verified central session. Never use a
+  // household slug supplied in the browser's request to choose the backend.
+  function trustedHousehold(request, response) {
     const grants = listGrantedHouseholdsForSessionUser(identityDatabase, {
       serverVerifiedUserId: request.familyAccount?.user_id,
     })
     if (grants.length === 0) {
       response.status(403).json({ error: 'No household access granted.' })
-      return
+      return null
     }
     const target = grants.length === 1
       ? grants[0]
@@ -229,16 +239,130 @@ export async function startPrivateHouseholdGateway({
         serverVerifiedUserId: request.familyAccount.user_id,
       })
     if (!target) {
-      // No implicit "first household" and no untrusted selection override.
       response.status(409).json({ error: 'Select an authorized household to continue.' })
-      return
+      return null
     }
-    const backendPort = portByHousehold.get(target.householdId)
-    if (!backendPort) {
+    if (!portByHousehold.has(target.householdId)) {
       response.status(503).json({ error: 'Household service unavailable.' })
-      return
+      return null
     }
-    proxyRequest(request, response, backendPort)
+    return target
+  }
+
+  // Event sharing is an overlay of explicitly granted EVENT snapshots.
+  // These routes are registered only in the local private test gateway,
+  // before the unauthenticated per-family backend's catch-all proxy.
+  // Unrecognized /api/shared-events paths are ALWAYS blocked.
+  app.get('/api/shared-events/recipients', (request, response) => {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    response.set('Cache-Control', 'no-store')
+    response.json({
+      recipients: listTrustedEventShareRecipients(identityDatabase, {
+        serverVerifiedUserId: request.familyAccount.user_id,
+        sourceHouseholdId: household.householdId,
+      }),
+    })
+  })
+  app.get('/api/shared-events/invitations', (request, response) => {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    response.set('Cache-Control', 'no-store')
+    response.json({
+      invitations: listEventShareInvitations(identityDatabase, {
+        serverVerifiedUserId: request.familyAccount.user_id,
+        recipientHouseholdId: household.householdId,
+      }),
+    })
+  })
+  app.get('/api/shared-events/accepted', (request, response) => {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    response.set('Cache-Control', 'no-store')
+    response.json({
+      events: listAcceptedSharedEvents(identityDatabase, {
+        serverVerifiedUserId: request.familyAccount.user_id,
+        recipientHouseholdId: household.householdId,
+      }),
+    })
+  })
+
+  const parseShareJson = express.json({ limit: '12kb', strict: true })
+  app.post('/api/shared-events/invite', parseShareJson, (request, response) => {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    const { eventIds, recipientHouseholdIds } = request.body ?? {}
+    let sourceDb = null
+    try {
+      // Resolve a server-trusted on-disk path, not an attacker-provided path.
+      const storage = resolveHouseholdStorage({
+        serverDirectory, storageRoot, householdId: household.householdId,
+      })
+      sourceDb = new DatabaseSync(storage.databasePath, { readOnly: true })
+      const created = inviteSelectedEvents(identityDatabase, {
+        serverVerifiedUserId: request.familyAccount.user_id,
+        sourceHouseholdId: household.householdId,
+        sourceDatabase: sourceDb,
+        eventIds, recipientHouseholdIds,
+      })
+      response.status(201).json({ invitations: created })
+    } catch (error) {
+      // Never leak source DB details, event IDs, internal paths or existence.
+      const conflict = error?.code === 'SQLITE_CONSTRAINT_UNIQUE'
+        || String(error?.message ?? '').includes('UNIQUE constraint')
+      response.status(conflict ? 409 : 400).json({
+        error: conflict ? 'One or more event invitations already exist.' :
+          'Could not share the selected events with the specified recipients.',
+      })
+    } finally {
+      sourceDb?.close()
+    }
+  })
+  app.post('/api/shared-events/:shareId/respond', parseShareJson, (request, response) => {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    const shareId = Number(request.params.shareId)
+    if (!Number.isSafeInteger(shareId) || shareId <= 0) {
+      return response.status(404).json({ error: 'Event invitation unavailable.' })
+    }
+    try {
+      const result = respondToEventInvitation(identityDatabase, {
+        serverVerifiedUserId: request.familyAccount.user_id,
+        recipientHouseholdId: household.householdId,
+        shareId,
+        decision: request.body?.decision,
+      })
+      response.json(result)
+    } catch {
+      response.status(404).json({ error: 'Event invitation unavailable.' })
+    }
+  })
+  app.post('/api/shared-events/:shareId/revoke', (request, response) => {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    const shareId = Number(request.params.shareId)
+    if (!Number.isSafeInteger(shareId) || shareId <= 0) {
+      return response.status(404).json({ error: 'Event share unavailable.' })
+    }
+    try {
+      response.json(revokeSelectedEventShare(identityDatabase, {
+        serverVerifiedUserId: request.familyAccount.user_id,
+        sourceHouseholdId: household.householdId,
+        shareId,
+      }))
+    } catch {
+      response.status(404).json({ error: 'Event share unavailable.' })
+    }
+  })
+  app.use('/api/shared-events', (_request, response) => {
+    response.status(404).json({ error: 'Not found.' })
+  })
+
+  app.use((request, response) => {
+    // installFamilyAuth has already validated the central session and CSRF.
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    proxyRequest(request, response, portByHousehold.get(household.householdId))
   })
 
   const server = http.createServer(app)
