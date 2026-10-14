@@ -98,3 +98,22 @@
     padding: 6px 8px;
   }
 }
+
+/* Accepted invitations appear alongside the recipient's Day events but
+   are not buttons and can never open the recipient's local event editor. */
+.day-summary-received-event {
+  cursor: default;
+  border: 1px dashed #a3c3e8;
+  border-radius: 9px;
+  background: #eaf3ff;
+  color: #253f5e;
+  width: 100%;
+}
+.day-summary-received-event .day-summary-event-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.day-summary-received-event .day-summary-event-text small {
+  display: block;
+  color: #47688b;
+}
