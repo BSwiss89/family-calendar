@@ -4458,7 +4458,10 @@ arneyReply(previewData.status === 'ready_for_confirmation'
 
 arneyDesktopCommandHandlerRef.current = (command: string) => {
   setAiCommandText(command)
-  void submitAiCommand(command)
+  // Only desktop wake commands signal their completion. Typed commands and
+  // mobile push-to-talk must not inadvertently restart desktop listening.
+  const notifyWakeFinished = () => window.dispatchEvent(new Event('arney:command-finished'))
+  void submitAiCommand(command).then(notifyWakeFinished, notifyWakeFinished)
 }
 
 async function applyArneyListWrite(preview: ArneyListAdd, alreadyLocked = false) {
