@@ -172,8 +172,8 @@ export default function FamilyEventSharing({ events }: Props) {
       .map(recipient => recipient.displayName)
     if (!window.confirm(
       'Share ' + sendableIds.length + ' selected event(s) with ' + names.join(', ') +
-      '? Only those event titles and dates/times will be shared after acceptance. ' +
-      'Your other calendar events, people, notes and photos stay private.'
+      '? Each recipient will see the selected event titles, dates/times and your household name in the invitation. ' +
+      'Accepted events then appear on their calendars. Other events, people, notes and photos stay private.'
     )) return
 
     setBusy(true)
