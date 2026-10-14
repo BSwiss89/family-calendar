@@ -324,51 +324,83 @@ Deployment safety. There is **not yet a live multi-family gateway
 preview** to visually inspect these chips as actual accepted shares;
 this is code and automated tests only.
 
-## Explicit individual-event invitations in Calendar UI
+## Individual-event sharing, desktop Invitations and mobile reminders
 
-The event-specific UI now includes a **Share Events & Invitations**
-control on the month-view **Events** window, plus a contextual **Share Event**
-button inside an individual event's details window. The contextual button
-preselects ONLY that opened, non-recurring event, leaving the recipient
-selection empty until the user explicitly chooses it. Both buttons open a
-centered modal dialog **over the Events/Event Details window** in a
-high-z-index document-body portal, rather than expanding an inline panel
-across the calendar. The dialog has a dimmed backdrop, internal scrolling,
-Escape-to-close, keyboard focus containment and focus return to its button.
+There is now exactly **one Share Event button per eligible event**, located
+inside that event's detail window. The former "Share Events & Invitations"
+button on the Events page is removed. Clicking Share Event opens a centered
+modal **over Event Details** in a document-body portal, with an independent
+scroll area, visible backdrop, Escape-to-close and keyboard focus management.
+The opened event is already selected and fixed: the user chooses one or more
+previously connected families (up to 8) and must explicitly confirm sending.
+This cannot expand into a calendar-wide subscription. Recurring source events
+cannot be shared yet; a safe occurrence/series selector is still required.
 
-These buttons are shown ONLY when the authenticated gateway successfully
-supports all three JSON endpoints for trusted recipient families, incoming
-invitations and the sender's existing outgoing grants. On the original
-legacy backend (with missing endpoints) the entire control is hidden
-without showing errors to family users or enabling dangerous unprotected
-actions.
+The desktop/tablet **left sidebar has an Invitations tab** with a pending
+count and Accept/Decline controls. Accepted events are read-only on the
+recipient's normal calendar, including cards under the Day view's
+Today's Events section. They never become an editable source event in
+the receiving family's SQLite database.
 
-The panel offers checkboxes for *specific* non-recurring source events
-(up to 20), checkboxes for *specific* administrator-connected recipient
-households (up to 8 and no more than 80 combinations), and an explicit
-confirmation describing the data that recipients see. There is NO option
-to share a whole calendar, enumerate unconnected households, or alter
-another family's events. A recipient sees only an individual pending
-invitation, can Accept/Decline it, and when accepted its read-only
-snapshot is refreshed immediately. A sender can review individual
-pending/accepted grants and revoke one without touching any other grant.
-The source event list remains independent of received read-only entries.
+On mobile (viewport up to 760px), pending invitations automatically show
+in a separate foreground dialog when the app opens. For each event:
+**Accept**, **Decline**, or **Remind Later**. Remind Later changes ONLY local
+presentation state; the invitation remains pending on the server and is
+offered again when the app reopens/reloads or next comes back from the
+background. It does not set a background push notification or depend
+on a permanently running app. Multiple invitations can be reviewed in
+that same dialog. Desktop/tablet do not get an automatic interruption.
 
-Only title, date, time and the sending household display name appear in
-invitations; event notes, location, people and private household records
-never leave the source calendar. Invitations expose these selected details
-*before* acceptance, as explicitly explained in the sender confirmation
-message.
+Invitation responses are still authorized against the logged-in
+household by the central private gateway; other families' event details,
+contacts, people, lists, photos and unrelated events remain private.
+The old single-family preview lacks these endpoints and safely hides
+sharing features.
 
-The UI parses server data through strict field allowlists. It never trusts
-tenant IDs or source database paths from browser input. The server
-revalidates all event and recipient IDs against the authenticated user
-and approved family connections. The panel is intended for the future
-authenticated multi-family gateway and cannot be exercised as a real
-family-to-family invitation from today's single-family preview yet.
+### Personal mobile accounts and a separate household hub account
 
-Source-event sync still needs durable reconciliation and additional
-mutation coverage. Do not publish or merge based solely on this view.
+The central login now distinguishes `accountKind = person` from
+`accountKind = hub`. Each family member can use an independent
+username/password and remembered session on their personal phone; the
+household tablet/hub has its **own** username/password and remembered
+session but is granted membership in the **same** family calendar.
+Device sessions remain individually revocable. The existing central
+`family_users` table is migrated in place with a default `person`
+role for older users; no existing account or session is deleted simply
+because this field was added. Adding a household member or hub account
+is a trusted offline provisioning step for now; **self-service member
+invites/account registration and owner-controlled provisioning are not
+implemented yet**.
+
+New event creation through the private authenticated gateway records
+a separate authoritative `event_creator_audit` entry in the central
+identity database. The actor is taken exclusively from the verified
+login/session and selected authorized family, NOT from any client
+`createdBy` field, calendar person tag, guessed ID, or device label.
+The household-only `GET /api/event-creators` returns its own
+existing-event authorship labels and distinguishes member-created from
+hub-created events. The calendar displays the verified "Created by"
+information in Event Details and shows the current account before
+creating events; mobile also offers a profile shortcut to switch accounts
+by signing out and signing in under another username. Existing events
+created outside the authenticated gateway remain **unattributed**;
+they are not guessed or retroactively assigned to someone.
+
+This audit is a **test-gateway first slice**, not a production-ready
+immutable event provenance system. In addition to normal PUT/DELETE,
+other event creation paths (including AI commands and direct DB writes)
+must be fully covered or disabled before relying on authorship across
+every creation path. Central and household DB commits are not atomic
+together and require durable replay/reconciliation; source event UUIDs
+are also needed to guard numeric ID reuse across out-of-band restores.
+Member-person assignment in the People Manager is a separate concept
+from the creator's account and should require explicit linking before
+auto-assigning a person to an event. The hub should not be assumed
+to be an individual calendar person.
+
+Source-event share synchronization still needs durable reconciliation
+and additional mutation coverage. This must remain a private draft
+until isolation, restore and authentication security review is complete.
 
 ## Private two-family hands-on browser rehearsal (DISPOSABLE)
 
