@@ -5,7 +5,7 @@ import {
   createEventShareTables, inviteSelectedEvents, respondToEventInvitation,
   revokeSelectedEventShare, listAcceptedSharedEvents, listEventShareInvitations,
   synchronizeSelectedEventShare, registerTrustedShareConnection,
-  listTrustedEventShareRecipients,
+  listTrustedEventShareRecipients, listOutgoingEventShares,
 } from '../Server/event-only-shares.mjs'
 
 // Disposable in-memory copies only; no existing preview/live SQLite touched.
@@ -125,6 +125,39 @@ test('two usernames of the same family can share only handpicked events with nam
   assert.throws(() => respondToEventInvitation(db, {
     serverVerifiedUserId: 3, recipientHouseholdId: 'family-b', shareId: created[0].shareId, decision: 'accepted',
   }), /no longer pending/)
+})
+
+test('outgoing invites are visible only to source family members and can be individually revoked', t => {
+  const { db, source } = fixture(t)
+  const created = send(db, source, [1, 2], ['family-b'])
+  const sentA = listOutgoingEventShares(db, {
+    serverVerifiedUserId: 2, sourceHouseholdId: 'family-a',
+  })
+  assert.deepEqual(sentA.map(item => item.title), ['A BBQ', 'A WORK'])
+  assert.deepEqual(sentA.map(item => item.status), ['pending', 'pending'])
+  assert.equal(sentA[0].recipientDisplayName, 'Family B')
+  assert.equal(Object.hasOwn(sentA[0], 'notes'), false)
+  assert.throws(() => listOutgoingEventShares(db, {
+    serverVerifiedUserId: 3, sourceHouseholdId: 'family-a',
+  }), /Not authorized/)
+  assert.deepEqual(listOutgoingEventShares(db, {
+    serverVerifiedUserId: 3, sourceHouseholdId: 'family-b',
+  }), [])
+
+  respondToEventInvitation(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: created[0].shareId, decision: 'accepted',
+  })
+  assert.deepEqual(listOutgoingEventShares(db, {
+    serverVerifiedUserId: 1, sourceHouseholdId: 'family-a',
+  }).map(item => item.status), ['accepted', 'pending'])
+  revokeSelectedEventShare(db, {
+    serverVerifiedUserId: 2, sourceHouseholdId: 'family-a',
+    shareId: created[0].shareId,
+  })
+  assert.deepEqual(listOutgoingEventShares(db, {
+    serverVerifiedUserId: 1, sourceHouseholdId: 'family-a',
+  }).map(item => item.title), ['A WORK'])
 })
 
 test('wrong users, broad sharing, recurrence and invalid batches fail without partial grants', t => {
