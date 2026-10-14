@@ -19,6 +19,12 @@ type RecognitionInstance = {
   onresult: ((event: RecognitionEvent) => void) | null
   onerror: ((event: RecognitionError) => void) | null
   onend: (() => void) | null
+  onstart?: (() => void) | null
+  onaudiostart?: (() => void) | null
+  onspeechstart?: (() => void) | null
+  onspeechend?: (() => void) | null
+  onaudioend?: (() => void) | null
+  onnomatch?: (() => void) | null
   start(): void
   stop(): void
   abort(): void
@@ -43,30 +49,67 @@ export function arneySpeechAvailable(): boolean {
   return getRecognition() !== null
 }
 
+/** Last attempt's browser event sequence. Never stores microphone audio or spoken words. */
+const speechDiagnosticKey = 'arney:last-speech-events'
+let lastSpeechEvents: string[] = []
+
+export function getArneySpeechDiagnostics(): string[] {
+  try {
+    const stored = window.sessionStorage.getItem(speechDiagnosticKey)
+    if (stored) {
+      const parsed: unknown = JSON.parse(stored)
+      if (Array.isArray(parsed) && parsed.every(item => typeof item === 'string')) return parsed
+    }
+  } catch { /* Session storage may be unavailable in private browsing. */ }
+  return [...lastSpeechEvents]
+}
+
 /** Reports one final result, including any transcript returned after stop(). */
 export function beginArneySpeech(
   onResult: (result: ArneySpeechResult) => void,
   onListeningChange?: (listening: boolean) => void,
 ): ArneySpeechSession | null {
   const Constructor = getRecognition()
-  if (!Constructor) return null
+  const startedAt = Date.now()
+  lastSpeechEvents = []
+  const record = (stage: string) => {
+    lastSpeechEvents.push(`+${Date.now() - startedAt}ms ${stage}`)
+    lastSpeechEvents = lastSpeechEvents.slice(-24)
+    try { window.sessionStorage.setItem(speechDiagnosticKey, JSON.stringify(lastSpeechEvents)) }
+    catch { /* Diagnostics are optional; recognition must still work. */ }
+  }
+  record('start requested')
+  if (!Constructor) {
+    record('recognition API unavailable')
+    return null
+  }
 
   let recognition: RecognitionInstance
   try {
     recognition = new Constructor()
   } catch {
+    record('constructor failed')
     onResult({ kind: 'error', reason: 'start-failed' })
     return null
   }
   recognition.lang = typeof navigator !== 'undefined' ? navigator.language || 'en-US' : 'en-US'
   recognition.continuous = false
-  recognition.interimResults = false
+  // Capture tentative Safari transcripts as well as final ones. The command
+  // is still submitted only once recognition ends after button release.
+  recognition.interimResults = true
+  recognition.onstart = () => record('browser start')
+  recognition.onaudiostart = () => record('audio start')
+  recognition.onspeechstart = () => record('speech detected')
+  recognition.onspeechend = () => record('speech ended')
+  recognition.onaudioend = () => record('audio ended')
+  recognition.onnomatch = () => record('no match')
 
   let finished = false
   let transcript = ''
   const finish = (result: ArneySpeechResult) => {
     if (finished) return
     finished = true
+    record(result.kind === 'transcript' ? 'completed with transcript' : result.kind === 'empty' ? 'completed empty' : 'completed with error')
     onListeningChange?.(false)
     onResult(result)
   }
@@ -77,19 +120,24 @@ export function beginArneySpeech(
       .map(result => result[0]?.transcript ?? '')
       .join(' ')
       .trim()
+    record(text ? 'result received (nonempty)' : 'result received (empty)')
     if (text) transcript = text
   }
   recognition.onerror = event => {
+    record('browser error: ' + (event.error || 'unknown'))
     finish({ kind: 'error', reason: event.error || 'unknown' })
   }
   recognition.onend = () => {
+    record('browser end')
     finish(transcript ? { kind: 'transcript', text: transcript } : { kind: 'empty' })
   }
 
   try {
     recognition.start()
+    record('start returned')
     onListeningChange?.(true)
   } catch {
+    record('start threw')
     finish({ kind: 'error', reason: 'start-failed' })
     return null
   }
@@ -97,12 +145,14 @@ export function beginArneySpeech(
   return {
     stop: () => {
       if (finished) return
+      record('stop requested')
       try { recognition.stop() }
       catch { finish(transcript ? { kind: 'transcript', text: transcript } : { kind: 'empty' }) }
     },
     cancel: () => {
       if (finished) return
       finished = true
+      record('cancel requested')
       recognition.onresult = null
       recognition.onerror = null
       recognition.onend = null
