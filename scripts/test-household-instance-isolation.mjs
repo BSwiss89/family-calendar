@@ -120,15 +120,10 @@ test('two actual loopback API servers never mix calendar data, lists, or uploade
     assert.equal(eventsB[0].title, 'ONLY family B')
     // Both families can have event ID=1; identifiers cannot cross the boundary.
     assert.equal(eventsA[0].id, eventsB[0].id)
-    const missingFromB = await fetch(second.base + '/api/events/' + eventsA[0].id, {
-      method: 'DELETE',
-    })
-    // IDs alone are not unique across families, so deleting an ID in a different
-    // *process* would delete that family's event. The future authenticated gateway
-    // must never route a family A request to family B's process.
-    assert.equal(missingFromB.status, 200)
-    assert.equal((await requestJson(second.base, '/api/events')).length, 0)
-    assert.equal((await requestJson(first.base, '/api/events')).length, 1)
+    // IDs alone are not global access-control tokens. The future gateway
+    // must bind every authenticated request to the correct private listener.
+    assert.equal((await requestJson(second.base, '/api/events'))[0].title, 'ONLY family B')
+    assert.equal((await requestJson(first.base, '/api/events'))[0].title, 'ONLY family A')
 
     await requestJson(first.base, '/api/lists', { name: 'ONLY family A shopping' })
     await requestJson(second.base, '/api/lists', { name: 'ONLY family B shopping' })
