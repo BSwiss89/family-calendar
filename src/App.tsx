@@ -12,6 +12,7 @@ import './App.css'
 import { arneySpeechAvailable, beginArneySpeech, speakArneyReply, type ArneySpeechResult, type ArneySpeechSession } from './arneySpeech'
 import { readArneyPreferences } from './arneyPreferences'
 import { shouldOfferArneyTextFallback } from './arneyWakePhrase'
+import { parseArneySimpleCommand, type ArneySimpleCommand } from './arneyTextCommands'
 
 
 import {
@@ -3474,6 +3475,7 @@ const arneyFailuresRef = useRef(0)
 const arneyCommandBusyRef = useRef(false)
 const [arneyListening, setArneyListening] = useState(false)
 const [arneyTextFallback, setArneyTextFallback] = useState(false)
+const arneyDesktopCommandHandlerRef = useRef<(text: string) => void>(() => {})
 
 useEffect(() => {
   const onArneyCommand = (event: Event) => {
@@ -3483,7 +3485,7 @@ useEffect(() => {
     setAiCommandText(command)
     setAiCommandResult('')
     setAiCommandOpen(true)
-    void submitAiCommand(command)
+    arneyDesktopCommandHandlerRef.current(command)
   }
   window.addEventListener('arney:voice-command', onArneyCommand)
   return () => window.removeEventListener('arney:voice-command', onArneyCommand)
@@ -3505,6 +3507,11 @@ const [
   aiCancellationPreview,
   setAiCancellationPreview,
 ] = useState<any | null>(null)
+
+type ArneyListAdd = Extract<ArneySimpleCommand, { kind: 'add-list-item' }>
+type ArneyEventCreate = Extract<ArneySimpleCommand, { kind: 'create-event' }>
+const [arneyListPreview, setArneyListPreview] = useState<ArneyListAdd | null>(null)
+const [arneyEventPreview, setArneyEventPreview] = useState<ArneyEventCreate | null>(null)
 
 const [
   aiReschedulePreview,
@@ -4288,8 +4295,58 @@ async function submitAiCommand(
 setAiCommandResult('')
 setAiCancellationPreview(null)
 setAiReschedulePreview(null)
+setArneyListPreview(null)
+setArneyEventPreview(null)
 
   try {
+    const simple = parseArneySimpleCommand(command, lists)
+    if (simple?.kind === 'list-query') {
+      const message = simple.items.length
+        ? simple.listName + ': ' + simple.items.join(', ') + '.'
+        : simple.listName + ' is empty.'
+      setAiCommandResult(message)
+      arneyReply(message)
+      return
+    }
+    if (simple?.kind === 'calendar-query') {
+      const date = new Date()
+      if (simple.when === 'tomorrow') date.setDate(date.getDate() + 1)
+      const key = getDateKeyFromDate(date)
+      const matching = events
+        .filter(event => getOccurrenceStartForDate(event, key) !== null)
+        .sort((first, second) => (first.time || '').localeCompare(second.time || ''))
+      const message = matching.length
+        ? 'On ' + key + ': ' + matching.slice(0, 20).map(item =>
+            item.title + (item.time ? ' at ' + item.time : '')
+          ).join('; ') + (matching.length > 20 ? '; and more.' : '.')
+        : 'No events scheduled for ' + key + '.'
+      setAiCommandResult(message)
+      arneyReply(message)
+      return
+    }
+    if (simple?.kind === 'add-list-item') {
+      if (readArneyPreferences().confirmBeforeChanges) {
+        setArneyListPreview(simple)
+        const message = 'Add ' + simple.item + ' to ' + simple.listName + '? Confirm below.'
+        setAiCommandResult(message)
+        arneyReply(message, true)
+      } else {
+        await applyArneyListWrite(simple, true)
+      }
+      return
+    }
+    if (simple?.kind === 'create-event') {
+      if (readArneyPreferences().confirmBeforeChanges) {
+        setArneyEventPreview(simple)
+        const message = 'Create ' + simple.title + ' on ' + simple.date
+          + (simple.time ? ' at ' + simple.time : '') + '? Confirm below.'
+        setAiCommandResult(message)
+        arneyReply(message, true)
+      } else {
+        await applyArneyEventWrite(simple, true)
+      }
+      return
+    }
     const intentResponse =
       await fetch(
         '/api/ai/intent',
@@ -4405,6 +4462,82 @@ setAiCommandResult(
   }
 }
 
+
+arneyDesktopCommandHandlerRef.current = (command: string) => {
+  setAiCommandText(command)
+  void submitAiCommand(command)
+}
+
+async function applyArneyListWrite(preview: ArneyListAdd, alreadyLocked = false) {
+  if (!alreadyLocked) {
+    if (arneyCommandBusyRef.current) return
+    arneyCommandBusyRef.current = true
+    setAiCommandLoading(true)
+  }
+  try {
+    const list = lists.find(item => item.id === preview.listId)
+    if (!list || list.name !== preview.listName) throw new Error('List no longer exists.')
+    if (list.items.some(item => item.text.trim().toLowerCase() === preview.item.toLowerCase())) {
+      setAiCommandResult(preview.item + ' is already on ' + preview.listName + '.')
+      setArneyListPreview(null)
+      return
+    }
+    const response = await fetch('/api/lists/' + preview.listId + '/items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: preview.item }),
+    })
+    if (!response.ok) throw new Error('Could not add the list item.')
+    await loadLists()
+    setArneyListPreview(null)
+    const message = 'Added ' + preview.item + ' to ' + preview.listName + '.'
+    setAiCommandResult(message)
+    arneyReply(message)
+  } catch (error) {
+    setAiCommandResult(error instanceof Error ? error.message : 'List update failed.')
+    arneyReply('I could not update the list.', true)
+  } finally {
+    if (!alreadyLocked) {
+      arneyCommandBusyRef.current = false
+      setAiCommandLoading(false)
+    }
+  }
+}
+
+async function applyArneyEventWrite(preview: ArneyEventCreate, alreadyLocked = false) {
+  if (!alreadyLocked) {
+    if (arneyCommandBusyRef.current) return
+    arneyCommandBusyRef.current = true
+    setAiCommandLoading(true)
+  }
+  try {
+    const response = await fetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: preview.title,
+        date: preview.date,
+        time: preview.time,
+        personIds: [],
+      }),
+    })
+    if (!response.ok) throw new Error('Could not create the event.')
+    await loadEvents()
+    setArneyEventPreview(null)
+    const message = 'Created ' + preview.title + ' on ' + preview.date
+      + (preview.time ? ' at ' + preview.time : '') + '.'
+    setAiCommandResult(message)
+    arneyReply(message)
+  } catch (error) {
+    setAiCommandResult(error instanceof Error ? error.message : 'Event creation failed.')
+    arneyReply('I could not create the event.', true)
+  } finally {
+    if (!alreadyLocked) {
+      arneyCommandBusyRef.current = false
+      setAiCommandLoading(false)
+    }
+  }
+}
 
 function arneyReply(message: string, important = false) {
   const mode = readArneyPreferences().responseMode
