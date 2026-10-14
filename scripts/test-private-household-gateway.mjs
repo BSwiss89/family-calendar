@@ -382,10 +382,10 @@ test('central authenticated gateway denies one family access to another family b
 
     // The selected event alone can be revoked; no calendar subscription.
     assert.equal((await json(gateway.base, '/api/shared-events/' + sharedId + '/revoke', {
-      cookie: cookieB,
+      cookie: cookieB, body: {},
     })).response.status, 404)
     assert.equal((await json(gateway.base, '/api/shared-events/' + sharedId + '/revoke', {
-      cookie: cookieA,
+      cookie: cookieA, body: {},
     })).response.status, 200)
     assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
       cookie: cookieB,
