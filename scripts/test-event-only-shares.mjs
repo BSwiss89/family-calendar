@@ -4,7 +4,8 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   createEventShareTables, inviteSelectedEvents, respondToEventInvitation,
   revokeSelectedEventShare, listAcceptedSharedEvents, listEventShareInvitations,
-  synchronizeSelectedEventShare,
+  synchronizeSelectedEventShare, registerTrustedShareConnection,
+  listTrustedEventShareRecipients,
 } from '../Server/event-only-shares.mjs'
 
 // Disposable in-memory copies only; no existing preview/live SQLite touched.
@@ -35,6 +36,12 @@ function fixture(t) {
       VALUES(1,1,'owner'),(2,1,'member'),(3,2,'owner'),(4,3,'owner');
   `)
   createEventShareTables(db)
+  registerTrustedShareConnection(db, {
+    sourceHouseholdId: 'family-a', recipientHouseholdId: 'family-b',
+  })
+  registerTrustedShareConnection(db, {
+    sourceHouseholdId: 'family-a', recipientHouseholdId: 'family-c',
+  })
   source.exec(`
     CREATE TABLE events (
       id INTEGER PRIMARY KEY, title TEXT, date TEXT, end_date TEXT,
@@ -80,7 +87,7 @@ test('one selected event reveals neither other source events nor private event f
   assert.doesNotMatch(JSON.stringify(pending(db, 3, 'family-b')), /PRIVATE|PERSON|HOME ADDRESS/)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM household_memberships').get().n, 4)
   respondToEventInvitation(db, {
-    serverVerifiedUserId: 3, shareId: created[0].shareId, decision: 'accepted',
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b', shareId: created[0].shareId, decision: 'accepted',
   })
   assert.deepEqual(visible(db, 3, 'family-b').map(event => event.title), ['A BBQ'])
   assert.doesNotMatch(JSON.stringify(visible(db, 3, 'family-b')),
@@ -100,23 +107,23 @@ test('two usernames of the same family can share only handpicked events with nam
   assert.deepEqual(pending(db, 4, 'family-c').map(event => event.title).sort(),
     ['A BBQ', 'A WORK'])
   respondToEventInvitation(db, {
-    serverVerifiedUserId: 3, shareId: created[0].shareId, decision: 'accepted',
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b', shareId: created[0].shareId, decision: 'accepted',
   })
   respondToEventInvitation(db, {
-    serverVerifiedUserId: 4, shareId: created[1].shareId, decision: 'accepted',
+    serverVerifiedUserId: 4, recipientHouseholdId: 'family-c', shareId: created[1].shareId, decision: 'accepted',
   })
   respondToEventInvitation(db, {
-    serverVerifiedUserId: 3, shareId: created[2].shareId, decision: 'declined',
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b', shareId: created[2].shareId, decision: 'declined',
   })
   assert.deepEqual(visible(db, 3, 'family-b').map(event => event.title), ['A BBQ'])
   assert.deepEqual(visible(db, 4, 'family-c').map(event => event.title), ['A BBQ'])
   // Revocation of A-to-B's BBQ does not remove A-to-C's BBQ or A-to-C's work invite.
-  revokeSelectedEventShare(db, { serverVerifiedUserId: 1, shareId: created[0].shareId })
+  revokeSelectedEventShare(db, { serverVerifiedUserId: 1, sourceHouseholdId: 'family-a', shareId: created[0].shareId })
   assert.deepEqual(visible(db, 3, 'family-b'), [])
   assert.deepEqual(visible(db, 4, 'family-c').map(event => event.title), ['A BBQ'])
   assert.equal(pending(db, 4, 'family-c').length, 1)
   assert.throws(() => respondToEventInvitation(db, {
-    serverVerifiedUserId: 3, shareId: created[0].shareId, decision: 'accepted',
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b', shareId: created[0].shareId, decision: 'accepted',
   }), /no longer pending/)
 })
 
@@ -131,6 +138,16 @@ test('wrong users, broad sharing, recurrence and invalid batches fail without pa
   assert.throws(() => send(db, source, [4], ['family-b']), /Recurring events require/)
   assert.throws(() => send(db, source, [1, 999], ['family-b']), /does not exist/)
   assert.equal(count(), 0)
+  assert.deepEqual(listTrustedEventShareRecipients(db, {
+    serverVerifiedUserId: 1, sourceHouseholdId: 'family-a',
+  }).map(x => x.householdId), ['family-b', 'family-c'])
+  assert.deepEqual(listTrustedEventShareRecipients(db, {
+    serverVerifiedUserId: 3, sourceHouseholdId: 'family-b',
+  }), [])
+  assert.throws(() => listTrustedEventShareRecipients(db, {
+    serverVerifiedUserId: 3, sourceHouseholdId: 'family-a',
+  }), /Not authorized/)
+  assert.throws(() => send(db, source, [1], ['family-c', 'family-b', 'family-c']), /Duplicate/)
   const one = send(db, source, [1], ['family-b'])
   assert.equal(count(), 1)
   assert.throws(() => send(db, source, [2, 1], ['family-b']), /UNIQUE/)
@@ -144,13 +161,21 @@ test('wrong users, broad sharing, recurrence and invalid batches fail without pa
     serverVerifiedUserId: 3, shareId: one[0].shareId,
   }), /Not authorized/)
   assert.deepEqual(visible(db, 3, 'family-b'), [])
+  assert.throws(() => respondToEventInvitation(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-a',
+    shareId: one[0].shareId, decision: 'accepted',
+  }), /selected household/)
+  assert.throws(() => revokeSelectedEventShare(db, {
+    serverVerifiedUserId: 1, sourceHouseholdId: 'family-b',
+    shareId: one[0].shareId,
+  }), /selected household/)
 })
 
 test('source edit refreshes only selected snapshots and deletion cancels that share', t => {
   const { db, source } = fixture(t)
   const created = send(db, source, [1, 2], ['family-b'])
   respondToEventInvitation(db, {
-    serverVerifiedUserId: 3, shareId: created[0].shareId, decision: 'accepted',
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b', shareId: created[0].shareId, decision: 'accepted',
   })
   source.prepare('UPDATE events SET title=?, time=?, notes=?, location=? WHERE id=1')
     .run('BBQ Updated', '16:00', 'NEW PRIVATE NOTES', 'NEW ADDRESS')
@@ -172,4 +197,15 @@ test('source edit refreshes only selected snapshots and deletion cancels that sh
   assert.equal(cancelled.cancelled, 1)
   assert.deepEqual(visible(db, 3, 'family-b'), [])
   assert.deepEqual(pending(db, 3, 'family-b').map(event => event.title), ['A WORK'])
+})
+
+test('only explicitly connected households may receive selected-event invitations', t => {
+  const { db, source } = fixture(t)
+  db.prepare('DELETE FROM event_share_connections WHERE recipient_household_id = 3').run()
+  assert.deepEqual(listTrustedEventShareRecipients(db, {
+    serverVerifiedUserId: 1, sourceHouseholdId: 'family-a',
+  }).map(row => row.householdId), ['family-b'])
+  assert.throws(() => send(db, source, [1], ['family-c']), /not connected/)
+  assert.throws(() => send(db, source, [1, 2], ['family-b', 'family-c']), /not connected/)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM event_share_grants').get().n, 0)
 })
