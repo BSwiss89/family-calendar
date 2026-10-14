@@ -228,3 +228,66 @@
   .family-event-sharing-lists { grid-template-columns: minmax(0, 1fr); }
   .family-sharing-options { max-height: 175px; }
 }
+
+/* The sharing form is a standalone modal above the existing Events/Event
+   Details window (which uses z-index up to 12000 on mobile). Never expand
+   this form inline across the month calendar. */
+.family-sharing-dialog-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 25000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  box-sizing: border-box;
+  isolation: isolate;
+  pointer-events: auto;
+}
+.family-sharing-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  background: rgba(17, 24, 39, .56);
+  backdrop-filter: blur(3px);
+  cursor: default;
+}
+.family-sharing-dialog-layer > .family-event-sharing-panel {
+  position: relative;
+  z-index: 1;
+  flex: 0 1 870px;
+  min-width: 0;
+  max-width: 100%;
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 18px;
+  box-shadow: 0 24px 75px rgba(11, 29, 52, .36);
+}
+.family-sharing-dialog-layer > .family-event-sharing-panel:focus {
+  outline: none;
+}
+.event-details-panel > .family-event-sharing {
+  margin: 15px 0 0;
+}
+.event-details-panel .family-event-sharing-toggle {
+  min-height: 43px;
+}
+@media (max-width: 760px) {
+  .family-sharing-dialog-layer {
+    align-items: center;
+    padding: 9px;
+  }
+  .family-sharing-dialog-layer > .family-event-sharing-panel {
+    flex-basis: auto;
+    width: 100%;
+    max-height: calc(100dvh - 18px);
+    padding: 12px;
+  }
+}
