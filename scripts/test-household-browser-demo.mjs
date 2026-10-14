@@ -55,6 +55,14 @@ test('disposable private browser demo serves real UI and only selected events th
 
     const cookieA = await login(demo, demo.accounts[0])
     const cookieB = await login(demo, demo.accounts[1])
+    const cookieAMember = await login(demo, demo.accounts[2])
+    const cookieAHub = await login(demo, demo.accounts[3])
+    assert.equal((await getJson(demo, '/api/auth/status', cookieAMember))
+      .data.accountKind, 'person')
+    assert.equal((await getJson(demo, '/api/auth/status', cookieAHub))
+      .data.accountKind, 'hub')
+    assert.equal((await getJson(demo, '/api/auth/status', cookieAHub))
+      .data.displayName, 'Family A Hub')
 
     const a = await getJson(demo, '/api/events', cookieA)
     const b = await getJson(demo, '/api/events', cookieB)
@@ -104,7 +112,54 @@ test('disposable private browser demo serves real UI and only selected events th
     ])
     assert.equal((await getJson(demo, '/api/shared-events/sent', cookieA))
       .data.shares[0].status, 'accepted')
-    console.log('[PASS] Browser demo uses two temporary usernames and separate SQLite households.')
+    assert.equal((await getJson(demo, '/api/event-creators', cookieB))
+      .status, 200)
+    assert.deepEqual((await getJson(demo, '/api/event-creators', cookieB))
+      .data.creators, [])
+    assert.equal((await request(demo.base, '/api/event-creators')).status, 401)
+    const memberCreate = await request(demo.base, '/api/events', {
+      cookie: cookieAMember,
+      body: {
+        date: demo.sample.sharedCandidateDate, title: 'Created on mobile',
+        time: '15:00',
+        createdBy: 'Fake Hub Admin',
+        accountKind: 'hub',
+      },
+    })
+    assert.equal(memberCreate.status, 201)
+    const memberCreatedId = (await memberCreate.json()).id
+    const hubCreate = await request(demo.base, '/api/events', {
+      cookie: cookieAHub,
+      body: {
+        date: demo.sample.sharedCandidateDate, title: 'Created by hub',
+        time: '16:00', createdBy: 'Fake Mobile Person',
+      },
+    })
+    assert.equal(hubCreate.status, 201)
+    const hubCreatedId = (await hubCreate.json()).id
+    const authorResponse = await getJson(demo, '/api/event-creators', cookieA)
+    assert.equal(authorResponse.status, 200)
+    const authorLabels = authorResponse.data.creators
+    assert.equal(authorLabels.find(v => v.eventId === memberCreatedId).displayName,
+      'Family A Member Two')
+    assert.equal(authorLabels.find(v => v.eventId === memberCreatedId).accountKind,
+      'person')
+    assert.equal(authorLabels.find(v => v.eventId === hubCreatedId).displayName,
+      'Family A Hub')
+    assert.equal(authorLabels.find(v => v.eventId === hubCreatedId).accountKind,
+      'hub')
+    assert.deepEqual((await getJson(demo, '/api/event-creators', cookieB))
+      .data.creators, [])
+    assert.deepEqual(
+      (await getJson(demo, '/api/events', cookieAMember)).data
+        .filter(v => [memberCreatedId, hubCreatedId].includes(v.id))
+        .map(v => v.title),
+      ['Created on mobile', 'Created by hub'],
+    )
+    console.log('[PASS] Mobile member and hub accounts have distinct session identities and audit authors.')
+    console.log('[PASS] Forged createdBy fields cannot impersonate another family member or hub.')
+    console.log('[PASS] Creator identities are accessible only within the verified household.')
+    console.log('[PASS] Browser demo uses separate SQLite households and multiple personal/hub accounts.')
     console.log('[PASS] Real calendar frontend and central login work behind one localhost gateway.')
     console.log('[PASS] A handpicked event can be invited and accepted without sharing a private calendar.')
     console.log('[PASS] Demo never opens production, test preview ports or a Tailscale listener.')
