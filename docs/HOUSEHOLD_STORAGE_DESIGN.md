@@ -360,6 +360,61 @@ family-to-family invitation from today's single-family preview yet.
 Source-event sync still needs durable reconciliation and additional
 mutation coverage. Do not publish or merge based solely on this view.
 
+## Private two-family hands-on browser rehearsal (DISPOSABLE)
+
+`scripts/run-household-browser-demo.mjs` now starts an entirely separate
+**loopback-only** test fixture from a built PR #46 checkout. It creates a
+unique operating-system temporary folder **outside all Git checkouts**,
+provisions blank Family A and Family B SQLite databases/uploads, builds
+a fresh central identity database, creates two *random*, independent
+test-only username/password accounts, allows sharing invitations in both
+directions, and starts two real `Server/index.mjs` backend processes and
+the central authenticated gateway on random, nonproduction 127.0.0.1 ports.
+
+The test calendars are seeded with fake events, including Family A's
+explicitly shareable BBQ and separate private events in A and B. **No
+invitations are pre-sent.** Both families must deliberately send and
+accept individual-event invitations using the new calendar UI.
+
+The runner prints the demo-only credentials **in the local terminal**
+rather than storing them in files, and stays open until Ctrl+C.
+Clean shutdown stops only its own child processes, closes its central
+DB and deletes only the unique OS temp folder it created. Abnormal
+termination may leave temporary demo data, but never touches the live,
+test or existing preview SQLite files.
+
+A separate `scripts/test-household-browser-demo.mjs` integration test
+starts the whole fixture, verifies that the normal frontend is served
+behind a secure-login gateway, logs into both temporary accounts, checks
+distinct private calendars, explicitly sends/accepts only one event,
+checks the recipient overlay, and shuts down the test fixture. It runs
+in the Deployment safety workflow and never changes Tailscale settings.
+
+### Manual browser access — separate HTTPS port, never Funnel
+
+The gateway listens only on localhost, but secure browser login requires
+HTTPS for its `__Host-fc_session` cookie. After a successful local
+demo start and inspecting `tailscale serve status`, the user may choose
+to launch a **foreground** Tailscale **Serve** endpoint on a separate
+HTTPS port, e.g. port 8443, aimed at the printed loopback gateway port.
+This endpoint is available only to authorized devices in the tailnet,
+not the public internet. Do **not** use Funnel, Tailscale Serve reset, or
+change the existing port 443 Serve mapping; if 8443 is already in use,
+STOP rather than overwriting a configured service.
+
+Use a **fresh Chrome Incognito window** for this rehearsal: cookies are
+scoped by hostname and not by port, so signing into the temporary demo
+on `:8443` from the normal Chrome profile would overwrite the
+existing trusted-device login cookie for the same `.ts.net` hostname
+on port 443. Incognito keeps the real account's remembered login intact.
+
+A second terminal runs foreground Serve while the first terminal runs
+the gateway demo. Press Ctrl+C in the Serve terminal to remove that
+foreground mapping, and Ctrl+C in the demo terminal to delete its
+test-only servers/data. The preview URL on port 13002 and production
+port 3001 are never repointed or stopped. This is a test-only harness,
+not a multi-household production deployment.
+
 ## Later hosting considerations
 
 For a handful of friends/families, several small Node processes and individual
