@@ -10,6 +10,7 @@ import {
 import { createPortal } from 'react-dom'
 import './App.css'
 import SharedEventsOverlay from './SharedEventsOverlay'
+import FamilyEventSharing from './FamilyEventSharing'
 import { useSharedEventFeed } from './useSharedEventFeed'
 import { sharedEventsInRange } from './sharedEventOverlay'
 import { arneySpeechAvailable, beginArneySpeech, speakArneyReply, type ArneySpeechResult, type ArneySpeechSession } from './arneySpeech'
@@ -16365,6 +16366,8 @@ createPortal(
 
 </div>
 </div>
+
+<FamilyEventSharing events={events} />
 
 <SharedEventsOverlay
   events={receivedSharedEvents}
