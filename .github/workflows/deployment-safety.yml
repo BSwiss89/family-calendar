@@ -1,0 +1,52 @@
+name: Deployment safety
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deployment-safety:
+    name: Deployment safety
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Test PWA package allowlist
+        run: node --test scripts/test-pwa-prebuild-only.mjs
+      - name: Check deployment PowerShell syntax and validator output isolation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scripts = @('scripts/deploy-frontend.ps1', 'scripts/release.ps1')
+          foreach ($file in $scripts) {
+            $tokens = $null
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file).Path, [ref]$tokens, [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              throw "$file has PowerShell syntax errors: $($errors -join '; ')"
+            }
+            $text = Get-Content -LiteralPath $file -Raw
+            if ($text -notmatch 'check-pwa-prebuild-only\\.mjs') {
+              throw "$file is missing the PWA validator"
+            }
+            $lines = $text -split "\\r?\\n"
+            $invocations = @($lines | Where-Object { $_ -match 'check-pwa-prebuild-only\\.mjs' -and $_ -match '& node' })
+            if ($invocations.Count -ne 1 -or $invocations[0] -notmatch '\\|\\s*Out-Host') {
+              throw "$file must route PWA validator stdout to Out-Host, not the deployment plan pipeline"
+            }
+            Write-Host "[PASS] $file parses and isolates validator output"
+          }
+      - name: Build frontend
+        run: npm run build
