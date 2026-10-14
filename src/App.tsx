@@ -4565,7 +4565,7 @@ function processArneyVoiceResult() {
     const message = result.reason === 'not-allowed' || result.reason === 'service-not-allowed'
       ? 'Microphone access was denied. Check your browser permissions.'
       : 'Could not recognize speech (' + result.reason + ').'
-    arneyVoiceFailure(message)
+    arneyVoiceFailure(message, result.reason === 'not-allowed' || result.reason === 'service-not-allowed')
   } else {
     arneyVoiceFailure('I did not hear a command.')
   }
