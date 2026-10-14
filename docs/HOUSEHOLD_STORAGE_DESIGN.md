@@ -83,6 +83,40 @@ only to 127.0.0.1 for tests. They are NOT safe to publish, including through
 a reverse proxy that lacks an authenticated, membership-checking gateway.
 Do not invite additional families yet.
 
+## End-to-end central authentication test gateway (private only)
+
+Server/private-household-gateway.mjs combines the previously isolated pieces
+in a **loopback-only test harness**. It starts on an OS-selected 127.0.0.1
+port, accepts existing PR #44 password login and trusted-device sessions
+against a disposable CENTRAL identity SQLite database, checks the authenticated
+account's currently active household membership for every request, and streams
+calendar API calls, lists, frontend assets and uploads to the corresponding
+**loopback-only** household backend.
+
+Only one active membership per user is routed at this stage. Zero memberships
+return HTTP 403 and multiple memberships return HTTP 409 until a secure
+household switcher exists; a client-supplied household in a query/header does
+NOT override the trusted membership result. Login endpoints are never sent to
+a backend. Auth cookies and proxy-forwarding headers are stripped before a
+request reaches the individual household instance; upstream Set-Cookie and
+unsafe redirects are not passed back to the browser.
+
+scripts/test-private-household-gateway.mjs creates two disposable family
+databases and a central identity database, runs two real private backend
+Node processes and a single test gateway, performs distinct password logins,
+and tests events, shopping lists, identically named uploaded pictures,
+unauthenticated requests, malicious tenant hints, revocation, disabled users
+and refusal of ambiguous multi-household accounts.
+
+**This is NOT production/public-ready.** The gateway intentionally has no
+public listener or stable deployment port, and the individual backend
+processes deliberately disable auth in this isolated test. Future work must
+attest the upstream server's household identity, enforce local service
+isolation and administrative-only configuration, provide a safe household
+switcher, examine every endpoint including local AI and backup jobs, and
+run dedicated recovery and security reviews. No existing preview or live
+accounts are migrated by this test.
+
 ## Important: not yet multi-family login
 
 PR #44's accounts are currently associated with ONE SQLite database, and all
