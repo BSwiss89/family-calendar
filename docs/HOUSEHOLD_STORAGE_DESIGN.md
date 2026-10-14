@@ -290,6 +290,39 @@ calendar are not migrated or opened publicly.
    records together. Enable remote public access only after review, security
    tests, approval and correct authentication on every path.
 
+## Accepted event display: read-only calendar overlay (test candidate)
+
+The calendar frontend now loads `GET /api/shared-events/accepted` only
+when the Calendar page is open. Accepted share snapshots are stored in
+separate React state, **never in the editable local `CalendarEvent[]`**
+array, so coincidentally matching event IDs cannot invoke local event
+edit/delete actions. The display uses a strict field allowlist
+(shareId, sharedBy, title, start/end date/time), rejecting malformed
+dates/IDs and ignoring notes, locations, attachments, participant details
+and any other unexpected server fields.
+
+A clearly labeled "Shared with our family" read-only strip shows
+received events for the calendar's visible month/week/day/schedule date
+range. Month cells also show a read-only shared-event label, separate
+from local event buttons, while preserving space for existing local
+events. The strip provides access to multiple received events for a day
+without treating a share ID as a local event ID.
+
+The legacy single-family backend does not implement that endpoint:
+unexpected HTML/404/non-JSON or fetch failures produce **no overlay**,
+leaving live and existing preview calendars unaffected. The view
+refreshes on focus, visibility and a 30-second interval; it never
+chooses a tenant or performs any sharing mutation.
+
+The read-only field/parser and date-range filtering have dedicated
+Node tests (`scripts/test-shared-event-overlay.mjs`) included in
+Deployment safety. There is **not yet a live multi-family gateway
+preview** to visually inspect these chips as actual accepted shares;
+this is code and automated tests only. Accept/decline/share controls
+and invitations in the calendar UI are separate future work.
+Source-event sync still needs durable reconciliation and additional
+mutation coverage. Do not publish or merge based solely on this view.
+
 ## Later hosting considerations
 
 For a handful of friends/families, several small Node processes and individual
