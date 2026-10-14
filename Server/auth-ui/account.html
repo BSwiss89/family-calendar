@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#4f46e5">
+  <title>Family account — Family Calendar</title>
+  <link rel="stylesheet" href="/auth/styles.css">
+  <script src="/auth/account.js" defer></script>
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card" aria-labelledby="account-title">
+      <a class="back-link" href="/">← Back to calendar</a>
+      <h1 id="account-title">Family account</h1>
+      <p id="whoami" class="muted">Loading account…</p>
+      <h2>Trusted devices</h2>
+      <p class="small muted">You stay signed in on devices you use. Revoke access to a device that was lost or is no longer trusted.</p>
+      <p id="account-message" role="status" aria-live="polite"></p>
+      <div id="devices" class="device-list" aria-live="polite"></div>
+      <button id="logout" type="button" class="secondary-button">Sign out of this device</button>
+    </section>
+  </main>
+</body>
+</html>

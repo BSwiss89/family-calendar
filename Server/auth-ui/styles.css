@@ -1,0 +1,29 @@
+:root{color-scheme:light;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#172033;background:#eef1f7}
+*{box-sizing:border-box}body{margin:0;min-height:100vh}.auth-shell{min-height:100vh;display:grid;place-items:center;padding:24px}
+.auth-card{width:min(100%,460px);background:#fff;border:1px solid #dce1eb;border-radius:20px;padding:clamp(22px,5vw,40px);box-shadow:0 15px 50px #263c5918}
+.auth-mark{display:grid;place-items:center;width:56px;height:56px;border-radius:16px;background:#e9eafe;color:#4338ca;font-size:32px;margin-bottom:20px}
+h1{font-size:27px;line-height:1.2;margin:0 0 10px}h2{font-size:18px;margin:30px 0 10px}
+.auth-intro{color:#536079;line-height:1.5;margin:0 0 24px}
+label{display:block;font-weight:650;margin:18px 0 7px;font-size:14px}
+input{font:inherit;width:100%;padding:12px 13px;border-radius:10px;border:1px solid #aebbd0;background:#fff;color:#182137}
+input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid #818cf8;outline-offset:2px}
+button{font:inherit;font-weight:700;cursor:pointer;border:0;border-radius:10px;background:#4f46e5;color:white;padding:12px 16px}
+#login-button{width:100%;margin-top:14px}button:disabled{cursor:wait;opacity:.65}
+.error{color:#aa243d;min-height:1.4em;margin-top:14px;font-size:14px}
+.muted{color:#637087}.small{font-size:13px;line-height:1.5}
+.auth-footnote{font-size:12px;color:#637087;line-height:1.5;margin:20px 0 0}
+.back-link{display:inline-block;color:#4338ca;text-decoration:none;font-weight:600;margin-bottom:22px}
+.device-list{display:grid;gap:11px;margin:20px 0}
+.device-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px;border:1px solid #e0e5ee;border-radius:11px}
+.device-row div{display:grid;gap:5px;min-width:0;overflow-wrap:anywhere}
+.revoke-button{padding:9px 12px;font-size:13px;background:#f2e8ee;color:#9f2451;flex-shrink:0}
+.secondary-button{background:#e8e9fd;color:#3730a3;width:100%;margin-top:16px}
+#account-message{color:#9f2451;min-height:1.2em}
+
+/* Never show the password form while checking a remembered device. */
+[hidden]{display:none!important}
+.auth-session-check{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:13px;min-height:180px;color:#536079;text-align:center}
+.auth-session-check p{margin:0;font-size:14px}
+.auth-check-spinner{width:27px;height:27px;border:3px solid #d8ddf8;border-top-color:#4f46e5;border-radius:50%;animation:auth-spin .85s linear infinite}
+@keyframes auth-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.auth-check-spinner{animation:none}}

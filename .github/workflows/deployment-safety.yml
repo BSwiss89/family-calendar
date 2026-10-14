@@ -48,5 +48,11 @@ jobs:
             }
             Write-Host "[PASS] $file parses and isolates validator output"
           }
+      - name: Test Arney wake phrases and fallback
+        run: node --experimental-strip-types --test scripts/test-arney-voice.mjs
+      - name: Test Arney safe calendar and list commands
+        run: node --experimental-strip-types --test scripts/test-arney-commands.mjs
+      - name: Test family authentication and trusted-device security
+        run: node --test scripts/test-family-auth.mjs
       - name: Build frontend
         run: npm run build
