@@ -1,4 +1,4 @@
-import { isCalendarDateKey } from './sharedEventOverlay'
+import { isCalendarDateKey } from './sharedEventOverlay.ts'
 
 export type TrustedShareRecipient = {
   householdId: string
