@@ -50,6 +50,7 @@ export function useSharedEventFeed(enabled: boolean): AcceptedSharedEvent[] {
     void refresh()
     const interval = window.setInterval(refreshOnFocus, 30000)
     window.addEventListener('focus', refreshOnFocus)
+    window.addEventListener('family-calendar:shared-events-changed', refreshOnFocus)
     document.addEventListener('visibilitychange', refreshOnVisibility)
 
     return () => {
@@ -57,6 +58,7 @@ export function useSharedEventFeed(enabled: boolean): AcceptedSharedEvent[] {
       request?.abort()
       window.clearInterval(interval)
       window.removeEventListener('focus', refreshOnFocus)
+      window.removeEventListener('family-calendar:shared-events-changed', refreshOnFocus)
       document.removeEventListener('visibilitychange', refreshOnVisibility)
     }
   }, [enabled])
