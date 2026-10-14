@@ -202,3 +202,53 @@ test('wake recovery waits until browser speech synthesis is quiet', async () => 
     globalThis.window = original
   }
 })
+
+
+test('permission denial ends recognition once and cannot submit late speech', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognition
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognition = this }
+      start() {}
+      stop() {}
+      abort() {}
+    },
+  }
+  try {
+    const received = []
+    const session = beginArneySpeech(result => received.push(result))
+    assert.ok(session)
+    recognition.onerror?.({ error: 'not-allowed' })
+    recognition.onresult?.({ results: [[{ transcript: 'should not execute' }]] })
+    recognition.onend?.()
+    assert.deepEqual(received, [{ kind: 'error', reason: 'not-allowed' }])
+  } finally {
+    globalThis.window = original
+  }
+})
+
+test('empty result ends safely and never creates a transcript', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognition
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognition = this }
+      start() {}
+      stop() { this.onend?.() }
+      abort() {}
+    },
+  }
+  try {
+    const received = []
+    const session = beginArneySpeech(result => received.push(result))
+    assert.ok(session)
+    session.stop()
+    recognition.onend?.()
+    assert.deepEqual(received, [{ kind: 'empty' }])
+  } finally {
+    globalThis.window = original
+  }
+})
