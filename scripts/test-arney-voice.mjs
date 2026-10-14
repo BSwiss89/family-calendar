@@ -42,6 +42,7 @@ test('speech adapter waits for end and emits once after stop', async () => {
     const results = []
     const session = beginArneySpeech(result => results.push(result))
     assert.ok(session)
+    assert.equal(instance.interimResults, true)
     instance.onresult?.({ results: [[{ transcript: 'Add milk to groceries' }]] })
     session.stop()
     instance.onend?.()
@@ -69,6 +70,41 @@ test('canceled browser recognition cannot submit late transcripts', async () => 
     session.cancel()
     instance.onend?.()
     assert.deepEqual(results, [])
+  } finally {
+    globalThis.window = original
+  }
+})
+
+
+test('interim Safari transcript survives stop and diagnostic contains no spoken words', async () => {
+  const { beginArneySpeech, getArneySpeechDiagnostics } = await import('../src/arneySpeech.ts')
+  let instance
+  const original = globalThis.window
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { instance = this }
+      start() { this.onstart?.() }
+      stop() { this.onend?.() }
+      abort() { this.onend?.() }
+    },
+  }
+  try {
+    const results = []
+    const session = beginArneySpeech(result => results.push(result))
+    assert.ok(session)
+    assert.equal(instance.interimResults, true)
+    instance.onaudiostart?.()
+    instance.onspeechstart?.()
+    instance.onresult?.({ results: [[{ transcript: 'private words' }]] })
+    session.stop()
+    instance.onresult?.({ results: [[{ transcript: 'ignored duplicate' }]] })
+    assert.deepEqual(results, [{ kind: 'transcript', text: 'private words' }])
+    const diagnostic = getArneySpeechDiagnostics().join('\n')
+    assert.match(diagnostic, /audio start/)
+    assert.match(diagnostic, /speech detected/)
+    assert.match(diagnostic, /result received \(nonempty\)/)
+    assert.match(diagnostic, /completed with transcript/)
+    assert.doesNotMatch(diagnostic, /private words|ignored duplicate/)
   } finally {
     globalThis.window = original
   }
