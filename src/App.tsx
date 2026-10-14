@@ -14655,9 +14655,9 @@ return (
 )}
 
 {aiCommandResult !== '' && (
-  <pre className="ai-command-debug">
+  <div className="arney-response" role="status" aria-live="polite">
     {aiCommandResult}
-  </pre>
+  </div>
 )}
 
 
