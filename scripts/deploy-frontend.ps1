@@ -53,6 +53,12 @@ function Get-Plan {
 
     $allowed = '^(src/|public/|\.github/|scripts/|docs/|index\.html$|README\.md$|\.gitignore$|eslint\.config\.js$|vite\.config\.ts$|tsconfig(?:\.[^/]+)?\.json$)'
     $blocked = @($changed | Where-Object { $_ -notmatch $allowed })
+    if ($changed -contains 'package.json') {
+        & node (Join-Path $test 'scripts\check-pwa-prebuild-only.mjs') $test $from $to
+        if ($LASTEXITCODE -eq 0) {
+            $blocked = @($blocked | Where-Object { $_ -ne 'package.json' })
+        }
+    }
 
     [pscustomobject]@{
         From = $from
