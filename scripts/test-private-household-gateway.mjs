@@ -93,19 +93,22 @@ async function stopBackend(backend) {
   assert.equal(clean, true, 'Private backend refused to stop.')
 }
 
-async function json(base, endpoint, { cookie = null, body = undefined, headers = {} } = {}) {
-  const isPost = body !== undefined
+async function json(base, endpoint, {
+  cookie = null, body = undefined, headers = {}, method = undefined,
+} = {}) {
+  const hasBody = body !== undefined
+  const httpMethod = method ?? (hasBody ? 'POST' : 'GET')
   const response = await fetch(base + endpoint, {
-    method: isPost ? 'POST' : 'GET',
+    method: httpMethod,
     headers: {
       ...(cookie ? { Cookie: cookie } : {}),
-      ...(isPost ? {
+      ...(httpMethod !== 'GET' && httpMethod !== 'HEAD' ? {
         Origin: 'https://' + new URL(base).host,
-        'Content-Type': 'application/json',
       } : {}),
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       ...headers,
     },
-    body: isPost ? JSON.stringify(body) : undefined,
+    body: hasBody ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(7000),
     redirect: 'manual',
   })
@@ -380,6 +383,43 @@ test('central authenticated gateway denies one family access to another family b
       cookie: cookieB,
     })).value.map(e => e.title), ['Family B private calendar'])
 
+    // A failed edit, or a CSRF attack, must NOT synchronize anything to B.
+    assert.equal((await json(gateway.base, '/api/events/' + idToShare, {
+      cookie: cookieA, method: 'PUT', body: {
+        date: 'bad', title: 'Private invalid update',
+      },
+    })).response.status, 400)
+    assert.equal((await json(gateway.base, '/api/events/' + idToShare, {
+      cookie: cookieA, method: 'PUT',
+      headers: { Origin: 'https://evil.example' },
+      body: { date: '2026-12-22', title: 'Malicious update' },
+    })).response.status, 403)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events.map(e => e.title), ['Family A private calendar'])
+
+    // A real successful backend PUT automatically refreshes only the shared
+    // snapshot. Changed notes, locations, people and other events stay private.
+    const edited = await json(gateway.base, '/api/events/' + idToShare, {
+      cookie: cookieA, method: 'PUT',
+      body: {
+        date: '2026-12-24', title: 'Family A BBQ time changed',
+        time: '15:30', notes: 'CHANGED PRIVATE INFORMATION',
+        location: 'HIDDEN PRIVATE ADDRESS',
+      },
+    })
+    assert.equal(edited.response.status, 200, JSON.stringify(edited.value))
+    const updatedShared = await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })
+    assert.equal(updatedShared.response.status, 200)
+    assert.equal(updatedShared.value.events.length, 1)
+    assert.equal(updatedShared.value.events[0].title, 'Family A BBQ time changed')
+    assert.equal(updatedShared.value.events[0].date, '2026-12-24')
+    assert.equal(updatedShared.value.events[0].time, '15:30')
+    assert.doesNotMatch(JSON.stringify(updatedShared.value),
+      /CHANGED PRIVATE|HIDDEN PRIVATE|A SECRET APPOINTMENT|location|notes|person/)
+
     // The selected event alone can be revoked; no calendar subscription.
     assert.equal((await json(gateway.base, '/api/shared-events/' + sharedId + '/revoke', {
       cookie: cookieB, body: {},
@@ -393,6 +433,44 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal((await json(gateway.base, '/api/shared-events/made-up', {
       cookie: cookieB,
     })).response.status, 404)
+
+    // Deleting an event must cancel only its accepted invitation, not B's own
+    // calendar or A's unrelated private event, and must not require manual sync.
+    const temporary = await json(gateway.base, '/api/events', {
+      cookie: cookieA, body: {
+        date: '2026-12-30', title: 'Family A temporary public event', time: '16:00',
+      },
+    })
+    assert.equal(temporary.response.status, 201)
+    const temporaryId = temporary.value.id
+    const temporaryInvite = await json(gateway.base, '/api/shared-events/invite', {
+      cookie: cookieA,
+      body: { eventIds: [temporaryId], recipientHouseholdIds: ['family-b'] },
+    })
+    assert.equal(temporaryInvite.response.status, 201)
+    const tempShareId = temporaryInvite.value.invitations[0].shareId
+    assert.equal((await json(gateway.base, '/api/shared-events/' + tempShareId + '/respond', {
+      cookie: cookieB, body: { decision: 'accepted' },
+    })).response.status, 200)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events.map(e => e.title), ['Family A temporary public event'])
+    assert.equal((await json(gateway.base, '/api/events/' + temporaryId, {
+      cookie: cookieA, method: 'DELETE',
+    })).response.status, 200)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events, [])
+    assert.equal(central.prepare(
+      'SELECT status FROM event_share_grants WHERE id = ?',
+    ).get(tempShareId).status, 'cancelled')
+    assert.deepEqual((await json(gateway.base, '/api/events', {
+      cookie: cookieB,
+    })).value.map(e => e.title), ['Family B private calendar'])
+    assert.deepEqual((await json(gateway.base, '/api/events', {
+      cookie: cookieA,
+    })).value.map(e => e.title),
+    ['Family A BBQ time changed', 'A SECRET APPOINTMENT'])
 
     const unknownAuth = await json(gateway.base, '/api/auth/whatever', { cookie: cookieA })
     assert.equal(unknownAuth.response.status, 404)
@@ -521,6 +599,8 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 401)
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB2 })).response.status, 401)
 
+    console.log('[PASS] Successful event edits refresh the accepted snapshot; rejected edits do not.')
+    console.log('[PASS] A deleted shared event cancels its own accepted grant without affecting other events.')
     console.log('[PASS] One selected event is invited, accepted and individually revoked over authenticated APIs.')
     console.log('[PASS] No unrelated event or private fields reach another household through event-sharing API.')
     console.log('[PASS] Only centrally connected households can receive event invitations.')
