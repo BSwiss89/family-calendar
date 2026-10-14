@@ -5,7 +5,7 @@ Status: Arney voice controls are implemented in draft PR #43 and must pass revie
 ## Getting started after approved deployment
 1. Open **Arney settings** (gear). Explicitly enable **Allow browser speech recognition** only if comfortable with browser-provider cloud transcription. This does not send audio to an OpenAI API or start listening automatically.
 2. On mobile, **tap** the blue + for the existing Quick Add sheet. **Hold** it for voice; a listening indicator appears, and **release** to finish speech recognition and submit a single command. Canceling the touch cancels the microphone session.
-3. On desktop/tablet, also enable wake words in Settings and click **Start Arney wake words** to begin foreground listening. Say "Hey Arney, [request]" or just "Hey Arney" and then speak the request during the next listening round. Click Stop to disable. The listener also stops when the page becomes hidden.
+3. On desktop/tablet, also enable wake words in Settings and click **Start Arney wake words** to begin foreground listening. Say "Hey Arney, [request]" or just "Hey Arney" and then speak the request during the next listening round. After Arney finishes processing the request and speaking its reply, the foreground listener resumes automatically. Click Stop to disable; it must stay off until explicitly restarted. The listener also stops when the page becomes hidden or permission is disabled.
 4. After a spoken command, review the transcript and any mutation preview before confirming. Destructive existing cancellation/reschedule flows always ask for confirmation.
 5. If the browser does not support recognition or access is disallowed, Arney offers typed input. Otherwise text fallback appears after three failed voice attempts; a recognized command may also be edited.
 
@@ -16,6 +16,11 @@ Status: Arney voice controls are implemented in draft PR #43 and must pass revie
 - "Schedule dentist tomorrow at 2 PM" or "Add meeting on 2026-10-20 at 14:00" (simple explicit dates and time); unassigned person by default.
 - Existing local-AI cancellation and rescheduling preview/confirm flows.
 - Voice responses: **Always**, **Speak when needed**, **Silent**.
+
+## Future dedicated wall-display mode (not part of PR #43)
+- When configured by the household in Settings, enable persistent on-device wake-word monitoring on the wall display after startup and after replies, with no microphone Start/Stop button on the home screen.
+- Listening must be disabled only through the wall display Settings, with a clear microphone status indicator. Prefer a dedicated local wake-word detector; the current browser-based foreground listener cannot guarantee true continuous or background operation.
+- Keep iPhone push-to-talk unchanged.
 
 ## Constraints and browser limitations
 - Browser speech recognition is **not a local wake-word detector** and may send spoken audio to the browser vendor's speech service. Permission is opt-in; cloud/provider behavior is outside app control.
