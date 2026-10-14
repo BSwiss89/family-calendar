@@ -168,6 +168,10 @@ test('central authenticated gateway denies one family access to another family b
 
     const unauthEvents = await json(gateway.base, '/api/events')
     assert.equal(unauthEvents.response.status, 401)
+    assert.equal((await json(gateway.base, '/api/households')).response.status, 401)
+    assert.equal((await json(gateway.base, '/api/households/select', {
+      body: { householdId: 'family-a' },
+    })).response.status, 401)
     assert.doesNotMatch(JSON.stringify(unauthEvents.value), /family [AB]/i)
     for (const route of ['/', '/uploads/private.jpg']) {
       const response = await fetch(gateway.base + route, { redirect: 'manual' })
@@ -190,6 +194,23 @@ test('central authenticated gateway denies one family access to another family b
     const cookieB = await login(gateway.base, 'familyadminb')
     assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieA })).value.authenticated, true)
     assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieB })).value.authenticated, true)
+    const householdsA = await json(gateway.base, '/api/households', { cookie: cookieA })
+    const householdsB = await json(gateway.base, '/api/households', { cookie: cookieB })
+    assert.deepEqual(householdsA.value.households.map(h => h.householdId), ['family-a'])
+    assert.deepEqual(householdsB.value.households.map(h => h.householdId), ['family-b'])
+    assert.equal(householdsA.value.selectedHouseholdId, 'family-a')
+    assert.equal(householdsB.value.selectedHouseholdId, 'family-b')
+    assert.equal((await json(gateway.base, '/api/households/select', {
+      cookie: cookieA, body: { householdId: 'family-b' },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, '/api/households/select', {
+      cookie: cookieA,
+      body: { householdId: 'family-a' },
+      headers: { Origin: 'https://evil.example' },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, '/api/households/unknown', {
+      cookie: cookieA,
+    })).response.status, 404)
 
     let addA = await json(gateway.base, '/api/events', {
       cookie: cookieA, body: { date: '2026-12-20', title: 'Family A private calendar', time: '12:00' },
@@ -248,19 +269,123 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieA })).response.status, 403)
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 200)
 
-    // A user explicitly granted multiple calendars must not silently default
-    // to one; a separate trusted household switcher will be required later.
+    // Multi-membership accounts must make an explicit, authorized choice.
+    // Session selections must be scoped to the current device, never the user
+    // or a manipulable tenant selector in the URL or browser header.
     grantHouseholdMembership(central, {
       serverVerifiedUserId: idB, householdId: 'family-a', role: 'member',
     })
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 409)
+    assert.equal((await json(gateway.base, '/api/events?household=family-a', {
+      cookie: cookieB,
+      headers: { 'X-Household-Id': 'family-a' },
+    })).response.status, 409)
+
+    const availableB = await json(gateway.base, '/api/households', { cookie: cookieB })
+    assert.deepEqual(
+      availableB.value.households.map(h => h.householdId),
+      ['family-a', 'family-b'],
+    )
+    assert.equal(availableB.value.selectedHouseholdId, null)
+
+    const deniedSelection = await json(gateway.base, '/api/households/select', {
+      cookie: cookieB, body: { householdId: 'nonexistent-family' },
+    })
+    assert.equal(deniedSelection.response.status, 403)
+    assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 409)
+
+    const csrfSelection = await json(gateway.base, '/api/households/select', {
+      cookie: cookieB,
+      body: { householdId: 'family-a' },
+      headers: { Origin: 'https://evil.example' },
+    })
+    assert.equal(csrfSelection.response.status, 403)
+    assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 409)
+
+    const chosenA = await json(gateway.base, '/api/households/select', {
+      cookie: cookieB,
+      body: { householdId: 'family-a' },
+    })
+    assert.equal(chosenA.response.status, 200)
+    assert.equal(chosenA.value.selectedHouseholdId, 'family-a')
+    assert.deepEqual(
+      (await json(gateway.base, '/api/events?household=family-b', {
+        cookie: cookieB, headers: { 'X-Household-Id': 'family-b' },
+      })).value.map(e => e.title),
+      ['Family A private calendar'],
+    )
+    assert.equal((await json(gateway.base, '/api/lists', {
+      cookie: cookieB,
+    })).value[0].name, 'Family A list')
+    assert.equal((await json(gateway.base, '/uploads/private-shared-name.jpg', {
+      cookie: cookieB,
+    })).value, 'ONLY family A photo bytes')
+
+    // Separate browser sessions for the *same* account cannot inherit each
+    // other's household selection or change it without their own request.
+    const cookieB2 = await login(gateway.base, 'familyadminb')
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: cookieB2,
+    })).response.status, 409)
+    assert.equal((await json(gateway.base, '/api/households', {
+      cookie: cookieB2,
+    })).value.selectedHouseholdId, null)
+
+    const chooseB2 = await json(gateway.base, '/api/households/select', {
+      cookie: cookieB2,
+      body: { householdId: 'family-b' },
+    })
+    assert.equal(chooseB2.response.status, 200)
+    assert.deepEqual((await json(gateway.base, '/api/events', {
+      cookie: cookieB2,
+    })).value.map(e => e.title), ['Family B private calendar'])
+    assert.deepEqual((await json(gateway.base, '/api/events', {
+      cookie: cookieB,
+    })).value.map(e => e.title), ['Family A private calendar'])
+
+    const chooseB = await json(gateway.base, '/api/households/select', {
+      cookie: cookieB,
+      body: { householdId: 'family-b' },
+    })
+    assert.equal(chooseB.response.status, 200)
+    assert.deepEqual((await json(gateway.base, '/api/events', {
+      cookie: cookieB,
+    })).value.map(e => e.title), ['Family B private calendar'])
+    assert.equal((await json(gateway.base, '/api/households', {
+      cookie: cookieB,
+    })).value.selectedHouseholdId, 'family-b')
+
+    // A deliberately revoked membership ceases to grant access even when
+    // its previously selected household was stored in the central DB.
+    await json(gateway.base, '/api/households/select', {
+      cookie: cookieB,
+      body: { householdId: 'family-a' },
+    })
+    central.prepare([
+      'UPDATE household_memberships SET disabled = 1',
+      'WHERE user_id = ? AND household_id =',
+      '(SELECT id FROM household_registry WHERE storage_id = ?)',
+    ].join(' ')).run(idB, 'family-a')
+    assert.equal((await json(gateway.base, '/api/households/select', {
+      cookie: cookieB,
+      body: { householdId: 'family-a' },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, '/api/households', {
+      cookie: cookieB,
+    })).value.selectedHouseholdId, 'family-b')
+    assert.deepEqual((await json(gateway.base, '/api/events', {
+      cookie: cookieB,
+    })).value.map(e => e.title), ['Family B private calendar'])
+
     central.prepare('UPDATE family_users SET disabled = 1 WHERE id = ?').run(idB)
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 401)
+    assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB2 })).response.status, 401)
 
     console.log('[PASS] One secure login gateway routes each authenticated user only to their household.')
     console.log('[PASS] Guessed tenant selectors cannot read unrelated events, lists or images.')
     console.log('[PASS] Invalid cookies, revoked memberships and disabled accounts block requests.')
-    console.log('[PASS] Multi-household accounts fail closed until a safe switcher exists.')
+    console.log('[PASS] Multi-household accounts require explicit, CSRF-checked selection.')
+    console.log('[PASS] Selections are independently stored per trusted device and rechecked after revocation.')
     console.log('[PASS] All servers were private loopback listeners with disposable SQLite DBs.')
   } finally {
     const failures = []
