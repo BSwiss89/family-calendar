@@ -178,12 +178,12 @@ function grantForActor(db, shareId, actor, direction, actorHouseholdId) {
   if (!row) throw new Error('Share not available.')
   const targetHouseholdId = direction === 'recipient'
     ? row.recipientHouseholdId : row.sourceHouseholdId
-  // A user who belongs to more than one family can only act on the
-  // family they explicitly selected in their verified device session.
+  // Check actual membership first. An otherwise authorized multi-family
+  // member must ALSO be acting in the selected verified device context.
+  membership(db, actor, targetHouseholdId)
   if (actorHouseholdId !== targetHouseholdId) {
     throw new Error('Share is not available to the selected household.')
   }
-  membership(db, actor, targetHouseholdId)
   return row
 }
 
