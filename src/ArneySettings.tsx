@@ -20,6 +20,14 @@ export default function ArneySettings({ onChange }: Props) {
   const [preferences, setPreferences] = useState(readArneyPreferences)
   const [error, setError] = useState(false)
 
+  // Read-only capability checks. Never request microphone permission here.
+  const browser = typeof window === 'undefined' ? null : window
+  const navigatorInfo = typeof navigator === 'undefined' ? null : navigator
+  const speechStandard = !!browser && 'SpeechRecognition' in browser
+  const speechWebkit = !!browser && 'webkitSpeechRecognition' in browser
+  const microphoneApi = !!navigatorInfo?.mediaDevices?.getUserMedia
+  const secureContext = browser?.isSecureContext === true
+
   function update(changes: Partial<ArneyPreferences>) {
     const next = { ...preferences, ...changes }
     if (!saveArneyPreferences(next)) {
@@ -82,6 +90,17 @@ export default function ArneySettings({ onChange }: Props) {
         />
         <span><strong>Confirm before making changes</strong><span style={{ display: 'block' }}>Destructive actions will always require confirmation.</span></span>
       </label>
+      <details>
+        <summary>Browser voice diagnostics</summary>
+        <div style={{ display: 'grid', gap: 6, marginTop: 10, overflowWrap: 'anywhere' }}>
+          <div>Secure context: {secureContext ? 'Yes' : 'No'}</div>
+          <div>Connection: {browser?.location.protocol ?? 'Unknown'}</div>
+          <div>SpeechRecognition: {speechStandard ? 'Available' : 'Unavailable'}</div>
+          <div>webkitSpeechRecognition: {speechWebkit ? 'Available' : 'Unavailable'}</div>
+          <div>Microphone API (getUserMedia): {microphoneApi ? 'Available' : 'Unavailable'}</div>
+          <small>Read-only checks. No microphone permission is requested and no audio is captured.</small>
+        </div>
+      </details>
       <p style={{ margin: 0, opacity: 0.75 }}>Preferences are saved on this device only.</p>
       {error && <p role="alert">Could not save Arney settings on this device.</p>}
     </section>
