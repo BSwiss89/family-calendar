@@ -378,7 +378,7 @@ export async function startPrivateHouseholdGateway({
     // installFamilyAuth has already validated the central session and CSRF.
     const household = trustedHousehold(request, response)
     if (!household) return
-    const eventMutation = /^\\/api\\/events\\/([1-9][0-9]*)(?:\\?[^#]*)?$/.exec(
+    const eventMutation = /^\/api\/events\/([1-9][0-9]*)(?:\?[^#]*)?$/.exec(
       request.originalUrl,
     )
     const shouldSync = eventMutation && ['PUT', 'DELETE'].includes(request.method)
