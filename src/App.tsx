@@ -13,6 +13,7 @@ import SharedEventsOverlay from './SharedEventsOverlay'
 import FamilyEventSharing from './FamilyEventSharing'
 import { DesktopInvitations, MobileInvitationReminder } from './InvitationCenter'
 import { useInvitationInbox } from './useInvitationInbox'
+import { useAuthenticatedCalendarIdentity } from './useAuthenticatedCalendarIdentity'
 import { useSharedEventFeed } from './useSharedEventFeed'
 import { sharedEventsInRange, formatSharedTime } from './sharedEventOverlay'
 import { arneySpeechAvailable, beginArneySpeech, speakArneyReply, type ArneySpeechResult, type ArneySpeechSession } from './arneySpeech'
@@ -3754,6 +3755,8 @@ const [
   // Accepted snapshots are NOT editable local events; their IDs are separate.
   const receivedSharedEvents = useSharedEventFeed(page === 'calendar')
   const invitationInbox = useInvitationInbox()
+  const { account: signedInAccount, creators: verifiedEventCreators } =
+    useAuthenticatedCalendarIdentity(events)
 
 function positionMobileScheduleTimeline(
   targetDate: Date
@@ -14119,6 +14122,19 @@ return (
 
   <div className="sidebar-nav-spacer" />
 
+  {signedInAccount && (
+    <button
+      type="button"
+      className="sidebar-nav-button family-account-nav"
+      title={`Signed in as ${signedInAccount.displayName}`}
+      onClick={() => window.location.assign('/account')}
+    >
+      <span className="sidebar-nav-icon">👤</span>
+      <span>{signedInAccount.displayName}</span>
+      <small>{signedInAccount.accountKind === 'hub' ? 'Hub' : 'Member'}</small>
+    </button>
+  )}
+
   <button
     type="button"
     className={`sidebar-nav-button ${
@@ -14192,6 +14208,17 @@ return (
     </span>
   </div>
 
+  {signedInAccount && (
+    <button
+      type="button"
+      className="mobile-account-identity"
+      aria-label={`Account: ${signedInAccount.displayName}`}
+      title={`${signedInAccount.displayName} (${signedInAccount.accountKind})`}
+      onClick={() => window.location.assign('/account')}
+    >
+      <span aria-hidden="true">👤</span>
+    </button>
+  )}
   <button
   type="button"
   className="mobile-capture-button"
@@ -18319,6 +18346,17 @@ onClick={(event) => {
         <h2>
           {viewingCalendarEvent.title}
         </h2>
+        {verifiedEventCreators.find(creator =>
+          creator.eventId === viewingCalendarEvent.id) && (
+          <p className="event-verified-creator">
+            Created by: {verifiedEventCreators.find(creator =>
+              creator.eventId === viewingCalendarEvent.id)?.displayName}
+            {' · '}
+            {verifiedEventCreators.find(creator =>
+              creator.eventId === viewingCalendarEvent.id)?.accountKind === 'hub'
+              ? 'Family hub' : 'Member account'}
+          </p>
+        )}
       </div>
 
       <button
@@ -18812,7 +18850,15 @@ const occurrenceEndDate =
   </div>
 </div>
   )}
-</div>    
+</div>
+              {signedInAccount && (
+                <p className="event-verified-creator">
+                  Signed in as {signedInAccount.displayName}
+                  {' · '}
+                  {signedInAccount.accountKind === 'hub'
+                    ? 'Family hub' : 'Member account'}
+                </p>
+              )}
               {selectedDay === null ? (
                 <p>Click a day on the calendar first.</p>
               ) : (
