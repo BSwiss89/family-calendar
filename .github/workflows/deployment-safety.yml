@@ -50,5 +50,7 @@ jobs:
           }
       - name: Test Arney wake phrases and fallback
         run: node --experimental-strip-types --test scripts/test-arney-voice.mjs
+      - name: Test Arney safe calendar and list commands
+        run: node --experimental-strip-types --test scripts/test-arney-commands.mjs
       - name: Build frontend
         run: npm run build
