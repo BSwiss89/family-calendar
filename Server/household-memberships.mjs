@@ -119,7 +119,7 @@ export function lookupGrantedHouseholdForSessionUser(identityDatabase, {
     'WHERE u.id = ? AND h.storage_id = ? AND u.disabled = 0',
     'AND m.disabled = 0 AND h.disabled = 0',
   ].join(' ')).get(serverVerifiedUserId, requestedHouseholdId)
-  return row ?? null
+  return row ? { householdId: row.householdId, displayName: row.displayName, role: row.role } : null
 }
 
 /** Return only the households the authenticated user is explicitly granted. */
@@ -136,5 +136,9 @@ export function listGrantedHouseholdsForSessionUser(identityDatabase, {
     'JOIN family_users u ON u.id = m.user_id',
     'WHERE u.id = ? AND u.disabled = 0 AND h.disabled = 0 AND m.disabled = 0',
     'ORDER BY h.display_name, h.storage_id',
-  ].join(' ')).all(serverVerifiedUserId)
+  ].join(' ')).all(serverVerifiedUserId).map(row => ({
+    householdId: row.householdId,
+    displayName: row.displayName,
+    role: row.role,
+  }))
 }
