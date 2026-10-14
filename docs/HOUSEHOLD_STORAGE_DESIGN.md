@@ -192,8 +192,32 @@ calendar subscription / Share entire calendar feature.**
 - Individual usernames are authentication identities. Event invitation
   or acceptance NEVER creates household membership in the source.
 
-This feature is DESIGN ONLY, not yet added to PR #46's gateway. No
-family-to-family event-sharing endpoint or public access is enabled.
+### Implemented in this PR: offline selected-event sharing model
+
+Server/event-only-shares.mjs now provides an explicitly selected-event,
+central-database invitation model and privacy-limited event snapshots. Its
+server-only functions create pending grants for individual event/recipient
+pairs, accept/decline by recipient household membership, revoke individual
+grants from the source, list a recipient's pending/accepted *selected*
+events, and refresh/cancel one source event's existing snapshots. Title,
+date, start/end time and source household display name are the only
+fields copied; source notes, location, people and other calendar records
+are NEVER copied to shared snapshots.
+
+Sending several events creates independent grants, so revoking one does
+not revoke another event or a second recipient. Each batch is atomic and
+bounded. Recurrence is deliberately REJECTED until there is an explicit
+single-occurrence vs series-sharing choice. Unknown events, invalid IDs,
+unauthorized users, wildcard recipients and accidental full-calendar
+sharing are rejected. All rules are covered by disposable SQLite tests.
+
+**Still not connected to the private gateway or calendar UI.** This is
+offline backend logic only. In particular, synchronization must be called
+from reviewed, trusted source-event mutation paths before changes update
+recipients automatically. Cancellation notices, retries, public invites,
+recurring sharing, data restoration, attachment permissions and invitations
+in the UI are not implemented. No family-to-family sharing endpoints or
+public access are enabled. 
 
 ## Next small implementation slices
 
