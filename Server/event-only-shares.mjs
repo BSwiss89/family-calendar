@@ -253,7 +253,12 @@ export function synchronizeSelectedEventShare(db, {
   try {
     summary = eventSummary(sourceDatabase, sourceEventId)
   } catch (error) {
-    if (error.message !== 'Selected source event does not exist.') throw error
+    // A formerly single event becoming recurring MUST NOT silently extend
+    // the recipient's grant to the whole series. Cancel its old snapshot.
+    if (error.message !== 'Selected source event does not exist.'
+      && !error.message.startsWith('Recurring events require explicit')) {
+      throw error
+    }
     summary = null
   }
   if (summary) {
