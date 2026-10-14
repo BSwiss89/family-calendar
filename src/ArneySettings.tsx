@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { getArneySpeechDiagnostics } from './arneySpeech'
 import {
   readArneyPreferences,
   saveArneyPreferences,
@@ -19,6 +20,7 @@ const responseModes: { value: ArneyVoiceResponseMode; title: string; description
 export default function ArneySettings({ onChange }: Props) {
   const [preferences, setPreferences] = useState(readArneyPreferences)
   const [error, setError] = useState(false)
+  const [speechEvents, setSpeechEvents] = useState(getArneySpeechDiagnostics)
 
   // Read-only capability checks. Never request microphone permission here.
   const browser = typeof window === 'undefined' ? null : window
@@ -99,6 +101,16 @@ export default function ArneySettings({ onChange }: Props) {
           <div>webkitSpeechRecognition: {speechWebkit ? 'Available' : 'Unavailable'}</div>
           <div>Microphone API (getUserMedia): {microphoneApi ? 'Available' : 'Unavailable'}</div>
           <small>Read-only checks. No microphone permission is requested and no audio is captured.</small>
+          <div style={{ marginTop: 12 }}>
+            <strong>Last voice attempt</strong>
+            <p style={{ margin: '6px 0' }}>Browser events only. No audio or spoken words are saved.</p>
+            <button type="button" onClick={() => setSpeechEvents(getArneySpeechDiagnostics())}>
+              Refresh voice attempt log
+            </button>
+            <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 12, marginTop: 8 }}>
+              {speechEvents.length ? speechEvents.join('\n') : 'No attempt recorded in this tab yet.'}
+            </pre>
+          </div>
         </div>
       </details>
       <p style={{ margin: 0, opacity: 0.75 }}>Preferences are saved on this device only.</p>
