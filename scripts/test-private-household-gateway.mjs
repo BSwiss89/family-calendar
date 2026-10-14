@@ -180,7 +180,7 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal(unauthEvents.response.status, 401)
     for (const route of [
       '/api/shared-events/recipients', '/api/shared-events/invitations',
-      '/api/shared-events/accepted',
+      '/api/shared-events/accepted', '/api/shared-events/sent',
     ]) {
       assert.equal((await json(gateway.base, route)).response.status, 401)
     }
@@ -329,6 +329,13 @@ test('central authenticated gateway denies one family access to another family b
       cookie: cookieB,
     })).value.events, [])
 
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/sent', {
+      cookie: cookieA,
+    })).value.shares, [])
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/sent', {
+      cookie: cookieB,
+    })).value.shares, [])
+
     const invalidSelection = await json(gateway.base, '/api/shared-events/invite', {
       cookie: cookieA, body: { eventIds: ['*'], recipientHouseholdIds: ['family-b'] },
     })
@@ -348,6 +355,18 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal(shared.response.status, 201, JSON.stringify(shared.value))
     const sharedId = shared.value.invitations[0].shareId
     assert.ok(Number.isSafeInteger(sharedId))
+    const sentFromA = await json(gateway.base, '/api/shared-events/sent', {
+      cookie: cookieA,
+    })
+    assert.equal(sentFromA.response.status, 200)
+    assert.deepEqual(sentFromA.value.shares.map(share => share.title), [
+      'Family A private calendar',
+    ])
+    assert.equal(sentFromA.value.shares[0].recipientHouseholdId, 'family-b')
+    assert.equal(sentFromA.value.shares[0].status, 'pending')
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/sent', {
+      cookie: cookieB,
+    })).value.shares, [])
     assert.equal((await json(gateway.base, '/api/shared-events/invitations', {
       cookie: cookieA,
     })).value.invitations.length, 0)
@@ -374,6 +393,9 @@ test('central authenticated gateway denies one family access to another family b
       cookie: cookieB, body: { decision: 'accepted' },
     })
     assert.equal(accepted.response.status, 200)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/sent', {
+      cookie: cookieA,
+    })).value.shares.map(share => share.status), ['accepted'])
     const approved = await json(gateway.base, '/api/shared-events/accepted', {
       cookie: cookieB,
     })
@@ -430,6 +452,9 @@ test('central authenticated gateway denies one family access to another family b
     assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
       cookie: cookieB,
     })).value.events, [])
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/sent', {
+      cookie: cookieA,
+    })).value.shares, [])
     assert.equal((await json(gateway.base, '/api/shared-events/made-up', {
       cookie: cookieB,
     })).response.status, 404)
