@@ -68,7 +68,15 @@ test('auth protects every calendar API, homepage and private uploads before publ
 
     const loginPage = await fetch(site.base + '/login')
     assert.equal(loginPage.status, 200)
-    assert.match(await loginPage.text(), /Family Calendar/)
+    const loginHtml = await loginPage.text()
+    assert.match(loginHtml, /Family Calendar/)
+    assert.match(loginHtml, /id="login-content" hidden/)
+    assert.match(loginHtml, /Checking your saved login/)
+    assert.match(loginHtml, /id="session-check"/)
+    const loginScript = await fetch(site.base + '/auth/login.js')
+    assert.equal(loginScript.status, 200)
+    assert.match(await loginScript.text(), /showLoginForm/)
+
 
     const insecure = await fetch(site.base + '/api/auth/login', {
       method: 'POST',
