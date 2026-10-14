@@ -18426,11 +18426,7 @@ onClick={(event) => {
       </div>
     )}
 
-    <FamilyEventSharing
-      events={events}
-      preselectedEventId={viewingCalendarEvent.id}
-      buttonLabel="Share Event"
-    />
+    <FamilyEventSharing event={viewingCalendarEvent} />
 
     <div className="event-details-actions">
   <button
@@ -18624,11 +18620,6 @@ editingEventId === null &&
     )}
   </p>
 )}
-
-    <FamilyEventSharing
-      events={events}
-      buttonLabel="Share Events & Invitations"
-    />
 
     <div
   className={`month-selected-events ${
