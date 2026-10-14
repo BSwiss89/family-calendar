@@ -17,7 +17,7 @@ import {
   createEventShareTables, inviteSelectedEvents,
   listTrustedEventShareRecipients, listEventShareInvitations,
   listAcceptedSharedEvents, respondToEventInvitation,
-  revokeSelectedEventShare,
+  revokeSelectedEventShare, synchronizeSelectedEventShare,
 } from './event-only-shares.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import {
@@ -95,7 +95,7 @@ function safeResponseHeaders(headers) {
   return result
 }
 
-function proxyRequest(request, response, upstreamPort) {
+function proxyRequest(request, response, upstreamPort, onCompletedMutation = null) {
   if (!HTTP_METHODS.has(request.method)) {
     response.status(405).json({ error: 'Unsupported request method.' })
     return
@@ -122,6 +122,22 @@ function proxyRequest(request, response, upstreamPort) {
     if (response.headersSent || response.destroyed) {
       upstreamResponse.destroy()
       return
+    }
+    // The real backend has committed an ordinary event PUT/DELETE before
+    // sending a success response. Synchronize ONLY the exact event mutated,
+    // never a client-selected household or any unrelated event ID. This
+    // private test hook is not yet a durable queue for crash recovery.
+    if (onCompletedMutation && upstreamResponse.statusCode >= 200
+        && upstreamResponse.statusCode < 300) {
+      upstreamResponse.once('end', () => {
+        try {
+          onCompletedMutation()
+        } catch (error) {
+          // The source event may already be committed. We must NOT pretend
+          // rolling it back is possible. Keep logging for eventual replay.
+          console.error('Private event-share update hook failed:', error)
+        }
+      })
     }
     response.writeHead(
       upstreamResponse.statusCode ?? 502,
@@ -362,7 +378,33 @@ export async function startPrivateHouseholdGateway({
     // installFamilyAuth has already validated the central session and CSRF.
     const household = trustedHousehold(request, response)
     if (!household) return
-    proxyRequest(request, response, portByHousehold.get(household.householdId))
+    const eventMutation = /^\\/api\\/events\\/([1-9][0-9]*)(?:\\?[^#]*)?$/.exec(
+      request.originalUrl,
+    )
+    const shouldSync = eventMutation && ['PUT', 'DELETE'].includes(request.method)
+    const sourceEventId = shouldSync ? Number(eventMutation[1]) : null
+    const safeEventId = Number.isSafeInteger(sourceEventId) && sourceEventId > 0
+    const sync = shouldSync && safeEventId
+      ? () => {
+        const path = resolveHouseholdStorage({
+          serverDirectory,
+          storageRoot,
+          householdId: household.householdId,
+        }).databasePath
+        const sourceDatabase = new DatabaseSync(path, { readOnly: true })
+        try {
+          synchronizeSelectedEventShare(identityDatabase, {
+            serverVerifiedUserId: request.familyAccount.user_id,
+            sourceHouseholdId: household.householdId,
+            sourceEventId,
+            sourceDatabase,
+          })
+        } finally {
+          sourceDatabase.close()
+        }
+      }
+      : null
+    proxyRequest(request, response, portByHousehold.get(household.householdId), sync)
   })
 
   const server = http.createServer(app)
