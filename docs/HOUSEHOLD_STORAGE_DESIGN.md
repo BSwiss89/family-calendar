@@ -228,6 +228,9 @@ event-only endpoints (not reachable from the public internet):
   for the current recipient household, not another household the same user
   might belong to.
 - GET /api/shared-events/accepted returns only accepted event snapshots.
+- GET /api/shared-events/sent shows the current source household's active
+  individual invitations, their approved recipient names and statuses; this
+  does not disclose recipient calendar content.
 - POST /api/shared-events/:shareId/revoke removes an individual invitation or
   accepted share from its originating household.
 
@@ -263,12 +266,13 @@ Before production sharing, immutable source-event identity must protect
 against reuse of numeric SQLite IDs after deletion, and readers must
 reconcile missing/out-of-date shares before showing them.
 
-**Remaining incomplete:** This is test-only HTTP routing. There is no
-recipient-facing invitation UI or calendar overlay yet. Cancellation
-notices, durable retries and reconciliation, restoration, safe recurring
-sharing, attachment permissions, friend invitation onboarding and the
-production security review are pending. The existing preview and live
-calendar are not migrated or opened publicly.
+**Remaining incomplete:** This is test-only HTTP routing; the
+invitation controls and calendar overlay are present only as frontend
+code and not connected to a real multi-family browser deployment yet.
+Cancellation notices, durable retries and reconciliation, restoration,
+safe recurring sharing, attachment permissions, trusted friend-contact
+onboarding and production security review are pending. The existing
+preview and live calendar are not migrated or opened publicly.
 
 ## Next small implementation slices
 
@@ -318,8 +322,41 @@ The read-only field/parser and date-range filtering have dedicated
 Node tests (`scripts/test-shared-event-overlay.mjs`) included in
 Deployment safety. There is **not yet a live multi-family gateway
 preview** to visually inspect these chips as actual accepted shares;
-this is code and automated tests only. Accept/decline/share controls
-and invitations in the calendar UI are separate future work.
+this is code and automated tests only.
+
+## Explicit individual-event invitations in Calendar UI
+
+The calendar now also includes a **Share events & invitations** control,
+which is shown ONLY when the authenticated gateway successfully supports
+all three JSON endpoints for trusted recipient families, incoming invitations
+and the sender's existing outgoing grants. On the original legacy backend
+(with missing endpoints) the entire control is hidden without showing
+errors to family users or enabling dangerous unprotected actions.
+
+The panel offers checkboxes for *specific* non-recurring source events
+(up to 20), checkboxes for *specific* administrator-connected recipient
+households (up to 8 and no more than 80 combinations), and an explicit
+confirmation describing the data that recipients see. There is NO option
+to share a whole calendar, enumerate unconnected households, or alter
+another family's events. A recipient sees only an individual pending
+invitation, can Accept/Decline it, and when accepted its read-only
+snapshot is refreshed immediately. A sender can review individual
+pending/accepted grants and revoke one without touching any other grant.
+The source event list remains independent of received read-only entries.
+
+Only title, date, time and the sending household display name appear in
+invitations; event notes, location, people and private household records
+never leave the source calendar. Invitations expose these selected details
+*before* acceptance, as explicitly explained in the sender confirmation
+message.
+
+The UI parses server data through strict field allowlists. It never trusts
+tenant IDs or source database paths from browser input. The server
+revalidates all event and recipient IDs against the authenticated user
+and approved family connections. The panel is intended for the future
+authenticated multi-family gateway and cannot be exercised as a real
+family-to-family invitation from today's single-family preview yet.
+
 Source-event sync still needs durable reconciliation and additional
 mutation coverage. Do not publish or merge based solely on this view.
 
