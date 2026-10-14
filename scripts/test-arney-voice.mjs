@@ -182,3 +182,23 @@ test('push-to-talk still waits for release when Chrome reports a final result', 
     globalThis.window = original
   }
 })
+
+
+test('wake recovery waits until browser speech synthesis is quiet', async () => {
+  const { arneyReplyAudioActive } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  try {
+    globalThis.window = {}
+    assert.equal(arneyReplyAudioActive(), false, 'no synthesis API is safe to resume')
+    globalThis.window.speechSynthesis = { speaking: true, pending: false, paused: false }
+    assert.equal(arneyReplyAudioActive(), true, 'never listen over current speech')
+    globalThis.window.speechSynthesis = { speaking: false, pending: true, paused: false }
+    assert.equal(arneyReplyAudioActive(), true, 'queued speech also blocks listening')
+    globalThis.window.speechSynthesis = { speaking: false, pending: false, paused: true }
+    assert.equal(arneyReplyAudioActive(), true, 'paused speech is not finished')
+    globalThis.window.speechSynthesis = { speaking: false, pending: false, paused: false }
+    assert.equal(arneyReplyAudioActive(), false, 'resume only when reply is finished')
+  } finally {
+    globalThis.window = original
+  }
+})
