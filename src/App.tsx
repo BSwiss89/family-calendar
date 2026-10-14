@@ -9,6 +9,9 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import { arneySpeechAvailable, beginArneySpeech, speakArneyReply, type ArneySpeechResult, type ArneySpeechSession } from './arneySpeech'
+import { readArneyPreferences } from './arneyPreferences'
+import { shouldOfferArneyTextFallback } from './arneyWakePhrase'
 
 
 import {
@@ -3463,6 +3466,29 @@ const calendarAddHoldTimerRef =
 const calendarAddLongPressRef =
   useRef(false)
 
+const arneySpeechSessionRef = useRef<ArneySpeechSession | null>(null)
+const arneyBufferedResultRef = useRef<ArneySpeechResult | null>(null)
+const arneyPreconditionRef = useRef('')
+const arneyReleasedRef = useRef(false)
+const arneyFailuresRef = useRef(0)
+const arneyCommandBusyRef = useRef(false)
+const [arneyListening, setArneyListening] = useState(false)
+const [arneyTextFallback, setArneyTextFallback] = useState(false)
+
+useEffect(() => {
+  const onArneyCommand = (event: Event) => {
+    const command = (event as CustomEvent<string>).detail
+    if (typeof command !== 'string' || !command.trim() || arneyCommandBusyRef.current) return
+    setArneyTextFallback(false)
+    setAiCommandText(command)
+    setAiCommandResult('')
+    setAiCommandOpen(true)
+    void submitAiCommand(command)
+  }
+  window.addEventListener('arney:voice-command', onArneyCommand)
+  return () => window.removeEventListener('arney:voice-command', onArneyCommand)
+}, [])
+
 const [aiCommandOpen, setAiCommandOpen] =
   useState(false)
 
@@ -4251,11 +4277,13 @@ async function submitAiCommand(
 
   if (
     command === '' ||
-    aiCommandLoading
+    aiCommandLoading ||
+    arneyCommandBusyRef.current
   ) {
     return
   }
 
+ arneyCommandBusyRef.current = true
  setAiCommandLoading(true)
 setAiCommandResult('')
 setAiCancellationPreview(null)
@@ -4372,43 +4400,113 @@ setAiCommandResult(
       )
     )
   } finally {
+    arneyCommandBusyRef.current = false
     setAiCommandLoading(false)
   }
 }
 
 
+function arneyReply(message: string, important = false) {
+  const mode = readArneyPreferences().responseMode
+  if (mode === 'always' || (mode === 'needed' && important)) speakArneyReply(message)
+}
+
+function arneyVoiceFailure(message: string, forceText = false) {
+  arneyFailuresRef.current += 1
+  if (forceText || shouldOfferArneyTextFallback(arneyFailuresRef.current)) {
+    setArneyTextFallback(true)
+    setAiCommandResult(message)
+    setAiCommandOpen(true)
+  } else {
+    showAppNotification(message + ' Hold + to try again.')
+  }
+  arneyReply(message, true)
+}
+
+function processArneyVoiceResult() {
+  const result = arneyBufferedResultRef.current
+  if (!arneyReleasedRef.current || !result) return
+  arneyBufferedResultRef.current = null
+  arneySpeechSessionRef.current = null
+  setArneyListening(false)
+  if (result.kind === 'transcript' && result.text.trim()) {
+    arneyFailuresRef.current = 0
+    setArneyTextFallback(false)
+    setAiCommandText(result.text.trim())
+    setAiCommandResult('')
+    setAiCommandOpen(true)
+    void submitAiCommand(result.text.trim())
+  } else if (result.kind === 'error') {
+    const message = result.reason === 'not-allowed' || result.reason === 'service-not-allowed'
+      ? 'Microphone access was denied. Check your browser permissions.'
+      : 'Could not recognize speech (' + result.reason + ').'
+    arneyVoiceFailure(message)
+  } else {
+    arneyVoiceFailure('I did not hear a command.')
+  }
+}
+
 function startCalendarAddHold() {
   calendarAddLongPressRef.current = false
-
-  if (
-    calendarAddHoldTimerRef.current !== null
-  ) {
-    window.clearTimeout(
-      calendarAddHoldTimerRef.current
-    )
-  }
-
-  calendarAddHoldTimerRef.current =
-    window.setTimeout(() => {
-      calendarAddHoldTimerRef.current = null
-      calendarAddLongPressRef.current = true
-
-            setAiCommandText('')
-      setQuickAddOpen(false)
-      setAiCommandOpen(true)
-    }, 800)
+  arneyReleasedRef.current = false
+  arneyBufferedResultRef.current = null
+  arneyPreconditionRef.current = ''
+  arneySpeechSessionRef.current?.cancel()
+  arneySpeechSessionRef.current = null
+  if (calendarAddHoldTimerRef.current !== null) window.clearTimeout(calendarAddHoldTimerRef.current)
+  // Short taps still open Quick Add. Only a hold starts voice recognition.
+  calendarAddHoldTimerRef.current = window.setTimeout(() => {
+    calendarAddHoldTimerRef.current = null
+    calendarAddLongPressRef.current = true
+    setQuickAddOpen(false)
+    const prefs = readArneyPreferences()
+    if (!prefs.browserSpeechEnabled) {
+      arneyPreconditionRef.current = 'Allow browser speech recognition in Arney settings first. Your browser may use cloud speech processing.'
+      return
+    }
+    if (!arneySpeechAvailable()) {
+      arneyPreconditionRef.current = 'Speech recognition is unavailable in this browser. You can type instead.'
+      return
+    }
+    setAiCommandText('')
+    setAiCommandResult('')
+    arneySpeechSessionRef.current = beginArneySpeech(result => {
+      arneyBufferedResultRef.current = result
+      setArneyListening(false)
+      processArneyVoiceResult()
+    }, setArneyListening)
+  }, 400)
 }
 
 function cancelCalendarAddHold() {
-  if (
-    calendarAddHoldTimerRef.current !== null
-  ) {
-    window.clearTimeout(
-      calendarAddHoldTimerRef.current
-    )
-
+  if (calendarAddHoldTimerRef.current !== null) {
+    window.clearTimeout(calendarAddHoldTimerRef.current)
     calendarAddHoldTimerRef.current = null
   }
+  if (!calendarAddLongPressRef.current) return
+  arneyReleasedRef.current = true
+  if (arneyPreconditionRef.current) {
+    setAiCommandResult(arneyPreconditionRef.current)
+    setArneyTextFallback(true)
+    setAiCommandOpen(true)
+    arneyPreconditionRef.current = ''
+    return
+  }
+  arneySpeechSessionRef.current?.stop()
+  processArneyVoiceResult()
+}
+
+function abortCalendarAddHold() {
+  if (calendarAddHoldTimerRef.current !== null) {
+    window.clearTimeout(calendarAddHoldTimerRef.current)
+    calendarAddHoldTimerRef.current = null
+  }
+  arneyReleasedRef.current = false
+  arneyBufferedResultRef.current = null
+  arneyPreconditionRef.current = ''
+  arneySpeechSessionRef.current?.cancel()
+  arneySpeechSessionRef.current = null
+  setArneyListening(false)
 }
 
 function consumeCalendarAddLongPress() {
@@ -13922,10 +14020,10 @@ return (
   <button
   type="button"
   className="mobile-capture-button"
-  aria-label="Open Quick Add"
+  aria-label={arneyListening ? 'Arney listening; release to send' : 'Quick Add; hold to speak to Arney'}
   onPointerDown={startCalendarAddHold}
   onPointerUp={cancelCalendarAddHold}
-  onPointerCancel={cancelCalendarAddHold}
+  onPointerCancel={abortCalendarAddHold}
   onContextMenu={(event) => {
     event.preventDefault()
   }}
@@ -13939,6 +14037,11 @@ return (
 >
   +
 </button>
+  {arneyListening && (
+    <div className="arney-listening-indicator" role="status" aria-live="polite">
+      🎙 Arney is listening — release + to send
+    </div>
+  )}
 </div>
 
 {aiCommandOpen &&
@@ -13961,7 +14064,7 @@ return (
               Calendar Assistant
             </span>
 
-            <h2>What would you like to do?</h2>
+            <h2>Arney</h2>
           </div>
 
           <button
@@ -13983,18 +14086,26 @@ return (
     void submitAiCommand()
   }}
 >
+{arneyTextFallback ? (
           <textarea
             className="ai-command-input"
             value={aiCommandText}
-            onChange={(event) => {
-              setAiCommandText(
-                event.target.value
-              )
-            }}
-            placeholder="Try: Cancel my dentist appointment tomorrow at 2 PM"
+            onChange={(event) => setAiCommandText(event.target.value)}
+            placeholder="Type your command for Arney"
             autoFocus
           />
-{aiCancellationPreview?.status ===
+        ) : (
+          <div className="arney-voice-transcript" aria-live="polite">
+            {aiCommandText ? (
+              <>
+                <strong>You said:</strong> {aiCommandText}
+                <button type="button" onClick={() => setArneyTextFallback(true)}>Edit command</button>
+              </>
+            ) : (
+              <span>Hold the + button to speak. Text becomes available after three failed attempts or if speech is unavailable.</span>
+            )}
+          </div>
+        )}aiCancellationPreview?.status ===
   'needs_clarification' &&
   aiCancellationPreview.matches?.length === 0 && (
     <div className="ai-cancel-confirmation">
@@ -19380,7 +19491,7 @@ const occurrenceEndDate =
                               type="button"
                   onPointerDown={startCalendarAddHold}
                   onPointerUp={cancelCalendarAddHold}
-                  onPointerCancel={cancelCalendarAddHold}
+                  onPointerCancel={abortCalendarAddHold}
                   onContextMenu={(event) => {
                     event.preventDefault()
                   }}
@@ -19467,7 +19578,7 @@ const occurrenceEndDate =
                 type="button"
         onPointerDown={startCalendarAddHold}
         onPointerUp={cancelCalendarAddHold}
-        onPointerCancel={cancelCalendarAddHold}
+        onPointerCancel={abortCalendarAddHold}
 onContextMenu={(event) => {
           event.preventDefault()
         }}
