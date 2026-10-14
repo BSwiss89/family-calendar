@@ -78,6 +78,14 @@ if ($LASTEXITCODE -ne 0 -or $changed.Count -eq 0) {
 
 $frontendAllowed = '^(src/|public/|\.github/|scripts/|docs/|index\.html$|README\.md$|\.gitignore$|eslint\.config\.js$|vite\.config\.ts$|tsconfig(?:\.[^/]+)?\.json$)'
 $notFrontend = @($changed | Where-Object { $_ -notmatch $frontendAllowed })
+if ($changed -contains 'package.json') {
+    & node (Join-Path $test 'scripts\check-pwa-prebuild-only.mjs') $test $from $to
+    if ($LASTEXITCODE -eq 0) {
+        $notFrontend = @($notFrontend | Where-Object { $_ -ne 'package.json' })
+    } else {
+        Write-Host 'package.json requires strict dependency review.'
+    }
+}
 $mode = if ($notFrontend.Count -eq 0) { 'frontend' } else { 'backend' }
 $releaseScript = Join-Path $test ("scripts\deploy-$mode.ps1")
 
