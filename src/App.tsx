@@ -4377,18 +4377,10 @@ setArneyEventPreview(null)
       intentData.intent !== 'move_event'
     ) {
       setAiCommandResult(
-        JSON.stringify(
-          {
-            intent:
-              intentData.intent,
-            status:
-              'not_wired_yet',
-          },
-          null,
-          2
-        )
+        'I understood your request, but that command needs a specific date or supported list format. '
+          + 'Try "Schedule dentist tomorrow at 2 PM" or "Add milk to my Groceries list".'
       )
-
+      arneyVoiceFailure('That command is not supported yet.')
       return
     }
 
@@ -4432,17 +4424,13 @@ setArneyEventPreview(null)
     } 
 
 setAiCommandResult(
-  JSON.stringify(
-    {
-      intent:
-        intentData.intent,
-      preview:
-        previewData,
-    },
-    null,
-    2
-  )
+  previewData.status === 'ready_for_confirmation'
+    ? 'I found an event. Review the details and confirm below.'
+    : 'I need a little more information to identify the event.'
 )
+arneyReply(previewData.status === 'ready_for_confirmation'
+  ? 'Please review and confirm the event change.'
+  : 'I need more details to find the right event.', true)
   } catch (error) {
     setAiCommandResult(
       JSON.stringify(
@@ -4456,6 +4444,7 @@ setAiCommandResult(
         2
       )
     )
+    arneyReply('I could not process that command.', true)
   } finally {
     arneyCommandBusyRef.current = false
     setAiCommandLoading(false)
@@ -4563,7 +4552,6 @@ function processArneyVoiceResult() {
   arneySpeechSessionRef.current = null
   setArneyListening(false)
   if (result.kind === 'transcript' && result.text.trim()) {
-    arneyFailuresRef.current = 0
     setArneyTextFallback(false)
     setAiCommandText(result.text.trim())
     setAiCommandResult('')
@@ -14628,6 +14616,39 @@ return (
       </div>
     </div>
   )}
+
+{arneyListPreview && (
+  <div className="ai-cancel-confirmation">
+    <strong>Confirm list change</strong>
+    <span>Add "{arneyListPreview.item}" to {arneyListPreview.listName}?</span>
+    <div className="ai-cancel-confirmation-actions">
+      <button type="button" className="ai-command-cancel" onClick={() => {
+        setArneyListPreview(null)
+        setAiCommandResult('List change canceled.')
+      }}>Cancel</button>
+      <button type="button" className="ai-command-send" disabled={aiCommandLoading} onClick={() => {
+        void applyArneyListWrite(arneyListPreview)
+      }}>{aiCommandLoading ? 'Adding…' : 'Confirm Add'}</button>
+    </div>
+  </div>
+)}
+{arneyEventPreview && (
+  <div className="ai-cancel-confirmation">
+    <strong>Confirm calendar event</strong>
+    <span>{arneyEventPreview.title} — {arneyEventPreview.date}
+      {arneyEventPreview.time ? ' at ' + arneyEventPreview.time : ' (all day)'}</span>
+    <span>No person will be assigned. Edit the event afterward if needed.</span>
+    <div className="ai-cancel-confirmation-actions">
+      <button type="button" className="ai-command-cancel" onClick={() => {
+        setArneyEventPreview(null)
+        setAiCommandResult('Event creation canceled.')
+      }}>Cancel</button>
+      <button type="button" className="ai-command-send" disabled={aiCommandLoading} onClick={() => {
+        void applyArneyEventWrite(arneyEventPreview)
+      }}>{aiCommandLoading ? 'Creating…' : 'Confirm Event'}</button>
+    </div>
+  </div>
+)}
 
 {aiCommandResult !== '' && (
   <pre className="ai-command-debug">
