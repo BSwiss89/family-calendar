@@ -9,7 +9,7 @@ export type ArneySpeechResult =
   | { kind: 'empty' }
 
 type RecognitionEvent = {
-  results: ArrayLike<ArrayLike<{ transcript: string }>>
+  results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }>
 }
 type RecognitionError = { error?: string }
 type RecognitionInstance = {
@@ -34,6 +34,15 @@ type RecognitionConstructor = new () => RecognitionInstance
 export type ArneySpeechSession = {
   stop: () => void
   cancel: () => void
+}
+
+export type ArneySpeechOptions = {
+  /**
+   * Wake-word listening should respond when the browser finalizes a phrase,
+   * without waiting for the recognizer to close its session. Push-to-talk
+   * must continue waiting for release and onend instead.
+   */
+  finishOnFinalResult?: boolean
 }
 
 function getRecognition(): RecognitionConstructor | null {
@@ -68,6 +77,7 @@ export function getArneySpeechDiagnostics(): string[] {
 export function beginArneySpeech(
   onResult: (result: ArneySpeechResult) => void,
   onListeningChange?: (listening: boolean) => void,
+  options?: ArneySpeechOptions,
 ): ArneySpeechSession | null {
   const Constructor = getRecognition()
   const startedAt = Date.now()
@@ -93,7 +103,9 @@ export function beginArneySpeech(
     return null
   }
   recognition.lang = typeof navigator !== 'undefined' ? navigator.language || 'en-US' : 'en-US'
-  recognition.continuous = false
+  // Keep wake-word recognition open until Chrome supplies a finalized phrase;
+  // push-to-talk retains its original release-to-submit semantics.
+  recognition.continuous = options?.finishOnFinalResult === true
   // Capture tentative Safari transcripts as well as final ones. The command
   // is still submitted only once recognition ends after button release.
   recognition.interimResults = true
@@ -116,12 +128,21 @@ export function beginArneySpeech(
 
   recognition.onresult = event => {
     if (finished) return
-    const text = Array.from(event.results)
+    const segments = Array.from(event.results)
+    const text = segments
       .map(result => result[0]?.transcript ?? '')
       .join(' ')
       .trim()
-    record(text ? 'result received (nonempty)' : 'result received (empty)')
+    const hasFinal = segments.some(result => result.isFinal === true)
+    record(text ? (hasFinal ? 'final result received (nonempty)' : 'result received (nonempty)') : 'result received (empty)')
     if (text) transcript = text
+    if (options?.finishOnFinalResult && hasFinal && transcript) {
+      // This delivers the wake phrase once, even if Chrome keeps its
+      // continuous recognition session open. No command is sent for interim
+      // guesses, and the recognizer is stopped before starting another round.
+      finish({ kind: 'transcript', text: transcript })
+      try { recognition.abort() } catch { /* already ended */ }
+    }
   }
   recognition.onerror = event => {
     record('browser error: ' + (event.error || 'unknown'))
