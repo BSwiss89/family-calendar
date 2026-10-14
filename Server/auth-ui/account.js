@@ -2,6 +2,8 @@ const message = document.getElementById('account-message')
 const whoami = document.getElementById('whoami')
 const devices = document.getElementById('devices')
 const logout = document.getElementById('logout')
+const switchProfile = document.getElementById('switch-profile')
+const profileUsername = document.getElementById('profile-username')
 
 async function requestJson(path, options = {}) {
   const response = await fetch(path, {
@@ -55,12 +57,14 @@ async function refresh() {
     requestJson('/api/auth/devices'),
   ])
   whoami.textContent = 'Signed in as ' + (status.displayName || status.username || 'family member')
+  profileUsername.textContent = status.username || 'Unavailable'
   devices.replaceChildren(...result.devices.map(deviceRow))
   if (!result.devices.length) message.textContent = 'No active devices.'
 }
 
-logout.addEventListener('click', async () => {
+async function signOutToLogin() {
   logout.disabled = true
+  switchProfile.disabled = true
   message.textContent = ''
   try {
     await requestJson('/api/auth/logout', { method: 'POST' })
@@ -68,8 +72,12 @@ logout.addEventListener('click', async () => {
   } catch (error) {
     message.textContent = error.message || 'Could not sign out.'
     logout.disabled = false
+    switchProfile.disabled = false
   }
-})
+}
+
+logout.addEventListener('click', signOutToLogin)
+switchProfile.addEventListener('click', signOutToLogin)
 
 refresh().catch((error) => {
   message.textContent = error.message || 'Could not load trusted devices.'
