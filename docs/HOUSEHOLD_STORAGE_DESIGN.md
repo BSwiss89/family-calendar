@@ -93,20 +93,27 @@ account's currently active household membership for every request, and streams
 calendar API calls, lists, frontend assets and uploads to the corresponding
 **loopback-only** household backend.
 
-Only one active membership per user is routed at this stage. Zero memberships
-return HTTP 403 and multiple memberships return HTTP 409 until a secure
-household switcher exists; a client-supplied household in a query/header does
-NOT override the trusted membership result. Login endpoints are never sent to
-a backend. Auth cookies and proxy-forwarding headers are stripped before a
-request reaches the individual household instance; upstream Set-Cookie and
-unsafe redirects are not passed back to the browser.
+A person with a single active membership is routed to that household.
+Zero memberships return HTTP 403. Multiple memberships return HTTP 409
+until the user explicitly chooses one via an authenticated, CSRF-checked
+POST /api/households/select call. The selection is saved server-side for
+that particular trusted-device session, rather than in URL, local storage
+or a client-controlled cookie. GET /api/households lists only households
+the current account is authorized to use, and an inactive session or
+revoked membership instantly invalidates a selection. Different devices
+can make independent choices. A client-supplied household in a forwarded
+API query/header NEVER overrides this trusted selection. Login endpoints
+are never sent to a backend. Auth cookies and proxy-forwarding headers
+are stripped before a request reaches the household; upstream Set-Cookie
+and unsafe redirects are not passed back to the browser.
 
 scripts/test-private-household-gateway.mjs creates two disposable family
 databases and a central identity database, runs two real private backend
 Node processes and a single test gateway, performs distinct password logins,
 and tests events, shopping lists, identically named uploaded pictures,
-unauthenticated requests, malicious tenant hints, revocation, disabled users
-and refusal of ambiguous multi-household accounts.
+unauthenticated requests, malicious tenant hints, explicit household
+selection, independent device preferences, CSRF rejection, immediate
+membership revocation and disabled users.
 
 **This is NOT production/public-ready.** The gateway intentionally has no
 public listener or stable deployment port, and the individual backend
