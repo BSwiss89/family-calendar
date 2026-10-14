@@ -1,10 +1,8 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  parseTrustedShareRecipients, parseIncomingInvitations,
-  parseOutgoingInvitations,
-  type TrustedShareRecipient, type IncomingEventInvitation,
-  type OutgoingEventInvitation,
+  parseTrustedShareRecipients, parseOutgoingInvitations,
+  type TrustedShareRecipient, type OutgoingEventInvitation,
 } from './eventSharingUiModel'
 import { isCalendarDateKey, formatSharedDate, formatSharedTime } from './sharedEventOverlay'
 import './FamilyEventSharing.css'
@@ -18,24 +16,19 @@ type LocalEventChoice = {
 }
 
 type Props = {
-  events: readonly LocalEventChoice[]
-  preselectedEventId?: number
-  buttonLabel?: string
+  event: LocalEventChoice
 }
 
-async function readSharingJson(url: string): Promise<unknown> {
-  const response = await fetch(url, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-  })
+async function readShareApi(url: string): Promise<unknown> {
+  const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' })
   if (!response.ok ||
     !(response.headers.get('content-type') ?? '').toLowerCase().includes('application/json')) {
-    throw new Error('Sharing service is not available for this calendar.')
+    throw new Error('Event sharing is unavailable.')
   }
   return response.json() as Promise<unknown>
 }
 
-async function writeSharingJson(url: string, body: Record<string, unknown>) {
+async function postShareApi(url: string, body: Record<string, unknown>) {
   const response = await fetch(url, {
     method: 'POST',
     credentials: 'same-origin',
@@ -45,89 +38,56 @@ async function writeSharingJson(url: string, body: Record<string, unknown>) {
   })
   if (!response.ok) {
     if (response.status === 409) {
-      throw new Error('One of these invitations already exists. Review sent invitations before trying again.')
+      throw new Error('An invitation already exists for this event and family.')
     }
-    throw new Error('Unable to complete that request. Refresh your invitations before retrying.')
+    throw new Error('The invitation could not be updated. Try refreshing.')
   }
-  return response
 }
 
-function formatChoiceDate(date: string, time: string | null): string {
-  return formatSharedDate(date) + ' · ' + formatSharedTime(time)
-}
-
-/**
- * A progressive enhancement for the PRIVATE authenticated gateway.
- * The legacy one-family backend doesn't support these endpoints, so the
- * entire control stays hidden instead of showing misleading sharing UI.
- * No form sends a household selection, source DB path, calendar subscription
- * or full event details. Only explicit event IDs and named contact IDs.
- */
-export default function FamilyEventSharing({
-  events, preselectedEventId, buttonLabel = 'Share Events & Invitations',
-}: Props) {
+export default function FamilyEventSharing({ event }: Props) {
   const [supported, setSupported] = useState(false)
   const [open, setOpen] = useState(false)
   const [recipients, setRecipients] = useState<TrustedShareRecipient[]>([])
-  const [incoming, setIncoming] = useState<IncomingEventInvitation[]>([])
   const [outgoing, setOutgoing] = useState<OutgoingEventInvitation[]>([])
-  const [selectedEvents, setSelectedEvents] = useState<number[]>([])
   const [selectedRecipients, setSelectedRecipients] = useState<string[]>([])
-  const [search, setSearch] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const mounted = useRef(true)
-  const loadGeneration = useRef(0)
+  const generation = useRef(0)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const dialogId = useId()
   const titleId = useId()
 
-  const eligibleEvents = useMemo(() => events.filter(event =>
-    Number.isSafeInteger(event.id) && event.id > 0 &&
+  const eligible = Number.isSafeInteger(event.id) && event.id > 0 &&
     typeof event.title === 'string' && event.title.trim().length > 0 &&
     isCalendarDateKey(event.date) &&
     (!event.repeatUnit || event.repeatUnit === 'none')
-  ).sort((a, b) =>
-    a.date.localeCompare(b.date) ||
-    (a.time ?? '').localeCompare(b.time ?? '') || a.id - b.id
-  ), [events])
 
   async function refresh() {
-    const generation = ++loadGeneration.current
+    const current = ++generation.current
     try {
-      const [recipientData, invitationData, sentData] = await Promise.all([
-        readSharingJson('/api/shared-events/recipients'),
-        readSharingJson('/api/shared-events/invitations'),
-        readSharingJson('/api/shared-events/sent'),
+      const [recipientData, sentData] = await Promise.all([
+        readShareApi('/api/shared-events/recipients'),
+        readShareApi('/api/shared-events/sent'),
       ])
-      // Treat malformed endpoints as unavailable; never assume they grant
-      // permission to send information to arbitrary other households.
-      if (typeof recipientData !== 'object' || !recipientData ||
-        !('recipients' in recipientData) ||
-        !Array.isArray(recipientData.recipients) ||
-        typeof invitationData !== 'object' || !invitationData ||
-        !('invitations' in invitationData) ||
-        !Array.isArray(invitationData.invitations) ||
-        typeof sentData !== 'object' || !sentData ||
-        !('shares' in sentData) ||
-        !Array.isArray(sentData.shares)) {
-        throw new Error('Sharing service returned an unexpected response.')
+      if (!recipientData || typeof recipientData !== 'object' ||
+        !('recipients' in recipientData) || !Array.isArray(recipientData.recipients) ||
+        !sentData || typeof sentData !== 'object' ||
+        !('shares' in sentData) || !Array.isArray(sentData.shares)) {
+        throw new Error('The sharing service did not return a valid response.')
       }
-      if (!mounted.current || generation !== loadGeneration.current) return
+      if (!mounted.current || current !== generation.current) return
       setRecipients(parseTrustedShareRecipients(recipientData))
-      setIncoming(parseIncomingInvitations(invitationData))
-      setOutgoing(parseOutgoingInvitations(sentData))
+      setOutgoing(parseOutgoingInvitations(sentData).filter(share =>
+        share.sourceEventId === event.id))
       setSupported(true)
-      setError('')
     } catch {
-      if (!mounted.current || generation !== loadGeneration.current) return
+      if (!mounted.current || current !== generation.current) return
       setSupported(false)
       setRecipients([])
-      setIncoming([])
       setOutgoing([])
-      setSelectedEvents([])
       setSelectedRecipients([])
       setOpen(false)
     }
@@ -136,53 +96,44 @@ export default function FamilyEventSharing({
   useEffect(() => {
     mounted.current = true
     void refresh()
-    const onFocus = () => { void refresh() }
-    window.addEventListener('focus', onFocus)
-    const timer = window.setInterval(onFocus, 30000)
     return () => {
       mounted.current = false
-      loadGeneration.current += 1
-      window.removeEventListener('focus', onFocus)
-      window.clearInterval(timer)
+      generation.current += 1
     }
-  }, [])
+  }, [event.id])
 
-  // The sharing dialog lives in a document.body portal, above the existing
-  // Events and Event Details popup instead of expanding over the calendar.
-  // Trap keyboard focus, close with Escape and restore focus to the trigger.
   useEffect(() => {
     if (!open) return
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     dialogRef.current?.focus()
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
+    const onKeyDown = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key === 'Escape') {
+        keyEvent.preventDefault()
+        keyEvent.stopPropagation()
         setOpen(false)
         return
       }
-      if (event.key !== 'Tab') return
+      if (keyEvent.key !== 'Tab') return
       const dialog = dialogRef.current
       if (!dialog) return
       const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
-        'textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
       )).filter(element => element.getClientRects().length > 0)
       if (!focusables.length) {
-        event.preventDefault()
+        keyEvent.preventDefault()
         dialog.focus()
         return
       }
       const first = focusables[0]
       const last = focusables[focusables.length - 1]
-      if (event.shiftKey && (document.activeElement === first ||
+      if (keyEvent.shiftKey && (document.activeElement === first ||
         !dialog.contains(document.activeElement))) {
-        event.preventDefault()
+        keyEvent.preventDefault()
         last.focus()
-      } else if (!event.shiftKey && (document.activeElement === last ||
+      } else if (!keyEvent.shiftKey && (document.activeElement === last ||
         !dialog.contains(document.activeElement))) {
-        event.preventDefault()
+        keyEvent.preventDefault()
         first.focus()
       }
     }
@@ -194,87 +145,37 @@ export default function FamilyEventSharing({
     }
   }, [open])
 
-  function toggleEvent(id: number) {
-    setSelectedEvents(current =>
-      current.includes(id) ? current.filter(other => other !== id) :
-      current.length < 20 ? [...current, id] : current
-    )
-  }
+  const selectedValid = selectedRecipients.filter(id =>
+    recipients.some(contact => contact.householdId === id))
+  const existingTargets = new Set(outgoing.map(share => share.recipientHouseholdId))
+  const sendable = selectedValid.length > 0 && selectedValid.length <= 8 &&
+    selectedValid.every(id => !existingTargets.has(id)) && eligible && !busy
 
-  function toggleRecipient(id: string) {
-    setSelectedRecipients(current =>
-      current.includes(id) ? current.filter(other => other !== id) :
-      current.length < 8 ? [...current, id] : current
-    )
-  }
-
-  const filteredEvents = eligibleEvents.filter(event =>
-    (event.title + ' ' + event.date).toLowerCase().includes(search.trim().toLowerCase())
-  ).slice(0, 80)
-
-  const sendableIds = selectedEvents.filter(id =>
-    eligibleEvents.some(event => event.id === id)
-  )
-  const sendableRecipients = selectedRecipients.filter(id =>
-    recipients.some(recipient => recipient.householdId === id)
-  )
-  const canSend = sendableIds.length > 0 && sendableRecipients.length > 0 &&
-    sendableIds.length * sendableRecipients.length <= 80 && !busy
-
-  async function sendInvitations() {
-    if (!canSend) return
-    const names = recipients
-      .filter(recipient => sendableRecipients.includes(recipient.householdId))
-      .map(recipient => recipient.displayName)
+  async function send() {
+    if (!sendable) return
+    const names = recipients.filter(item => selectedValid.includes(item.householdId))
+      .map(item => item.displayName)
     if (!window.confirm(
-      'Share ' + sendableIds.length + ' selected event(s) with ' + names.join(', ') +
-      '? Each recipient will see the selected event titles, dates/times and your household name in the invitation. ' +
-      'Accepted events then appear on their calendars. Other events, people, notes and photos stay private.'
+      'Share "' + event.title + '" with ' + names.join(', ') +
+      '? Your household name and this event title/date/time appear in their invitations. ' +
+      'Your other events, notes, people and photos stay private.'
     )) return
 
     setBusy(true)
     setError('')
     setMessage('')
     try {
-      await writeSharingJson('/api/shared-events/invite', {
-        eventIds: sendableIds,
-        recipientHouseholdIds: sendableRecipients,
+      await postShareApi('/api/shared-events/invite', {
+        eventIds: [event.id],
+        recipientHouseholdIds: selectedValid,
       })
       if (!mounted.current) return
-      setSelectedEvents([])
       setSelectedRecipients([])
-      setMessage('Invitations sent. The receiving households must accept them.')
+      setMessage('Event invitation sent. The family must accept it.')
       await refresh()
     } catch (reason) {
-      if (mounted.current) setError(
-        reason instanceof Error ? reason.message : 'Unable to send invitations.'
-      )
-    } finally {
-      if (mounted.current) setBusy(false)
-    }
-  }
-
-  async function respond(shareId: number, decision: 'accepted' | 'declined') {
-    if (!Number.isSafeInteger(shareId) || shareId <= 0 || busy) return
-    setBusy(true)
-    setError('')
-    setMessage('')
-    try {
-      await writeSharingJson(
-        '/api/shared-events/' + shareId + '/respond', { decision }
-      )
-      if (!mounted.current) return
-      setMessage(decision === 'accepted'
-        ? 'Event accepted. It will appear on your calendar.'
-        : 'Invitation declined.')
-      // Tell the existing read-only calendar overlay to reload now, without
-      // ever adding the sender's event to our editable local event array.
-      window.dispatchEvent(new Event('family-calendar:shared-events-changed'))
-      await refresh()
-    } catch (reason) {
-      if (mounted.current) setError(
-        reason instanceof Error ? reason.message : 'Unable to respond.'
-      )
+      if (mounted.current) setError(reason instanceof Error
+        ? reason.message : 'Could not send event invitation.')
     } finally {
       if (mounted.current) setBusy(false)
     }
@@ -283,188 +184,117 @@ export default function FamilyEventSharing({
   async function revoke(share: OutgoingEventInvitation) {
     if (busy || !window.confirm(
       'Stop sharing "' + share.title + '" with ' +
-      share.recipientDisplayName + '? Other event invitations will be unaffected.'
+      share.recipientDisplayName + '? Other recipients are unaffected.'
     )) return
     setBusy(true)
     setError('')
     setMessage('')
     try {
-      await writeSharingJson('/api/shared-events/' + share.shareId + '/revoke', {})
+      await postShareApi('/api/shared-events/' + share.shareId + '/revoke', {})
       if (!mounted.current) return
-      setMessage('That individual event share was revoked.')
+      setMessage('That event share was revoked.')
       await refresh()
     } catch (reason) {
-      if (mounted.current) setError(
-        reason instanceof Error ? reason.message : 'Unable to revoke that share.'
-      )
+      if (mounted.current) setError(reason instanceof Error
+        ? reason.message : 'Could not revoke the share.')
     } finally {
       if (mounted.current) setBusy(false)
     }
   }
 
-  if (!supported) return null
+  // No calendar-wide sharing button. Only a valid individual event has a trigger.
+  if (!supported || !eligible) return null
 
   return (
-    <section className="family-event-sharing" aria-label="Individual event sharing">
+    <div className="family-event-sharing">
       <button type="button" className="family-event-sharing-toggle"
-        ref={triggerRef}
-        aria-expanded={open} aria-haspopup="dialog" aria-controls={dialogId}
+        ref={triggerRef} aria-haspopup="dialog" aria-controls={dialogId}
+        aria-expanded={open}
         onClick={() => {
-          if (open) {
-            setOpen(false)
-            return
-          }
-          setSelectedEvents(preselectedEventId !== undefined &&
-            eligibleEvents.some(event => event.id === preselectedEventId)
-            ? [preselectedEventId] : [])
           setOpen(true)
           setError('')
           setMessage('')
+          setSelectedRecipients([])
           void refresh()
         }}>
-        <span aria-hidden="true">↗</span>
-        {buttonLabel}
-        {incoming.length > 0 && (
-          <span className="family-event-sharing-count">
-            {incoming.length} pending
-          </span>
-        )}
+        <span aria-hidden="true">↗</span> Share Event
       </button>
 
       {open && createPortal(
         <div className="family-sharing-dialog-layer">
-          <button
-            type="button"
-            className="family-sharing-dialog-backdrop"
-            aria-label="Close sharing window"
-            onClick={() => setOpen(false)}
-          />
-          <div
-            id={dialogId}
-            ref={dialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={titleId}
-            tabIndex={-1}
-            className="family-event-sharing-panel"
-          >
-          <div className="family-event-sharing-panel-header">
-            <div>
-              <h3 id={titleId}>Share specific events</h3>
-              <p>Select only the events and households you intend to share with.
-                No other family calendar information is shared.</p>
+          <button type="button" className="family-sharing-dialog-backdrop"
+            aria-label="Close sharing window" onClick={() => setOpen(false)} />
+          <div id={dialogId} ref={dialogRef} role="dialog" aria-modal="true"
+            aria-labelledby={titleId} tabIndex={-1}
+            className="family-event-sharing-panel">
+            <div className="family-event-sharing-panel-header">
+              <div>
+                <h3 id={titleId}>Share Event</h3>
+                <p>Only this event will be shared. No other calendar events are included.</p>
+              </div>
+              <button type="button" className="family-event-sharing-close"
+                onClick={() => setOpen(false)} aria-label="Close event sharing">×</button>
             </div>
-            <button type="button" onClick={() => setOpen(false)}
-              className="family-event-sharing-close" aria-label="Close event sharing">×</button>
-          </div>
-          <div className="family-event-sharing-grid">
-            <fieldset disabled={busy}>
-              <legend>1. Choose your events (up to 20)</legend>
-              {eligibleEvents.length === 0 ? (
-                <p className="family-sharing-empty">No non-recurring events are available.</p>
-              ) : (
-                <>
-                  <label htmlFor="family-share-search">Find an event by name or date</label>
-                  <input id="family-share-search" type="search"
-                    placeholder="Search your calendar events"
-                    value={search} onChange={event => setSearch(event.target.value)} />
-                  <div className="family-sharing-options" role="group" aria-label="Events to share">
-                    {filteredEvents.map(event => (
-                      <label className="family-sharing-choice" key={event.id}>
-                        <input type="checkbox" checked={sendableIds.includes(event.id)}
-                          onChange={() => toggleEvent(event.id)} />
-                        <span>
-                          <strong>{event.title}</strong>
-                          <small>{formatChoiceDate(event.date, event.time)}</small>
-                        </span>
-                      </label>
-                    ))}
-                    {filteredEvents.length === 0 && (
-                      <p className="family-sharing-empty">No matching events.</p>
-                    )}
-                  </div>
-                </>
-              )}
-              <small>{sendableIds.length} events selected. Recurring events
-                are unavailable until occurrence-level sharing is supported.</small>
-            </fieldset>
-
-            <fieldset disabled={busy}>
-              <legend>2. Choose recipient families (up to 8)</legend>
-              <div className="family-sharing-options" role="group" aria-label="Families receiving events">
-                {recipients.map(recipient => (
-                  <label className="family-sharing-choice" key={recipient.householdId}>
+            <div className="family-sharing-single-event">
+              <strong>{event.title}</strong>
+              <span>{formatSharedDate(event.date)} · {formatSharedTime(event.time)}</span>
+            </div>
+            <fieldset className="family-sharing-recipient-fieldset" disabled={busy}>
+              <legend>Choose families to invite (up to 8)</legend>
+              <div className="family-sharing-options" role="group"
+                aria-label="Recipient families for this event">
+                {recipients.map(contact => (
+                  <label className="family-sharing-choice" key={contact.householdId}>
                     <input type="checkbox"
-                      checked={sendableRecipients.includes(recipient.householdId)}
-                      onChange={() => toggleRecipient(recipient.householdId)} />
-                    <span><strong>{recipient.displayName}</strong></span>
+                      checked={selectedValid.includes(contact.householdId)}
+                      disabled={existingTargets.has(contact.householdId)}
+                      onChange={() => setSelectedRecipients(current =>
+                        current.includes(contact.householdId)
+                          ? current.filter(id => id !== contact.householdId)
+                          : current.length < 8
+                            ? [...current, contact.householdId] : current
+                      )} />
+                    <span>
+                      <strong>{contact.displayName}</strong>
+                      {existingTargets.has(contact.householdId) &&
+                        <small>Already invited</small>}
+                    </span>
                   </label>
                 ))}
                 {recipients.length === 0 && (
-                  <p className="family-sharing-empty">No trusted family contacts yet.
-                    A family must be connected by an administrator before you can share.</p>
+                  <p className="family-sharing-empty">No trusted family contacts are connected yet.</p>
                 )}
               </div>
-              <small>{sendableRecipients.length} families selected.
-                Invitations give access only to selected events, never entire calendars.</small>
             </fieldset>
-          </div>
-
-          <button type="button" className="family-sharing-send" disabled={!canSend}
-            onClick={() => { void sendInvitations() }}>
-            {busy ? 'Processing…' : 'Send selected event invitations'}
-          </button>
-          {sendableIds.length * sendableRecipients.length > 80 && (
-            <p className="family-sharing-error">
-              Reduce your selection to at most 80 event/recipient combinations.</p>
-          )}
-
-          <div className="family-event-sharing-lists">
-            <section aria-label="Incoming event invitations">
-              <h4>Invitations from other families ({incoming.length})</h4>
-              {incoming.length === 0 && (
-                <p className="family-sharing-empty">No invitations awaiting your response.</p>
-              )}
-              {incoming.map(invite => (
-                <div className="family-sharing-invitation" key={invite.shareId}>
-                  <strong>{invite.title}</strong>
-                  <small>{formatChoiceDate(invite.date, invite.time)} · From {invite.sharedBy}</small>
-                  <div className="family-sharing-actions">
-                    <button type="button" disabled={busy}
-                      onClick={() => { void respond(invite.shareId, 'accepted') }}>Accept event</button>
-                    <button type="button" disabled={busy}
-                      onClick={() => { void respond(invite.shareId, 'declined') }}>Decline</button>
+            <button type="button" className="family-sharing-send" disabled={!sendable}
+              onClick={() => { void send() }}>
+              {busy ? 'Processing…' : 'Send Event Invitation'}
+            </button>
+            {outgoing.length > 0 && (
+              <section className="family-sharing-sent" aria-label="Existing shares for this event">
+                <h4>This event is shared with</h4>
+                {outgoing.map(share => (
+                  <div className="family-sharing-invitation" key={share.shareId}>
+                    <strong>{share.recipientDisplayName}</strong>
+                    <div className="family-sharing-actions">
+                      <span className="family-sharing-status">
+                        {share.status === 'accepted' ? 'Accepted' : 'Awaiting acceptance'}
+                      </span>
+                      <button type="button" disabled={busy}
+                        onClick={() => { void revoke(share) }}>
+                        Stop sharing
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </section>
-            <section aria-label="Sent event invitations">
-              <h4>Events you shared ({outgoing.length})</h4>
-              {outgoing.length === 0 && (
-                <p className="family-sharing-empty">No active event invitations sent.</p>
-              )}
-              {outgoing.map(share => (
-                <div className="family-sharing-invitation" key={share.shareId}>
-                  <strong>{share.title}</strong>
-                  <small>{formatChoiceDate(share.date, share.time)} · To {share.recipientDisplayName}</small>
-                  <div className="family-sharing-actions">
-                    <span className="family-sharing-status">
-                      {share.status === 'accepted' ? 'Accepted' : 'Awaiting acceptance'}
-                    </span>
-                    <button type="button" disabled={busy}
-                      onClick={() => { void revoke(share) }}>Stop sharing</button>
-                  </div>
-                </div>
-              ))}
-            </section>
-          </div>
-
-          {error && <p className="family-sharing-error" role="alert">{error}</p>}
-          {message && <p className="family-sharing-message" role="status">{message}</p>}
+                ))}
+              </section>
+            )}
+            {error && <p role="alert" className="family-sharing-error">{error}</p>}
+            {message && <p role="status" className="family-sharing-message">{message}</p>}
           </div>
         </div>,
         document.body
       )}
-    </section>
+    </div>
   )
 }
