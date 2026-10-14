@@ -60,5 +60,7 @@ jobs:
         run: node --test scripts/test-household-instance-isolation.mjs
       - name: Check central user-to-household grants and denial rules
         run: node --test scripts/test-household-memberships.mjs
+      - name: Exercise authenticated private household gateway end-to-end
+        run: node --test scripts/test-private-household-gateway.mjs
       - name: Build frontend
         run: npm run build
