@@ -211,13 +211,38 @@ single-occurrence vs series-sharing choice. Unknown events, invalid IDs,
 unauthorized users, wildcard recipients and accidental full-calendar
 sharing are rejected. All rules are covered by disposable SQLite tests.
 
-**Still not connected to the private gateway or calendar UI.** This is
-offline backend logic only. In particular, synchronization must be called
-from reviewed, trusted source-event mutation paths before changes update
-recipients automatically. Cancellation notices, retries, public invites,
-recurring sharing, data restoration, attachment permissions and invitations
-in the UI are not implemented. No family-to-family sharing endpoints or
-public access are enabled. 
+### Authenticated private gateway integration (in-progress testing)
+
+The loopback-only test gateway now owns these authenticated, CSRF-checked
+event-only endpoints (not reachable from the public internet):
+
+- GET /api/shared-events/recipients lists only explicitly trusted contacts
+  for the signed-in household, never a public household directory.
+- POST /api/shared-events/invite requires specifically selected event IDs
+  and recipient household IDs. The gateway resolves the current household
+  from the verified login and opens only its approved SQLite file read-only.
+  The browser cannot choose another source family or a database path.
+- GET /api/shared-events/invitations returns only pending invitations to the
+  currently authorized recipient household.
+- POST /api/shared-events/:shareId/respond accepts or declines an invitation
+  for the current recipient household, not another household the same user
+  might belong to.
+- GET /api/shared-events/accepted returns only accepted event snapshots.
+- POST /api/shared-events/:shareId/revoke removes an individual invitation or
+  accepted share from its originating household.
+
+The gateway blocks all other /api/shared-events paths instead of proxying
+them to an unauthenticated per-household backend. Trusted household
+connections are provisioned only by server-side administration in tests;
+there is no client endpoint to link households or expose a directory.
+
+**Remaining incomplete:** This is test-only HTTP routing. Existing event
+edits/deletions do NOT automatically propagate across households until
+source-event mutation hooks are integrated. There is no recipient-facing
+invitation UI or calendar overlay yet. Cancellation notices, retries,
+restoration, recurring sharing, attachment permissions, friend invitation
+onboarding and the production security review are also pending. The
+existing preview and live calendar are not migrated or opened publicly.
 
 ## Next small implementation slices
 
