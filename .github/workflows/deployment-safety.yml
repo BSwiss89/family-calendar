@@ -68,6 +68,8 @@ jobs:
         run: node --experimental-strip-types --test scripts/test-shared-event-overlay.mjs
       - name: Test event invitation UI field allowlists and trusted recipients
         run: node --experimental-strip-types --test scripts/test-event-sharing-ui-model.mjs
+      - name: Verify personal and hub account creator audit isolation
+        run: node --test scripts/test-event-creator-audit.mjs
       - name: Check Share Events modal placement over Events page
         run: node --test scripts/test-event-sharing-modal-placement.mjs
       - name: Build frontend
