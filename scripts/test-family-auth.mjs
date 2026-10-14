@@ -105,6 +105,15 @@ test('auth protects every calendar API, homepage and private uploads before publ
     assert.equal(authorized.status, 200)
     assert.deepEqual((await authorized.json()).events, ['PRIVATE'])
 
+    // A valid remembered session should never render the login form again.
+    // Redirect it server-side directly to the calendar without a browser fetch delay.
+    const signedInLoginPage = await fetch(site.base + '/login', {
+      headers: { Cookie: headerCookie },
+      redirect: 'manual',
+    })
+    assert.equal(signedInLoginPage.status, 303)
+    assert.equal(signedInLoginPage.headers.get('location'), '/')
+
     const image = await fetch(site.base + '/uploads/private-image', { headers: { Cookie: headerCookie } })
     assert.equal(image.status, 200)
     assert.equal(await image.text(), 'PRIVATE IMAGE')
