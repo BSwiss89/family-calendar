@@ -236,13 +236,39 @@ them to an unauthenticated per-household backend. Trusted household
 connections are provisioned only by server-side administration in tests;
 there is no client endpoint to link households or expose a directory.
 
-**Remaining incomplete:** This is test-only HTTP routing. Existing event
-edits/deletions do NOT automatically propagate across households until
-source-event mutation hooks are integrated. There is no recipient-facing
-invitation UI or calendar overlay yet. Cancellation notices, retries,
-restoration, recurring sharing, attachment permissions, friend invitation
-onboarding and the production security review are also pending. The
-existing preview and live calendar are not migrated or opened publicly.
+### First automatic synchronization slice (private gateway only)
+
+Successful PUT /api/events/:id and DELETE /api/events/:id requests routed
+through the authenticated, loopback-only gateway now trigger a read-only
+lookup of the matching source event and update/cancel only its existing
+explicit share snapshots in central SQLite. Failed validation, rejected
+HTTP responses and wrong-household requests cause no sync. Editing a
+previously shared, nonrecurring event into a recurrence cancels the old
+one-time grant; it does not expand sharing to an entire series.
+
+A disposable integration test changes a shared source event's title/date/time
+through a real backend and checks the recipient sees exactly those new
+fields without private notes, location or other events. It tests that a
+deletion cancels the share and leaves both household calendars unchanged
+apart from the owner's requested mutation.
+
+**Known limitation: this is not yet guaranteed crash-safe delivery.** A
+backend commit and central share snapshot update are different SQLite
+transactions. A power failure or sharing sync error between them can
+temporarily leave stale data. The hook currently logs failures; a future
+durable replay/reconciliation mechanism is required. The code does NOT
+yet cover delete-by-batch, AI reschedule endpoints, edits made directly
+in SQLite, recurring-event exceptions, or any other mutation route.
+Before production sharing, immutable source-event identity must protect
+against reuse of numeric SQLite IDs after deletion, and readers must
+reconcile missing/out-of-date shares before showing them.
+
+**Remaining incomplete:** This is test-only HTTP routing. There is no
+recipient-facing invitation UI or calendar overlay yet. Cancellation
+notices, durable retries and reconciliation, restoration, safe recurring
+sharing, attachment permissions, friend invitation onboarding and the
+production security review are pending. The existing preview and live
+calendar are not migrated or opened publicly.
 
 ## Next small implementation slices
 
