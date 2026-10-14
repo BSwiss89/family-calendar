@@ -38,12 +38,12 @@ jobs:
               throw "$file has PowerShell syntax errors: $($errors -join '; ')"
             }
             $text = Get-Content -LiteralPath $file -Raw
-            if ($text -notmatch 'check-pwa-prebuild-only\\.mjs') {
+            if ($text -notmatch 'check-pwa-prebuild-only\.mjs') {
               throw "$file is missing the PWA validator"
             }
-            $lines = $text -split "\\r?\\n"
-            $invocations = @($lines | Where-Object { $_ -match 'check-pwa-prebuild-only\\.mjs' -and $_ -match '& node' })
-            if ($invocations.Count -ne 1 -or $invocations[0] -notmatch '\\|\\s*Out-Host') {
+            $lines = $text -split "\r?\n"
+            $invocations = @($lines | Where-Object { $_ -match 'check-pwa-prebuild-only\.mjs' -and $_ -match '& node' })
+            if ($invocations.Count -ne 1 -or $invocations[0] -notmatch '\|\s*Out-Host') {
               throw "$file must route PWA validator stdout to Out-Host, not the deployment plan pipeline"
             }
             Write-Host "[PASS] $file parses and isolates validator output"
