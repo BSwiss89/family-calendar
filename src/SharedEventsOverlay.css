@@ -117,3 +117,31 @@
   display: block;
   color: #47688b;
 }
+
+
+/* Shared items are interactive calendar entries, not a calendar-wide banner. */
+.month-shared-event-chip,
+.day-summary-received-event,
+.shared-week-event,
+.shared-schedule-event {
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.month-shared-event-chip:focus-visible,
+.day-summary-received-event:focus-visible,
+.shared-week-event:focus-visible,
+.shared-schedule-event:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+.shared-week-event,
+.shared-schedule-event {
+  border: 1px dashed #a3c3e8;
+  border-left: 3px solid #5484bd;
+  background: #e7f0ff;
+  color: #17375c;
+}
+.shared-week-event { display: block; width: 100%; box-sizing: border-box; }
+.shared-schedule-event { height: auto; min-height: 23px; white-space: normal; overflow-wrap: anywhere; }
+.shared-mobile-event-group .mobile-schedule-all-day-label { font-weight: 700; }
