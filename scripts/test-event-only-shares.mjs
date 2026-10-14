@@ -199,6 +199,29 @@ test('source edit refreshes only selected snapshots and deletion cancels that sh
   assert.deepEqual(pending(db, 3, 'family-b').map(event => event.title), ['A WORK'])
 })
 
+test('editing a previously shared one-time event into recurrence cancels its old grant', t => {
+  const { db, source } = fixture(t)
+  const created = send(db, source, [1], ['family-b'])
+  respondToEventInvitation(db, {
+    serverVerifiedUserId: 3,
+    recipientHouseholdId: 'family-b',
+    shareId: created[0].shareId,
+    decision: 'accepted',
+  })
+  assert.deepEqual(visible(db, 3, 'family-b').map(e => e.title), ['A BBQ'])
+  source.prepare('UPDATE events SET repeat_unit = ? WHERE id = ?').run('week', 1)
+  const result = synchronizeSelectedEventShare(db, {
+    serverVerifiedUserId: 1,
+    sourceHouseholdId: 'family-a',
+    sourceEventId: 1,
+    sourceDatabase: source,
+  })
+  assert.equal(result.cancelled, 1)
+  assert.deepEqual(visible(db, 3, 'family-b'), [])
+  assert.equal(db.prepare('SELECT status FROM event_share_grants WHERE id = ?')
+    .get(created[0].shareId).status, 'cancelled')
+})
+
 test('only explicitly connected households may receive selected-event invitations', t => {
   const { db, source } = fixture(t)
   db.prepare('DELETE FROM event_share_connections WHERE recipient_household_id = 3').run()
