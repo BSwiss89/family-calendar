@@ -19,3 +19,11 @@ button{font:inherit;font-weight:700;cursor:pointer;border:0;border-radius:10px;b
 .revoke-button{padding:9px 12px;font-size:13px;background:#f2e8ee;color:#9f2451;flex-shrink:0}
 .secondary-button{background:#e8e9fd;color:#3730a3;width:100%;margin-top:16px}
 #account-message{color:#9f2451;min-height:1.2em}
+
+/* Never show the password form while checking a remembered device. */
+[hidden]{display:none!important}
+.auth-session-check{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:13px;min-height:180px;color:#536079;text-align:center}
+.auth-session-check p{margin:0;font-size:14px}
+.auth-check-spinner{width:27px;height:27px;border:3px solid #d8ddf8;border-top-color:#4f46e5;border-radius:50%;animation:auth-spin .85s linear infinite}
+@keyframes auth-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.auth-check-spinner{animation:none}}
