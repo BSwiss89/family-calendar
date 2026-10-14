@@ -29,6 +29,7 @@ export default function ArneySettings({ onChange }: Props) {
     setError(false)
     setPreferences(next)
     onChange?.(next)
+    window.dispatchEvent(new Event('arney:preferences-changed'))
   }
 
   return (
@@ -52,10 +53,26 @@ export default function ArneySettings({ onChange }: Props) {
       <label style={{ display: 'flex', gap: 10 }}>
         <input
           type="checkbox"
+          checked={preferences.browserSpeechEnabled}
+          onChange={(event) => update({ browserSpeechEnabled: event.target.checked })}
+        />
+        <span>
+          <strong>Allow browser speech recognition</strong>
+          <span style={{ display: 'block' }}>
+            Optional. Your browser may send microphone audio to a cloud speech provider
+            for transcription. The calendar does not control that service. Leave off for
+            local-only use; no voice listening starts until you actively hold + or start
+            wake-word listening.
+          </span>
+        </span>
+      </label>
+      <label style={{ display: 'flex', gap: 10 }}>
+        <input
+          type="checkbox"
           checked={preferences.wakeWordsEnabled}
           onChange={(event) => update({ wakeWordsEnabled: event.target.checked })}
         />
-        <span><strong>Enable wake words</strong><span style={{ display: 'block' }}>Hey Arney, Arney, Computer. Requires supported microphone access; enabling this setting does not start listening by itself.</span></span>
+        <span><strong>Enable wake words</strong><span style={{ display: 'block' }}>Hey Arney, Arney, Computer. Works only while this page is active and you explicitly start listening; the browser may use cloud speech processing. No background or screen-locked listening.</span></span>
       </label>
       <label style={{ display: 'flex', gap: 10 }}>
         <input
