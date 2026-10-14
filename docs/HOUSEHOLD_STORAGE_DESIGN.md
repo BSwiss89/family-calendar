@@ -157,6 +157,44 @@ the existing live database stays intact until the owner's household has
 been migrated and tested with the new storage layout. Back up accounts,
 calendar data and image uploads before any such move.
 
+## Event-only cross-family sharing — strict product requirement
+
+Cross-household sharing does **NOT** grant access to another family's
+calendar. Every household keeps its own independent calendar, and every
+individual has a personal username mapped to their authorized household
+membership(s). Household members may share one manually selected event,
+several manually selected events as independent grants, or one selected
+event with multiple recipient households. **Never implement a full
+calendar subscription / Share entire calendar feature.**
+
+- Events are private unless the source household expressly invites
+  a named, authorized recipient household to one particular event.
+- The recipient sees only each accepted shared event interleaved with
+  its own household's events. Receiving one invitation conveys ZERO
+  membership/access to the sending family, including its other events,
+  event IDs, people, lists, meals, photos, notes, or AI history.
+- Repeated events require an explicit scope choice: one occurrence
+  or an entire recurrence series, never an implicit wider grant.
+- Share invitations have pending, accepted, declined and revoked states.
+  Optional fields (notes, address, attachments, participant names)
+  require an explicit field-level privacy decision and should default
+  to not shared.
+- All synchronization is from the source of truth to a controlled
+  shared-event view/snapshot in the recipient household. Recipients
+  cannot change the originating event. Edits, cancellations and
+  revocations affect ONLY selected event/share grants.
+- A sender can revoke one recipient's access to one event without
+  impacting a different event or a different recipient.
+- Build regression tests: sharing A's BBQ with B must not expose
+  either of A's other events; sharing A's second selected event
+  adds only that event; B cannot fetch the source household through
+  crafted URLs, IDs or direct uploads.
+- Individual usernames are authentication identities. Event invitation
+  or acceptance NEVER creates household membership in the source.
+
+This feature is DESIGN ONLY, not yet added to PR #46's gateway. No
+family-to-family event-sharing endpoint or public access is enabled.
+
 ## Next small implementation slices
 
 1. Completed in this PR: a private, loopback-only opt-in with real two-server
