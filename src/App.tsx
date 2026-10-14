@@ -16367,8 +16367,6 @@ createPortal(
 </div>
 </div>
 
-<FamilyEventSharing events={events} />
-
 <SharedEventsOverlay
   events={receivedSharedEvents}
   startDate={sharedViewStart}
@@ -18428,6 +18426,12 @@ onClick={(event) => {
       </div>
     )}
 
+    <FamilyEventSharing
+      events={events}
+      preselectedEventId={viewingCalendarEvent.id}
+      buttonLabel="Share Event"
+    />
+
     <div className="event-details-actions">
   <button
     type="button"
@@ -18620,6 +18624,11 @@ editingEventId === null &&
     )}
   </p>
 )}
+
+    <FamilyEventSharing
+      events={events}
+      buttonLabel="Share Events & Invitations"
+    />
 
     <div
   className={`month-selected-events ${
