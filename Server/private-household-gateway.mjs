@@ -17,7 +17,7 @@ import {
   createEventShareTables, inviteSelectedEvents,
   listTrustedEventShareRecipients, listEventShareInvitations,
   listOutgoingEventShares, listAcceptedSharedEvents, respondToEventInvitation,
-  revokeSelectedEventShare, synchronizeSelectedEventShare,
+  revokeSelectedEventShare, removeReceivedEventShare, synchronizeSelectedEventShare,
 } from './event-only-shares.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import {
@@ -424,6 +424,26 @@ export async function startPrivateHouseholdGateway({
       response.json(result)
     } catch {
       response.status(404).json({ error: 'Event invitation unavailable.' })
+    }
+  })
+  // Recipient-side removal affects ONLY the accepted shared snapshot.
+  // Never forward this action to /api/events or a sending-family backend.
+  app.delete('/api/shared-events/:shareId/received', (request, response) => {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    const shareId = Number(request.params.shareId)
+    if (!Number.isSafeInteger(shareId) || shareId <= 0) {
+      return response.status(404).json({ error: 'Accepted shared event unavailable.' })
+    }
+    try {
+      response.set('Cache-Control', 'no-store')
+      response.json(removeReceivedEventShare(identityDatabase, {
+        serverVerifiedUserId: request.familyAccount.user_id,
+        recipientHouseholdId: household.householdId,
+        shareId,
+      }))
+    } catch {
+      response.status(404).json({ error: 'Accepted shared event unavailable.' })
     }
   })
   app.post('/api/shared-events/:shareId/revoke', (request, response) => {
