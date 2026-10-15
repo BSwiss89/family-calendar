@@ -38,7 +38,12 @@ async function postShareApi(url: string, body: Record<string, unknown>) {
   })
   if (!response.ok) {
     if (response.status === 409) {
-      throw new Error('An invitation already exists for this event and family.')
+      const payload: unknown = await response.json().catch(() => null)
+      if (payload && typeof payload === 'object' && 'error' in payload &&
+        typeof payload.error === 'string') {
+        throw new Error(payload.error)
+      }
+      throw new Error('The recipient already has this event or invitation. Refresh and try again.')
     }
     throw new Error('The invitation could not be updated. Try refreshing.')
   }
