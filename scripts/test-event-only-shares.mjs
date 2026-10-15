@@ -438,7 +438,7 @@ test('recipient can remove only their own accepted snapshot; source and other re
   assert.throws(() => removeReceivedEventShare(db, {
     serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
     shareId: familyC.shareId,
-  }), /selected household/)
+  }), /Not authorized/)
   assert.throws(() => removeReceivedEventShare(db, {
     serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
     shareId: 999999,
