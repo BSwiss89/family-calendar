@@ -114,7 +114,7 @@ test('previously invited contacts can be explicitly re-invited after warning wit
   assert.match(sharing, /const priorRecipients = selectedValid\.filter/)
   assert.match(sharing, /Previously invited — you can resend/)
   assert.match(sharing, /previouslySent\.length > 0/)
-  assert.match(sharing, /Send another invitation\?/)
+  assert.match(sharing, /Send an invitation to/)
   assert.match(sharing, /window\.confirm\(/)
   assert.match(sharing, /allowResend: priorRecipients\.length > 0/)
   assert.match(sharing, /Send Invitation Again/)
