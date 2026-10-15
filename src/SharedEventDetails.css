@@ -40,3 +40,14 @@
 .shared-details-done { margin-top: 10px; background: #346cc4; color: white; border: 0; border-radius: 8px; font-size: 14px; padding: 10px 18px; cursor: pointer; }
 .shared-details-panel button:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
 @media (max-width: 760px) { .shared-details-panel { padding: 19px; } }
+
+.shared-details-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.shared-details-actions button { margin-top: 0; min-height: 42px; }
+.shared-details-remove { border: 1px solid #bb3344; color: #a31e32; background: #fff3f4; border-radius: 8px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+.shared-details-remove:hover:not(:disabled) { background: #ffe4e7; }
+.shared-details-remove:disabled { opacity: .6; cursor: wait; }
+.shared-details-error { color: #a31e32; font-size: 13px; font-weight: 650; }
+@media (max-width: 500px) {
+  .shared-details-actions { flex-direction: column-reverse; align-items: stretch; }
+  .shared-details-actions button { width: 100%; }
+}
