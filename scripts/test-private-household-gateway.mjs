@@ -454,7 +454,7 @@ test('central authenticated gateway denies one family access to another family b
     })).value.events, [])
     assert.deepEqual((await json(gateway.base, '/api/shared-events/sent', {
       cookie: cookieA,
-    })).value.shares, [])
+    })).value.shares.map(share => share.status), ['revoked'])
     assert.equal((await json(gateway.base, '/api/shared-events/made-up', {
       cookie: cookieB,
     })).response.status, 404)
