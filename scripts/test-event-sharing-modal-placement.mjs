@@ -136,3 +136,18 @@ test('freshly resent invitation reopens mobile reminder even after Remind Later'
   assert.match(invitations, /invitations\.some\(item => !seenInviteIds\.current\.has\(item\.shareId\)\)/)
   assert.match(invitations, /if \(hasNew\) setRemindLater\(false\)/)
 })
+
+test('recipient can remove own accepted share, without a sender event DELETE or silent re-invite', () => {
+  const details = fs.readFileSync(path.join(root, 'src/SharedEventDetails.tsx'), 'utf8')
+  assert.match(details, /Remove from My Calendar/)
+  assert.match(details, /window\.confirm\(/)
+  assert.match(details, /method: 'DELETE'/)
+  assert.match(details, /\/api\/shared-events\//)
+  assert.match(details, /\/received/)
+  assert.match(details, /result\.status !== 'removed'/)
+  assert.match(details, /family-calendar:shared-events-changed/)
+  assert.match(details, /setError\(/)
+  assert.match(sharing, /Removed by recipient/)
+  assert.match(sharing, /Previously invited — you can resend/)
+  assert.doesNotMatch(details, /\/api\/events|sourceEventId|deleteEvent/)
+})
