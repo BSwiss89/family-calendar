@@ -145,29 +145,29 @@ export default function FamilyEventSharing({ event }: Props) {
     }
   }, [open])
 
-  const selectedValid = selectedRecipients.filter(id =>
-    recipients.some(contact => contact.householdId === id))
+  const activeStatusByHousehold = new Map<string, 'pending' | 'accepted'>()
+  for (const share of outgoing) {
+    if (share.status === 'accepted' || share.status === 'pending') {
+      const current = activeStatusByHousehold.get(share.recipientHouseholdId)
+      if (current !== 'accepted') {
+        activeStatusByHousehold.set(share.recipientHouseholdId, share.status)
+      }
+    }
+  }
   const existingTargets = new Set(outgoing.map(share => share.recipientHouseholdId))
+  const selectedValid = selectedRecipients.filter(id =>
+    recipients.some(contact => contact.householdId === id) &&
+    !activeStatusByHousehold.has(id))
   const priorRecipients = selectedValid.filter(id => existingTargets.has(id))
-  // Show one row per recipient even when a reminder is pending alongside an
-  // accepted event or older declined/revoked invitations remain in history.
   const displayedOutgoing = recipients.map(contact => {
     const history = outgoing.filter(share => share.recipientHouseholdId === contact.householdId)
     const preferred = history.find(share => share.status === 'accepted') ??
       history.find(share => share.status === 'pending') ??
       history[history.length - 1]
-    return preferred ? {
-      share: preferred,
-      resentPending: history.some(share => share.status === 'pending' &&
-        share.shareId !== preferred.shareId),
-    } : null
-  }).filter((value): value is {
-    share: OutgoingEventInvitation
-    resentPending: boolean
-  } => value !== null)
+    return preferred ? preferred : null
+  }).filter((share): share is OutgoingEventInvitation => share !== null)
   const sendable = selectedValid.length > 0 && selectedValid.length <= 8 &&
     eligible && !busy
-
   async function send() {
     if (!sendable) return
     const names = recipients.filter(item => selectedValid.includes(item.householdId))
@@ -178,9 +178,7 @@ export default function FamilyEventSharing({ event }: Props) {
       (previouslySent.length > 0
         ? 'Previously sent to ' + previouslySent.join(', ') +
           '. Send an invitation to ' + names.join(', ') + ' again? ' +
-          'The recipient will see a new invitation. ' +
-          'Any already accepted share stays on their calendar unless they accept the new one, ' +
-          'and no duplicate event will be created. '
+          'This only sends a new invitation because the previous one is no longer pending or accepted. '
         : 'Share "' + event.title + '" with ' + names.join(', ') + '? ') +
       'Only your family name and this event title/date/time will be visible; ' +
       'private notes, people and photos stay private.'
@@ -198,7 +196,7 @@ export default function FamilyEventSharing({ event }: Props) {
       if (!mounted.current) return
       setSelectedRecipients([])
       setMessage(priorRecipients.length > 0
-        ? 'Invitation sent again. The recipient can accept or decline it.'
+        ? 'Invitation sent again. The family must accept or decline it.'
         : 'Event invitation sent. The family must accept it.')
       await refresh()
     } catch (reason) {
@@ -275,6 +273,7 @@ export default function FamilyEventSharing({ event }: Props) {
                   <label className="family-sharing-choice" key={contact.householdId}>
                     <input type="checkbox"
                       checked={selectedValid.includes(contact.householdId)}
+                      disabled={activeStatusByHousehold.has(contact.householdId)}
                       onChange={() => setSelectedRecipients(current =>
                         current.includes(contact.householdId)
                           ? current.filter(id => id !== contact.householdId)
@@ -283,8 +282,13 @@ export default function FamilyEventSharing({ event }: Props) {
                       )} />
                     <span>
                       <strong>{contact.displayName}</strong>
-                      {existingTargets.has(contact.householdId) &&
-                        <small>Previously invited — you can resend</small>}
+                      {activeStatusByHousehold.get(contact.householdId) === 'accepted' ? (
+                        <small>Already on their calendar</small>
+                      ) : activeStatusByHousehold.get(contact.householdId) === 'pending' ? (
+                        <small>Invitation already waiting</small>
+                      ) : existingTargets.has(contact.householdId) ? (
+                        <small>Previously invited — you can resend</small>
+                      ) : null}
                     </span>
                   </label>
                 ))}
@@ -300,7 +304,7 @@ export default function FamilyEventSharing({ event }: Props) {
             {displayedOutgoing.length > 0 && (
               <section className="family-sharing-sent" aria-label="Existing shares for this event">
                 <h4>Invitation history</h4>
-                {displayedOutgoing.map(({ share, resentPending }) => (
+                {displayedOutgoing.map(share => (
                   <div className="family-sharing-invitation" key={share.shareId}>
                     <strong>{share.recipientDisplayName}</strong>
                     <div className="family-sharing-actions">
@@ -309,7 +313,7 @@ export default function FamilyEventSharing({ event }: Props) {
                           share.status === 'pending' ? 'Awaiting acceptance' :
                           share.status === 'declined' ? 'Declined' :
                           share.status === 'revoked' ? 'Stopped sharing' : 'Previous event deleted'}
-                        {resentPending && ' · Invitation resent, awaiting response'}
+                        
                       </span>
                       {(share.status === 'pending' || share.status === 'accepted') && (
                         <button type="button" disabled={busy}
