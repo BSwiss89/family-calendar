@@ -114,13 +114,11 @@ export function createEventShareTables(db) {
   db.exec([
     'CREATE INDEX IF NOT EXISTS event_share_recipient_idx',
     'ON event_share_grants(recipient_household_id, status);',
-    'DROP INDEX IF EXISTS event_share_live_pair_idx;',
-    'CREATE UNIQUE INDEX IF NOT EXISTS event_share_pending_pair_idx',
+    'DROP INDEX IF EXISTS event_share_pending_pair_idx;',
+    'DROP INDEX IF EXISTS event_share_accepted_pair_idx;',
+    'CREATE UNIQUE INDEX IF NOT EXISTS event_share_live_pair_idx',
     'ON event_share_grants(source_household_id, recipient_household_id, source_event_id)',
-    "WHERE status = 'pending';",
-    'CREATE UNIQUE INDEX IF NOT EXISTS event_share_accepted_pair_idx',
-    'ON event_share_grants(source_household_id, recipient_household_id, source_event_id)',
-    "WHERE status = 'accepted';",
+    "WHERE status IN ('pending','accepted');",
   ].join('\n'))
 }
 
@@ -198,23 +196,22 @@ export function inviteSelectedEvents(db, {
     'WHERE source_household_id = ? AND recipient_household_id = ? AND source_event_id = ?',
     'ORDER BY id DESC',
   ].join(' '))
-  const supersedePending = db.prepare([
-    "UPDATE event_share_grants SET status = 'cancelled', updated_at = ?",
-    "WHERE source_household_id = ? AND recipient_household_id = ? AND source_event_id = ? AND status = 'pending'",
-  ].join(' '))
   const made = []
   db.exec('BEGIN IMMEDIATE')
   try {
     for (const event of summaries) for (const to of targets) {
       const now = Date.now()
       const prior = findPrior.all(from, to.target, event.eventId)
+      // A pending invitation or accepted copy is already present for this
+      // household. Never generate a duplicate notification, even on request.
+      if (prior.some(share => share.status === 'pending')) {
+        throw new Error('An invitation is already waiting for this family.')
+      }
+      if (prior.some(share => share.status === 'accepted')) {
+        throw new Error('This event is already on the receiving calendar.')
+      }
       if (prior.length > 0 && allowResend !== true) {
         throw new Error('An invitation was previously sent to this family. Confirm to resend.')
-      }
-      if (prior.some(share => share.status === 'pending')) {
-        // Replace a stale pending invitation with a fresh notification ID.
-        // Never interrupt an accepted share while awaiting a new response.
-        supersedePending.run(now, from, to.target, event.eventId)
       }
       const saved = insert.run(from, to.target, event.eventId, serverVerifiedUserId,
         event.summary.title, event.summary.date, event.summary.endDate,
