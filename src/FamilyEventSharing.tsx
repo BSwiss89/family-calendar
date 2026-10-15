@@ -177,7 +177,8 @@ export default function FamilyEventSharing({ event }: Props) {
     if (!window.confirm(
       (previouslySent.length > 0
         ? 'Previously sent to ' + previouslySent.join(', ') +
-          '. Send another invitation? The recipient will see a new invitation. ' +
+          '. Send an invitation to ' + names.join(', ') + ' again? ' +
+          'The recipient will see a new invitation. ' +
           'Any already accepted share stays on their calendar unless they accept the new one, ' +
           'and no duplicate event will be created. '
         : 'Share "' + event.title + '" with ' + names.join(', ') + '? ') +
