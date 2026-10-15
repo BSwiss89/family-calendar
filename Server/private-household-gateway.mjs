@@ -370,7 +370,10 @@ export async function startPrivateHouseholdGateway({
   app.post('/api/shared-events/invite', parseShareJson, (request, response) => {
     const household = trustedHousehold(request, response)
     if (!household) return
-    const { eventIds, recipientHouseholdIds } = request.body ?? {}
+    const { eventIds, recipientHouseholdIds, allowResend = false } = request.body ?? {}
+    if (typeof allowResend !== 'boolean') {
+      return response.status(400).json({ error: 'Invalid resend confirmation.' })
+    }
     let sourceDb = null
     try {
       // Resolve a server-trusted on-disk path, not an attacker-provided path.
@@ -382,15 +385,16 @@ export async function startPrivateHouseholdGateway({
         serverVerifiedUserId: request.familyAccount.user_id,
         sourceHouseholdId: household.householdId,
         sourceDatabase: sourceDb,
-        eventIds, recipientHouseholdIds,
+        eventIds, recipientHouseholdIds, allowResend,
       })
       response.status(201).json({ invitations: created })
     } catch (error) {
       // Never leak source DB details, event IDs, internal paths or existence.
       const conflict = error?.code === 'SQLITE_CONSTRAINT_UNIQUE'
         || String(error?.message ?? '').includes('UNIQUE constraint')
+        || String(error?.message ?? '').includes('previously sent')
       response.status(conflict ? 409 : 400).json({
-        error: conflict ? 'One or more event invitations already exist.' :
+        error: conflict ? 'An invitation has been sent before. Confirm to resend it.' :
           'Could not share the selected events with the specified recipients.',
       })
     } finally {
