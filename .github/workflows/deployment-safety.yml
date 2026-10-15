@@ -48,5 +48,31 @@ jobs:
             }
             Write-Host "[PASS] $file parses and isolates validator output"
           }
+      - name: Test Arney wake phrases and fallback
+        run: node --experimental-strip-types --test scripts/test-arney-voice.mjs
+      - name: Test Arney safe calendar and list commands
+        run: node --experimental-strip-types --test scripts/test-arney-commands.mjs
+      - name: Test family authentication and trusted-device security
+        run: node --test scripts/test-family-auth.mjs
+      - name: Test isolated household data and upload boundaries
+        run: node --test scripts/test-household-storage.mjs
+      - name: Exercise two real private household API instances
+        run: node --test scripts/test-household-instance-isolation.mjs
+      - name: Check central user-to-household grants and denial rules
+        run: node --test scripts/test-household-memberships.mjs
+      - name: Exercise authenticated private household gateway end-to-end
+        run: node --test scripts/test-private-household-gateway.mjs
+      - name: Test explicitly selected event-only sharing and private calendar boundaries
+        run: node --test scripts/test-event-only-shares.mjs
+      - name: Test safe read-only shared event calendar overlays
+        run: node --experimental-strip-types --test scripts/test-shared-event-overlay.mjs
+      - name: Test event invitation UI field allowlists and trusted recipients
+        run: node --experimental-strip-types --test scripts/test-event-sharing-ui-model.mjs
+      - name: Verify personal and hub account creator audit isolation
+        run: node --test scripts/test-event-creator-audit.mjs
+      - name: Check Share Events modal placement over Events page
+        run: node --test scripts/test-event-sharing-modal-placement.mjs
       - name: Build frontend
         run: npm run build
+      - name: Rehearse disposable two-family browser demo over localhost
+        run: node --test scripts/test-household-browser-demo.mjs

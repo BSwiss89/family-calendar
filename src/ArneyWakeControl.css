@@ -1,0 +1,6 @@
+.arney-wake-control{position:fixed;right:20px;bottom:20px;z-index:1200;display:flex;flex-direction:column;gap:5px;align-items:flex-end;max-width:min(90vw,320px);padding:10px;border-radius:12px;background:#1e1b4bee;color:white;box-shadow:0 4px 20px #0004;font-size:12px}
+.arney-wake-control button{background:#e0e7ff;color:#312e81;border:0;border-radius:8px;padding:9px 12px;font-weight:700;cursor:pointer}
+.arney-wake-control button:disabled{opacity:.55;cursor:not-allowed}
+.arney-wake-control button.arney-wake-active{background:#fecaca;color:#991b1b}
+.arney-wake-control span{max-width:290px;text-align:right}
+@media(max-width:760px){.arney-wake-control{display:none}}
