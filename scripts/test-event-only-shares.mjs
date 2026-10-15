@@ -183,7 +183,7 @@ test('wrong users, broad sharing, recurrence and invalid batches fail without pa
   assert.throws(() => send(db, source, [1], ['family-c', 'family-b', 'family-c']), /Duplicate/)
   const one = send(db, source, [1], ['family-b'])
   assert.equal(count(), 1)
-  assert.throws(() => send(db, source, [2, 1], ['family-b']), /previously sent/)
+  assert.throws(() => send(db, source, [2, 1], ['family-b']), /already waiting/)
   assert.equal(count(), 1)
   assert.throws(() => pending(db, 1, 'family-b'), /Not authorized/)
   assert.throws(() => visible(db, 3, 'family-a'), /Not authorized/)
