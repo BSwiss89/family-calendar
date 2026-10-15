@@ -390,11 +390,17 @@ export async function startPrivateHouseholdGateway({
       response.status(201).json({ invitations: created })
     } catch (error) {
       // Never leak source DB details, event IDs, internal paths or existence.
-      const conflict = error?.code === 'SQLITE_CONSTRAINT_UNIQUE'
-        || String(error?.message ?? '').includes('UNIQUE constraint')
-        || String(error?.message ?? '').includes('previously sent')
+      const message = String(error?.message ?? '')
+      const alreadyWaiting = message.includes('already waiting')
+      const alreadyOnCalendar = message.includes('already on the receiving calendar')
+      const previouslySent = message.includes('previously sent')
+      const conflict = alreadyWaiting || alreadyOnCalendar || previouslySent ||
+        error?.code === 'SQLITE_CONSTRAINT_UNIQUE' || message.includes('UNIQUE constraint')
       response.status(conflict ? 409 : 400).json({
-        error: conflict ? 'An invitation has been sent before. Confirm to resend it.' :
+        error: alreadyWaiting ? 'An invitation is already waiting for this family.' :
+          alreadyOnCalendar ? 'This event is already on their calendar.' :
+          previouslySent ? 'An invitation was sent before. Confirm to resend it.' :
+          conflict ? 'This invitation is already pending or accepted.' :
           'Could not share the selected events with the specified recipients.',
       })
     } finally {
