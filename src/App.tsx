@@ -11744,7 +11744,8 @@ function handleScheduleScroll() {
 }
 
 function getScheduleTimedEventLayouts(
-  scheduleDay: Date
+  scheduleDay: Date,
+  includeReceivedShares = false
 ) {
   const dateKey =
     getDateKeyFromDate(scheduleDay)
@@ -11753,7 +11754,8 @@ function getScheduleTimedEventLayouts(
     scheduleDayWidth - 10
 
   const timedEventLayouts: Array<{
-    calendarEvent: (typeof events)[number]
+    calendarEvent: CalendarEvent | null
+    sharedEvent: AcceptedSharedEvent | null
     dateKey: string
     visibleStart: number
     visibleEnd: number
@@ -11829,6 +11831,7 @@ function getScheduleTimedEventLayouts(
 
     timedEventLayouts.push({
       calendarEvent,
+      sharedEvent: null,
       dateKey,
       visibleStart,
       visibleEnd,
@@ -11840,6 +11843,29 @@ function getScheduleTimedEventLayouts(
     })
   }
 
+  if (includeReceivedShares) {
+    // Accepted event snapshots participate in the SAME collision layout.
+    // Never use their share IDs as local event IDs.
+    for (const sharedEvent of sharedEventsInRange(receivedSharedEvents, dateKey, dateKey)) {
+      if (sharedEvent.time === null) continue
+      const [hour, minute] = sharedEvent.time.split(':').map(Number)
+      const startMinutes = hour * 60 + minute
+      let endMinutes = startMinutes + 60
+      if (sharedEvent.endTime) {
+        const [endHour, endMinute] = sharedEvent.endTime.split(':').map(Number)
+        endMinutes = endHour * 60 + endMinute
+        if (endMinutes <= startMinutes) endMinutes += 1440
+      }
+      const visibleStart = Math.max(0, startMinutes)
+      const visibleEnd = Math.min(1440, endMinutes)
+      if (visibleEnd <= visibleStart) continue
+      timedEventLayouts.push({
+        calendarEvent: null, sharedEvent, dateKey, visibleStart, visibleEnd,
+        durationMinutes: visibleEnd - visibleStart, leftPx: 5,
+        widthPx: scheduleEventUsableWidth,
+      })
+    }
+  }
   timedEventLayouts.sort(
     (eventA, eventB) => {
       if (
@@ -11862,8 +11888,8 @@ function getScheduleTimedEventLayouts(
         )
       }
 
-      return eventA.calendarEvent.title.localeCompare(
-        eventB.calendarEvent.title
+      return (eventA.calendarEvent?.title ?? eventA.sharedEvent?.title ?? '').localeCompare(
+        (eventB.calendarEvent?.title ?? eventB.sharedEvent?.title ?? '')
       )
     }
   )
@@ -11944,8 +11970,8 @@ function getScheduleTimedEventLayouts(
           )
         }
 
-        return eventA.calendarEvent.title.localeCompare(
-          eventB.calendarEvent.title
+        return (eventA.calendarEvent?.title ?? eventA.sharedEvent?.title ?? '').localeCompare(
+          (eventB.calendarEvent?.title ?? eventB.sharedEvent?.title ?? '')
         )
       }
     )
@@ -12066,8 +12092,8 @@ function getScheduleTimedEventLayouts(
         )
       }
 
-      return eventA.calendarEvent.title.localeCompare(
-        eventB.calendarEvent.title
+      return (eventA.calendarEvent?.title ?? eventA.sharedEvent?.title ?? '').localeCompare(
+        (eventB.calendarEvent?.title ?? eventB.sharedEvent?.title ?? '')
       )
     }
   )
