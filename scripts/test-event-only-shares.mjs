@@ -265,3 +265,102 @@ test('only explicitly connected households may receive selected-event invitation
   assert.throws(() => send(db, source, [1, 2], ['family-b', 'family-c']), /not connected/)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM event_share_grants').get().n, 0)
 })
+
+test('explicit re-invites retain historical revoked and declined grants without auto-acceptance', t => {
+  const { db, source } = fixture(t)
+  const original = send(db, source, [1, 2], ['family-b'])
+  respondToEventInvitation(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: original[0].shareId, decision: 'accepted',
+  })
+  revokeSelectedEventShare(db, {
+    serverVerifiedUserId: 1, sourceHouseholdId: 'family-a', shareId: original[0].shareId,
+  })
+  respondToEventInvitation(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: original[1].shareId, decision: 'declined',
+  })
+  const resent = send(db, source, [1, 2], ['family-b'])
+  assert.equal(new Set([...original, ...resent].map(row => row.shareId)).size, 4)
+  assert.deepEqual(visible(db, 3, 'family-b'), [])
+  assert.deepEqual(pending(db, 3, 'family-b').map(row => row.title), ['A BBQ', 'A WORK'])
+  assert.deepEqual(db.prepare(
+    'SELECT status FROM event_share_grants WHERE id IN (?, ?) ORDER BY id'
+  ).all(original[0].shareId, original[1].shareId).map(row => row.status), ['revoked', 'declined'])
+  assert.throws(() => respondToEventInvitation(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: original[0].shareId, decision: 'accepted',
+  }), /no longer pending/)
+  assert.throws(() => send(db, source, [1], ['family-b']), /UNIQUE/)
+  respondToEventInvitation(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: resent[0].shareId, decision: 'accepted',
+  })
+  assert.deepEqual(visible(db, 3, 'family-b').map(row => row.title), ['A BBQ'])
+})
+
+test('recycled source event ID does not collide with historical cancelled share', t => {
+  const { db, source } = fixture(t)
+  const original = send(db, source, [1], ['family-b'])[0]
+  respondToEventInvitation(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: original.shareId, decision: 'accepted',
+  })
+  source.prepare('DELETE FROM events WHERE id = ?').run(1)
+  const sync = synchronizeSelectedEventShare(db, {
+    serverVerifiedUserId: 1, sourceHouseholdId: 'family-a',
+    sourceEventId: 1, sourceDatabase: source,
+  })
+  assert.equal(sync.cancelled, 1)
+  source.prepare([
+    'INSERT INTO events (id, title, date, time, end_time, repeat_unit)',
+    "VALUES (1, 'NEW EVENT', '2026-12-27', '19:00', '20:00', NULL)",
+  ].join(' ')).run()
+  const newer = send(db, source, [1], ['family-b'])[0]
+  assert.notEqual(newer.shareId, original.shareId)
+  assert.deepEqual(visible(db, 3, 'family-b'), [])
+  assert.deepEqual(pending(db, 3, 'family-b').map(row => row.title), ['NEW EVENT'])
+  assert.equal(db.prepare('SELECT status FROM event_share_grants WHERE id = ?')
+    .get(original.shareId).status, 'cancelled')
+  respondToEventInvitation(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: newer.shareId, decision: 'accepted',
+  })
+  assert.deepEqual(visible(db, 3, 'family-b').map(row => row.title), ['NEW EVENT'])
+})
+
+test('legacy lifetime-unique grants migrate transactionally and preserve inactive history', t => {
+  const { db, source } = fixture(t)
+  db.exec('DROP TABLE event_share_grants;')
+  db.exec([
+    'CREATE TABLE event_share_grants (',
+    'id INTEGER PRIMARY KEY,',
+    'source_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
+    'recipient_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
+    'source_event_id INTEGER NOT NULL CHECK(source_event_id > 0),',
+    'created_by_user_id INTEGER NOT NULL REFERENCES family_users(id),',
+    "status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','declined','revoked','cancelled')),",
+    'title TEXT NOT NULL, date TEXT NOT NULL, end_date TEXT, time TEXT, end_time TEXT,',
+    'created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, responded_at INTEGER,',
+    'CHECK(source_household_id != recipient_household_id),',
+    'UNIQUE(source_household_id, recipient_household_id, source_event_id)',
+    ') STRICT;',
+  ].join(' '))
+  db.prepare([
+    'INSERT INTO event_share_grants',
+    '(id,source_household_id,recipient_household_id,source_event_id,created_by_user_id,',
+    'status,title,date,end_date,time,end_time,created_at,updated_at,responded_at)',
+    "VALUES (41,1,2,1,1,'cancelled','A BBQ','2026-12-20',NULL,'12:00','14:00',123,124,NULL)",
+  ].join(' ')).run()
+  createEventShareTables(db)
+  createEventShareTables(db)
+  assert.equal(db.prepare('SELECT status FROM event_share_grants WHERE id = 41')
+    .get().status, 'cancelled')
+  const renewed = send(db, source, [1], ['family-b'])[0]
+  assert.ok(renewed.shareId > 41)
+  assert.deepEqual(pending(db, 3, 'family-b').map(row => row.title), ['A BBQ'])
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM event_share_grants')
+    .get().count, 2)
+  const indexes = db.prepare("PRAGMA index_list('event_share_grants')").all()
+  assert.ok(indexes.some(row => row.name === 'event_share_live_pair_idx' && row.partial === 1))
+})
