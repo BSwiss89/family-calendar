@@ -21,7 +21,7 @@ export type OutgoingEventInvitation = {
   title: string
   date: string
   time: string | null
-  status: 'pending' | 'accepted'
+  status: 'pending' | 'accepted' | 'declined' | 'revoked' | 'cancelled'
 }
 
 type DataRow = Record<string, unknown>
@@ -96,7 +96,7 @@ export function parseOutgoingInvitations(payload: unknown): OutgoingEventInvitat
       seen.has(raw.shareId) || !validIdentifier(raw.sourceEventId) ||
       !validHouseholdId(raw.recipientHouseholdId) ||
       !isCalendarDateKey(raw.date) ||
-      (raw.status !== 'accepted' && raw.status !== 'pending')) continue
+      !['accepted', 'pending', 'declined', 'revoked', 'cancelled'].includes(raw.status as string)) continue
     const title = limitedText(raw.title, 250)
     const recipientDisplayName = limitedText(raw.recipientDisplayName, 90)
     const time = limitedTime(raw.time)
@@ -110,10 +110,10 @@ export function parseOutgoingInvitations(payload: unknown): OutgoingEventInvitat
       title,
       date: raw.date,
       time,
-      status: raw.status,
+      status: raw.status as OutgoingEventInvitation['status'],
     })
     if (result.length >= 250) break
   }
   return result.sort((a, b) =>
-    a.date.localeCompare(b.date) || a.shareId - b.shareId)
+    a.shareId - b.shareId)
 }
