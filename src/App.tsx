@@ -17348,7 +17348,7 @@ const visibleMultiDayLaneCount =
   </div>
 )}
                 <div className="schedule-all-day-events">
-                  {sharedEventsInRange(receivedSharedEvents, dateKey, dateKey).map(shared => (
+                  {sharedEventsInRange(receivedSharedEvents, dateKey, dateKey).filter(shared => shared.time === null).map(shared => (
                     <button type="button" className="schedule-all-day-event shared-schedule-event"
                       key={`schedule-shared-${shared.shareId}-${dateKey}`}
                       title={`Shared by ${shared.sharedBy} · ${formatSharedTime(shared.time)}`}
@@ -17486,7 +17486,7 @@ const visibleMultiDayLaneCount =
 
            const timedEventLayouts =
   getScheduleTimedEventLayouts(
-    scheduleDay
+    scheduleDay, true
   )
 
             return (
@@ -17604,42 +17604,37 @@ const visibleMultiDayLaneCount =
     return (
       <button
         type="button"
-        className="schedule-event"
-        key={`${timedEventLayout.calendarEvent.id}-${timedEventLayout.dateKey}`}
+        className={`schedule-event${timedEventLayout.sharedEvent ? " shared-schedule-timed-event" : ""}`}
+        key={timedEventLayout.sharedEvent
+          ? `shared-${timedEventLayout.sharedEvent.shareId}-${timedEventLayout.dateKey}`
+          : `${timedEventLayout.calendarEvent!.id}-${timedEventLayout.dateKey}`}
         style={{
           top: `${top}px`,
           height: `${height}px`,
           left: `${timedEventLayout.leftPx}px`,
           width: `${timedEventLayout.widthPx}px`,
           right: 'auto',
-          background:
-            getEventBackground(
-              timedEventLayout.calendarEvent.people
-            ),
+          background: timedEventLayout.sharedEvent
+            ? '#e7f0ff'
+            : getEventBackground(timedEventLayout.calendarEvent!.people),
         }}
-        onClick={() =>
-          openEventDetails(
-            timedEventLayout.calendarEvent,
-            timedEventLayout.dateKey
-          )
-        }
+        onClick={() => {
+          if (timedEventLayout.sharedEvent) setSelectedReceivedEvent(timedEventLayout.sharedEvent)
+          else openEventDetails(timedEventLayout.calendarEvent!, timedEventLayout.dateKey)
+        }}
       >
-        <strong>
-  {
-    timedEventLayout.calendarEvent.title
-  }
-</strong>
-
-<span className="schedule-event-time">
-  {formatTime(
-    timedEventLayout.calendarEvent.time!
-  )}
-
-  {timedEventLayout.calendarEvent.endTime &&
-    ` – ${formatTime(
-      timedEventLayout.calendarEvent.endTime
-    )}`}
-</span>
+        <strong>{timedEventLayout.sharedEvent
+          ? `↗ ${timedEventLayout.sharedEvent.title}`
+          : timedEventLayout.calendarEvent!.title}</strong>
+        <span className="schedule-event-time">
+          {timedEventLayout.sharedEvent
+            ? formatSharedTime(timedEventLayout.sharedEvent.time)
+            : formatTime(timedEventLayout.calendarEvent!.time!)}
+          {timedEventLayout.sharedEvent
+            ? timedEventLayout.sharedEvent.endTime && ` – ${formatSharedTime(timedEventLayout.sharedEvent.endTime)}`
+            : timedEventLayout.calendarEvent!.endTime && ` – ${formatTime(timedEventLayout.calendarEvent!.endTime)}`}
+        </span>
+        {timedEventLayout.sharedEvent && <small>Shared by {timedEventLayout.sharedEvent.sharedBy}</small>}
       </button>
     )
   }
@@ -18054,14 +18049,13 @@ const visibleMultiDayLaneCount =
 )
   .filter(
     (timedEventLayout) =>
-      !isMultiDayEvent(
-        timedEventLayout.calendarEvent
-      )
+      timedEventLayout.calendarEvent !== null &&
+      !isMultiDayEvent(timedEventLayout.calendarEvent)
   )
   .map(
     (timedEventLayout) => {
       const calendarEvent =
-        timedEventLayout.calendarEvent
+        timedEventLayout.calendarEvent!
 
       const eventTop =
         (timedEventLayout.visibleStart /
