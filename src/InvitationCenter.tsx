@@ -79,6 +79,7 @@ export function MobileInvitationReminder({
     window.matchMedia('(max-width: 760px)').matches)
   const [remindLater, setRemindLater] = useState(false)
   const wasHidden = useRef(false)
+  const seenInviteIds = useRef(new Set<number>())
   const dialog = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -100,6 +101,15 @@ export function MobileInvitationReminder({
     document.addEventListener('visibilitychange', onVisibility)
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [])
+
+  // A genuinely new invitation (including a confirmed resend with a fresh ID)
+  // must be visible, even if a previous reminder was dismissed on this device.
+  useEffect(() => {
+    const incoming = new Set(invitations.map(item => item.shareId))
+    const hasNew = invitations.some(item => !seenInviteIds.current.has(item.shareId))
+    seenInviteIds.current = incoming
+    if (hasNew) setRemindLater(false)
+  }, [invitations])
 
   const visible = mobile && available && invitations.length > 0 && !remindLater
 
