@@ -114,9 +114,13 @@ export function createEventShareTables(db) {
   db.exec([
     'CREATE INDEX IF NOT EXISTS event_share_recipient_idx',
     'ON event_share_grants(recipient_household_id, status);',
-    'CREATE UNIQUE INDEX IF NOT EXISTS event_share_live_pair_idx',
+    'DROP INDEX IF EXISTS event_share_live_pair_idx;',
+    'CREATE UNIQUE INDEX IF NOT EXISTS event_share_pending_pair_idx',
     'ON event_share_grants(source_household_id, recipient_household_id, source_event_id)',
-    "WHERE status IN ('pending','accepted');",
+    "WHERE status = 'pending';",
+    'CREATE UNIQUE INDEX IF NOT EXISTS event_share_accepted_pair_idx',
+    'ON event_share_grants(source_household_id, recipient_household_id, source_event_id)',
+    "WHERE status = 'accepted';",
   ].join('\n'))
 }
 
@@ -156,7 +160,7 @@ export function listTrustedEventShareRecipients(db, { serverVerifiedUserId, sour
  */
 export function inviteSelectedEvents(db, {
   serverVerifiedUserId, sourceHouseholdId, recipientHouseholdIds,
-  eventIds, sourceDatabase,
+  eventIds, sourceDatabase, allowResend = false,
 }) {
   membership(db, serverVerifiedUserId, sourceHouseholdId)
   const events = distinct(eventIds, 'event IDs', 20, id)
@@ -189,11 +193,29 @@ export function inviteSelectedEvents(db, {
     'created_by_user_id, title, date, end_date, time, end_time, created_at, updated_at)',
     'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ].join(' '))
+  const findPrior = db.prepare([
+    'SELECT id, status FROM event_share_grants',
+    'WHERE source_household_id = ? AND recipient_household_id = ? AND source_event_id = ?',
+    'ORDER BY id DESC',
+  ].join(' '))
+  const supersedePending = db.prepare([
+    "UPDATE event_share_grants SET status = 'cancelled', updated_at = ?",
+    "WHERE source_household_id = ? AND recipient_household_id = ? AND source_event_id = ? AND status = 'pending'",
+  ].join(' '))
   const made = []
   db.exec('BEGIN IMMEDIATE')
   try {
     for (const event of summaries) for (const to of targets) {
       const now = Date.now()
+      const prior = findPrior.all(from, to.target, event.eventId)
+      if (prior.length > 0 && allowResend !== true) {
+        throw new Error('An invitation was previously sent to this family. Confirm to resend.')
+      }
+      if (prior.some(share => share.status === 'pending')) {
+        // Replace a stale pending invitation with a fresh notification ID.
+        // Never interrupt an accepted share while awaiting a new response.
+        supersedePending.run(now, from, to.target, event.eventId)
+      }
       const saved = insert.run(from, to.target, event.eventId, serverVerifiedUserId,
         event.summary.title, event.summary.date, event.summary.endDate,
         event.summary.time, event.summary.endTime, now, now)
@@ -235,22 +257,54 @@ export function respondToEventInvitation(db, { serverVerifiedUserId, recipientHo
   const row = grantForActor(db, shareId, serverVerifiedUserId, 'recipient', recipientHouseholdId)
   if (row.status !== 'pending') throw new Error('Invitation is no longer pending.')
   const now = Date.now()
-  const changed = db.prepare([
-    'UPDATE event_share_grants SET status = ?, responded_at = ?, updated_at = ?',
-    "WHERE id = ? AND status = 'pending'",
-  ].join(' ')).run(decision, now, now, shareId)
-  if (changed.changes !== 1) throw new Error('Invitation changed, please reload.')
-  return { shareId, status: decision }
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    if (decision === 'accepted') {
+      // Replace (not duplicate) the previous accepted event in this household.
+      // A declined reminder leaves the original accepted event untouched.
+      db.prepare([
+        "UPDATE event_share_grants SET status = 'revoked', updated_at = ?",
+        'WHERE source_household_id = ? AND recipient_household_id = ?',
+        "AND source_event_id = ? AND status = 'accepted' AND id != ?",
+      ].join(' ')).run(now, row.source_household_id, row.recipient_household_id,
+        row.source_event_id, shareId)
+    }
+    const changed = db.prepare([
+      'UPDATE event_share_grants SET status = ?, responded_at = ?, updated_at = ?',
+      "WHERE id = ? AND status = 'pending'",
+    ].join(' ')).run(decision, now, now, shareId)
+    if (changed.changes !== 1) throw new Error('Invitation changed, please reload.')
+    db.exec('COMMIT')
+    return { shareId, status: decision }
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
 }
 
 /** Revoke this specific event-to-recipient grant only. */
 export function revokeSelectedEventShare(db, { serverVerifiedUserId, sourceHouseholdId, shareId }) {
-  grantForActor(db, shareId, serverVerifiedUserId, 'source', sourceHouseholdId)
+  const row = grantForActor(db, shareId, serverVerifiedUserId, 'source', sourceHouseholdId)
+  if (!['pending', 'accepted', 'declined'].includes(row.status)) {
+    throw new Error('Share is already revoked or cancelled.')
+  }
+  const now = Date.now()
+  // Stopping sharing means stopping BOTH an accepted share and any pending
+  // resend for the same event/recipient. No latent invite can re-enable it.
   const changed = db.prepare([
     "UPDATE event_share_grants SET status = 'revoked', updated_at = ?",
-    "WHERE id = ? AND status IN ('pending','accepted','declined')",
-  ].join(' ')).run(Date.now(), shareId)
-  if (changed.changes !== 1) throw new Error('Share is already revoked or cancelled.')
+    'WHERE source_household_id = ? AND recipient_household_id = ?',
+    "AND source_event_id = ? AND status IN ('pending','accepted')",
+  ].join(' ')).run(now, row.source_household_id, row.recipient_household_id,
+    row.source_event_id)
+  if (row.status === 'declined') {
+    db.prepare([
+      "UPDATE event_share_grants SET status = 'revoked', updated_at = ?",
+      "WHERE id = ? AND status = 'declined'",
+    ].join(' ')).run(now, shareId)
+  } else if (changed.changes < 1) {
+    throw new Error('Share is already revoked or cancelled.')
+  }
   return { shareId, status: 'revoked' }
 }
 
@@ -285,7 +339,6 @@ export function listOutgoingEventShares(db, { serverVerifiedUserId, sourceHouseh
     'JOIN household_registry source ON source.id = share.source_household_id',
     'JOIN household_registry recipient ON recipient.id = share.recipient_household_id',
     'WHERE source.storage_id = ?',
-    "AND share.status IN ('pending','accepted')",
     'AND source.disabled = 0 AND recipient.disabled = 0',
     'ORDER BY share.date, share.id',
   ].join(' ')).all(sourceHouseholdId).map(row => ({
