@@ -317,7 +317,8 @@ export default function FamilyEventSharing({ event }: Props) {
                         {share.status === 'accepted' ? 'Accepted' :
                           share.status === 'pending' ? 'Awaiting acceptance' :
                           share.status === 'declined' ? 'Declined' :
-                          share.status === 'revoked' ? 'Stopped sharing' : 'Previous event deleted'}
+                          share.status === 'revoked' ? 'Stopped sharing' :
+                          share.status === 'removed' ? 'Removed by recipient' : 'Previous event deleted'}
                         
                       </span>
                       {(share.status === 'pending' || share.status === 'accepted') && (
