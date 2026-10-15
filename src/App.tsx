@@ -13413,14 +13413,13 @@ const targetMiniMonthDays =
 )
   .filter(
     (timedEventLayout) =>
-      !isMultiDayEvent(
-        timedEventLayout.calendarEvent
-      )
+      timedEventLayout.calendarEvent !== null &&
+      !isMultiDayEvent(timedEventLayout.calendarEvent)
   )
   .map(
     (timedEventLayout) => {
       const calendarEvent =
-        timedEventLayout.calendarEvent
+        timedEventLayout.calendarEvent!
 
       const eventTop =
         (timedEventLayout.visibleStart /
