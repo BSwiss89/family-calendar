@@ -62,7 +62,7 @@ function shareGrantTableSql(name) {
     'recipient_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
     'source_event_id INTEGER NOT NULL CHECK(source_event_id > 0),',
     'created_by_user_id INTEGER NOT NULL REFERENCES family_users(id),',
-    "status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','declined','revoked','cancelled')),",
+    "status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','declined','revoked','cancelled','removed')),",
     'title TEXT NOT NULL, date TEXT NOT NULL, end_date TEXT, time TEXT, end_time TEXT,',
     'created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, responded_at INTEGER,',
     'CHECK(source_household_id != recipient_household_id)',
@@ -88,7 +88,8 @@ export function createEventShareTables(db) {
   const oldDefinition = db.prepare(
     "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'event_share_grants'"
   ).get()?.sql ?? ''
-  if (/UNIQUE\s*\(\s*source_household_id\s*,\s*recipient_household_id\s*,\s*source_event_id\s*\)/i.test(oldDefinition)) {
+  if (/UNIQUE\s*\(\s*source_household_id\s*,\s*recipient_household_id\s*,\s*source_event_id\s*\)/i.test(oldDefinition) ||
+    !oldDefinition.includes("'removed'")) {
     // Transactional, data-preserving migration from the original table's
     // lifetime uniqueness rule. No invitation changes status or recipient.
     db.exec('BEGIN IMMEDIATE')
@@ -277,6 +278,24 @@ export function respondToEventInvitation(db, { serverVerifiedUserId, recipientHo
     db.exec('ROLLBACK')
     throw error
   }
+}
+
+/**
+ * The recipient can remove an accepted snapshot from THEIR OWN calendar.
+ * This never touches the sender's household database or other recipients.
+ * Mark it as inactive history so an explicit re-invite is possible.
+ */
+export function removeReceivedEventShare(db, {
+  serverVerifiedUserId, recipientHouseholdId, shareId,
+}) {
+  const share = grantForActor(db, shareId, serverVerifiedUserId, 'recipient', recipientHouseholdId)
+  if (share.status !== 'accepted') throw new Error('Accepted shared event is unavailable.')
+  const result = db.prepare([
+    "UPDATE event_share_grants SET status = 'removed', updated_at = ?",
+    "WHERE id = ? AND recipient_household_id = ? AND status = 'accepted'",
+  ].join(' ')).run(Date.now(), shareId, share.recipient_household_id)
+  if (result.changes !== 1) throw new Error('Accepted shared event changed, please reload.')
+  return { shareId, status: 'removed' }
 }
 
 /** Revoke this specific event-to-recipient grant only. */
