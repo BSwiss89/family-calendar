@@ -12188,7 +12188,7 @@ const mobileHiddenAllDayEventCount =
   mobileVisibleAllDayEvents.length
   const timedLayouts =
   getScheduleTimedEventLayouts(
-    targetDate
+    targetDate, true
   )
 
   return (
@@ -12397,11 +12397,11 @@ positionMobileScheduleTimeline(
         </div>
       )}
 
-      {sharedEventsInRange(receivedSharedEvents, targetDateKey, targetDateKey).length > 0 && (
+      {sharedEventsInRange(receivedSharedEvents, targetDateKey, targetDateKey).some(shared => shared.time === null) && (
         <div className="mobile-schedule-all-day shared-mobile-event-group">
           <span className="mobile-schedule-all-day-label">Shared</span>
           <div className="mobile-schedule-all-day-events">
-            {sharedEventsInRange(receivedSharedEvents, targetDateKey, targetDateKey).map(shared => (
+            {sharedEventsInRange(receivedSharedEvents, targetDateKey, targetDateKey).filter(shared => shared.time === null).map(shared => (
               <button type="button" className="mobile-schedule-all-day-event shared-schedule-event"
                 key={`mobile-shared-${shared.shareId}-${targetDateKey}`}
                 onClick={() => setSelectedReceivedEvent(shared)}>
@@ -12578,6 +12578,7 @@ positionMobileScheduleTimeline(
               (timedLayout) => {
                 const calendarEvent =
                   timedLayout.calendarEvent
+                const sharedEvent = timedLayout.sharedEvent
 
                 const top =
                   (timedLayout.visibleStart /
@@ -12614,47 +12615,34 @@ const widthPercent =
                 return (
                   <button
                     type="button"
-                    className="mobile-schedule-event"
-                    key={`${targetDateKey}-${calendarEvent.id}`}
+                    className={`mobile-schedule-event${sharedEvent ? " shared-schedule-timed-event" : ""}`}
+                    key={sharedEvent ? `shared-${targetDateKey}-${sharedEvent.shareId}` : `${targetDateKey}-${calendarEvent!.id}`}
                     style={{
                       top: `${top}px`,
                       height: `${height}px`,
                       left: `calc(${leftPercent}% + 3px)`,
 width: `calc(${widthPercent}% - 6px)`,
-                      background:
-                        getEventBackground(
-                          calendarEvent.people
-                        ),
+                      background: sharedEvent ? '#e7f0ff' : getEventBackground(calendarEvent!.people),
                     }}
-                    onClick={() =>
-                      openEventDetails(
-                        calendarEvent,
-                        targetDateKey
-                      )
-                    }
+                    onClick={() => {
+                      if (sharedEvent) setSelectedReceivedEvent(sharedEvent)
+                      else openEventDetails(calendarEvent!, targetDateKey)
+                    }}
                   >
                     <strong>
-                      {calendarEvent.title}
+                      {sharedEvent ? `↗ ${sharedEvent.title}` : calendarEvent!.title}
                     </strong>
 
                     <span>
-                      {formatTime(
-                        calendarEvent.time!
-                      )}
-
-                      {calendarEvent.endTime &&
-                        ` – ${formatTime(
-                          calendarEvent.endTime
-                        )}`}
+                      {sharedEvent ? formatSharedTime(sharedEvent.time) : formatTime(calendarEvent!.time!)}
+                      {sharedEvent
+                        ? sharedEvent.endTime && ` – ${formatSharedTime(sharedEvent.endTime)}`
+                        : calendarEvent!.endTime && ` – ${formatTime(calendarEvent!.endTime)}`}
                     </span>
 
-                    {calendarEvent.location && (
-                      <small>
-                        {
-                          calendarEvent.location
-                        }
-                      </small>
-                    )}
+                    {sharedEvent
+                      ? <small>Shared by {sharedEvent.sharedBy} · Read only</small>
+                      : calendarEvent!.location && <small>{calendarEvent!.location}</small>}
                   </button>
                 )
               }
