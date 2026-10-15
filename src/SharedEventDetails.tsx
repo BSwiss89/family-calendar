@@ -42,7 +42,7 @@ export default function SharedEventDetails({ event, onClose }: Props) {
     setError('')
     try {
       // shareId refers to a centrally authorized received snapshot, never
-      // a household-local /api/events ID or the sender's calendar database.
+      // a household-local event ID or the sender's calendar database.
       const response = await fetch('/api/shared-events/' + event.shareId + '/received', {
         method: 'DELETE',
         credentials: 'same-origin',
