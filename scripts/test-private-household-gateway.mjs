@@ -400,31 +400,21 @@ test('central authenticated gateway denies one family access to another family b
       cookie: cookieB,
     })
     assert.deepEqual(approved.value.events.map(e => e.title), ['Family A private calendar'])
-    // An accepted event stays visible while a second, confirmed invitation
-    // awaits a response; declining the reminder must not revoke the share.
+    // Neither a pending nor an accepted event permits duplicate invitations.
     const blockedReminder = await json(gateway.base, '/api/shared-events/invite', {
       cookie: cookieA, body: { eventIds: [idToShare], recipientHouseholdIds: ['family-b'] },
     })
     assert.equal(blockedReminder.response.status, 409)
-    const reminder = await json(gateway.base, '/api/shared-events/invite', {
+    const blockedConfirmedReminder = await json(gateway.base, '/api/shared-events/invite', {
       cookie: cookieA, body: { eventIds: [idToShare], recipientHouseholdIds: ['family-b'], allowResend: true },
     })
-    assert.equal(reminder.response.status, 201)
-    const reminderId = reminder.value.invitations[0].shareId
-    assert.notEqual(reminderId, sharedId)
+    assert.equal(blockedConfirmedReminder.response.status, 409)
     assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
       cookie: cookieB,
     })).value.events.map(event => event.shareId), [sharedId])
     assert.deepEqual((await json(gateway.base, '/api/shared-events/invitations', {
       cookie: cookieB,
-    })).value.invitations.map(event => event.shareId), [reminderId])
-    assert.equal((await json(gateway.base, '/api/shared-events/' + reminderId + '/respond', {
-      cookie: cookieB, body: { decision: 'declined' },
-    })).response.status, 200)
-    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
-      cookie: cookieB,
-    })).value.events.map(event => event.shareId), [sharedId])
-
+    })).value.invitations, [])
     assert.doesNotMatch(JSON.stringify(approved.value), /SECRET|PRIVATE MEDICAL|location|notes|person/)
     assert.deepEqual((await json(gateway.base, '/api/events', {
       cookie: cookieB,
@@ -479,7 +469,33 @@ test('central authenticated gateway denies one family access to another family b
     })).value.events, [])
     assert.deepEqual((await json(gateway.base, '/api/shared-events/sent', {
       cookie: cookieA,
-    })).value.shares.map(share => share.status).sort(), ['declined', 'revoked'])
+    })).value.shares.map(share => share.status), ['revoked'])
+    // A revoked share can be resent, but only with explicit confirmation.
+    const resendWithoutConfirmation = await json(gateway.base, '/api/shared-events/invite', {
+      cookie: cookieA, body: { eventIds: [idToShare], recipientHouseholdIds: ['family-b'] },
+    })
+    assert.equal(resendWithoutConfirmation.response.status, 409)
+    const resent = await json(gateway.base, '/api/shared-events/invite', {
+      cookie: cookieA, body: { eventIds: [idToShare], recipientHouseholdIds: ['family-b'], allowResend: true },
+    })
+    assert.equal(resent.response.status, 201, JSON.stringify(resent.value))
+    const resentId = resent.value.invitations[0].shareId
+    assert.notEqual(resentId, sharedId)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/invitations', {
+      cookie: cookieB,
+    })).value.invitations.map(event => event.shareId), [resentId])
+    assert.equal((await json(gateway.base, '/api/shared-events/invite', {
+      cookie: cookieA, body: { eventIds: [idToShare], recipientHouseholdIds: ['family-b'], allowResend: true },
+    })).response.status, 409)
+    assert.equal((await json(gateway.base, '/api/shared-events/' + resentId + '/respond', {
+      cookie: cookieB, body: { decision: 'declined' },
+    })).response.status, 200)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/invitations', {
+      cookie: cookieB,
+    })).value.invitations, [])
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events, [])
     assert.equal((await json(gateway.base, '/api/shared-events/made-up', {
       cookie: cookieB,
     })).response.status, 404)
