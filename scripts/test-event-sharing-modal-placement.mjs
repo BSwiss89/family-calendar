@@ -125,3 +125,10 @@ test('previously invited contacts can be explicitly re-invited after warning wit
   assert.match(sharing, /share\.status === 'revoked'/)
   assert.doesNotMatch(sharing, /disabled=\{existingTargets\.has\(contact\.householdId\)\}/)
 })
+
+
+test('freshly resent invitation reopens mobile reminder even after Remind Later', () => {
+  assert.match(invitations, /seenInviteIds\.current/)
+  assert.match(invitations, /invitations\.some\(item => !seenInviteIds\.current\.has\(item\.shareId\)\)/)
+  assert.match(invitations, /if \(hasNew\) setRemindLater\(false\)/)
+})
