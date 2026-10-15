@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import {
   createEventShareTables, inviteSelectedEvents, respondToEventInvitation,
-  revokeSelectedEventShare, listAcceptedSharedEvents, listEventShareInvitations,
+  revokeSelectedEventShare, removeReceivedEventShare, listAcceptedSharedEvents, listEventShareInvitations,
   synchronizeSelectedEventShare, registerTrustedShareConnection,
   listTrustedEventShareRecipients, listOutgoingEventShares,
 } from '../Server/event-only-shares.mjs'
@@ -356,6 +356,7 @@ test('legacy lifetime-unique grants migrate transactionally and preserve inactiv
   ].join(' ')).run()
   createEventShareTables(db)
   createEventShareTables(db)
+  assert.match(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'event_share_grants'").get().sql, /'removed'/)
   assert.equal(db.prepare('SELECT status FROM event_share_grants WHERE id = 41')
     .get().status, 'cancelled')
   const renewed = send(db, source, [1], ['family-b'], { allowResend: true })[0]
@@ -419,4 +420,74 @@ test('mixed recipient resend batch rejects active invitation atomically', t => {
   assert.equal(sent.length, 2)
   assert.equal(pending(db, 3, 'family-b').length, 1)
   assert.equal(pending(db, 4, 'family-c').length, 1)
+})
+
+test('recipient can remove only their own accepted snapshot; source and other recipients remain intact', t => {
+  const { db, source } = fixture(t)
+  const shares = send(db, source, [1], ['family-b', 'family-c'])
+  const familyB = shares.find(x => x.recipientHouseholdId === 'family-b')
+  const familyC = shares.find(x => x.recipientHouseholdId === 'family-c')
+  for (const [user, house, share] of [[3, 'family-b', familyB], [4, 'family-c', familyC]]) {
+    respondToEventInvitation(db, { serverVerifiedUserId: user,
+      recipientHouseholdId: house, shareId: share.shareId, decision: 'accepted' })
+  }
+  assert.throws(() => removeReceivedEventShare(db, {
+    serverVerifiedUserId: 1, recipientHouseholdId: 'family-b',
+    shareId: familyB.shareId,
+  }), /Not authorized/)
+  assert.throws(() => removeReceivedEventShare(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: familyC.shareId,
+  }), /selected household/)
+  assert.throws(() => removeReceivedEventShare(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: 999999,
+  }), /not available/)
+  assert.deepEqual(removeReceivedEventShare(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: familyB.shareId,
+  }), { shareId: familyB.shareId, status: 'removed' })
+  assert.deepEqual(visible(db, 3, 'family-b'), [])
+  assert.deepEqual(pending(db, 3, 'family-b'), [])
+  assert.deepEqual(visible(db, 4, 'family-c').map(x => x.title), ['A BBQ'])
+  assert.equal(source.prepare('SELECT title FROM events WHERE id=1').get().title, 'A BBQ')
+  assert.equal(db.prepare('SELECT status FROM event_share_grants WHERE id=?')
+    .get(familyB.shareId).status, 'removed')
+  assert.throws(() => removeReceivedEventShare(db, {
+    serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: familyB.shareId,
+  }), /unavailable/)
+  assert.throws(() => send(db, source, [1], ['family-b']), /previously sent/)
+  const resent = send(db, source, [1], ['family-b'], { allowResend: true })[0]
+  assert.notEqual(resent.shareId, familyB.shareId)
+  assert.deepEqual(pending(db, 3, 'family-b').map(x => x.shareId), [resent.shareId])
+  assert.deepEqual(visible(db, 4, 'family-c').map(x => x.shareId), [familyC.shareId])
+  respondToEventInvitation(db, { serverVerifiedUserId: 3,
+    recipientHouseholdId: 'family-b', shareId: resent.shareId, decision: 'accepted' })
+  assert.deepEqual(visible(db, 3, 'family-b').map(x => x.shareId), [resent.shareId])
+  assert.deepEqual(visible(db, 4, 'family-c').map(x => x.shareId), [familyC.shareId])
+})
+
+test('recipient cannot remove pending, declined, revoked or source-cancelled shares', t => {
+  const { db, source } = fixture(t)
+  const [pendingShare, declinedShare, revokedShare, cancelledShare] =
+    send(db, source, [1, 2], ['family-b','family-c'])
+  // Ordering is event-major: B1, C1, B2, C2.
+  assert.equal(pendingShare.recipientHouseholdId, 'family-b')
+  assert.throws(() => removeReceivedEventShare(db, { serverVerifiedUserId: 3,
+    recipientHouseholdId: 'family-b', shareId: pendingShare.shareId }), /unavailable/)
+  respondToEventInvitation(db, { serverVerifiedUserId: 4,
+    recipientHouseholdId: 'family-c', shareId: declinedShare.shareId, decision: 'declined' })
+  assert.throws(() => removeReceivedEventShare(db, { serverVerifiedUserId: 4,
+    recipientHouseholdId: 'family-c', shareId: declinedShare.shareId }), /unavailable/)
+  revokeSelectedEventShare(db, { serverVerifiedUserId: 1,
+    sourceHouseholdId: 'family-a', shareId: revokedShare.shareId })
+  assert.throws(() => removeReceivedEventShare(db, { serverVerifiedUserId: 3,
+    recipientHouseholdId: 'family-b', shareId: revokedShare.shareId }), /unavailable/)
+  source.prepare('DELETE FROM events WHERE id=?').run(2)
+  synchronizeSelectedEventShare(db, { serverVerifiedUserId: 1,
+    sourceHouseholdId: 'family-a', sourceEventId: 2, sourceDatabase: source })
+  assert.throws(() => removeReceivedEventShare(db, { serverVerifiedUserId: 4,
+    recipientHouseholdId: 'family-c', shareId: cancelledShare.shareId }), /unavailable/)
+  assert.deepEqual(pending(db, 3, 'family-b').map(x => x.title), ['A BBQ'])
 })
