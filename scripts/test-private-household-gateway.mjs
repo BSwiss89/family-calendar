@@ -521,6 +521,71 @@ test('central authenticated gateway denies one family access to another family b
     assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
       cookie: cookieB,
     })).value.events.map(e => e.title), ['Family A temporary public event'])
+
+    // Family B may remove its accepted copy; Family A cannot remove B's copy
+    // and the source event remains entirely untouched.
+    assert.equal((await json(gateway.base,
+      '/api/shared-events/' + tempShareId + '/received', {
+        cookie: cookieA, method: 'DELETE',
+      })).response.status, 404)
+    assert.equal((await json(gateway.base,
+      '/api/shared-events/999999/received', {
+        cookie: cookieB, method: 'DELETE',
+      })).response.status, 404)
+    const removed = await json(gateway.base,
+      '/api/shared-events/' + tempShareId + '/received', {
+        cookie: cookieB, method: 'DELETE',
+      })
+    assert.equal(removed.response.status, 200)
+    assert.deepEqual(removed.value, { shareId: tempShareId, status: 'removed' })
+    assert.equal((await json(gateway.base,
+      '/api/shared-events/' + tempShareId + '/received', {
+        cookie: cookieB, method: 'DELETE',
+      })).response.status, 404)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events, [])
+    assert.equal(central.prepare('SELECT status FROM event_share_grants WHERE id=?')
+      .get(tempShareId).status, 'removed')
+    assert.equal((await json(gateway.base, '/api/events', { cookie: cookieA }))
+      .value.some(event => event.id === temporaryId &&
+        event.title === 'Family A temporary public event'), true)
+    assert.equal((await json(gateway.base, '/api/shared-events/invitations', {
+      cookie: cookieB,
+    })).value.invitations.length, 0)
+
+    // Removing the copy makes a confirmed re-invite possible, but never
+    // silently restores it or adds a duplicate pending invitation.
+    assert.equal((await json(gateway.base, '/api/shared-events/invite', {
+      cookie: cookieA, body: {
+        eventIds: [temporaryId], recipientHouseholdIds: ['family-b'],
+      },
+    })).response.status, 409)
+    const secondTemporaryInvite = await json(gateway.base, '/api/shared-events/invite', {
+      cookie: cookieA, body: {
+        eventIds: [temporaryId], recipientHouseholdIds: ['family-b'],
+        allowResend: true,
+      },
+    })
+    assert.equal(secondTemporaryInvite.response.status, 201)
+    const secondTempShareId = secondTemporaryInvite.value.invitations[0].shareId
+    assert.notEqual(secondTempShareId, tempShareId)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/invitations', {
+      cookie: cookieB,
+    })).value.invitations.map(event => event.shareId), [secondTempShareId])
+    assert.equal((await json(gateway.base, '/api/shared-events/invite', {
+      cookie: cookieA, body: {
+        eventIds: [temporaryId], recipientHouseholdIds: ['family-b'],
+        allowResend: true,
+      },
+    })).response.status, 409)
+    assert.equal((await json(gateway.base,
+      '/api/shared-events/' + secondTempShareId + '/respond', {
+        cookie: cookieB, body: { decision: 'accepted' },
+      })).response.status, 200)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events.map(event => event.shareId), [secondTempShareId])
     assert.equal((await json(gateway.base, '/api/events/' + temporaryId, {
       cookie: cookieA, method: 'DELETE',
     })).response.status, 200)
@@ -529,7 +594,10 @@ test('central authenticated gateway denies one family access to another family b
     })).value.events, [])
     assert.equal(central.prepare(
       'SELECT status FROM event_share_grants WHERE id = ?',
-    ).get(tempShareId).status, 'cancelled')
+    ).get(tempShareId).status, 'removed')
+    assert.equal(central.prepare(
+      'SELECT status FROM event_share_grants WHERE id = ?',
+    ).get(secondTempShareId).status, 'cancelled')
     assert.deepEqual((await json(gateway.base, '/api/events', {
       cookie: cookieB,
     })).value.map(e => e.title), ['Family B private calendar'])
