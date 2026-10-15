@@ -292,7 +292,8 @@ test('explicit re-invites retain historical revoked and declined grants without 
     serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
     shareId: original[0].shareId, decision: 'accepted',
   }), /no longer pending/)
-  assert.throws(() => send(db, source, [1], ['family-b']), /previously sent/)
+  assert.throws(() => send(db, source, [1], ['family-b']), /already waiting/)
+  assert.throws(() => send(db, source, [1], ['family-b'], { allowResend: true }), /already waiting/)
   respondToEventInvitation(db, {
     serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
     shareId: resent[0].shareId, decision: 'accepted',
@@ -363,52 +364,55 @@ test('legacy lifetime-unique grants migrate transactionally and preserve inactiv
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM event_share_grants')
     .get().count, 2)
   const indexes = db.prepare("PRAGMA index_list('event_share_grants')").all()
-  assert.ok(indexes.some(row => row.name === 'event_share_pending_pair_idx' && row.partial === 1))
-  assert.ok(indexes.some(row => row.name === 'event_share_accepted_pair_idx' && row.partial === 1))
+  assert.ok(indexes.some(row => row.name === 'event_share_live_pair_idx' && row.partial === 1))
 })
 
-test('resending an accepted event preserves the existing copy until recipient decides', t => {
+test('pending or accepted share never triggers a duplicate invite even with resend confirmation', t => {
   const { db, source } = fixture(t)
   const original = send(db, source, [1], ['family-b'])[0]
+  assert.throws(() => send(db, source, [1], ['family-b'], { allowResend: true }), /already waiting/)
+  assert.deepEqual(pending(db, 3, 'family-b').map(row => row.shareId), [original.shareId])
   respondToEventInvitation(db, { serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
     shareId: original.shareId, decision: 'accepted' })
+  assert.throws(() => send(db, source, [1], ['family-b'], { allowResend: true }), /already on the receiving calendar/)
+  assert.deepEqual(visible(db, 3, 'family-b').map(row => row.shareId), [original.shareId])
+  assert.deepEqual(pending(db, 3, 'family-b'), [])
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM event_share_grants').get().n, 1)
+  revokeSelectedEventShare(db, { serverVerifiedUserId: 1, sourceHouseholdId: 'family-a',
+    shareId: original.shareId })
+  assert.deepEqual(visible(db, 3, 'family-b'), [])
   assert.throws(() => send(db, source, [1], ['family-b']), /previously sent/)
   const resent = send(db, source, [1], ['family-b'], { allowResend: true })[0]
-  assert.notEqual(original.shareId, resent.shareId)
-  assert.deepEqual(visible(db, 3, 'family-b').map(x => x.shareId), [original.shareId])
-  assert.deepEqual(pending(db, 3, 'family-b').map(x => x.shareId), [resent.shareId])
-  respondToEventInvitation(db, { serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
-    shareId: resent.shareId, decision: 'declined' })
-  assert.deepEqual(visible(db, 3, 'family-b').map(x => x.shareId), [original.shareId])
-  const resendAccepted = send(db, source, [1], ['family-b'], { allowResend: true })[0]
-  respondToEventInvitation(db, { serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
-    shareId: resendAccepted.shareId, decision: 'accepted' })
-  assert.deepEqual(visible(db, 3, 'family-b').map(x => x.shareId), [resendAccepted.shareId])
-  assert.equal(db.prepare('SELECT status FROM event_share_grants WHERE id = ?')
-    .get(original.shareId).status, 'revoked')
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM event_share_grants').get().n, 3)
-})
-
-test('repeated pending sends replace the pending invitation ID and Stop sharing clears both active states', t => {
-  const { db, source } = fixture(t)
-  const first = send(db, source, [1], ['family-b'])[0]
-  const second = send(db, source, [1], ['family-b'], { allowResend: true })[0]
-  assert.deepEqual(pending(db, 3, 'family-b').map(x => x.shareId), [second.shareId])
-  assert.equal(db.prepare('SELECT status FROM event_share_grants WHERE id = ?').get(first.shareId).status, 'cancelled')
-  assert.throws(() => respondToEventInvitation(db, { serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
-    shareId: first.shareId, decision: 'accepted' }), /no longer pending/)
-  respondToEventInvitation(db, { serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
-    shareId: second.shareId, decision: 'accepted' })
-  const third = send(db, source, [1], ['family-b'], { allowResend: true })[0]
-  revokeSelectedEventShare(db, { serverVerifiedUserId: 1, sourceHouseholdId: 'family-a', shareId: second.shareId })
+  assert.notEqual(resent.shareId, original.shareId)
+  assert.deepEqual(pending(db, 3, 'family-b').map(row => row.shareId), [resent.shareId])
   assert.deepEqual(visible(db, 3, 'family-b'), [])
-  assert.deepEqual(pending(db, 3, 'family-b'), [])
-  assert.equal(db.prepare('SELECT status FROM event_share_grants WHERE id=?').get(third.shareId).status, 'revoked')
+  respondToEventInvitation(db, { serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: resent.shareId, decision: 'accepted' })
+  assert.deepEqual(visible(db, 3, 'family-b').map(row => row.shareId), [resent.shareId])
 })
 
-test('re-invitation selection stays atomic if any recipient was previously invited without confirmation', t => {
+test('previously declined invitation can be resent once, never duplicated while waiting', t => {
   const { db, source } = fixture(t)
-  send(db, source, [1], ['family-b'])
+  const old = send(db, source, [1], ['family-b'])[0]
+  respondToEventInvitation(db, { serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: old.shareId, decision: 'declined' })
+  assert.deepEqual(pending(db, 3, 'family-b'), [])
+  assert.throws(() => send(db, source, [1], ['family-b']), /previously sent/)
+  const newer = send(db, source, [1], ['family-b'], { allowResend: true })[0]
+  assert.deepEqual(pending(db, 3, 'family-b').map(row => row.shareId), [newer.shareId])
+  assert.throws(() => send(db, source, [1], ['family-b'], { allowResend: true }), /already waiting/)
+  assert.equal(db.prepare('SELECT status FROM event_share_grants WHERE id=?').get(old.shareId).status, 'declined')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM event_share_grants').get().n, 2)
+})
+
+test('mixed recipient resend batch rejects active invitation atomically', t => {
+  const { db, source } = fixture(t)
+  const original = send(db, source, [1], ['family-b'])[0]
+  assert.throws(() => send(db, source, [1], ['family-b','family-c'],
+    { allowResend: true }), /already waiting/)
+  assert.deepEqual(pending(db, 4, 'family-c'), [])
+  respondToEventInvitation(db, { serverVerifiedUserId: 3, recipientHouseholdId: 'family-b',
+    shareId: original.shareId, decision: 'declined' })
   assert.throws(() => send(db, source, [1], ['family-b','family-c']), /previously sent/)
   assert.deepEqual(pending(db, 4, 'family-c'), [])
   const sent = send(db, source, [1], ['family-b','family-c'], { allowResend: true })
