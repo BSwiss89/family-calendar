@@ -145,3 +145,30 @@
 .shared-week-event { display: block; width: 100%; box-sizing: border-box; }
 .shared-schedule-event { height: auto; min-height: 23px; white-space: normal; overflow-wrap: anywhere; }
 .shared-mobile-event-group .mobile-schedule-all-day-label { font-weight: 700; }
+
+
+/* A scheduled shared event occupies its actual time slot. The calendar's
+   existing collision layout positions it beside other timed events. */
+.schedule-event.shared-schedule-timed-event,
+.mobile-schedule-event.shared-schedule-timed-event {
+  border: 1px dashed #8faed4;
+  border-left: 3px solid #5484bd;
+  background: #e7f0ff;
+  color: #17375c;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.schedule-event.shared-schedule-timed-event small,
+.mobile-schedule-event.shared-schedule-timed-event small {
+  display: block;
+  font-size: 10px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.shared-schedule-timed-event:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
