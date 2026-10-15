@@ -57,9 +57,15 @@ test('sender can review only individually invited events and statuses, not recip
       recipientDisplayName: 'Family C', title: 'Revoked event',
       date: '2026-12-20', time: '14:00', status: 'revoked',
     },
+    {
+      shareId: 48, sourceEventId: 1, recipientHouseholdId: 'family-b',
+      recipientDisplayName: 'Family B', title: 'Our BBQ',
+      date: '2026-12-20', time: '14:00', status: 'removed',
+      sourceNotes: 'HIDDEN SECRET',
+    },
   ] })
-  assert.deepEqual(sent.map(s => s.status), ['pending', 'accepted', 'revoked'])
-  assert.deepEqual(sent.map(s => s.shareId), [45, 46, 47])
-  assert.doesNotMatch(JSON.stringify(sent), /recipientDbPath|PRIVATE APPOINTMENT|SECRET|otherEvents/)
+  assert.deepEqual(sent.map(s => s.status), ['pending', 'accepted', 'revoked', 'removed'])
+  assert.deepEqual(sent.map(s => s.shareId), [45, 46, 47, 48])
+  assert.doesNotMatch(JSON.stringify(sent), /recipientDbPath|PRIVATE APPOINTMENT|SECRET|otherEvents|sourceNotes/)
   assert.deepEqual(parseOutgoingInvitations({ shares: {} }), [])
 })
