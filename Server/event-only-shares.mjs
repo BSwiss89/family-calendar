@@ -51,12 +51,13 @@ function eventSummary(source, eventId) {
   }
 }
 
-export function createEventShareTables(db) {
-  // Trusted caller first initializes CENTRAL identity and household tables.
-  db.exec([
-    'PRAGMA foreign_keys = ON;',
-    'CREATE TABLE IF NOT EXISTS event_share_grants (',
-    'id INTEGER PRIMARY KEY,',
+function shareGrantTableSql(name) {
+  if (!['event_share_grants', 'event_share_grants_migrating'].includes(name)) {
+    throw new Error('Invalid internal grants table name.')
+  }
+  return [
+    `CREATE TABLE ${name} (`,
+    'id INTEGER PRIMARY KEY AUTOINCREMENT,',
     'source_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
     'recipient_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
     'source_event_id INTEGER NOT NULL CHECK(source_event_id > 0),',
@@ -64,17 +65,58 @@ export function createEventShareTables(db) {
     "status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','declined','revoked','cancelled')),",
     'title TEXT NOT NULL, date TEXT NOT NULL, end_date TEXT, time TEXT, end_time TEXT,',
     'created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, responded_at INTEGER,',
-    'CHECK(source_household_id != recipient_household_id),',
-    'UNIQUE(source_household_id, recipient_household_id, source_event_id)',
+    'CHECK(source_household_id != recipient_household_id)',
     ') STRICT;',
-    'CREATE INDEX IF NOT EXISTS event_share_recipient_idx',
-    'ON event_share_grants(recipient_household_id, status);',
+  ].join(' ')
+}
+
+export function createEventShareTables(db) {
+  // Only active pending/accepted grants must be unique. Inactive invitations
+  // remain immutable history and must not block later explicit re-invitations,
+  // including when the source SQLite database recycles a deleted event ID.
+  db.exec([
+    'PRAGMA foreign_keys = ON;',
+    shareGrantTableSql('event_share_grants').replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS '),
     'CREATE TABLE IF NOT EXISTS event_share_connections (',
     'source_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
     'recipient_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
     'PRIMARY KEY (source_household_id, recipient_household_id),',
     'CHECK(source_household_id != recipient_household_id)',
     ') STRICT;',
+  ].join('\n'))
+
+  const oldDefinition = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'event_share_grants'"
+  ).get()?.sql ?? ''
+  if (/UNIQUE\s*\(\s*source_household_id\s*,\s*recipient_household_id\s*,\s*source_event_id\s*\)/i.test(oldDefinition)) {
+    // Transactional, data-preserving migration from the original table's
+    // lifetime uniqueness rule. No invitation changes status or recipient.
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      db.exec(shareGrantTableSql('event_share_grants_migrating'))
+      db.exec([
+        'INSERT INTO event_share_grants_migrating',
+        '(id, source_household_id, recipient_household_id, source_event_id,',
+        'created_by_user_id, status, title, date, end_date, time, end_time,',
+        'created_at, updated_at, responded_at)',
+        'SELECT id, source_household_id, recipient_household_id, source_event_id,',
+        'created_by_user_id, status, title, date, end_date, time, end_time,',
+        'created_at, updated_at, responded_at FROM event_share_grants;',
+      ].join(' '))
+      db.exec('DROP TABLE event_share_grants;')
+      db.exec('ALTER TABLE event_share_grants_migrating RENAME TO event_share_grants;')
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+  }
+  db.exec([
+    'CREATE INDEX IF NOT EXISTS event_share_recipient_idx',
+    'ON event_share_grants(recipient_household_id, status);',
+    'CREATE UNIQUE INDEX IF NOT EXISTS event_share_live_pair_idx',
+    'ON event_share_grants(source_household_id, recipient_household_id, source_event_id)',
+    "WHERE status IN ('pending','accepted');",
   ].join('\n'))
 }
 
