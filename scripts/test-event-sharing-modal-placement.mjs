@@ -119,11 +119,15 @@ test('previously invited contacts can be explicitly re-invited after warning wit
   assert.match(sharing, /allowResend: priorRecipients\.length > 0/)
   assert.match(sharing, /Send Invitation Again/)
   assert.match(sharing, /Invitation history/)
-  assert.match(sharing, /resentPending/)
+  assert.match(sharing, /activeStatusByHousehold\.has\(contact\.householdId\)/)
+  assert.match(sharing, /Already on their calendar/)
+  assert.match(sharing, /Invitation already waiting/)
+  assert.match(sharing, /Previously invited — you can resend/)
+  assert.match(sharing, /disabled=\{activeStatusByHousehold\.has\(contact\.householdId\)\}/)
   assert.match(sharing, /share\.status === 'accepted'/)
   assert.match(sharing, /share\.status === 'declined'/)
   assert.match(sharing, /share\.status === 'revoked'/)
-  assert.doesNotMatch(sharing, /disabled=\{existingTargets\.has\(contact\.householdId\)\}/)
+  assert.doesNotMatch(sharing, /supersedePending|resentPending/)
 })
 
 
