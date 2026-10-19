@@ -66,7 +66,8 @@ test('Arney shows only explicitly accepted shares, never a pending, declined or 
     'created_by_user_id,status,title,date,time,created_at,updated_at)',
     'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
   ].join(' '))
-  const add=(state,title)=>insert.run(from,to,1,'11223344556677889900aabbccddeeff',
+  let nextSourceId = 0
+  const add=(state,title)=>insert.run(from,to,++nextSourceId,'11223344556677889900aabbccddeeff',
     f.aUser,state,title,'2026-12-20','09:00',1,1)
   const accepted=Number(add('accepted','Approved share').lastInsertRowid)
   add('declined','Private declined')
