@@ -377,14 +377,15 @@ export function listAcceptedSharedEvents(db, args) {
 }
 
 /**
- * Source-side trusted synchronization hook: explicit edit/delete of one
- * source event updates/cancels ONLY its pre-existing share grants.
- * Not wired to the running backend's event mutation routes yet.
+ * The only direct call site is the PRIVATE gateway's server-trusted replay
+ * loop, using its fixed, validated household storage mapping. This is not an
+ * HTTP endpoint and does not accept a browser-supplied household/database.
+ * Reconciliation must also work after the original editor has signed out or
+ * lost membership; their successful backend write still needs propagation.
  */
-export function synchronizeSelectedEventShare(db, {
-  serverVerifiedUserId, sourceHouseholdId, sourceEventId, sourceDatabase,
+export function synchronizeTrustedSelectedEventShare(db, {
+  sourceHouseholdId, sourceEventId, sourceDatabase,
 }) {
-  membership(db, serverVerifiedUserId, sourceHouseholdId)
   id(sourceEventId, 'source event ID')
   const from = activeHousehold(db, sourceHouseholdId)
   if (!from) throw new Error('Source household is not active.')
@@ -417,4 +418,14 @@ export function synchronizeSelectedEventShare(db, {
     "WHERE source_household_id = ? AND source_event_id = ? AND status IN ('pending','accepted')",
   ].join(' ')).run(Date.now(), from, sourceEventId)
   return { updated: 0, cancelled: cancelled.changes }
+}
+
+/** Authenticated legacy test helper; authorization is NOT optional here. */
+export function synchronizeSelectedEventShare(db, {
+  serverVerifiedUserId, sourceHouseholdId, sourceEventId, sourceDatabase,
+}) {
+  membership(db, serverVerifiedUserId, sourceHouseholdId)
+  return synchronizeTrustedSelectedEventShare(db, {
+    sourceHouseholdId, sourceEventId, sourceDatabase,
+  })
 }
