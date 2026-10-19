@@ -94,8 +94,9 @@ export function reservePrivateLocalAiRequest(db, {
       'VALUES (?,?,1) ON CONFLICT(household_id,period_utc)',
       'DO UPDATE SET used_requests=used_requests+1',
     ].join(' ')).run(id, status.periodUtc)
+    const updated = privateLocalAiBudgetStatus(db, { householdId, at })
     db.exec('COMMIT')
-    return { allowed: true, ...privateLocalAiBudgetStatus(db, { householdId, at }) }
+    return { allowed: true, ...updated }
   } catch (error) {
     db.exec('ROLLBACK')
     throw error
