@@ -38,9 +38,16 @@ export function createEventShareSyncJournal(db) {
     'source_event_id INTEGER NOT NULL CHECK(source_event_id > 0),',
     'revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),',
     'queued_at INTEGER NOT NULL,',
+    'in_flight_count INTEGER NOT NULL DEFAULT 0 CHECK(in_flight_count >= 0),',
     'PRIMARY KEY(source_household_id, source_event_id)',
     ') STRICT;',
   ].join(' '))
+  // Additive migration for earlier disposable central fixtures.
+  const columns = db.prepare('PRAGMA table_info(event_share_sync_pending)').all()
+  if (!columns.some(c => c.name === 'in_flight_count')) {
+    db.exec('ALTER TABLE event_share_sync_pending ADD COLUMN in_flight_count ' +
+      'INTEGER NOT NULL DEFAULT 0 CHECK(in_flight_count >= 0)')
+  }
 }
 
 // Only called after the gateway authenticates the actor and resolves a
@@ -66,6 +73,49 @@ export function markEventShareSyncPending(db, {
   ].join(' ')).get(from, sourceEventId).revision
 }
 
+// Before forwarding an authenticated event edit/delete, record an UNRESOLVED
+// in-flight operation durably. If the gateway dies before the household backend
+// acknowledges its completed response, recovery must NOT assume that the
+// backend is quiescent or snapshot its possibly still-running transaction.
+// Concurrent edits to one event each require their own acknowledgement.
+export function markEventShareSyncInFlight(db, {
+  sourceHouseholdId, sourceEventId,
+}) {
+  const from = verifiedSource(db, sourceHouseholdId)
+  verifiedEventId(sourceEventId)
+  db.prepare([
+    'INSERT INTO event_share_sync_pending',
+    '(source_household_id, source_event_id, revision, queued_at, in_flight_count)',
+    'VALUES (?, ?, 1, ?, 1)',
+    'ON CONFLICT(source_household_id, source_event_id)',
+    'DO UPDATE SET revision = revision + 1, queued_at = excluded.queued_at,',
+    'in_flight_count = in_flight_count + 1',
+  ].join(' ')).run(from, sourceEventId, Date.now())
+}
+
+// Only an actual completed backend HTTP response is authoritative enough to
+// resolve one in-flight operation. A browser disconnect is NOT an ACK. Lost
+// backend connections keep the record quarantined until backend fencing and
+// explicit offline recovery are implemented. Never decrement on a timeout.
+export function acknowledgeEventShareSyncInFlight(db, {
+  sourceHouseholdId, sourceEventId,
+}) {
+  const from = verifiedSource(db, sourceHouseholdId)
+  verifiedEventId(sourceEventId)
+  const updated = db.prepare([
+    'UPDATE event_share_sync_pending SET in_flight_count = in_flight_count - 1',
+    'WHERE source_household_id = ? AND source_event_id = ?',
+    'AND in_flight_count > 0',
+  ].join(' ')).run(from, sourceEventId)
+  if (updated.changes !== 1) throw new Error('No in-flight event mutation to acknowledge.')
+}
+
+export function countUnresolvedEventShareSync(db) {
+  return db.prepare([
+    'SELECT COUNT(*) AS n FROM event_share_sync_pending WHERE in_flight_count > 0',
+  ].join(' ')).get().n
+}
+
 export function countPendingEventShareSync(db, { sourceHouseholdId } = {}) {
   if (sourceHouseholdId == null) {
     return db.prepare('SELECT COUNT(*) AS n FROM event_share_sync_pending').get().n
@@ -88,6 +138,12 @@ export function replayEventShareSyncPending(db, {
   if (typeof apply !== 'function') throw new Error('Trusted replay callback required.')
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) {
     throw new Error('Invalid sync replay batch size.')
+  }
+  // Failing closed across all households is intentional: a prior gateway
+  // could have died while a backend process was still writing. The unfinished
+  // request must be fenced before any replay or invitation delivery resumes.
+  if (countUnresolvedEventShareSync(db) !== 0) {
+    throw new Error('Unacknowledged source mutation requires backend fencing.')
   }
   const pending = db.prepare([
     'SELECT source_event_id AS sourceEventId, revision',
