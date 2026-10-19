@@ -9,6 +9,7 @@ import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boo
 import { installFamilyAuth } from './family-auth.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { installPrivateEventIdentity } from './private-event-identity.mjs'
+import { installPrivateUpstreamGuard, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
 
 const app = express()
 // The live server defaults to 3001 / all interfaces.
@@ -42,6 +43,12 @@ if (householdStorage.mode === 'household') {
   if (HOST !== '127.0.0.1' || [3001, 13001, 13002, 13003, 11434].includes(PORT)) {
     throw new Error('Private household testing requires a non-production loopback listener.')
   }
+  // Fail BEFORE opening a private household SQLite database. No direct
+  // loopback access without a server-provisioned channel capability.
+  requirePrivateUpstreamToken(process.env.FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN)
+  installPrivateUpstreamGuard(app, {
+    expectedToken: process.env.FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN,
+  })
 }
 const { dataFolder, uploadFolder, databasePath } = householdStorage
 const OLLAMA_URL =
