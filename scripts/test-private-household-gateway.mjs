@@ -437,9 +437,9 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal(directCommitted.response.status, 200,
       JSON.stringify(directCommitted.value))
     assert.equal(countPendingEventShareSync(central), 1)
-    assert.deepEqual(central.prepare(
+    assert.equal(central.prepare(
       'SELECT title FROM event_share_grants WHERE id=?'
-    ).get(sharedId), { title: 'Family A private calendar' })
+    ).get(sharedId).title, 'Family A private calendar')
 
     await gateway.close()
     gateway = await startPrivateHouseholdGateway({
