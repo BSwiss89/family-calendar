@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
+import { installPrivateEventIdentity } from './private-event-identity.mjs'
 
 const app = express()
 // The live server defaults to 3001 / all interfaces.
@@ -362,6 +363,13 @@ if (!eventColumns.includes('location')) {
     ALTER TABLE events
     ADD COLUMN location TEXT
   `)
+}
+
+// Only disposable, explicitly opted-in private household backends receive
+// permanent event identities during this test phase. The existing legacy
+// calendar startup/database is unchanged.
+if (householdStorage.mode === 'household') {
+  installPrivateEventIdentity(database)
 }
 
 database.exec(`
