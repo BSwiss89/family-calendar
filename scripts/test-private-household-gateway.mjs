@@ -11,6 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startPrivateHouseholdGateway } from '../Server/private-household-gateway.mjs'
+import { markEventShareSyncPending, countPendingEventShareSync } from '../Server/event-share-sync-journal.mjs'
 import { provisionEmptyHousehold } from '../Server/household-storage.mjs'
 import {
   createHouseholdMembershipTables,
@@ -420,6 +421,73 @@ test('central authenticated gateway denies one family access to another family b
       cookie: cookieB,
     })).value.map(e => e.title), ['Family B private calendar'])
 
+    // Simulate a real household backend committing an event change and the
+    // authenticated gateway process dying BEFORE its old after-response hook.
+    // The write-ahead intent was persisted in central SQLite first.
+    assert.equal(markEventShareSyncPending(central, {
+      sourceHouseholdId: 'family-a', sourceEventId: idToShare,
+    }), 1)
+    const directCommitted = await json(backends[0].base,
+      '/api/events/' + idToShare, {
+        method: 'PUT', body: {
+          title: 'Family A updated during interrupted gateway',
+          date: '2026-12-20', time: '14:45',
+        },
+      })
+    assert.equal(directCommitted.response.status, 200,
+      JSON.stringify(directCommitted.value))
+    assert.equal(countPendingEventShareSync(central), 1)
+    assert.deepEqual(central.prepare(
+      'SELECT title FROM event_share_grants WHERE id=?'
+    ).get(sharedId), { title: 'Family A private calendar' })
+
+    await gateway.close()
+    gateway = await startPrivateHouseholdGateway({
+      identityDatabase: central, serverDirectory, storageRoot,
+      backendPorts: { 'family-a': portA, 'family-b': portB },
+    })
+    // Before opening a listener, the new process reconciles persisted work.
+    assert.equal(countPendingEventShareSync(central), 0)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events.map(x => [x.title, x.time]),
+    [['Family A updated during interrupted gateway', '14:45']])
+    assert.equal((await json(gateway.base, '/api/events/' + idToShare, {
+      cookie: cookieA, method: 'PUT',
+      body: {
+        title: 'Family A private calendar', date: '2026-12-20', time: '12:00',
+      },
+    })).response.status, 200)
+    assert.equal(countPendingEventShareSync(central), 0)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events.map(x => x.title), ['Family A private calendar'])
+
+    // Repeat with a running gateway: a read of the accepted overlay should
+    // repair an interrupted source edit, not return stale family data.
+    markEventShareSyncPending(central, {
+      sourceHouseholdId: 'family-a', sourceEventId: idToShare,
+    })
+    assert.equal((await json(backends[0].base, '/api/events/' + idToShare, {
+      method: 'PUT',
+      body: { title: 'Read-time recovery', date: '2026-12-20', time: '13:00' },
+    })).response.status, 200)
+    assert.equal(countPendingEventShareSync(central), 1)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events.map(x => x.title), ['Read-time recovery'])
+    assert.equal(countPendingEventShareSync(central), 0)
+    assert.equal((await json(gateway.base, '/api/events/' + idToShare, {
+      cookie: cookieA, method: 'PUT',
+      body: {
+        title: 'Family A private calendar', date: '2026-12-20', time: '12:00',
+      },
+    })).response.status, 200)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events.map(x => x.title), ['Family A private calendar'])
+    assert.equal(countPendingEventShareSync(central), 0)
+
     // A failed edit, or a CSRF attack, must NOT synchronize anything to B.
     assert.equal((await json(gateway.base, '/api/events/' + idToShare, {
       cookie: cookieA, method: 'PUT', body: {
@@ -434,6 +502,7 @@ test('central authenticated gateway denies one family access to another family b
     assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
       cookie: cookieB,
     })).value.events.map(e => e.title), ['Family A private calendar'])
+    assert.equal(countPendingEventShareSync(central), 0)
 
     // A real successful backend PUT automatically refreshes only the shared
     // snapshot. Changed notes, locations, people and other events stay private.
@@ -733,6 +802,7 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 401)
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB2 })).response.status, 401)
 
+    console.log('[PASS] Persisted source sync survives gateway restart and read-time recovery.')
     console.log('[PASS] Successful event edits refresh the accepted snapshot; rejected edits do not.')
     console.log('[PASS] A deleted shared event cancels its own accepted grant without affecting other events.')
     console.log('[PASS] One selected event is invited, accepted and individually revoked over authenticated APIs.')
