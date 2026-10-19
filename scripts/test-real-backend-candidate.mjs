@@ -215,6 +215,7 @@ async function main() {
     }
     fs.copyFileSync(path.join(source, 'Server', 'family-auth.mjs'), path.join(app, 'Server', 'family-auth.mjs'))
     fs.copyFileSync(path.join(source, 'Server', 'household-storage.mjs'), path.join(app, 'Server', 'household-storage.mjs'))
+    fs.copyFileSync(path.join(source, 'Server', 'private-event-identity.mjs'), path.join(app, 'Server', 'private-event-identity.mjs'))
     fs.copyFileSync(path.join(source, 'Server', 'index.mjs'), path.join(app, 'Server', 'index.mjs'))
     fs.copyFileSync(path.join(source, 'dist', 'index.html'), path.join(app, 'dist', 'index.html'))
 
