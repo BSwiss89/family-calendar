@@ -9,6 +9,33 @@ change existing preview or live data.
 
 Tracking: issue #45. Depends on draft auth PR #44 and Arney PR #43.
 
+## Private gateway: fail closed on unaudited event mutations
+
+The private multi-family gateway now uses one canonical mutation route policy
+(`Server/private-gateway-mutation-policy.mjs`) both to authorize an event
+write and to determine which individual event must be written to the durable
+sharing journal. This avoids separate URL parsers disagreeing about a route.
+
+It rejects alternate calendar-changing API paths which are **not** yet
+journaled: `POST /api/ai/cancel-confirmed`,
+`POST /api/ai/reschedule-confirmed`,
+`DELETE /api/event-batches/:batchId`, recurrence-exception mutations, and
+noncanonical event paths (case variations, leading-zero numeric IDs,
+trailing slashes, encoded identifiers). These are blocked ONLY through the
+test household gateway; they remain unchanged on the existing live,
+single-family calendar. Canonical `POST /api/events`,
+`PUT /api/events/:id` and `DELETE /api/events/:id` remain available and
+the latter two use the durable per-event journal.
+
+Regression checks run in the deployment-safety workflow as both pure policy
+unit tests and an authenticated two-family gateway integration test. These
+blocks are temporary product limitations, not final implementations: each
+currently rejected action needs a trusted affected-event change journal,
+atomic reconciliation and cross-family tests before it can be enabled in
+the multi-household service. More work remains on local AI privacy,
+unauthenticated backend bypass prevention, endpoint inventory,
+uploads, resource budgets and privileged account administration.
+
 ## Offline multi-household restore preflight (no restoration implemented)
 
 `Server/private-restore-preflight.mjs` is a read-only safety gate for an
