@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
-import { installPrivateEventIdentity } from '../Server/private-event-identity.mjs'
+import { installPrivateEventIdentity, trustedEventUid } from '../Server/private-event-identity.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -697,4 +697,92 @@ test('legacy ready journal rows migrate without losing revisions', t => {
   assert.deepEqual(replayEventShareSyncPending(db, {
     sourceHouseholdId: 'family-a', apply: () => {},
   }), { replayed: 1, remaining: 0 })
+})
+
+test('event UUID survives edits but cannot be overwritten or reused after deletion', t => {
+  const { source } = fixture(t)
+  const original = trustedEventUid(source, 1)
+  assert.match(original, /^[0-9a-f]{32}$/)
+  installPrivateEventIdentity(source)
+  assert.equal(trustedEventUid(source, 1), original)
+  source.prepare('UPDATE events SET title = ? WHERE id = 1').run('Edited')
+  assert.equal(trustedEventUid(source, 1), original)
+  assert.throws(() => source.prepare(
+    'UPDATE events SET event_uid = ? WHERE id = 1'
+  ).run('a'.repeat(32)), /immutable/)
+  assert.equal(trustedEventUid(source, 1), original)
+  source.prepare('DELETE FROM events WHERE id = 1').run()
+  assert.throws(() => source.prepare(
+    'INSERT INTO events (id, title, date, event_uid) VALUES (1, ?, ?, ?)'
+  ).run('Impostor', '2026-12-22', original), /server-assigned/)
+  source.prepare(
+    'INSERT INTO events (id, title, date) VALUES (1, ?, ?)'
+  ).run('Replacement event', '2026-12-22')
+  const replacement = trustedEventUid(source, 1)
+  assert.notEqual(original, replacement)
+  assert.match(replacement, /^[0-9a-f]{32}$/)
+})
+
+test('replacement event using recycled row ID cannot inherit accepted shares', t => {
+  const { db, source } = fixture(t)
+  const oldUid = trustedEventUid(source, 1)
+  const [oldB, oldC] = send(db, source, [1], ['family-b', 'family-c'])
+  respondToEventInvitation(db, { serverVerifiedUserId: 3,
+    recipientHouseholdId: 'family-b', shareId: oldB.shareId, decision: 'accepted' })
+  assert.deepEqual(visible(db, 3, 'family-b').map(x => x.title), ['A BBQ'])
+  source.prepare('DELETE FROM events WHERE id = ?').run(1)
+  // Mimic an out-of-band restore/insert BEFORE the journal catches up.
+  source.prepare('INSERT INTO events (id, date, title, time) VALUES(?, ?, ?, ?)')
+    .run(1, '2027-01-04', 'FAMILY A SECRET REPLACEMENT', '09:00')
+  assert.notEqual(trustedEventUid(source, 1), oldUid)
+  const result = synchronizeSelectedEventShare(db, { serverVerifiedUserId: 1,
+    sourceHouseholdId: 'family-a', sourceEventId: 1, sourceDatabase: source })
+  assert.deepEqual(result, { updated: 0, cancelled: 2 })
+  assert.deepEqual(visible(db, 3, 'family-b'), [])
+  assert.deepEqual(pending(db, 4, 'family-c'), [])
+  assert.deepEqual(db.prepare(
+    'SELECT status FROM event_share_grants WHERE id IN (?, ?) ORDER BY id'
+  ).all(oldB.shareId, oldC.shareId).map(x => x.status), ['cancelled','cancelled'])
+  assert.doesNotMatch(JSON.stringify(visible(db, 3, 'family-b')),
+    /SECRET REPLACEMENT/)
+  // The same numeric ID is a NEW event with a new UUID. It can be shared
+  // only by sending a completely new invitation, never accepting an old one.
+  const fresh = send(db, source, [1], ['family-b'])[0]
+  assert.notEqual(fresh.shareId, oldB.shareId)
+  assert.deepEqual(pending(db, 3, 'family-b').map(x => x.title),
+    ['FAMILY A SECRET REPLACEMENT'])
+  assert.throws(() => respondToEventInvitation(db, { serverVerifiedUserId: 4,
+    recipientHouseholdId: 'family-c', shareId: oldC.shareId, decision: 'accepted'
+  }), /no longer pending/)
+})
+
+test('legacy active invitations without verified source UUID fail closed on migration', t => {
+  const { db } = fixture(t)
+  db.exec('DROP TABLE event_share_grants')
+  db.exec([
+    'CREATE TABLE event_share_grants (',
+    'id INTEGER PRIMARY KEY,',
+    'source_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
+    'recipient_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
+    'source_event_id INTEGER NOT NULL,',
+    'created_by_user_id INTEGER NOT NULL REFERENCES family_users(id),',
+    "status TEXT NOT NULL CHECK(status IN ('pending','accepted','declined','cancelled','revoked')),",
+    'title TEXT NOT NULL, date TEXT NOT NULL, end_date TEXT, time TEXT, end_time TEXT,',
+    'created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, responded_at INTEGER,',
+    'UNIQUE(source_household_id, recipient_household_id, source_event_id)',
+    ') STRICT',
+  ].join(' '))
+  db.prepare([
+    'INSERT INTO event_share_grants',
+    '(id,source_household_id,recipient_household_id,source_event_id,',
+    'created_by_user_id,status,title,date,created_at,updated_at)',
+    "VALUES (44,1,2,1,1,'accepted','LEGACY UNSAFE SHARE','2026-12-20',1,1)",
+  ].join(' ')).run()
+  createEventShareTables(db)
+  createEventShareTables(db)
+  assert.deepEqual(visible(db, 3, 'family-b'), [])
+  assert.equal(db.prepare('SELECT status FROM event_share_grants WHERE id=44')
+    .get().status, 'cancelled')
+  assert.equal(db.prepare('SELECT source_event_uid FROM event_share_grants WHERE id=44')
+    .get().source_event_uid, null)
 })
