@@ -9,6 +9,37 @@ change existing preview or live data.
 
 Tracking: issue #45. Depends on draft auth PR #44 and Arney PR #43.
 
+## Private upstream credentials and AI lockdown — nonproduction only
+
+Private household Node backends in test mode now refuse ALL direct HTTP requests
+without their server-configured 256-bit, household-specific upstream secret,
+including event APIs, lists, uploaded files, static assets and health checks.
+The test gateway strips any browser-provided service-token header and inserts
+only the trusted secret for the household selected by the authenticated session.
+Secrets must be nonempty, well-formed and distinct per household. The
+disposable demo provisions new random credentials for every run; neither
+tokens nor backend routes are included in the browser or exposed by APIs.
+Tests prove missing, malformed and wrong-family direct credentials cannot
+access local endpoints, while authenticated proxying still works.
+
+**Important limitation:** This protects against other ordinary localhost
+clients, but secrets stored in process environment do NOT defend against a
+compromised same-account operating-system process, administrator, or malicious
+package. It is not a substitute for OS account/process isolation, service
+identity attestations and audited production networking. Loopback-only
+listeners are STILL mandatory; do not enable Tailscale Funnel or expose a
+backend listener outside localhost.
+
+Until a durable per-household AI usage cap, GPU scheduling, and AI route/data
+privacy review exist, the private multi-family gateway responds with 409 to
+POST AI command/model routes and vision/capture-analysis routes. Otherwise,
+one household could exhaust the shared Ollama GPU budget or execute an
+unreviewed calendar write path. These guards apply ONLY to the draft private
+gateway; the live single-family calendar retains all its existing Arney and
+photo analysis capabilities. Household capture-inbox records and uploads
+remain stored in each household's isolated folders, but analysis is withheld
+in this private preview.
+
 ## Private gateway: fail closed on unaudited event mutations
 
 The private multi-family gateway now uses one canonical mutation route policy
