@@ -31,7 +31,8 @@ import {
 } from './household-memberships.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import {
-  createEventShareSyncJournal, markEventShareSyncPending,
+  createEventShareSyncJournal, markEventShareSyncInFlight,
+  acknowledgeEventShareSyncInFlight,
   countPendingEventShareSync, replayEventShareSyncPending,
 } from './event-share-sync-journal.mjs'
 
@@ -103,7 +104,20 @@ function safeResponseHeaders(headers) {
   return result
 }
 
-function proxyRequest(request, response, upstreamPort, onCompletedMutation = null) {
+function proxyRequest(
+  request, response, upstreamPort,
+  onCompletedMutation = null, onBackendResult = null,
+) {
+  let backendResultReported = false
+  let upstreamResponseRef = null
+  function backendResult(confirmed) {
+    if (backendResultReported) return
+    backendResultReported = true
+    try { onBackendResult?.(confirmed) } catch (error) {
+      // Never claim acknowledgement for a failed central DB update.
+      console.error('Unable to complete event mutation recovery record:', error)
+    }
+  }
   if (!HTTP_METHODS.has(request.method)) {
     response.status(405).json({ error: 'Unsupported request method.' })
     return
@@ -127,8 +141,22 @@ function proxyRequest(request, response, upstreamPort, onCompletedMutation = nul
     agent: false,
     timeout: 300000,
   }, (upstreamResponse) => {
+    upstreamResponseRef = upstreamResponse
+    // The backend's fully completed reply, not the browser's connection,
+    // establishes that its synchronous event handler finished.
+    upstreamResponse.once('error', () => backendResult(false))
+    upstreamResponse.once('close', () => {
+      if (!upstreamResponse.complete) backendResult(false)
+    })
     if (response.headersSent || response.destroyed) {
-      upstreamResponse.destroy()
+      // Browser already disconnected. Continue consuming the response so
+      // the backend can complete, rather than prematurely erasing its intent.
+      if (onBackendResult) {
+        upstreamResponse.once('end', () => backendResult(true))
+        upstreamResponse.resume()
+      } else {
+        upstreamResponse.destroy()
+      }
       return
     }
     // The real backend has committed an ordinary event PUT/DELETE before
@@ -165,6 +193,9 @@ function proxyRequest(request, response, upstreamPort, onCompletedMutation = nul
         }
       })
     }
+    // Register AFTER any optional per-response audit callback so audit
+    // failures do not prevent durable share acknowledgement.
+    upstreamResponse.once('end', () => backendResult(true))
     response.writeHead(
       upstreamResponse.statusCode ?? 502,
       safeResponseHeaders(upstreamResponse.headers),
@@ -174,6 +205,9 @@ function proxyRequest(request, response, upstreamPort, onCompletedMutation = nul
 
   upstream.on('timeout', () => upstream.destroy(new Error('Household backend timeout.')))
   upstream.on('error', () => {
+    // Upstream errors can occur after the backend committed but before its
+    // reply arrived. Never ACK an ambiguous mutation.
+    backendResult(false)
     if (!response.headersSent && !response.destroyed) {
       response.status(502).json({ error: 'Private household service is unavailable.' })
     } else {
@@ -181,9 +215,23 @@ function proxyRequest(request, response, upstreamPort, onCompletedMutation = nul
     }
   })
 
-  request.on('aborted', () => upstream.destroy())
+  request.on('aborted', () => {
+    // Incomplete request body: backend outcome is unknowable.
+    backendResult(false)
+    upstream.destroy()
+  })
   response.on('close', () => {
-    if (!response.writableEnded) upstream.destroy()
+    if (response.writableEnded) return
+    if (onBackendResult && upstream.writableFinished) {
+      // The full mutation request has reached the backend transport.
+      // A client closing its tab must not cancel our attempt to obtain the
+      // backend's authoritative completion response.
+      upstreamResponseRef?.unpipe(response)
+      upstreamResponseRef?.resume()
+    } else {
+      backendResult(false)
+      upstream.destroy()
+    }
   })
   request.pipe(upstream)
 }
@@ -563,7 +611,7 @@ export async function startPrivateHouseholdGateway({
     // Even a failed backend request is safe to reconcile against final truth.
     if (shouldSync && safeEventId) {
       try {
-        markEventShareSyncPending(identityDatabase, {
+        markEventShareSyncInFlight(identityDatabase, {
           sourceHouseholdId: household.householdId, sourceEventId,
         })
       } catch (error) {
@@ -573,20 +621,30 @@ export async function startPrivateHouseholdGateway({
       const key = household.householdId + ':' + sourceEventId
       activeEventMutations.set(key, (activeEventMutations.get(key) ?? 0) + 1)
       let finished = false
-      function settle() {
+      function settle(backendConfirmed) {
         if (finished) return
         finished = true
+        if (backendConfirmed) {
+          try {
+            acknowledgeEventShareSyncInFlight(identityDatabase, {
+              sourceHouseholdId: household.householdId, sourceEventId,
+            })
+          } catch (error) {
+            console.error('Unable to acknowledge completed source event:', error)
+          }
+        }
+        // On uncertain outcomes the persisted in-flight counter remains
+        // positive. All shared-event reads then fail closed until a fenced
+        // offline reconciliation strategy exists.
         const pending = activeEventMutations.get(key) ?? 1
         if (pending <= 1) activeEventMutations.delete(key)
         else activeEventMutations.set(key, pending - 1)
         if (activeEventMutations.size !== 0) return
         try { reconcilePendingShares() } catch (error) {
-          // Keep the durable journal intact for next read/restart.
           console.error('Private event share retry pending:', error)
         }
       }
-      response.once('finish', settle)
-      response.once('close', settle)
+      response.locals.eventMutationSettled = settle
     }
 
     const mutationHook = (shouldSync && safeEventId) || isCreate
@@ -627,7 +685,8 @@ export async function startPrivateHouseholdGateway({
       }
       : null
     proxyRequest(request, response,
-      portByHousehold.get(household.householdId), mutationHook)
+      portByHousehold.get(household.householdId),
+      mutationHook, response.locals.eventMutationSettled ?? null)
   })
 
   const server = http.createServer(app)
