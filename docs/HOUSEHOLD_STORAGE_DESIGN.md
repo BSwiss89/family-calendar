@@ -9,6 +9,63 @@ change existing preview or live data.
 
 Tracking: issue #45. Depends on draft auth PR #44 and Arney PR #43.
 
+## Offline multi-household restore preflight (no restoration implemented)
+
+`Server/private-restore-preflight.mjs` is a read-only safety gate for an
+**explicitly staged, offline private-test restore set**, NOT an instruction to
+restore the running Calendar. Its test-only fixture lives entirely in the OS
+temporary directory. No backend, gateway, scheduler, Tailscale or live SQLite
+database is stopped, replaced, or reconfigured by this module.
+
+The staged root must be OUTSIDE the checkout, be marked by an explicit
+`.family-calendar-restore-review.json` with
+`{ "kind": "private-household-offline-restore-review", "version": 1 }`,
+and contain exactly:
+
+    staging/
+      .family-calendar-restore-review.json
+      central/identity.db
+      households/<registered-id>/
+        .family-calendar-household.json
+        data/calendar.db
+        uploads/... all backup image files ...
+
+The preflight refuses uncheckpointed SQLite `-wal`/`-shm` companions,
+unknown or absent tenants, symlink escapes, missing markers/files, SQLite
+quick_check/foreign-key-check errors, missing permanent event IDs, duplicated
+event IDs, and **any** queued/unacknowledged share changes. Each pending or
+accepted invitation must match its *current* source event's permanent UID and
+all allowlisted title/date/time fields. A mixed snapshot cannot silently
+rebind another event under a reused numeric row ID.
+
+It also **refuses any restored login session that is still active**. A separate
+audited process must revoke sessions on a disposable, offline staging copy;
+users must log in again after any future approved restore. This is a defense
+against reviving lost/revoked devices through a database rollback; it is NOT
+a complete protection against reverting membership changes or account
+disabled flags recorded after the snapshot.
+
+`attestOfflinePrivateRestoreSet(...)` builds a deterministic SHA-256 inventory
+of the staged central database, every family DB and marker, every upload and
+the review marker. Capture only after all database writers have been fenced
+and every SQLite file consistently checkpointed/copied, then keep its
+attestation in a **separate trusted backup catalog**. Later
+`verifyOfflinePrivateRestoreSet(..., approvedAttestation)` requires that
+external attestation and rejects changes/swapped copies. Recalculating or
+accepting a new attestation from a suspect restore candidate would defeat
+this independent integrity check. File hashes establish equality with the
+approved catalog, **not** authenticity, backup-time consistency, or a safe
+point-in-time recovery on their own.
+
+**Still not production-ready:** coordinated multi-SQLite snapshot creation,
+trusted/offline catalog signing and retention, external account/role
+revocation checks, backend fencing, staged session sanitization,
+restoration order and atomic cutover, durable journal resolution,
+upload-reference coverage, offsite copies, complete rollback, and a verified
+full end-to-end restoration rehearsal. This is a conservative REJECTION
+preflight only, with no automatic restore/promotion path and no production
+configuration touched.
+
 ## Event identity hardening — private household test mode
 
 The private household backend now installs `Server/private-event-identity.mjs`
