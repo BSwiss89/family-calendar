@@ -23,6 +23,12 @@ export function inspectPrivateGatewayMutation(method, originalUrl) {
     return { allowed: false }
   }
   const lower = path.toLowerCase()
+  // Safe local classification only: no source calendar query or write.
+  // The gateway still requires a positive server-configured quota and
+  // admits only one active local model request at a time.
+  if (method === 'POST' && path === '/api/ai/intent') {
+    return { allowed: true, localAiIntent: true }
+  }
   // No durable per-household AI spend/resource budget or isolation policy
   // exists for concurrent families yet. Disable the expensive local-model
   // entrypoints in PRIVATE multi-household testing, rather than allowing one
