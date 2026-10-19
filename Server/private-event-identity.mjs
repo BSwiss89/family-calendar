@@ -52,13 +52,13 @@ export function installPrivateEventIdentity(db) {
       'WHERE id = NEW.id AND event_uid IS NULL;',
       'END;',
     ].join('\n'))
-    // Enforce no direct SQL insert may provide a duplicate or malformed UID.
+    // The database, not any caller, owns identity generation. Inserting a
+    // supplied old UID after deleting an event could resurrect a stale share.
     db.exec([
       'CREATE TRIGGER IF NOT EXISTS events_private_uid_validate_insert',
       'BEFORE INSERT ON events',
-      'WHEN NEW.event_uid IS NOT NULL AND',
-      "(length(NEW.event_uid) != 32 OR NEW.event_uid GLOB '*[^0-9a-f]*')",
-      "BEGIN SELECT RAISE(ABORT, 'Invalid source event identity'); END;",
+      'WHEN NEW.event_uid IS NOT NULL',
+      "BEGIN SELECT RAISE(ABORT, 'Source event identity is server-assigned'); END;",
     ].join(' '))
     db.exec('COMMIT')
   } catch (error) {
