@@ -488,6 +488,25 @@ test('central authenticated gateway denies one family access to another family b
     })).value.events.map(x => x.title), ['Family A private calendar'])
     assert.equal(countPendingEventShareSync(central), 0)
 
+    // Crash recovery must drain MORE than a single 100-event batch, not fail
+    // startup and strand subsequent family updates. These are synthetic IDs
+    // absent from the disposable source DB, so replay cancels nothing.
+    for (let sourceEventId = 10000; sourceEventId < 10205; sourceEventId++) {
+      markEventShareSyncPending(central, {
+        sourceHouseholdId: 'family-a', sourceEventId,
+      })
+    }
+    assert.equal(countPendingEventShareSync(central), 205)
+    await gateway.close()
+    gateway = await startPrivateHouseholdGateway({
+      identityDatabase: central, serverDirectory, storageRoot,
+      backendPorts: { 'family-a': portA, 'family-b': portB },
+    })
+    assert.equal(countPendingEventShareSync(central), 0)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events.map(event => event.title), ['Family A private calendar'])
+
     // A failed edit, or a CSRF attack, must NOT synchronize anything to B.
     assert.equal((await json(gateway.base, '/api/events/' + idToShare, {
       cookie: cookieA, method: 'PUT', body: {
