@@ -9,6 +9,9 @@ test('canonical individual event changes are the only mutable event routes permi
   assert.deepEqual(inspectPrivateGatewayMutation('POST', '/api/events?from=month'), {
     allowed: true, isCreate: true,
   })
+  assert.deepEqual(inspectPrivateGatewayMutation('POST', '/api/ai/intent'), {
+    allowed: true, localAiIntent: true,
+  })
   assert.deepEqual(inspectPrivateGatewayMutation('PUT', '/api/events/123?ignore=1'), {
     allowed: true, sourceEventId: 123,
   })
@@ -25,7 +28,8 @@ test('canonical individual event changes are the only mutable event routes permi
 
 test('alternate event mutations fail closed instead of skipping durable journal', () => {
   const forbidden = [
-    ['POST', '/api/ai/intent'],
+    ['POST', '/API/AI/INTENT'],
+    ['POST', '/api/ai/intent/'],
     ['POST', '/api/ai/reschedule-preview'],
     ['POST', '/api/ai/cancel-criteria'],
     ['POST', '/api/capture/analyze-photo'],
