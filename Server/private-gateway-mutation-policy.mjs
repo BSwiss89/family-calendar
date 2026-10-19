@@ -23,6 +23,16 @@ export function inspectPrivateGatewayMutation(method, originalUrl) {
     return { allowed: false }
   }
   const lower = path.toLowerCase()
+  // No durable per-household AI spend/resource budget or isolation policy
+  // exists for concurrent families yet. Disable the expensive local-model
+  // entrypoints in PRIVATE multi-household testing, rather than allowing one
+  // family to exhaust a shared Ollama process or trigger unreviewed AI writes.
+  // Legacy single-family endpoints are unchanged.
+  if (lower === '/api/ai' || lower.startsWith('/api/ai/') ||
+      lower === '/api/capture/analyze-photo' ||
+      /^\/api\/capture-inbox\/[^/]+\/analyze\/?$/.test(lower)) {
+    return { allowed: false }
+  }
   if (lower === '/api/event-batches' || lower.startsWith('/api/event-batches/')) {
     return { allowed: false }
   }
