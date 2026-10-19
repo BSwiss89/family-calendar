@@ -184,6 +184,18 @@ function inspectSet({ serverDirectory, restoreRoot }) {
       opened.set(household.id, db)
       checkSqlite(db, 'household')
       requireTables(db, ['events'], 'household')
+      // A source-local outbox is transactionally tied to calendar event
+      // writes. A restore candidate with undelivered source changes could
+      // expose stale invitations even when the CENTRAL journal is empty.
+      const hasOutbox = db.prepare([
+        "SELECT 1 FROM sqlite_master WHERE type='table'",
+        "AND name='event_source_share_outbox'",
+      ].join(' ')).get()
+      if (hasOutbox && db.prepare(
+        'SELECT COUNT(*) AS n FROM event_source_share_outbox'
+      ).get().n !== 0) {
+        fail('source household has undelivered event changes.')
+      }
       const cols = db.prepare('PRAGMA table_info(events)').all().map(x => x.name)
       if (!cols.includes('event_uid')) {
         fail('source household is missing permanent event identities.')
