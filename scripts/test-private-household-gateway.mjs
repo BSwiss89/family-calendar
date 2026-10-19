@@ -6,12 +6,16 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { createServer } from 'node:net'
+import { createServer as createHttpServer, request as httpRequest } from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startPrivateHouseholdGateway } from '../Server/private-household-gateway.mjs'
-import { markEventShareSyncPending, countPendingEventShareSync } from '../Server/event-share-sync-journal.mjs'
+import {
+  markEventShareSyncPending, countPendingEventShareSync,
+  countUnresolvedEventShareSync,
+} from '../Server/event-share-sync-journal.mjs'
 import { provisionEmptyHousehold } from '../Server/household-storage.mjs'
 import {
   createHouseholdMembershipTables,
@@ -21,6 +25,7 @@ import {
 import { setFamilyAccount } from '../Server/family-auth.mjs'
 import {
   createEventShareTables, registerTrustedShareConnection,
+  inviteSelectedEvents, respondToEventInvitation,
 } from '../Server/event-only-shares.mjs'
 
 const serverDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../Server')
@@ -848,5 +853,158 @@ test('central authenticated gateway denies one family access to another family b
       console.error('Disposable test data kept for safe inspection: ' + work)
       throw failures[0]
     }
+  }
+})
+
+test('client disconnect cannot clear a share update while backend is still committing', {
+  timeout: 25000,
+}, async () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'calendar-disconnect-recovery-'))
+  const storageRoot = path.join(work, 'household-storage')
+  fs.mkdirSync(storageRoot)
+  const central = new DatabaseSync(path.join(work, 'identity.db'))
+  let gateway = null
+  let fakeBackend = null
+  let releaseBackend = null
+  let editor = null
+  try {
+    const a = provisionEmptyHousehold({ serverDirectory, storageRoot, householdId: 'family-a' })
+    provisionEmptyHousehold({ serverDirectory, storageRoot, householdId: 'family-b' })
+    const source = new DatabaseSync(a.databasePath)
+    try {
+      source.exec(`CREATE TABLE events (
+        id INTEGER PRIMARY KEY, title TEXT, date TEXT, end_date TEXT,
+        time TEXT, end_time TEXT, repeat_unit TEXT
+      );
+      INSERT INTO events VALUES
+        (1,'Before disconnect','2026-12-20',NULL,'12:00',NULL,NULL);`)
+      createHouseholdMembershipTables(central)
+      setFamilyAccount(central, 'disconnect-a', 'Test Family A', testPassword)
+      setFamilyAccount(central, 'disconnect-b', 'Test Family B', testPassword)
+      registerHousehold(central, { householdId: 'family-a', displayName: 'Family A' })
+      registerHousehold(central, { householdId: 'family-b', displayName: 'Family B' })
+      createEventShareTables(central)
+      registerTrustedShareConnection(central, {
+        sourceHouseholdId: 'family-a', recipientHouseholdId: 'family-b',
+      })
+      const userA = central.prepare(
+        "SELECT id FROM family_users WHERE username = 'disconnect-a'"
+      ).get().id
+      const userB = central.prepare(
+        "SELECT id FROM family_users WHERE username = 'disconnect-b'"
+      ).get().id
+      grantHouseholdMembership(central, {
+        serverVerifiedUserId: userA, householdId: 'family-a', role: 'owner',
+      })
+      grantHouseholdMembership(central, {
+        serverVerifiedUserId: userB, householdId: 'family-b', role: 'owner',
+      })
+      const [share] = inviteSelectedEvents(central, {
+        serverVerifiedUserId: userA, sourceHouseholdId: 'family-a',
+        sourceDatabase: source, eventIds: [1], recipientHouseholdIds: ['family-b'],
+      })
+      respondToEventInvitation(central, {
+        serverVerifiedUserId: userB, recipientHouseholdId: 'family-b',
+        shareId: share.shareId, decision: 'accepted',
+      })
+    } finally {
+      source.close()
+    }
+
+    let signalRequest
+    const received = new Promise(resolve => { signalRequest = resolve })
+    const release = new Promise(resolve => { releaseBackend = resolve })
+    fakeBackend = createHttpServer((request, response) => {
+      if (request.method !== 'PUT' || request.url !== '/api/events/1') {
+        response.writeHead(404)
+        response.end()
+        return
+      }
+      request.once('end', () => {
+        signalRequest()
+        void release.then(() => {
+          const db = new DatabaseSync(a.databasePath)
+          try {
+            db.prepare('UPDATE events SET title=? WHERE id=1')
+              .run('Committed after browser disconnected')
+          } finally {
+            db.close()
+          }
+          response.writeHead(200, { 'Content-Type': 'application/json' })
+          response.end('{"ok":true}')
+        }).catch(() => response.destroy())
+      })
+      request.resume()
+    })
+    await new Promise((resolve, reject) => {
+      fakeBackend.once('error', reject)
+      fakeBackend.listen(0, '127.0.0.1', resolve)
+    })
+    const portA = fakeBackend.address().port
+    const portB = await randomPort(new Set([portA]))
+    assert.equal(forbiddenPorts.has(portA), false)
+    gateway = await startPrivateHouseholdGateway({
+      identityDatabase: central, serverDirectory, storageRoot,
+      backendPorts: { 'family-a': portA, 'family-b': portB },
+    })
+    const cookieA = await login(gateway.base, 'disconnect-a')
+    const cookieB = await login(gateway.base, 'disconnect-b')
+
+    let signalDisconnected
+    const disconnected = new Promise(resolve => { signalDisconnected = resolve })
+    const url = new URL(gateway.base)
+    editor = httpRequest({
+      hostname: url.hostname, port: Number(url.port),
+      path: '/api/events/1', method: 'PUT',
+      headers: {
+        Cookie: cookieA,
+        Origin: 'https://' + url.host,
+        'Content-Type': 'application/json',
+      },
+    }, response => response.resume())
+    editor.once('error', () => signalDisconnected())
+    editor.end(JSON.stringify({
+      date: '2026-12-20', title: 'Committed after browser disconnected',
+    }))
+    await received
+    // The backend deliberately has NOT committed or sent a response yet.
+    editor.destroy()
+    await disconnected
+    assert.equal(countUnresolvedEventShareSync(central), 1)
+    const blocked = await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })
+    assert.equal(blocked.response.status, 503)
+    assert.equal(countPendingEventShareSync(central), 1)
+    assert.equal(central.prepare(
+      'SELECT title FROM event_share_grants WHERE status = ?'
+    ).get('accepted').title, 'Before disconnect')
+
+    // Finish the backend commit after the browser has vanished. The gateway
+    // still consumes the authoritative backend response and then safely replays.
+    releaseBackend()
+    releaseBackend = null
+    for (let attempt = 0; attempt < 100 && countPendingEventShareSync(central); attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    assert.equal(countUnresolvedEventShareSync(central), 0)
+    assert.equal(countPendingEventShareSync(central), 0)
+    const current = await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })
+    assert.equal(current.response.status, 200)
+    assert.deepEqual(current.value.events.map(x => x.title),
+      ['Committed after browser disconnected'])
+    console.log('[PASS] Browser disconnect cannot acknowledge uncommitted backend work.')
+  } finally {
+    releaseBackend?.()
+    editor?.destroy()
+    if (gateway) await gateway.close()
+    if (fakeBackend) {
+      fakeBackend.closeAllConnections()
+      await new Promise(resolve => fakeBackend.close(resolve))
+    }
+    central.close()
+    fs.rmSync(work, { recursive: true, force: true })
   }
 })
