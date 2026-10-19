@@ -4,6 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -28,7 +29,7 @@ async function findTestPort(exclude = new Set()) {
   throw new Error('No free and safe loopback test port was found.')
 }
 
-function startProcess(storageRoot, householdId, port) {
+function startProcess(storageRoot, householdId, port, serviceToken) {
   const child = spawn(process.execPath, [entry], {
     cwd: path.dirname(serverDirectory),
     windowsHide: true,
@@ -40,6 +41,7 @@ function startProcess(storageRoot, householdId, port) {
       FAMILY_CALENDAR_HOUSEHOLD_STORAGE_ROOT: storageRoot,
       FAMILY_CALENDAR_HOUSEHOLD_ID: householdId,
       FAMILY_CALENDAR_HOUSEHOLD_TEST_ONLY: 'YES',
+      FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN: serviceToken,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -47,7 +49,7 @@ function startProcess(storageRoot, householdId, port) {
   for (const stream of [child.stdout, child.stderr]) {
     stream.on('data', chunk => { logs = (logs + chunk.toString('utf8')).slice(-2000) })
   }
-  return { child, base: 'http://127.0.0.1:' + port, logs: () => logs }
+  return { child, base: 'http://127.0.0.1:' + port, serviceToken, logs: () => logs }
 }
 
 async function waitForHealth(processInfo) {
@@ -55,6 +57,7 @@ async function waitForHealth(processInfo) {
     if (processInfo.child.exitCode !== null || processInfo.child.signalCode !== null) break
     try {
       const response = await fetch(processInfo.base + '/api/health', {
+        headers: { 'x-family-calendar-upstream-token': processInfo.serviceToken },
         signal: AbortSignal.timeout(1000),
         cache: 'no-store',
       })
@@ -65,10 +68,13 @@ async function waitForHealth(processInfo) {
   throw new Error('Isolated household server never became healthy: ' + processInfo.logs())
 }
 
-async function requestJson(base, endpoint, body = null) {
-  const response = await fetch(base + endpoint, {
+async function requestJson(backend, endpoint, body = null) {
+  const response = await fetch(backend.base + endpoint, {
     method: body == null ? 'GET' : 'POST',
-    headers: body == null ? {} : { 'Content-Type': 'application/json' },
+    headers: {
+      'x-family-calendar-upstream-token': backend.serviceToken,
+      ...(body == null ? {} : { 'Content-Type': 'application/json' }),
+    },
     body: body == null ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(5000),
   })
@@ -103,17 +109,17 @@ test('two actual loopback API servers never mix calendar data, lists, or uploade
     const familyB = provisionEmptyHousehold({ serverDirectory, storageRoot, householdId: 'family-b' })
     const portA = await findTestPort()
     const portB = await findTestPort(new Set([portA]))
-    const first = startProcess(storageRoot, 'family-a', portA)
-    const second = startProcess(storageRoot, 'family-b', portB)
+    const first = startProcess(storageRoot, 'family-a', portA, randomBytes(32).toString('hex'))
+    const second = startProcess(storageRoot, 'family-b', portB, randomBytes(32).toString('hex'))
     running.push(first, second)
     await Promise.all([waitForHealth(first), waitForHealth(second)])
-    assert.deepEqual(await requestJson(first.base, '/api/events'), [])
-    assert.deepEqual(await requestJson(second.base, '/api/events'), [])
+    assert.deepEqual(await requestJson(first, '/api/events'), [])
+    assert.deepEqual(await requestJson(second, '/api/events'), [])
 
-    await requestJson(first.base, '/api/events', { date: '2026-12-20', title: 'ONLY family A', time: '12:00' })
-    await requestJson(second.base, '/api/events', { date: '2026-12-21', title: 'ONLY family B', time: '13:00' })
-    const eventsA = await requestJson(first.base, '/api/events')
-    const eventsB = await requestJson(second.base, '/api/events')
+    await requestJson(first, '/api/events', { date: '2026-12-20', title: 'ONLY family A', time: '12:00' })
+    await requestJson(second, '/api/events', { date: '2026-12-21', title: 'ONLY family B', time: '13:00' })
+    const eventsA = await requestJson(first, '/api/events')
+    const eventsB = await requestJson(second, '/api/events')
     assert.equal(eventsA.length, 1)
     assert.equal(eventsB.length, 1)
     assert.equal(eventsA[0].title, 'ONLY family A')
@@ -122,13 +128,13 @@ test('two actual loopback API servers never mix calendar data, lists, or uploade
     assert.equal(eventsA[0].id, eventsB[0].id)
     // IDs alone are not global access-control tokens. The future gateway
     // must bind every authenticated request to the correct private listener.
-    assert.equal((await requestJson(second.base, '/api/events'))[0].title, 'ONLY family B')
-    assert.equal((await requestJson(first.base, '/api/events'))[0].title, 'ONLY family A')
+    assert.equal((await requestJson(second, '/api/events'))[0].title, 'ONLY family B')
+    assert.equal((await requestJson(first, '/api/events'))[0].title, 'ONLY family A')
 
-    await requestJson(first.base, '/api/lists', { name: 'ONLY family A shopping' })
-    await requestJson(second.base, '/api/lists', { name: 'ONLY family B shopping' })
-    const listsA = await requestJson(first.base, '/api/lists')
-    const listsB = await requestJson(second.base, '/api/lists')
+    await requestJson(first, '/api/lists', { name: 'ONLY family A shopping' })
+    await requestJson(second, '/api/lists', { name: 'ONLY family B shopping' })
+    const listsA = await requestJson(first, '/api/lists')
+    const listsB = await requestJson(second, '/api/lists')
     assert.equal(listsA.length, 1)
     assert.equal(listsB.length, 1)
     assert.equal(listsA[0].name, 'ONLY family A shopping')
@@ -138,8 +144,18 @@ test('two actual loopback API servers never mix calendar data, lists, or uploade
     // even when the filenames match exactly in two households.
     fs.writeFileSync(path.join(familyA.uploadFolder, 'shared-name.txt'), 'family A private photo')
     fs.writeFileSync(path.join(familyB.uploadFolder, 'shared-name.txt'), 'family B private photo')
-    const photoA = await fetch(first.base + '/uploads/shared-name.txt')
-    const photoB = await fetch(second.base + '/uploads/shared-name.txt')
+    // No one bypasses the gateway without the correct per-household token.
+    assert.equal((await fetch(first.base + '/uploads/shared-name.txt')).status, 403)
+    assert.equal((await fetch(second.base + '/api/events')).status, 403)
+    assert.equal((await fetch(first.base + '/api/events', {
+      headers: { 'x-family-calendar-upstream-token': second.serviceToken },
+    })).status, 403)
+    const photoA = await fetch(first.base + '/uploads/shared-name.txt', {
+      headers: { 'x-family-calendar-upstream-token': first.serviceToken },
+    })
+    const photoB = await fetch(second.base + '/uploads/shared-name.txt', {
+      headers: { 'x-family-calendar-upstream-token': second.serviceToken },
+    })
     assert.equal(photoA.status, 200)
     assert.equal(photoB.status, 200)
     assert.equal(await photoA.text(), 'family A private photo')
