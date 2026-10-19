@@ -1,6 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import {
+  createEventShareSyncJournal, markEventShareSyncPending,
+  countPendingEventShareSync, replayEventShareSyncPending,
+} from '../Server/event-share-sync-journal.mjs'
 import {
   createEventShareTables, inviteSelectedEvents, respondToEventInvitation,
   revokeSelectedEventShare, removeReceivedEventShare, listAcceptedSharedEvents, listEventShareInvitations,
@@ -490,4 +497,111 @@ test('recipient cannot remove pending, declined, revoked or source-cancelled sha
   assert.throws(() => removeReceivedEventShare(db, { serverVerifiedUserId: 4,
     recipientHouseholdId: 'family-c', shareId: cancelledShare.shareId }), /unavailable/)
   assert.deepEqual(pending(db, 3, 'family-b').map(x => x.title), ['A BBQ'])
+})
+
+test('durable journal replays a missed shared-event edit exactly once', t => {
+  const { db, source } = fixture(t)
+  createEventShareSyncJournal(db)
+  createEventShareSyncJournal(db)
+  const [share] = send(db, source, [1], ['family-b'])
+  respondToEventInvitation(db, { serverVerifiedUserId: 3,
+    recipientHouseholdId: 'family-b', shareId: share.shareId, decision: 'accepted' })
+  assert.equal(markEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a', sourceEventId: 1,
+  }), 1)
+  source.prepare('UPDATE events SET title = ?, time = ? WHERE id = 1')
+    .run('Rescheduled Family A BBQ', '15:00')
+  // Simulate process death between the committed backend edit and the usual
+  // post-response sharing sync. Central queue survives, snapshot is still old.
+  assert.deepEqual(visible(db, 3, 'family-b').map(x => x.title), ['A BBQ'])
+  const reconcile = ({ sourceEventId }) => synchronizeSelectedEventShare(db, {
+    serverVerifiedUserId: 1, sourceHouseholdId: 'family-a',
+    sourceEventId, sourceDatabase: source,
+  })
+  assert.deepEqual(replayEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a', apply: reconcile,
+  }), { replayed: 1, remaining: 0 })
+  assert.deepEqual(visible(db, 3, 'family-b').map(x => [x.title, x.time]),
+    [['Rescheduled Family A BBQ', '15:00']])
+  assert.deepEqual(replayEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a', apply: reconcile,
+  }), { replayed: 0, remaining: 0 })
+})
+
+test('failed replay rolls back share update and keeps work queued for retry', t => {
+  const { db, source } = fixture(t)
+  createEventShareSyncJournal(db)
+  const [share] = send(db, source, [1], ['family-b'])
+  respondToEventInvitation(db, { serverVerifiedUserId: 3,
+    recipientHouseholdId: 'family-b', shareId: share.shareId, decision: 'accepted' })
+  markEventShareSyncPending(db, { sourceHouseholdId: 'family-a', sourceEventId: 1 })
+  source.prepare('DELETE FROM events WHERE id = ?').run(1)
+  assert.throws(() => replayEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a',
+    apply: ({ sourceEventId }) => {
+      synchronizeSelectedEventShare(db, { serverVerifiedUserId: 1,
+        sourceHouseholdId: 'family-a', sourceEventId, sourceDatabase: source })
+      throw new Error('Crash between share change and acknowledgement')
+    },
+  }), /Crash between share change/)
+  assert.equal(countPendingEventShareSync(db), 1)
+  assert.deepEqual(visible(db, 3, 'family-b').map(x => x.title), ['A BBQ'])
+  assert.deepEqual(replayEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a',
+    apply: ({ sourceEventId }) => synchronizeSelectedEventShare(db, {
+      serverVerifiedUserId: 1, sourceHouseholdId: 'family-a',
+      sourceEventId, sourceDatabase: source,
+    }),
+  }), { replayed: 1, remaining: 0 })
+  assert.deepEqual(visible(db, 3, 'family-b'), [])
+  assert.equal(db.prepare('SELECT status FROM event_share_grants WHERE id = ?')
+    .get(share.shareId).status, 'cancelled')
+})
+
+test('journal persists across closing and reopening central SQLite', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'family-calendar-sync-journal-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const databasePath = path.join(root, 'central.db')
+  const first = new DatabaseSync(databasePath)
+  first.exec(`CREATE TABLE household_registry (
+    id INTEGER PRIMARY KEY, storage_id TEXT UNIQUE, disabled INTEGER DEFAULT 0
+  ) STRICT;
+  INSERT INTO household_registry (id,storage_id) VALUES (1,'family-a'),(2,'family-b');
+  CREATE TABLE sync_test_effects (id INTEGER PRIMARY KEY, note TEXT);`)
+  createEventShareSyncJournal(first)
+  markEventShareSyncPending(first, { sourceHouseholdId: 'family-a', sourceEventId: 17 })
+  markEventShareSyncPending(first, { sourceHouseholdId: 'family-a', sourceEventId: 17 })
+  assert.equal(countPendingEventShareSync(first), 1)
+  assert.equal(first.prepare('SELECT revision FROM event_share_sync_pending').get().revision, 2)
+  first.close()
+  const recovered = new DatabaseSync(databasePath)
+  t.after(() => recovered.close())
+  assert.equal(countPendingEventShareSync(recovered), 1)
+  assert.deepEqual(replayEventShareSyncPending(recovered, {
+    sourceHouseholdId: 'family-a',
+    apply: ({ sourceEventId }) => recovered.prepare(
+      'INSERT INTO sync_test_effects(id, note) VALUES (?, ?)'
+    ).run(sourceEventId, 'replayed after restart'),
+  }), { replayed: 1, remaining: 0 })
+  assert.equal(recovered.prepare('SELECT note FROM sync_test_effects WHERE id = 17')
+    .get().note, 'replayed after restart')
+  assert.equal(countPendingEventShareSync(recovered), 0)
+})
+
+test('sync journal rejects untrusted household and event IDs', t => {
+  const { db } = fixture(t)
+  createEventShareSyncJournal(db)
+  assert.throws(() => markEventShareSyncPending(db, {
+    sourceHouseholdId: '../family-b', sourceEventId: 1,
+  }), /Invalid trusted source/)
+  assert.throws(() => markEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-unknown', sourceEventId: 1,
+  }), /not available/)
+  assert.throws(() => markEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a', sourceEventId: -2,
+  }), /Invalid source event/)
+  assert.throws(() => replayEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a', apply: () => {}, limit: 0,
+  }), /Invalid sync replay batch size/)
+  assert.equal(countPendingEventShareSync(db), 0)
 })
