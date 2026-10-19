@@ -40,6 +40,44 @@ photo analysis capabilities. Household capture-inbox records and uploads
 remain stored in each household's isolated folders, but analysis is withheld
 in this private preview.
 
+## Arney's signed confirm-only simple-event actions (private test, not deployed)
+
+The private authenticated gateway now owns
+`POST /api/ai/event-action-preview` and
+`POST /api/ai/event-action-confirm`. This does **not** enable the legacy
+AI confirmation endpoints, model-driven writes, or recurrence mutations.
+A caller may preview a **specific event ID in their selected household**
+for simple single-day nonrecurring cancellation or date/time rescheduling.
+The preview returns the permitted event title/date/time and an opaque
+HMAC-signed, five-minute confirmation token. The signature binds the exact
+event UID, full row/person-link fingerprint, household, account, device
+session and proposed action. The private gateway retains a new random signing
+key for each startup, so restarts invalidate all old previews.
+
+A separate request with `confirm: true` is mandatory; the backend never
+accepts a model output as confirmation. Before modifying the trusted
+household SQLite database, the gateway takes an IMMEDIATE transaction,
+checks that the event is unchanged, and records the affected ID in the
+CENTRAL sharing journal. The source SQLite outbox trigger records the
+update/delete in the same source transaction. Immediately after commit,
+the gateway reconciles the pending journal and accepted invitations.
+If central sync fails after a successful source COMMIT, it responds with a
+conservative ambiguity warning and retains both journals for retry, rather
+than claiming rollback or dropping the change.
+
+The helper and CI tests reject expired/tampered/replayed tokens, changing
+notes/people, switched accounts/households/devices, reused SQLite IDs,
+unconfirmed calls, invalid new times, and recurring or multi-day edits.
+The end-to-end disposable two-family gateway exercises rescheduling and
+recipient snapshot synchronization; no other household's source data is
+read by the assistant and no external model is used.
+
+**Limitations:** This is an API-only test slice, not yet voice- or
+natural-language-driven actions. It does not establish multi-process source
+fencing, periodic reconciliation, an operator restore runbook or production
+safety. No production database, scheduled task, Tailscale route or running
+backend is changed. Existing legacy AI routes stay blocked in private mode.
+
 ## Arney's authenticated read-only calendar lookup (nonproduction)
 
 The private gateway owns canonical `GET /api/ai/calendar-lookup?from=YYYY-MM-DD&to=YYYY-MM-DD`.

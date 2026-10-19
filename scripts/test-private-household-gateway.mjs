@@ -449,6 +449,49 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal(imageB.value, 'ONLY family B photo bytes')
     assert.equal(imageA.response.headers.get('set-cookie'), null)
 
+    // Arney's preview/confirm flow is explicitly scoped to the household
+    // selected by central authentication and does not need Ollama.
+    const privateArneyPreview = await json(gateway.base, '/api/ai/event-action-preview', {
+      cookie: cookieA, body: {
+        action: 'reschedule', eventId: addA.value.id, newTime: '12:45',
+      },
+    })
+    assert.equal(privateArneyPreview.response.status, 200)
+    assert.equal(privateArneyPreview.value.requiresConfirmation, true)
+    assert.equal((await json(gateway.base, '/api/ai/event-action-confirm', {
+      cookie: cookieB, body: {
+        confirm: true, previewToken: privateArneyPreview.value.previewToken,
+      },
+    })).response.status, 409)
+    assert.equal((await json(gateway.base, '/api/ai/event-action-confirm', {
+      cookie: cookieA, body: {
+        confirm: false, previewToken: privateArneyPreview.value.previewToken,
+      },
+    })).response.status, 400)
+    const confirmedArney = await json(gateway.base, '/api/ai/event-action-confirm', {
+      cookie: cookieA, body: {
+        confirm: true, previewToken: privateArneyPreview.value.previewToken,
+      },
+    })
+    assert.equal(confirmedArney.response.status, 200, JSON.stringify(confirmedArney.value))
+    assert.equal(confirmedArney.value.action, 'reschedule')
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: cookieA,
+    })).value.find(e => e.id === addA.value.id).time, '12:45')
+    assert.equal(central.prepare('SELECT COUNT(*) n FROM event_share_sync_pending').get().n, 0)
+    assert.equal((await json(gateway.base, '/api/ai/event-action-confirm', {
+      cookie: cookieA, body: {
+        confirm: true, previewToken: privateArneyPreview.value.previewToken,
+      },
+    })).response.status, 409)
+    assert.equal((await json(gateway.base, '/api/ai/event-action-preview', {
+      cookie: cookieB, body: { action: 'cancel', eventId: addA.value.id },
+    })).response.status, 200)
+    assert.equal((await json(gateway.base, '/api/ai/event-action-preview', {
+      cookie: cookieA, body: { action: 'cancel', eventId: addA.value.id,
+        householdId: 'family-b' },
+    })).response.status, 400)
+
     // A can share ONE handpicked event with connected B, but never A's
     // entire calendar or a private second event. B must explicitly accept.
     const privateA = await json(gateway.base, '/api/events', {
@@ -570,6 +613,28 @@ test('central authenticated gateway denies one family access to another family b
     assert.deepEqual((await json(gateway.base, '/api/events', {
       cookie: cookieB,
     })).value.map(e => e.title), ['Family B private calendar'])
+
+    // Confirmed Arney reschedules propagate into B's accepted shared copy.
+    const sharedArneyPreview = await json(gateway.base,
+      '/api/ai/event-action-preview', {
+        cookie: cookieA, body: {
+          action: 'reschedule', eventId: idToShare, newTime: '14:20',
+        },
+      })
+    assert.equal(sharedArneyPreview.response.status, 200)
+    assert.equal((await json(gateway.base, '/api/ai/event-action-confirm', {
+      cookie: cookieA, body: {
+        confirm: true, previewToken: sharedArneyPreview.value.previewToken,
+      },
+    })).response.status, 200)
+    const syncedArney = await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })
+    assert.equal(syncedArney.response.status, 200)
+    assert.equal(syncedArney.value.events[0].time, '14:20')
+    assert.doesNotMatch(JSON.stringify(syncedArney.value),
+      /PRIVATE MEDICAL|notes|location|people/)
+    assert.equal(central.prepare('SELECT COUNT(*) n FROM event_share_sync_pending').get().n, 0)
 
     // Source SQLite triggers catch an AI-style update even when it bypasses
     // ordinary PUT /api/events/:id. Read-time delivery updates only the

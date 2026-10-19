@@ -72,6 +72,8 @@ jobs:
         run: node --test scripts/test-private-paid-api-budget.mjs
       - name: Validate read-only household-scoped Arney calendar lookup
         run: node --test scripts/test-private-arney-calendar-lookup.mjs
+      - name: Verify signed Arney preview and confirmed single-event mutations
+        run: node --test scripts/test-private-arney-confirmed-actions.mjs
       - name: Reject unaudited event mutation routes in the private gateway
         run: node --test scripts/test-private-gateway-mutation-policy.mjs
       - name: Exercise authenticated private household gateway end-to-end

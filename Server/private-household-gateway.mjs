@@ -13,6 +13,7 @@
 import express from 'express'
 import http from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
+import { randomBytes } from 'node:crypto'
 import {
   createEventShareTables, inviteSelectedEvents,
   listTrustedEventShareRecipients, listEventShareInvitations,
@@ -35,6 +36,9 @@ import { PRIVATE_UPSTREAM_HEADER, requirePrivateUpstreamToken } from './private-
 import { inspectPrivateGatewayMutation } from './private-gateway-mutation-policy.mjs'
 import { listPrivateArneyCalendar } from './private-arney-calendar-lookup.mjs'
 import {
+  ArneyActionError, previewPrivateArneyAction, confirmPrivateArneyAction,
+} from './private-arney-confirmed-actions.mjs'
+import {
   createPrivateLocalAiBudgetTables, privateLocalAiBudgetStatus,
   reservePrivateLocalAiRequest,
 } from './private-local-ai-budget.mjs'
@@ -42,7 +46,7 @@ import {
   createPrivatePaidApiBudgetTables, privatePaidApiBudgetStatus,
 } from './private-paid-api-budget.mjs'
 import {
-  createEventShareSyncJournal, markEventShareSyncInFlight,
+  createEventShareSyncJournal, markEventShareSyncPending, markEventShareSyncInFlight,
   acknowledgeEventShareSyncInFlight,
   countPendingEventShareSync, replayEventShareSyncPending,
 } from './event-share-sync-journal.mjs'
@@ -406,6 +410,7 @@ export async function startPrivateHouseholdGateway({
   // Block reads while event mutations may still be committing in another
   // backend process. Multiple edits to the same source remain coalesced in
   // the revisioned central journal, and replay waits for the final response.
+  const arneyActionTokenKey = randomBytes(32)
   const activeEventMutations = new Map()
   const activeLocalAi = new Set()
   function ensureReconciled(response) {
@@ -575,6 +580,69 @@ export async function startPrivateHouseholdGateway({
   app.use('/api/ai/calendar-lookup', (_request, response) => {
     response.status(404).json({ error: 'Not found.' })
   })
+
+  // Private gateway owns structured Arney previews and confirmed changes.
+  // The legacy /api/ai/*-confirmed backend handlers remain BLOCKED. A signed
+  // five-minute preview is bound to this exact account, session, household,
+  // source-event UID and entire event snapshot, then independently confirmed.
+  function handlePrivateArneyAction(request, response, operation) {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    if (!ensureReconciled(response)) return
+    let sourceDb
+    let changed = false
+    try {
+      const storage = resolveHouseholdStorage({
+        serverDirectory, storageRoot, householdId: household.householdId,
+      })
+      sourceDb = new DatabaseSync(storage.databasePath)
+      const args = {
+        sourceDb, tokenKey: arneyActionTokenKey,
+        verifiedUserId: request.familyAccount.user_id,
+        verifiedSessionId: request.familyAccount.id,
+        householdId: household.householdId,
+        request: request.body,
+      }
+      const result = operation === 'preview'
+        ? previewPrivateArneyAction(args)
+        : confirmPrivateArneyAction({
+          ...args,
+          beforeWrite: ({ sourceEventId }) => {
+            // Durable CENTRAL pending intent BEFORE SQLite's source update.
+            // The source-local outbox then records the same change atomically.
+            markEventShareSyncPending(identityDatabase, {
+              sourceHouseholdId: household.householdId, sourceEventId,
+            })
+          },
+        })
+      changed = operation === 'confirm'
+      if (changed) reconcilePendingShares()
+      response.set('Cache-Control', 'no-store')
+      response.json(result)
+    } catch (error) {
+      if (changed) {
+        // The source COMMIT cannot be undone. The pending central journal and
+        // source-local outbox survive and MUST be replayed before sharing.
+        console.error('Committed private Arney action awaits sync:', error)
+        response.status(503).json({
+          error: 'Event may have changed; shared synchronization unavailable. Refresh before retrying.',
+        })
+      } else if (error instanceof ArneyActionError) {
+        response.status(error.status).json({ error: error.message })
+      } else {
+        console.error('Private Arney event action unavailable:', error)
+        response.status(503).json({ error: 'Event action temporarily unavailable.' })
+      }
+    } finally { sourceDb?.close() }
+  }
+  app.post('/api/ai/event-action-preview', express.json({ limit: '4kb' }),
+    (request, response) => handlePrivateArneyAction(request, response, 'preview'))
+  app.post('/api/ai/event-action-confirm', express.json({ limit: '4kb' }),
+    (request, response) => handlePrivateArneyAction(request, response, 'confirm'))
+  for (const route of ['/api/ai/event-action-preview', '/api/ai/event-action-confirm']) {
+    app.use(route, (_request, response) =>
+      response.status(404).json({ error: 'Not found.' }))
+  }
 
   // Only authorship of events in this verified household is exposed.
   // This does not fetch any other family's members, events or event creators.
