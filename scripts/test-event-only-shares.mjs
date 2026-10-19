@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
+import { installPrivateEventIdentity } from '../Server/private-event-identity.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -70,6 +71,7 @@ function fixture(t) {
       (4,'REPEATING SHIFT','2026-12-23',NULL,'07:00',NULL,'day',
        'SHOULD NOT SHARE','PRIVATE','C');
   `)
+  installPrivateEventIdentity(source)
   return { db, source }
 }
 const send = (db, source, eventIds, recipientHouseholdIds, extra = {}) =>
