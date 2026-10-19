@@ -48,5 +48,7 @@ jobs:
             }
             Write-Host "[PASS] $file parses and isolates validator output"
           }
+      - name: Verify private preview cannot be released by manual or automatic paths
+        run: node --test scripts/test-private-preview-release-scope.mjs
       - name: Build frontend
         run: npm run build

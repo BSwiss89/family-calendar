@@ -81,6 +81,16 @@ if ($Apply) {
 
 $plan = Get-Plan
 
+$changed = @($plan.Changed)
+$previewGate = Join-Path $test 'scripts\check-private-preview-release-scope.mjs'
+if (-not (Test-Path -LiteralPath $previewGate)) {
+    throw 'PRIVATE MULTI-FAMILY PREVIEW RELEASE BLOCKED: release guard is missing.'
+}
+& node $previewGate @changed | Out-Host
+if ($LASTEXITCODE -ne 0) {
+    throw 'PRIVATE MULTI-FAMILY PREVIEW RELEASE BLOCKED: draft-only household files need a separate reviewed release.'
+}
+
 Write-Host ''
 Write-Host "Live commit: $($plan.From.Substring(0, 7))"
 Write-Host "Test commit: $($plan.To.Substring(0, 7))"
