@@ -30,6 +30,7 @@ import {
   selectHouseholdForVerifiedSession,
 } from './household-memberships.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
+import { PRIVATE_UPSTREAM_HEADER, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
 import { inspectPrivateGatewayMutation } from './private-gateway-mutation-policy.mjs'
 import {
   createEventShareSyncJournal, markEventShareSyncInFlight,
@@ -44,7 +45,7 @@ const HOP_HEADERS = new Set([
 ])
 const REQUEST_REMOVED = new Set([
   ...HOP_HEADERS,
-  'cookie', 'authorization', 'host',
+  'cookie', 'authorization', 'host', PRIVATE_UPSTREAM_HEADER,
   'forwarded', 'x-forwarded-for', 'x-forwarded-host',
   'x-forwarded-proto', 'x-real-ip', 'cf-connecting-ip',
 ])
@@ -83,13 +84,16 @@ function validateUpstreams({ identityDatabase, serverDirectory, storageRoot, bac
   return ports
 }
 
-function safeRequestHeaders(headers, upstreamPort) {
+function safeRequestHeaders(headers, upstreamPort, upstreamToken) {
   const result = {}
   for (const [name, value] of Object.entries(headers)) {
     if (REQUEST_REMOVED.has(name.toLowerCase()) || value === undefined) continue
     result[name] = value
   }
   result.host = '127.0.0.1:' + upstreamPort
+  // NEVER forward a browser-supplied version of this capability. Only the
+  // trusted per-household config may set it, after membership resolution.
+  result[PRIVATE_UPSTREAM_HEADER] = requirePrivateUpstreamToken(upstreamToken)
   return result
 }
 
@@ -108,6 +112,7 @@ function safeResponseHeaders(headers) {
 function proxyRequest(
   request, response, upstreamPort,
   onCompletedMutation = null, onBackendResult = null,
+  upstreamToken,
 ) {
   let backendResultReported = false
   let upstreamResponseRef = null
@@ -138,7 +143,7 @@ function proxyRequest(
     port: upstreamPort,
     path: relativeUrl,
     method: request.method,
-    headers: safeRequestHeaders(request.headers, upstreamPort),
+    headers: safeRequestHeaders(request.headers, upstreamPort, upstreamToken),
     agent: false,
     timeout: 300000,
   }, (upstreamResponse) => {
@@ -249,10 +254,24 @@ export async function startPrivateHouseholdGateway({
   serverDirectory,
   storageRoot,
   backendPorts,
+  backendTokens,
 }) {
   const portByHousehold = validateUpstreams({
     identityDatabase, serverDirectory, storageRoot, backendPorts,
   })
+  if (!backendTokens || typeof backendTokens !== 'object' ||
+      Array.isArray(backendTokens) ||
+      Object.keys(backendTokens).length !== portByHousehold.size) {
+    throw new Error('Private gateway requires one trusted secret per household.')
+  }
+  const tokensByHousehold = new Map()
+  const usedTokens = new Set()
+  for (const householdId of portByHousehold.keys()) {
+    const token = requirePrivateUpstreamToken(backendTokens[householdId])
+    if (usedTokens.has(token)) throw new Error('Private household secrets must be distinct.')
+    usedTokens.add(token)
+    tokensByHousehold.set(householdId, token)
+  }
   // Central share records are separate from either family's calendar DB.
   // No migrations to live/preview data occur; this gateway is test-only.
   createEventShareTables(identityDatabase)
@@ -693,7 +712,8 @@ export async function startPrivateHouseholdGateway({
       : null
     proxyRequest(request, response,
       portByHousehold.get(household.householdId),
-      mutationHook, response.locals.eventMutationSettled ?? null)
+      mutationHook, response.locals.eventMutationSettled ?? null,
+      tokensByHousehold.get(household.householdId))
   })
 
   const server = http.createServer(app)
