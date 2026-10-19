@@ -34,6 +34,10 @@ import { installPrivateEventSourceOutbox, drainPrivateSourceOutbox } from './pri
 import { PRIVATE_UPSTREAM_HEADER, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
 import { inspectPrivateGatewayMutation } from './private-gateway-mutation-policy.mjs'
 import {
+  createPrivateLocalAiBudgetTables, privateLocalAiBudgetStatus,
+  reservePrivateLocalAiRequest,
+} from './private-local-ai-budget.mjs'
+import {
   createEventShareSyncJournal, markEventShareSyncInFlight,
   acknowledgeEventShareSyncInFlight,
   countPendingEventShareSync, replayEventShareSyncPending,
@@ -277,6 +281,7 @@ export async function startPrivateHouseholdGateway({
   // No migrations to live/preview data occur; this gateway is test-only.
   createEventShareTables(identityDatabase)
   createEventShareSyncJournal(identityDatabase)
+  createPrivateLocalAiBudgetTables(identityDatabase)
 
   // Private-gateway-only reconciliation. Storage is resolved from trusted
   // server configuration; no user-provided path or membership is trusted.
@@ -397,6 +402,7 @@ export async function startPrivateHouseholdGateway({
   // backend process. Multiple edits to the same source remain coalesced in
   // the revisioned central journal, and replay waits for the final response.
   const activeEventMutations = new Map()
+  const activeLocalAi = new Set()
   function ensureReconciled(response) {
     if (activeEventMutations.size !== 0) {
       response.status(503).json({ error: 'Shared events are updating. Try again.' })
@@ -499,6 +505,21 @@ export async function startPrivateHouseholdGateway({
     }
     return target
   }
+
+  // Authenticated read-only usage visibility. Setting or resetting limits is
+  // NOT exposed to a family browser; only a trusted offline administrator may
+  // opt the private test household in via central SQLite configuration.
+  app.get('/api/ai-budget', (request, response) => {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    response.set('Cache-Control', 'no-store')
+    response.json({
+      local: privateLocalAiBudgetStatus(identityDatabase, {
+        householdId: household.householdId,
+      }),
+      paidCloudEnabled: false,
+    })
+  })
 
   // Only authorship of events in this verified household is exposed.
   // This does not fetch any other family's members, events or event creators.
@@ -698,6 +719,28 @@ export async function startPrivateHouseholdGateway({
     }
     // Use exactly the same policy decision as the write-ahead journal. A
     // different route regex could let a backend mutation bypass sharing sync.
+    if (policy.localAiIntent === true) {
+      // Only one in-flight Ollama request is allowed across the entire
+      // private gateway. A lost backend response remains quarantined instead
+      // of immediately admitting additional GPU work.
+      if (activeLocalAi.size !== 0) {
+        return response.status(429).json({ error: 'Local AI is currently busy.' })
+      }
+      const quota = reservePrivateLocalAiRequest(identityDatabase, {
+        householdId: household.householdId,
+      })
+      if (!quota.allowed) {
+        return response.status(429).json({
+          error: 'Household local AI monthly request limit reached.',
+          remainingRequests: 0,
+        })
+      }
+      activeLocalAi.add(household.householdId)
+      response.locals.localAiSettled = (backendConfirmed) => {
+        if (backendConfirmed) activeLocalAi.delete(household.householdId)
+        // Unknown outcomes fail closed until the test gateway restarts.
+      }
+    }
     const sourceEventId = policy.sourceEventId ?? null
     const shouldSync = sourceEventId !== null
     const safeEventId = shouldSync
@@ -782,7 +825,8 @@ export async function startPrivateHouseholdGateway({
       : null
     proxyRequest(request, response,
       portByHousehold.get(household.householdId),
-      mutationHook, response.locals.eventMutationSettled ?? null,
+      mutationHook, response.locals.eventMutationSettled ??
+        response.locals.localAiSettled ?? null,
       tokensByHousehold.get(household.householdId))
   })
 
