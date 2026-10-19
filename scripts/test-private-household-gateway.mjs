@@ -322,6 +322,26 @@ test('central authenticated gateway denies one family access to another family b
     ).get().n, 0)
     console.log('[PASS] Alternative and noncanonical event writes cannot bypass sharing recovery.')
 
+    for (const endpoint of [
+      '/api/ai/intent',
+      '/api/ai/cancel-preview',
+      '/api/ai/reschedule-preview',
+      '/api/capture/analyze-photo',
+      '/api/capture-inbox/1/analyze',
+    ]) {
+      const denied = await json(gateway.base, endpoint, {
+        cookie: cookieA, body: { text: 'Find private events' },
+      })
+      assert.equal(denied.response.status, 409, endpoint)
+    }
+    const spoofedUpstream = await json(gateway.base, '/api/events', {
+      cookie: cookieA,
+      headers: { 'x-family-calendar-upstream-token': backendTokens['family-b'] },
+    })
+    assert.equal(spoofedUpstream.response.status, 200)
+    assert.deepEqual(spoofedUpstream.value.map(e => e.title),
+      ['Family A private calendar'])
+
     const eventsA = await json(gateway.base, '/api/events?household=family-b', {
       cookie: cookieA, headers: { 'X-Household-Id': 'family-b' },
     })
