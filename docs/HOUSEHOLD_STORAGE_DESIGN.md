@@ -9,6 +9,36 @@ change existing preview or live data.
 
 Tracking: issue #45. Depends on draft auth PR #44 and Arney PR #43.
 
+## Event identity hardening — private household test mode
+
+The private household backend now installs `Server/private-event-identity.mjs`
+**only when explicitly running the nonproduction household test mode**. Every
+source event has a persistent, randomly generated 128-bit `event_uid`, separate
+from its SQLite integer row ID. A one-time backfill runs only on the selected
+private test household database; SQL triggers assign identities for later
+inserts and prohibit changing or explicitly supplying an identity. Edits keep
+the same identity. A delete followed by an insert using the old numeric ID
+receives a new identity.
+
+The central event-share table stores `source_event_uid` alongside the
+numeric row ID. Invitations are created only when the trusted source has an
+assigned identity. During synchronization, a shared snapshot updates **only**
+when its saved identity matches the current source event. Pending or accepted
+grants from a deleted event are cancelled when their numeric row ID is reused;
+they can never be refreshed with the replacement event's title/date/time.
+Any legacy active share with no verified identity is cancelled rather than
+silently rebound. Historical inactive invitation records are kept for review.
+
+**Limitations:** This is not an authorization to migrate the live family
+database. No production household routing exists yet. Out-of-band SQLite
+changes and restores still need authoritative change detection and source
+database fencing; an unjournaled out-of-band delete may temporarily leave
+an OLD snapshot visible until reconciliation. UUIDs prevent it from silently
+becoming a share of an unrelated NEW event, but do not substitute for a
+production-grade transactional change log and restore-safety design.
+Restore/replacement of a whole household database and the central identity
+database must be coordinated and reverified before external access.
+
 ## First slice in this PR
 
 Server/household-storage.mjs provides two intentionally separate operations:
@@ -262,9 +292,9 @@ temporarily leave stale data. The hook currently logs failures; a future
 durable replay/reconciliation mechanism is required. The code does NOT
 yet cover delete-by-batch, AI reschedule endpoints, edits made directly
 in SQLite, recurring-event exceptions, or any other mutation route.
-Before production sharing, immutable source-event identity must protect
-against reuse of numeric SQLite IDs after deletion, and readers must
-reconcile missing/out-of-date shares before showing them.
+Permanent source-event IDs now protect the private test sharing model against
+reused numeric SQLite IDs. Production still needs comprehensive mutation
+coverage, coordinated restores and stale-share reconciliation.
 
 **Remaining incomplete:** This is test-only HTTP routing; the
 invitation controls and calendar overlay are present only as frontend
