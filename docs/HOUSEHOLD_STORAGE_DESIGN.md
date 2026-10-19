@@ -40,6 +40,35 @@ photo analysis capabilities. Household capture-inbox records and uploads
 remain stored in each household's isolated folders, but analysis is withheld
 in this private preview.
 
+## Deterministic event phrases to signed Arney previews (private tests)
+
+New private gateway-only `POST /api/ai/event-action-interpret` accepts a short
+text request and recognizes only restricted phrases with a quoted **exact
+event title** and **explicit original ISO date**. Supported examples:
+
+- `Cancel event "Dentist Appointment" on 2026-12-20`
+- `Move event "Dentist Appointment" on 2026-12-20 to 2026-12-22 at 14:30`
+
+The interpreter is a bounded local grammar, **not an LLM, general conversational
+parser or voice frontend**. Vague language, relative dates, bulk edits, unsupported
+times and injected instructions return clarification without writing. The gateway
+resolves the current authenticated household and reconciles journals before any
+lookup; parameterized exact-title/date searches read ONLY that family's own
+events, never other households or accepted invitations. Zero matching events
+return not-found, duplicates require explicit event selection, and more than
+20 matching records are not enumerated. Recurring/multiday events receive no
+confirmation token. Only a **single eligible exact match** is allowed to produce
+a five-minute signed preview through the existing secure preview function.
+Even a successful interpretation **does not edit anything**; the user must
+submit a separate confirmation with the signed token. This route never spends
+local GPU or paid cloud AI allowance.
+
+New pure fixture tests and authenticated two-family integration tests verify
+strict parsing, wrong-family denial, ambiguous matches, unsupported events,
+prompt-injection-like text, SQL-looking titles, token creation, and the
+existing preview-to-confirm update. Production service is untouched and this
+draft endpoint is not a general Arney rollout.
+
 ## Arney's signed confirm-only simple-event actions (private test, not deployed)
 
 The private authenticated gateway now owns

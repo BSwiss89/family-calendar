@@ -451,13 +451,34 @@ test('central authenticated gateway denies one family access to another family b
 
     // Arney's preview/confirm flow is explicitly scoped to the household
     // selected by central authentication and does not need Ollama.
-    const privateArneyPreview = await json(gateway.base, '/api/ai/event-action-preview', {
-      cookie: cookieA, body: {
-        action: 'reschedule', eventId: addA.value.id, newTime: '12:45',
-      },
+    const phrase = 'Hey Arney, move event "Family A private calendar" on 2026-12-20 to 2026-12-20 at 12:45'
+    assert.equal((await json(gateway.base, '/api/ai/event-action-interpret', {
+      body: { text: phrase },
+    })).response.status, 401)
+    const otherFamilyPhrase = await json(gateway.base, '/api/ai/event-action-interpret', {
+      cookie: cookieB, body: { text: phrase },
+    })
+    assert.equal(otherFamilyPhrase.response.status, 200)
+    assert.equal(otherFamilyPhrase.value.status, 'not_found')
+    assert.equal((await json(gateway.base, '/api/ai/event-action-interpret', {
+      cookie: cookieA, body: { text: phrase, householdId: 'family-b' },
+    })).response.status, 400)
+    assert.equal((await json(gateway.base, '/api/ai/event-action-interpret/', {
+      cookie: cookieA, body: { text: phrase },
+    })).response.status, 404)
+    const privateArneyPreview = await json(gateway.base, '/api/ai/event-action-interpret', {
+      cookie: cookieA, body: { text: phrase },
     })
     assert.equal(privateArneyPreview.response.status, 200)
+    assert.equal(privateArneyPreview.value.status, 'ready_for_confirmation')
     assert.equal(privateArneyPreview.value.requiresConfirmation, true)
+    assert.equal(privateArneyPreview.value.eventId, addA.value.id)
+    assert.doesNotMatch(JSON.stringify(privateArneyPreview.value),
+      /PRIVATE MEDICAL|notes|location|people/)
+    const vague = await json(gateway.base, '/api/ai/event-action-interpret', {
+      cookie: cookieA, body: { text: 'Cancel all my appointments' },
+    })
+    assert.equal(vague.value.status, 'needs_clarification')
     assert.equal((await json(gateway.base, '/api/ai/event-action-confirm', {
       cookie: cookieB, body: {
         confirm: true, previewToken: privateArneyPreview.value.previewToken,

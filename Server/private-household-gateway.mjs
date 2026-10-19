@@ -35,6 +35,7 @@ import { installPrivateEventSourceOutbox, drainPrivateSourceOutbox } from './pri
 import { PRIVATE_UPSTREAM_HEADER, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
 import { inspectPrivateGatewayMutation } from './private-gateway-mutation-policy.mjs'
 import { listPrivateArneyCalendar } from './private-arney-calendar-lookup.mjs'
+import { interpretPrivateArneyEventAction } from './private-arney-event-language.mjs'
 import {
   ArneyActionError, previewPrivateArneyAction, confirmPrivateArneyAction,
 } from './private-arney-confirmed-actions.mjs'
@@ -578,6 +579,49 @@ export async function startPrivateHouseholdGateway({
     } finally { sourceDb?.close() }
   })
   app.use('/api/ai/calendar-lookup', (_request, response) => {
+    response.status(404).json({ error: 'Not found.' })
+  })
+
+  // Conservative speech/text entrypoint. No model and NO writing here.
+  // The same signed preview is produced as by the structured event endpoint;
+  // only a completely matched, unique own-household event is eligible.
+  app.post('/api/ai/event-action-interpret', express.json({ limit: '4kb' }),
+    (request, response) => {
+      const household = trustedHousehold(request, response)
+      if (!household) return
+      if (request.originalUrl !== '/api/ai/event-action-interpret') {
+        return response.status(404).json({ error: 'Not found.' })
+      }
+      if (!request.body || typeof request.body !== 'object' ||
+          Array.isArray(request.body) ||
+          Object.keys(request.body).some(key => key !== 'text')) {
+        return response.status(400).json({ error: 'A text command is required.' })
+      }
+      if (!ensureReconciled(response)) return
+      let sourceDb
+      try {
+        const storage = resolveHouseholdStorage({
+          serverDirectory, storageRoot, householdId: household.householdId,
+        })
+        sourceDb = new DatabaseSync(storage.databasePath, { readOnly: true })
+        const result = interpretPrivateArneyEventAction({
+          identityDatabase, sourceDb, tokenKey: arneyActionTokenKey,
+          verifiedUserId: request.familyAccount.user_id,
+          verifiedSessionId: request.familyAccount.id,
+          householdId: household.householdId, text: request.body.text,
+        })
+        response.set('Cache-Control', 'no-store')
+        response.json(result)
+      } catch (error) {
+        if (error instanceof ArneyActionError) {
+          response.status(error.status).json({ error: error.message })
+        } else {
+          console.error('Private Arney language interpretation unavailable:', error)
+          response.status(503).json({ error: 'Calendar command temporarily unavailable.' })
+        }
+      } finally { sourceDb?.close() }
+    })
+  app.use('/api/ai/event-action-interpret', (_request, response) => {
     response.status(404).json({ error: 'Not found.' })
   })
 
