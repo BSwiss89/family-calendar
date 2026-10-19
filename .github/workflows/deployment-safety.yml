@@ -70,6 +70,8 @@ jobs:
         run: node --test scripts/test-private-local-ai-budget.mjs
       - name: Enforce fail-closed per-household paid API dollar reservations
         run: node --test scripts/test-private-paid-api-budget.mjs
+      - name: Validate read-only household-scoped Arney calendar lookup
+        run: node --test scripts/test-private-arney-calendar-lookup.mjs
       - name: Reject unaudited event mutation routes in the private gateway
         run: node --test scripts/test-private-gateway-mutation-policy.mjs
       - name: Exercise authenticated private household gateway end-to-end

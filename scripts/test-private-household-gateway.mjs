@@ -388,6 +388,26 @@ test('central authenticated gateway denies one family access to another family b
     assert.deepEqual(eventsA.value.map(e => e.title), ['Family A private calendar'])
     assert.deepEqual(eventsB.value.map(e => e.title), ['Family B private calendar'])
 
+    // Read-only Arney lookup sees this family's own events, never other
+    // household metadata or private notes; no Ollama quota is consumed.
+    const range = '/api/ai/calendar-lookup?from=2026-12-20&to=2026-12-24'
+    const arneyA = await json(gateway.base, range + '&household=family-b', { cookie: cookieA })
+    assert.equal(arneyA.response.status, 400)
+    assert.equal((await json(gateway.base, range)).response.status, 401)
+    const arneyOwnA = await json(gateway.base, range, { cookie: cookieA })
+    const arneyOwnB = await json(gateway.base, range, { cookie: cookieB })
+    assert.equal(arneyOwnA.response.status, 200)
+    assert.equal(arneyOwnB.response.status, 200)
+    assert.deepEqual(arneyOwnA.value.events.map(e => e.title), ['Family A private calendar'])
+    assert.deepEqual(arneyOwnB.value.events.map(e => e.title), ['Family B private calendar'])
+    assert.equal(arneyOwnA.value.readOnly, true)
+    assert.equal((await json(gateway.base, '/api/ai/calendar-lookup?from=2026-02-30&to=2026-03-01', {
+      cookie: cookieA,
+    })).response.status, 400)
+    assert.equal((await json(gateway.base, '/api/ai/calendar-lookup', {
+      cookie: cookieA, body: { from: '2026-12-20', to: '2026-12-24' },
+    })).response.status, 404)
+
     // Simulate clicking "Switch username": logout kills only that trusted
     // session; signing into a different username opens only its own family.
     const beforeSwitch = await login(gateway.base, 'familyadmina')
@@ -522,6 +542,15 @@ test('central authenticated gateway denies one family access to another family b
       cookie: cookieB,
     })
     assert.deepEqual(approved.value.events.map(e => e.title), ['Family A private calendar'])
+    const arneyShared = await json(gateway.base,
+      '/api/ai/calendar-lookup?from=2026-12-20&to=2026-12-24', { cookie: cookieB })
+    assert.equal(arneyShared.response.status, 200)
+    assert.deepEqual(arneyShared.value.events.map(e => e.title),
+      ['Family A private calendar', 'Family B private calendar'])
+    assert.equal(arneyShared.value.events[0].source, 'accepted_invitation')
+    assert.equal(arneyShared.value.events[0].sharedBy, 'Family A')
+    assert.doesNotMatch(JSON.stringify(arneyShared.value),
+      /SECRET|PRIVATE MEDICAL|HOME ADDRESS|location|notes|person|sourceEventId/)
     // Neither a pending nor an accepted event permits duplicate invitations.
     const blockedReminder = await json(gateway.base, '/api/shared-events/invite', {
       cookie: cookieA, body: { eventIds: [idToShare], recipientHouseholdIds: ['family-b'] },

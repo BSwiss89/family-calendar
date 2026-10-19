@@ -40,6 +40,34 @@ photo analysis capabilities. Household capture-inbox records and uploads
 remain stored in each household's isolated folders, but analysis is withheld
 in this private preview.
 
+## Arney's authenticated read-only calendar lookup (nonproduction)
+
+The private gateway owns canonical `GET /api/ai/calendar-lookup?from=YYYY-MM-DD&to=YYYY-MM-DD`.
+It is a **no-model, no-spend, no-mutation** lookup foundation for later Arney
+calendar questions; it does not parse natural language or perform any calendar
+write. Only a verified session and its selected active household can use it.
+The helper `Server/private-arney-calendar-lookup.mjs` reads a trusted SQLite
+connection belonging solely to that household and approved, individually
+accepted invitation snapshots from the central sharing DB. The gateway drains
+sharing journals/outboxes before reads, failing closed if recovery is
+ambiguous. Guessed household query selectors are rejected.
+
+SQL allowlists only title, date, optional end date and times, local event ID,
+or accepted invitation ID plus sender display name. **Notes, people, private
+locations, attachments, sender source-event IDs and other family events
+remain private**. The date window cannot exceed 31 days; over 50 matches
+fails rather than returning a misleading partial list. Gregorian dates are
+strictly validated. Repeating events are NOT expanded: a conservative
+`recurringSeriesNotExpanded` flag warns that results may omit occurrences.
+Future natural-language interpretation and recurrence handling need their
+own review before treating this as a complete assistant.
+
+Read-only lookups need no paid/local AI quota, and do not enable any
+`/api/ai/*` mutation routes or Ollama process. Only the private draft gateway
+is affected; the working live calendar stays unchanged. CI now tests
+household boundaries, accepted-vs-inactive shares, private field omission,
+range/size validation and authenticated real-backend responses.
+
 ## Private paid API budget — ledger only; paid providers still DISABLED
 
 The CENTRAL SQLite module `Server/private-paid-api-budget.mjs` now holds a

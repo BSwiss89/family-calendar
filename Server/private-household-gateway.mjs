@@ -33,6 +33,7 @@ import { resolveHouseholdStorage } from './household-storage.mjs'
 import { installPrivateEventSourceOutbox, drainPrivateSourceOutbox } from './private-event-source-outbox.mjs'
 import { PRIVATE_UPSTREAM_HEADER, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
 import { inspectPrivateGatewayMutation } from './private-gateway-mutation-policy.mjs'
+import { listPrivateArneyCalendar } from './private-arney-calendar-lookup.mjs'
 import {
   createPrivateLocalAiBudgetTables, privateLocalAiBudgetStatus,
   reservePrivateLocalAiRequest,
@@ -530,6 +531,48 @@ export async function startPrivateHouseholdGateway({
 
   // Block every browser write/alias under this gateway-owned budget route.
   app.use('/api/ai-budget', (_request, response) => {
+    response.status(404).json({ error: 'Not found.' })
+  })
+
+  // Safe, read-only Arney calendar lookup: NO Ollama request and NO event
+  // mutation. The date window is tightly bounded, and only the selected
+  // family's events plus its explicitly accepted sharing overlays are read.
+  app.get('/api/ai/calendar-lookup', (request, response) => {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    if (Object.keys(request.query).some(key => key !== 'from' && key !== 'to') ||
+        typeof request.query.from !== 'string' ||
+        typeof request.query.to !== 'string') {
+      return response.status(400).json({ error: 'Valid calendar date range required.' })
+    }
+    if (!ensureReconciled(response)) return
+    let sourceDb
+    try {
+      const resolved = resolveHouseholdStorage({
+        serverDirectory, storageRoot, householdId: household.householdId,
+      })
+      sourceDb = new DatabaseSync(resolved.databasePath, { readOnly: true })
+      const result = listPrivateArneyCalendar({
+        identityDatabase, sourceDatabase: sourceDb,
+        serverVerifiedUserId: request.familyAccount.user_id,
+        householdId: household.householdId,
+        fromDate: request.query.from, toDate: request.query.to,
+      })
+      response.set('Cache-Control', 'no-store')
+      response.json(result)
+    } catch (error) {
+      if (String(error?.message).includes('lookup result limit')) {
+        response.status(413).json({ error: 'Calendar lookup has too many events for one request.' })
+      } else if (String(error?.message).includes('calendar dates') ||
+                 String(error?.message).includes('lookup range')) {
+        response.status(400).json({ error: 'Invalid calendar lookup dates or range.' })
+      } else {
+        console.error('Private Arney calendar read unavailable:', error)
+        response.status(503).json({ error: 'Calendar lookup temporarily unavailable.' })
+      }
+    } finally { sourceDb?.close() }
+  })
+  app.use('/api/ai/calendar-lookup', (_request, response) => {
     response.status(404).json({ error: 'Not found.' })
   })
 
