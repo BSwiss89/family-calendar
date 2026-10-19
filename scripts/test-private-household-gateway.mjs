@@ -4,6 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { createServer } from 'node:net'
 import { createServer as createHttpServer, request as httpRequest } from 'node:http'
@@ -50,7 +51,7 @@ async function randomPort(used) {
   throw new Error('Could not find a safe random local port.')
 }
 
-function startBackend(storageRoot, id, port) {
+function startBackend(storageRoot, id, port, serviceToken) {
   const child = spawn(process.execPath, [entry], {
     cwd: path.dirname(serverDirectory),
     env: {
@@ -61,6 +62,7 @@ function startBackend(storageRoot, id, port) {
       FAMILY_CALENDAR_HOUSEHOLD_STORAGE_ROOT: storageRoot,
       FAMILY_CALENDAR_HOUSEHOLD_ID: id,
       FAMILY_CALENDAR_HOUSEHOLD_TEST_ONLY: 'YES',
+      FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN: serviceToken,
     },
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -71,7 +73,7 @@ function startBackend(storageRoot, id, port) {
       recent = (recent + bytes.toString('utf8')).slice(-3500)
     })
   }
-  return { child, base: 'http://127.0.0.1:' + port, logs: () => recent }
+  return { child, base: 'http://127.0.0.1:' + port, serviceToken, logs: () => recent }
 }
 
 async function waitForBackend(backend) {
@@ -79,6 +81,7 @@ async function waitForBackend(backend) {
     if (backend.child.exitCode !== null || backend.child.signalCode !== null) break
     try {
       const response = await fetch(backend.base + '/api/health', {
+        headers: { 'x-family-calendar-upstream-token': backend.serviceToken },
         signal: AbortSignal.timeout(1000),
       })
       if (response.ok && (await response.json()).status === 'ok') return
@@ -167,18 +170,36 @@ test('central authenticated gateway denies one family access to another family b
     grantHouseholdMembership(central, { serverVerifiedUserId: idA, householdId: 'family-a', role: 'owner' })
     grantHouseholdMembership(central, { serverVerifiedUserId: idB, householdId: 'family-b', role: 'owner' })
 
+    const backendTokens = {
+      'family-a': randomBytes(32).toString('hex'),
+      'family-b': randomBytes(32).toString('hex'),
+    }
     const usedPorts = new Set()
     const portA = await randomPort(usedPorts)
     const portB = await randomPort(usedPorts)
-    backends.push(startBackend(storageRoot, 'family-a', portA))
-    backends.push(startBackend(storageRoot, 'family-b', portB))
+    backends.push(startBackend(storageRoot, 'family-a', portA, backendTokens['family-a']))
+    backends.push(startBackend(storageRoot, 'family-b', portB, backendTokens['family-b']))
     await Promise.all(backends.map(waitForBackend))
+
+    // Even a process on localhost must not bypass the central gateway or
+    // reuse the other household's private service credential.
+    for (const backend of backends) {
+      assert.equal((await fetch(backend.base + '/api/events')).status, 403)
+      assert.equal((await fetch(backend.base + '/api/health')).status, 403)
+      assert.equal((await fetch(backend.base + '/uploads/private.jpg')).status, 403)
+      const wrong = backend === backends[0]
+        ? backendTokens['family-b'] : backendTokens['family-a']
+      assert.equal((await fetch(backend.base + '/api/events', {
+        headers: { 'x-family-calendar-upstream-token': wrong },
+      })).status, 403)
+    }
 
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central,
       serverDirectory,
       storageRoot,
       backendPorts: { 'family-a': portA, 'family-b': portB },
+      backendTokens,
     })
     assert.equal(new URL(gateway.base).hostname, '127.0.0.1')
     assert.equal(forbiddenPorts.has(gateway.port), false)
@@ -474,7 +495,9 @@ test('central authenticated gateway denies one family access to another family b
     }), 1)
     const directCommitted = await json(backends[0].base,
       '/api/events/' + idToShare, {
-        method: 'PUT', body: {
+        method: 'PUT',
+        headers: { 'x-family-calendar-upstream-token': backendTokens['family-a'] },
+        body: {
           title: 'Family A updated during interrupted gateway',
           date: '2026-12-20', time: '14:45',
         },
@@ -490,6 +513,7 @@ test('central authenticated gateway denies one family access to another family b
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory, storageRoot,
       backendPorts: { 'family-a': portA, 'family-b': portB },
+      backendTokens,
     })
     // Before opening a listener, the new process reconciles persisted work.
     assert.equal(countPendingEventShareSync(central), 0)
@@ -515,6 +539,7 @@ test('central authenticated gateway denies one family access to another family b
     })
     assert.equal((await json(backends[0].base, '/api/events/' + idToShare, {
       method: 'PUT',
+      headers: { 'x-family-calendar-upstream-token': backendTokens['family-a'] },
       body: { title: 'Read-time recovery', date: '2026-12-20', time: '13:00' },
     })).response.status, 200)
     assert.equal(countPendingEventShareSync(central), 1)
@@ -546,6 +571,7 @@ test('central authenticated gateway denies one family access to another family b
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory, storageRoot,
       backendPorts: { 'family-a': portA, 'family-b': portB },
+      backendTokens,
     })
     assert.equal(countPendingEventShareSync(central), 0)
     assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
@@ -872,6 +898,7 @@ test('central authenticated gateway denies one family access to another family b
     console.log('[PASS] One selected event is invited, accepted and individually revoked over authenticated APIs.')
     console.log('[PASS] No unrelated event or private fields reach another household through event-sharing API.')
     console.log('[PASS] Only centrally connected households can receive event invitations.')
+    console.log('[PASS] Private backends reject direct access without their own service capability.')
     console.log('[PASS] One secure login gateway routes each authenticated user only to their household.')
     console.log('[PASS] Guessed tenant selectors cannot read unrelated events, lists or images.')
     console.log('[PASS] Invalid cookies, revoked memberships and disabled accounts block requests.')
@@ -983,10 +1010,15 @@ test('client disconnect cannot clear a share update while backend is still commi
     })
     const portA = fakeBackend.address().port
     const portB = await randomPort(new Set([portA]))
+    const backendTokens = {
+      'family-a': randomBytes(32).toString('hex'),
+      'family-b': randomBytes(32).toString('hex'),
+    }
     assert.equal(forbiddenPorts.has(portA), false)
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory, storageRoot,
       backendPorts: { 'family-a': portA, 'family-b': portB },
+      backendTokens,
     })
     const cookieA = await login(gateway.base, 'disconnect-a')
     const cookieB = await login(gateway.base, 'disconnect-b')
