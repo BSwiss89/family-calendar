@@ -8,6 +8,7 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { provisionEmptyHousehold } from '../Server/household-storage.mjs'
 import { installPrivateEventIdentity } from '../Server/private-event-identity.mjs'
+import { installPrivateEventSourceOutbox } from '../Server/private-event-source-outbox.mjs'
 import {
   createHouseholdMembershipTables, registerHousehold, grantHouseholdMembership,
 } from '../Server/household-memberships.mjs'
@@ -238,4 +239,16 @@ test('missing stage marker, symlinks and modified attestation fail without write
     /independent, trusted backup-time attestation/)
   fs.unlinkSync(path.join(f.restoreRoot, '.family-calendar-restore-review.json'))
   assert.throws(() => attestOfflinePrivateRestoreSet(f.options), /unexpected or missing/)
+})
+
+test('offline restore refuses undelivered event changes in source household outbox', t => {
+  const f = fixture(t)
+  const db = new DatabaseSync(f.a.databasePath)
+  try {
+    installPrivateEventSourceOutbox(db)
+    db.prepare('UPDATE events SET title=? WHERE id=1').run('Still unshared')
+    assert.ok(db.prepare('SELECT COUNT(*) AS n FROM event_source_share_outbox').get().n > 0)
+  } finally { db.close() }
+  assert.throws(() => attestOfflinePrivateRestoreSet(f.options),
+    /undelivered event changes/)
 })
