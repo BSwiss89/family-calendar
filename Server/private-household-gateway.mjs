@@ -30,6 +30,7 @@ import {
   selectHouseholdForVerifiedSession,
 } from './household-memberships.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
+import { inspectPrivateGatewayMutation } from './private-gateway-mutation-policy.mjs'
 import {
   createEventShareSyncJournal, markEventShareSyncInFlight,
   acknowledgeEventShareSyncInFlight,
@@ -598,14 +599,20 @@ export async function startPrivateHouseholdGateway({
     // installFamilyAuth has already validated the central session and CSRF.
     const household = trustedHousehold(request, response)
     if (!household) return
-    const eventMutation = /^\/api\/events\/([1-9][0-9]*)(?:\?[^#]*)?$/.exec(
-      request.originalUrl,
+    const policy = inspectPrivateGatewayMutation(
+      request.method, request.originalUrl,
     )
-    const shouldSync = eventMutation && ['PUT', 'DELETE'].includes(request.method)
-    const sourceEventId = shouldSync ? Number(eventMutation[1]) : null
-    const safeEventId = Number.isSafeInteger(sourceEventId) && sourceEventId > 0
-    const isCreate = request.method === 'POST' &&
-      /^\/api\/events(?:\?[^#]*)?$/.test(request.originalUrl)
+    if (!policy.allowed) {
+      return response.status(409).json({
+        error: 'This event operation is not yet supported in the private family-sharing preview.',
+      })
+    }
+    // Use exactly the same policy decision as the write-ahead journal. A
+    // different route regex could let a backend mutation bypass sharing sync.
+    const sourceEventId = policy.sourceEventId ?? null
+    const shouldSync = sourceEventId !== null
+    const safeEventId = shouldSync
+    const isCreate = policy.isCreate === true
     // Persist source-event intent BEFORE forwarding the request. Once the
     // household backend commits, a process death cannot lose this marker.
     // Even a failed backend request is safe to reconcile against final truth.
