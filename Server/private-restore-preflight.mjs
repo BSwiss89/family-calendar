@@ -32,7 +32,7 @@ function entry(root, relative) {
   if (stat.isSymbolicLink()) fail('symbolic links or junctions are forbidden.')
   const actual = fs.realpathSync(full)
   const diff = path.relative(root, actual)
-  if (!diff || diff === '..' || diff.startsWith('..' + path.sep)
+  if ((relative !== '.' && !diff) || diff === '..' || diff.startsWith('..' + path.sep)
       || path.isAbsolute(diff)) {
     fail('staging path escapes its directory.')
   }
@@ -94,7 +94,21 @@ function collectUploadFiles(root, folder, output) {
 }
 
 function digestFile(full) {
-  return createHash('sha256').update(fs.readFileSync(full)).digest('hex')
+  // Files may be large (SQLite, photographs). Never load the entire backup
+  // into RAM just to compute its inventory digest.
+  const hash = createHash('sha256')
+  const fd = fs.openSync(full, 'r')
+  const buf = Buffer.allocUnsafe(1024 * 1024)
+  try {
+    for (;;) {
+      const count = fs.readSync(fd, buf, 0, buf.length, null)
+      if (count === 0) break
+      hash.update(buf.subarray(0, count))
+    }
+  } finally {
+    fs.closeSync(fd)
+  }
+  return hash.digest('hex')
 }
 
 function inspectSet({ serverDirectory, restoreRoot }) {
