@@ -11,7 +11,9 @@ const PRIVATE_PREVIEW_PATHS = [
   /^Server\/(?:family-auth|event-only-shares|event-share-sync-journal|event-creator-audit)\.mjs$/i,
   /^Server\/auth-ui\//i,
   /^src\/(?:FamilyAccountEntry|FamilyEventSharing|InvitationCenter|SharedEventDetails|SharedEventsOverlay|useAuthenticatedCalendarIdentity|useInvitationInbox|useSharedEventFeed|sharedEventOverlay|eventSharingUiModel)(?:\.|$)/i,
-  /^scripts\/(?:run-household-|test-household-|test-private-|test-family-auth\.mjs$|test-event-only-shares\.mjs$|test-event-sharing-|test-event-creator-audit\.mjs$|test-shared-event-)/i,
+  // The release-safety fixture itself is not a household-preview test.
+  // Exempt only this exact file, not the other private test modules.
+  /^scripts\/(?:run-household-|test-household-|test-private-(?!preview-release-scope\.mjs$)|test-family-auth\.mjs$|test-event-only-shares\.mjs$|test-event-sharing-|test-event-creator-audit\.mjs$|test-shared-event-)/i,
 ]
 
 function canonicalFile(filename) {
