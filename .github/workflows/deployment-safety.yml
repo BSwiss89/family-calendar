@@ -66,6 +66,8 @@ jobs:
         run: node --test scripts/test-household-memberships.mjs
       - name: Verify private household upstream service credentials
         run: node --test scripts/test-private-upstream-access.mjs
+      - name: Validate per-household hard monthly local AI allowance
+        run: node --test scripts/test-private-local-ai-budget.mjs
       - name: Reject unaudited event mutation routes in the private gateway
         run: node --test scripts/test-private-gateway-mutation-policy.mjs
       - name: Exercise authenticated private household gateway end-to-end
