@@ -6,7 +6,9 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   createEventShareSyncJournal, markEventShareSyncPending,
-  countPendingEventShareSync, replayEventShareSyncPending,
+  markEventShareSyncInFlight, acknowledgeEventShareSyncInFlight,
+  countPendingEventShareSync, countUnresolvedEventShareSync,
+  replayEventShareSyncPending,
 } from '../Server/event-share-sync-journal.mjs'
 import {
   createEventShareTables, inviteSelectedEvents, respondToEventInvitation,
@@ -607,4 +609,90 @@ test('sync journal rejects untrusted household and event IDs', t => {
     sourceHouseholdId: 'family-a', apply: () => {}, limit: 0,
   }), /Invalid sync replay batch size/)
   assert.equal(countPendingEventShareSync(db), 0)
+})
+
+test('browser disconnect cannot acknowledge unfinished backend mutation', t => {
+  const { db, source } = fixture(t)
+  createEventShareSyncJournal(db)
+  const [share] = send(db, source, [1], ['family-b'])
+  respondToEventInvitation(db, { serverVerifiedUserId: 3,
+    recipientHouseholdId: 'family-b', shareId: share.shareId, decision: 'accepted' })
+  markEventShareSyncInFlight(db, {
+    sourceHouseholdId: 'family-a', sourceEventId: 1,
+  })
+  // The real backend has not returned, so a client dropping its socket
+  // must NEVER remove this pending intent or serve the old snapshot.
+  assert.equal(countUnresolvedEventShareSync(db), 1)
+  assert.throws(() => replayEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a',
+    apply: ({ sourceEventId }) => synchronizeSelectedEventShare(db, {
+      serverVerifiedUserId: 1, sourceHouseholdId: 'family-a',
+      sourceEventId, sourceDatabase: source,
+    }),
+  }), /Unacknowledged source mutation/)
+  assert.equal(countPendingEventShareSync(db), 1)
+  source.prepare('UPDATE events SET title=? WHERE id=1').run('After dropped browser')
+  acknowledgeEventShareSyncInFlight(db, {
+    sourceHouseholdId: 'family-a', sourceEventId: 1,
+  })
+  assert.equal(countUnresolvedEventShareSync(db), 0)
+  assert.deepEqual(replayEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a',
+    apply: ({ sourceEventId }) => synchronizeSelectedEventShare(db, {
+      serverVerifiedUserId: 1, sourceHouseholdId: 'family-a',
+      sourceEventId, sourceDatabase: source,
+    }),
+  }), { replayed: 1, remaining: 0 })
+  assert.deepEqual(visible(db, 3, 'family-b').map(x => x.title),
+    ['After dropped browser'])
+  assert.throws(() => acknowledgeEventShareSyncInFlight(db, {
+    sourceHouseholdId: 'family-a', sourceEventId: 1,
+  }), /No in-flight event mutation/)
+})
+
+test('two concurrent edits require two backend acknowledgements', t => {
+  const { db, source } = fixture(t)
+  createEventShareSyncJournal(db)
+  markEventShareSyncInFlight(db, {
+    sourceHouseholdId: 'family-a', sourceEventId: 1,
+  })
+  markEventShareSyncInFlight(db, {
+    sourceHouseholdId: 'family-a', sourceEventId: 1,
+  })
+  assert.equal(db.prepare('SELECT in_flight_count FROM event_share_sync_pending')
+    .get().in_flight_count, 2)
+  acknowledgeEventShareSyncInFlight(db, {
+    sourceHouseholdId: 'family-a', sourceEventId: 1,
+  })
+  assert.equal(countUnresolvedEventShareSync(db), 1)
+  assert.throws(() => replayEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a', apply: () => {},
+  }), /Unacknowledged/)
+  source.prepare('UPDATE events SET title=? WHERE id=1').run('Final edit')
+  acknowledgeEventShareSyncInFlight(db, {
+    sourceHouseholdId: 'family-a', sourceEventId: 1,
+  })
+  assert.deepEqual(replayEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a', apply: () => {},
+  }), { replayed: 1, remaining: 0 })
+})
+
+test('legacy ready journal rows migrate without losing revisions', t => {
+  const { db } = fixture(t)
+  db.exec(`CREATE TABLE event_share_sync_pending (
+    source_household_id INTEGER NOT NULL,
+    source_event_id INTEGER NOT NULL,
+    revision INTEGER NOT NULL, queued_at INTEGER NOT NULL,
+    PRIMARY KEY(source_household_id,source_event_id)
+  ) STRICT;
+  INSERT INTO event_share_sync_pending VALUES(1,1,4,100);`)
+  createEventShareSyncJournal(db)
+  createEventShareSyncJournal(db)
+  assert.deepEqual(db.prepare(
+    'SELECT revision,in_flight_count FROM event_share_sync_pending'
+  ).get().revision, 4)
+  assert.equal(countUnresolvedEventShareSync(db), 0)
+  assert.deepEqual(replayEventShareSyncPending(db, {
+    sourceHouseholdId: 'family-a', apply: () => {},
+  }), { replayed: 1, remaining: 0 })
 })
