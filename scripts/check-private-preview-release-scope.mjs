@@ -18,7 +18,8 @@ function canonicalFile(filename) {
   return typeof filename === 'string' && filename.length > 0 &&
     filename.length <= 500 &&
     /^(?:[A-Za-z0-9_.@ -]+\/)*[A-Za-z0-9_.@ -]+$/.test(filename) &&
-    filename.split('/').every(segment => segment !== '.' && segment !== '..')
+    filename.split('/').every(segment =>
+      segment !== '.' && segment !== '..' && !segment.startsWith('-'))
 }
 
 export function inspectPrivatePreviewReleaseFiles(files) {

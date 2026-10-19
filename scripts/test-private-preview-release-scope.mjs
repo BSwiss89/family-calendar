@@ -85,7 +85,7 @@ test('every release entrypoint enforces the gate before approval or backend shut
     assert.match(source,/check-private-preview-release-scope\.mjs/)
     assert.match(source,/PRIVATE MULTI-FAMILY PREVIEW RELEASE BLOCKED/i)
     const guardAt=source.indexOf('check-private-preview-release-scope.mjs')
-    const releaseAt=source.indexOf("if ($Apply) {")
+    const releaseAt=source.indexOf('param([switch]$Apply)')
     if (file.endsWith('release.ps1')) {
       assert.ok(guardAt > source.indexOf('$changed = @(& git'))
       assert.ok(guardAt < source.indexOf('$mode = if'))
