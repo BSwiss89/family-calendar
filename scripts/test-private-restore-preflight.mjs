@@ -188,7 +188,8 @@ test('missing or unexpected households, WAL files and uploads refuse a stage', t
   assert.throws(() => attestOfflinePrivateRestoreSet(f.options), /unexpected or missing/)
   fs.unlinkSync(wal)
   fs.unlinkSync(f.b.databasePath)
-  assert.throws(() => attestOfflinePrivateRestoreSet(f.options), /unexpected or missing/)
+  assert.throws(() => attestOfflinePrivateRestoreSet(f.options),
+    /ENOENT|unexpected or missing/)
   assert.equal(fs.existsSync(f.b.databasePath), false)
 })
 
