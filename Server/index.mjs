@@ -9,6 +9,7 @@ import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boo
 import { installFamilyAuth } from './family-auth.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { installPrivateEventIdentity } from './private-event-identity.mjs'
+import { installPrivateEventSourceOutbox } from './private-event-source-outbox.mjs'
 import { installPrivateUpstreamGuard, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
 
 const app = express()
@@ -377,6 +378,7 @@ if (!eventColumns.includes('location')) {
 // calendar startup/database is unchanged.
 if (householdStorage.mode === 'household') {
   installPrivateEventIdentity(database)
+  installPrivateEventSourceOutbox(database)
 }
 
 database.exec(`
