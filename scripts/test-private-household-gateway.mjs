@@ -262,6 +262,45 @@ test('central authenticated gateway denies one family access to another family b
     })
     assert.equal(addA.response.status, 201)
     assert.equal(addB.response.status, 201)
+
+    // The legacy backend has alternate delete/reschedule/batch routes that
+    // do NOT yet write the private gateway's durable per-event journal.
+    // Deny these rather than letting a browser silently desynchronize an
+    // accepted invitation. Also reject noncanonical event IDs that Express
+    // would parse differently than the gateway's journal.
+    for (const [method, endpoint, body] of [
+      ['POST', '/api/ai/cancel-confirmed', {
+        eventId: addA.value.id, matchType: 'event', confirm: true,
+      }],
+      ['POST', '/api/ai/reschedule-confirmed', {
+        eventId: addA.value.id, confirm: true, newDate: '2026-12-22',
+      }],
+      ['DELETE', '/api/event-batches/sample-batch', undefined],
+      ['POST', '/api/events/' + addA.value.id + '/exceptions', {
+        occurrenceDate: '2026-12-24',
+      }],
+      ['DELETE', '/api/events/0' + addA.value.id, undefined],
+      ['DELETE', '/API/EVENTS/' + addA.value.id, undefined],
+      ['DELETE', '/api/events/' + addA.value.id + '/', undefined],
+      ['DELETE', '/api/events/%31', undefined],
+      ['PUT', '/api/events/0' + addA.value.id, {
+        date: '2026-12-23', title: 'MALICIOUS UNJOURNALED UPDATE',
+      }],
+    ]) {
+      const blocked = await json(gateway.base, endpoint, {
+        cookie: cookieA, method, body,
+      })
+      assert.equal(blocked.response.status, 409,
+        method + ' ' + endpoint + ': ' + JSON.stringify(blocked.value))
+    }
+    assert.deepEqual((await json(gateway.base, '/api/events', {
+      cookie: cookieA,
+    })).value.map(event => event.title), ['Family A private calendar'])
+    assert.equal(central.prepare(
+      'SELECT COUNT(*) AS n FROM event_share_sync_pending'
+    ).get().n, 0)
+    console.log('[PASS] Alternative and noncanonical event writes cannot bypass sharing recovery.')
+
     const eventsA = await json(gateway.base, '/api/events?household=family-b', {
       cookie: cookieA, headers: { 'X-Household-Id': 'family-b' },
     })
