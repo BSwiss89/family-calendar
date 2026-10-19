@@ -17,7 +17,7 @@ import {
   createEventShareTables, inviteSelectedEvents,
   listTrustedEventShareRecipients, listEventShareInvitations,
   listOutgoingEventShares, listAcceptedSharedEvents, respondToEventInvitation,
-  revokeSelectedEventShare, removeReceivedEventShare, synchronizeSelectedEventShare,
+  revokeSelectedEventShare, removeReceivedEventShare, synchronizeTrustedSelectedEventShare,
 } from './event-only-shares.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import {
@@ -30,6 +30,10 @@ import {
   selectHouseholdForVerifiedSession,
 } from './household-memberships.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
+import {
+  createEventShareSyncJournal, markEventShareSyncPending,
+  countPendingEventShareSync, replayEventShareSyncPending,
+} from './event-share-sync-journal.mjs'
 
 const BLOCKED_PORTS = new Set([3001, 13001, 13002, 13003, 11434])
 const HOP_HEADERS = new Set([
@@ -203,6 +207,66 @@ export async function startPrivateHouseholdGateway({
   // Central share records are separate from either family's calendar DB.
   // No migrations to live/preview data occur; this gateway is test-only.
   createEventShareTables(identityDatabase)
+  createEventShareSyncJournal(identityDatabase)
+
+  // Private-gateway-only reconciliation. Storage is resolved from trusted
+  // server configuration; no user-provided path or membership is trusted.
+  // A pending change is applied and acknowledged in one CENTRAL transaction.
+  function reconcilePendingShares() {
+    let total = 0
+    for (const householdId of portByHousehold.keys()) {
+      if (!countPendingEventShareSync(identityDatabase, {
+        sourceHouseholdId: householdId,
+      })) continue
+      const storage = resolveHouseholdStorage({
+        serverDirectory, storageRoot, householdId,
+      })
+      const trustedSource = new DatabaseSync(storage.databasePath, { readOnly: true })
+      try {
+        const result = replayEventShareSyncPending(identityDatabase, {
+          sourceHouseholdId: householdId,
+          apply: ({ sourceEventId }) => synchronizeTrustedSelectedEventShare(
+            identityDatabase, {
+              sourceHouseholdId: householdId,
+              sourceEventId,
+              sourceDatabase: trustedSource,
+            }),
+        })
+        total += result.replayed
+      } finally {
+        trustedSource.close()
+      }
+    }
+    // Never silently serve snapshots when unrecognized/inactive household
+    // work remains. The private harness must fail closed for review.
+    if (countPendingEventShareSync(identityDatabase) !== 0) {
+      throw new Error('Unresolved household sharing reconciliation work.')
+    }
+    return total
+  }
+
+  // Block reads while event mutations may still be committing in another
+  // backend process. Multiple edits to the same source remain coalesced in
+  // the revisioned central journal, and replay waits for the final response.
+  const activeEventMutations = new Map()
+  function ensureReconciled(response) {
+    if (activeEventMutations.size !== 0) {
+      response.status(503).json({ error: 'Shared events are updating. Try again.' })
+      return false
+    }
+    try {
+      reconcilePendingShares()
+      return true
+    } catch (error) {
+      console.error('Private share reconciliation unavailable:', error)
+      response.status(503).json({ error: 'Shared events temporarily unavailable.' })
+      return false
+    }
+  }
+
+  // Drain any persisted pending intents before accepting browser traffic.
+  // If a source DB is unavailable, startup fails instead of serving stale data.
+  reconcilePendingShares()
   const app = express()
   app.disable('x-powered-by')
   // Login is the only endpoint that needs parsed JSON. All calendar request
@@ -335,6 +399,7 @@ export async function startPrivateHouseholdGateway({
   app.get('/api/shared-events/invitations', (request, response) => {
     const household = trustedHousehold(request, response)
     if (!household) return
+    if (!ensureReconciled(response)) return
     response.set('Cache-Control', 'no-store')
     response.json({
       invitations: listEventShareInvitations(identityDatabase, {
@@ -346,6 +411,7 @@ export async function startPrivateHouseholdGateway({
   app.get('/api/shared-events/sent', (request, response) => {
     const household = trustedHousehold(request, response)
     if (!household) return
+    if (!ensureReconciled(response)) return
     response.set('Cache-Control', 'no-store')
     response.json({
       shares: listOutgoingEventShares(identityDatabase, {
@@ -357,6 +423,7 @@ export async function startPrivateHouseholdGateway({
   app.get('/api/shared-events/accepted', (request, response) => {
     const household = trustedHousehold(request, response)
     if (!household) return
+    if (!ensureReconciled(response)) return
     response.set('Cache-Control', 'no-store')
     response.json({
       events: listAcceptedSharedEvents(identityDatabase, {
@@ -370,6 +437,7 @@ export async function startPrivateHouseholdGateway({
   app.post('/api/shared-events/invite', parseShareJson, (request, response) => {
     const household = trustedHousehold(request, response)
     if (!household) return
+    if (!ensureReconciled(response)) return
     const { eventIds, recipientHouseholdIds, allowResend = false } = request.body ?? {}
     if (typeof allowResend !== 'boolean') {
       return response.status(400).json({ error: 'Invalid resend confirmation.' })
@@ -410,6 +478,7 @@ export async function startPrivateHouseholdGateway({
   app.post('/api/shared-events/:shareId/respond', parseShareJson, (request, response) => {
     const household = trustedHousehold(request, response)
     if (!household) return
+    if (!ensureReconciled(response)) return
     const shareId = Number(request.params.shareId)
     if (!Number.isSafeInteger(shareId) || shareId <= 0) {
       return response.status(404).json({ error: 'Event invitation unavailable.' })
@@ -479,6 +548,37 @@ export async function startPrivateHouseholdGateway({
     const safeEventId = Number.isSafeInteger(sourceEventId) && sourceEventId > 0
     const isCreate = request.method === 'POST' &&
       /^\/api\/events(?:\?[^#]*)?$/.test(request.originalUrl)
+    // Persist source-event intent BEFORE forwarding the request. Once the
+    // household backend commits, a process death cannot lose this marker.
+    // Even a failed backend request is safe to reconcile against final truth.
+    if (shouldSync && safeEventId) {
+      try {
+        markEventShareSyncPending(identityDatabase, {
+          sourceHouseholdId: household.householdId, sourceEventId,
+        })
+      } catch (error) {
+        console.error('Unable to journal private shared event mutation:', error)
+        return response.status(503).json({ error: 'Event update unavailable.' })
+      }
+      const key = household.householdId + ':' + sourceEventId
+      activeEventMutations.set(key, (activeEventMutations.get(key) ?? 0) + 1)
+      let finished = false
+      function settle() {
+        if (finished) return
+        finished = true
+        const pending = activeEventMutations.get(key) ?? 1
+        if (pending <= 1) activeEventMutations.delete(key)
+        else activeEventMutations.set(key, pending - 1)
+        if (activeEventMutations.size !== 0) return
+        try { reconcilePendingShares() } catch (error) {
+          // Keep the durable journal intact for next read/restart.
+          console.error('Private event share retry pending:', error)
+        }
+      }
+      response.once('finish', settle)
+      response.once('close', settle)
+    }
+
     const mutationHook = (shouldSync && safeEventId) || isCreate
       ? (backendResponseBody) => {
         const resolved = resolveHouseholdStorage({
@@ -500,12 +600,8 @@ export async function startPrivateHouseholdGateway({
               })
             }
           } else if (shouldSync && safeEventId) {
-            synchronizeSelectedEventShare(identityDatabase, {
-              serverVerifiedUserId: request.familyAccount.user_id,
-              sourceHouseholdId: household.householdId,
-              sourceEventId,
-              sourceDatabase,
-            })
+            // Snapshot reconciliation happens after the response settles,
+            // including rejected/aborted requests. The journal is durable.
             if (request.method === 'DELETE') {
               cleanupDeletedEventCreator(identityDatabase, {
                 verifiedUserId: request.familyAccount.user_id,
