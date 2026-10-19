@@ -38,6 +38,9 @@ import {
   reservePrivateLocalAiRequest,
 } from './private-local-ai-budget.mjs'
 import {
+  createPrivatePaidApiBudgetTables, privatePaidApiBudgetStatus,
+} from './private-paid-api-budget.mjs'
+import {
   createEventShareSyncJournal, markEventShareSyncInFlight,
   acknowledgeEventShareSyncInFlight,
   countPendingEventShareSync, replayEventShareSyncPending,
@@ -282,6 +285,7 @@ export async function startPrivateHouseholdGateway({
   createEventShareTables(identityDatabase)
   createEventShareSyncJournal(identityDatabase)
   createPrivateLocalAiBudgetTables(identityDatabase)
+  createPrivatePaidApiBudgetTables(identityDatabase)
 
   // Private-gateway-only reconciliation. Storage is resolved from trusted
   // server configuration; no user-provided path or membership is trusted.
@@ -517,8 +521,16 @@ export async function startPrivateHouseholdGateway({
       local: privateLocalAiBudgetStatus(identityDatabase, {
         householdId: household.householdId,
       }),
+      paid: privatePaidApiBudgetStatus(identityDatabase, {
+        householdId: household.householdId,
+      }),
       paidCloudEnabled: false,
     })
+  })
+
+  // Block every browser write/alias under this gateway-owned budget route.
+  app.use('/api/ai-budget', (_request, response) => {
+    response.status(404).json({ error: 'Not found.' })
   })
 
   // Only authorship of events in this verified household is exposed.

@@ -40,6 +40,32 @@ photo analysis capabilities. Household capture-inbox records and uploads
 remain stored in each household's isolated folders, but analysis is withheld
 in this private preview.
 
+## Private paid API budget — ledger only; paid providers still DISABLED
+
+The CENTRAL SQLite module `Server/private-paid-api-budget.mjs` now holds a
+separate per-household **USD micro-dollar** monthly cap for eventual cloud AI
+and paid web search. Every household starts with a ZERO dollar allowance;
+a trusted offline administrator may set a limit, but no browser can alter it.
+Authenticated `GET /api/ai-budget` includes a `paid` status for only the
+session-selected family; writes/aliases under that route are blocked.
+
+Future provider calls MUST be preceded by an atomic, durable reservation of
+their **provider-enforced maximum possible bill**, not an untrusted estimate.
+Both types of paid service draw from the same household allowance. Unknown
+responses, disconnects, missing invoices and crashes keep the full hold until
+a trusted billing reconciliation settles the actual amount. Settlement is
+idempotent; conflicting receipts, cross-household IDs and charges exceeding
+the reserved maximum fail closed. Lowering the cap cannot erase prior usage;
+a UTC month rollover never silently refunds last month's reservations.
+
+**Important limitation:** A ledger alone CANNOT enforce an external provider's
+charges. A future adapter must PROVE the provider-side bound includes output
+tokens, retries and other applicable costs before dispatch, and independently
+verify final charges. If there is no enforceable bound, the call is forbidden.
+No paid cloud route, web search, provider key or spend-enabled feature is
+connected here. Local request-count caps remain separate. The live calendar
+is unchanged.
+
 ## Private per-household local Arney intent budget (opt-in, nonproduction)
 
 The private test gateway now has `Server/private-local-ai-budget.mjs`,

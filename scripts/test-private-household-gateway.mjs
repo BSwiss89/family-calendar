@@ -332,6 +332,11 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal(initialAi.response.status, 200)
     assert.equal(initialAi.value.local.monthlyRequestLimit, 0)
     assert.equal(initialAi.value.paidCloudEnabled, false)
+    assert.deepEqual(initialAi.value.paid, {
+      periodUtc: initialAi.value.local.periodUtc, currency: 'USD',
+      monthlyLimitMicros: 0, billedMicros: 0, heldMicros: 0,
+      pendingReservations: 0, remainingMicros: 0,
+    })
     setPrivateLocalAiMonthlyLimit(central, {
       householdId: 'family-a', monthlyLimit: 1,
     })
