@@ -58,6 +58,8 @@ jobs:
         run: node --test scripts/test-household-storage.mjs
       - name: Exercise two real private household API instances
         run: node --test scripts/test-household-instance-isolation.mjs
+      - name: Reject unsafe staged multi-household database restores
+        run: node --test scripts/test-private-restore-preflight.mjs
       - name: Check central user-to-household grants and denial rules
         run: node --test scripts/test-household-memberships.mjs
       - name: Exercise authenticated private household gateway end-to-end
