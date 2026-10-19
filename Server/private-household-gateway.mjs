@@ -223,16 +223,26 @@ export async function startPrivateHouseholdGateway({
       })
       const trustedSource = new DatabaseSync(storage.databasePath, { readOnly: true })
       try {
-        const result = replayEventShareSyncPending(identityDatabase, {
-          sourceHouseholdId: householdId,
-          apply: ({ sourceEventId }) => synchronizeTrustedSelectedEventShare(
-            identityDatabase, {
-              sourceHouseholdId: householdId,
-              sourceEventId,
-              sourceDatabase: trustedSource,
-            }),
-        })
-        total += result.replayed
+        // Each bounded batch commits its changes and acknowledgements
+        // atomically. A backlog larger than the batch size must not make
+        // a restarted gateway permanently unavailable.
+        let remaining
+        do {
+          const result = replayEventShareSyncPending(identityDatabase, {
+            sourceHouseholdId: householdId,
+            apply: ({ sourceEventId }) => synchronizeTrustedSelectedEventShare(
+              identityDatabase, {
+                sourceHouseholdId: householdId,
+                sourceEventId,
+                sourceDatabase: trustedSource,
+              }),
+          })
+          if (result.remaining > 0 && result.replayed === 0) {
+            throw new Error('Event share recovery made no progress.')
+          }
+          total += result.replayed
+          remaining = result.remaining
+        } while (remaining > 0)
       } finally {
         trustedSource.close()
       }
