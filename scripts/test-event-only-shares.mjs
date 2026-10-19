@@ -560,7 +560,11 @@ test('failed replay rolls back share update and keeps work queued for retry', t 
 
 test('journal persists across closing and reopening central SQLite', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'family-calendar-sync-journal-'))
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  let recovered
+  t.after(() => {
+    recovered?.close()
+    fs.rmSync(root, { recursive: true, force: true })
+  })
   const databasePath = path.join(root, 'central.db')
   const first = new DatabaseSync(databasePath)
   first.exec(`CREATE TABLE household_registry (
@@ -574,8 +578,7 @@ test('journal persists across closing and reopening central SQLite', t => {
   assert.equal(countPendingEventShareSync(first), 1)
   assert.equal(first.prepare('SELECT revision FROM event_share_sync_pending').get().revision, 2)
   first.close()
-  const recovered = new DatabaseSync(databasePath)
-  t.after(() => recovered.close())
+  recovered = new DatabaseSync(databasePath)
   assert.equal(countPendingEventShareSync(recovered), 1)
   assert.deepEqual(replayEventShareSyncPending(recovered, {
     sourceHouseholdId: 'family-a',
