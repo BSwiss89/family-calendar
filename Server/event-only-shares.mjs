@@ -3,6 +3,7 @@
 // Authenticated identities come from trusted server sessions. sourceDatabase
 // MUST be the resolved SQLite DB belonging to sourceHouseholdId, not user input.
 import { lookupGrantedHouseholdForSessionUser } from './household-memberships.mjs'
+import { trustedEventUid } from './private-event-identity.mjs'
 
 function id(value, label) {
   if (!Number.isSafeInteger(value) || value < 1) throw new Error('Invalid ' + label + '.')
@@ -45,6 +46,7 @@ function eventSummary(source, eventId) {
   // Explicit minimal allowlist; DO NOT copy notes, location, names, files,
   // other participants, event IDs from unrelated events, or calendar context.
   return {
+    eventUid: trustedEventUid(source, eventId),
     title: event.title, date: event.date,
     endDate: event.endDate ?? null,
     time: event.time ?? null, endTime: event.endTime ?? null,
@@ -61,6 +63,7 @@ function shareGrantTableSql(name) {
     'source_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
     'recipient_household_id INTEGER NOT NULL REFERENCES household_registry(id),',
     'source_event_id INTEGER NOT NULL CHECK(source_event_id > 0),',
+    'source_event_uid TEXT,',
     'created_by_user_id INTEGER NOT NULL REFERENCES family_users(id),',
     "status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','declined','revoked','cancelled','removed')),",
     'title TEXT NOT NULL, date TEXT NOT NULL, end_date TEXT, time TEXT, end_time TEXT,',
@@ -112,6 +115,47 @@ export function createEventShareTables(db) {
       throw error
     }
   }
+  // A central identity DB from an older private test may contain live grants
+  // with no permanent source identity. They CANNOT safely be associated with
+  // a reused numeric event ID. Preserve them as cancelled history instead of
+  // guessing or silently assigning the current event's identity.
+  const columns = db.prepare('PRAGMA table_info(event_share_grants)').all()
+  if (!columns.some(column => column.name === 'source_event_uid')) {
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      db.exec('ALTER TABLE event_share_grants ADD COLUMN source_event_uid TEXT')
+      db.exec([
+        "UPDATE event_share_grants SET status = 'cancelled', updated_at =",
+        "CAST(strftime('%s','now') AS INTEGER) * 1000",
+        "WHERE source_event_uid IS NULL AND status IN ('pending','accepted')",
+      ].join(' '))
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+  }
+  // Re-check even when the identity column already exists; corrupt or
+  // incomplete legacy records must never remain live.
+  db.prepare([
+    "UPDATE event_share_grants SET status = 'cancelled', updated_at = ?",
+    "WHERE source_event_uid IS NULL AND status IN ('pending','accepted')",
+  ].join(' ')).run(Date.now())
+  db.exec([
+    'CREATE TRIGGER IF NOT EXISTS event_share_require_source_uid',
+    'BEFORE INSERT ON event_share_grants',
+    'WHEN NEW.source_event_uid IS NULL OR length(NEW.source_event_uid) != 32',
+    "OR NEW.source_event_uid GLOB '*[^0-9a-f]*'",
+    "BEGIN SELECT RAISE(ABORT, 'Source event identity required'); END;",
+  ].join(' '))
+  db.exec([
+    'CREATE TRIGGER IF NOT EXISTS event_share_require_active_uid',
+    'BEFORE UPDATE OF status ON event_share_grants',
+    "WHEN NEW.status IN ('pending','accepted') AND",
+    "(NEW.source_event_uid IS NULL OR length(NEW.source_event_uid) != 32",
+    "OR NEW.source_event_uid GLOB '*[^0-9a-f]*')",
+    "BEGIN SELECT RAISE(ABORT, 'Source event identity required'); END;",
+  ].join(' '))
   db.exec([
     'CREATE INDEX IF NOT EXISTS event_share_recipient_idx',
     'ON event_share_grants(recipient_household_id, status);',
@@ -188,13 +232,14 @@ export function inviteSelectedEvents(db, {
   }))
   const insert = db.prepare([
     'INSERT INTO event_share_grants',
-    '(source_household_id, recipient_household_id, source_event_id,',
+    '(source_household_id, recipient_household_id, source_event_id, source_event_uid,',
     'created_by_user_id, title, date, end_date, time, end_time, created_at, updated_at)',
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   ].join(' '))
   const findPrior = db.prepare([
     'SELECT id, status FROM event_share_grants',
-    'WHERE source_household_id = ? AND recipient_household_id = ? AND source_event_id = ?',
+    'WHERE source_household_id = ? AND recipient_household_id = ?',
+    'AND source_event_uid = ?',
     'ORDER BY id DESC',
   ].join(' '))
   const made = []
@@ -202,7 +247,7 @@ export function inviteSelectedEvents(db, {
   try {
     for (const event of summaries) for (const to of targets) {
       const now = Date.now()
-      const prior = findPrior.all(from, to.target, event.eventId)
+      const prior = findPrior.all(from, to.target, event.summary.eventUid)
       // A pending invitation or accepted copy is already present for this
       // household. Never generate a duplicate notification, even on request.
       if (prior.some(share => share.status === 'pending')) {
@@ -214,8 +259,8 @@ export function inviteSelectedEvents(db, {
       if (prior.length > 0 && allowResend !== true) {
         throw new Error('An invitation was previously sent to this family. Confirm to resend.')
       }
-      const saved = insert.run(from, to.target, event.eventId, serverVerifiedUserId,
-        event.summary.title, event.summary.date, event.summary.endDate,
+      const saved = insert.run(from, to.target, event.eventId, event.summary.eventUid,
+        serverVerifiedUserId, event.summary.title, event.summary.date, event.summary.endDate,
         event.summary.time, event.summary.endTime, now, now)
       made.push({ shareId: Number(saved.lastInsertRowid), recipientHouseholdId: to.slug })
     }
@@ -263,9 +308,9 @@ export function respondToEventInvitation(db, { serverVerifiedUserId, recipientHo
       db.prepare([
         "UPDATE event_share_grants SET status = 'revoked', updated_at = ?",
         'WHERE source_household_id = ? AND recipient_household_id = ?',
-        "AND source_event_id = ? AND status = 'accepted' AND id != ?",
+        "AND source_event_uid = ? AND status = 'accepted' AND id != ?",
       ].join(' ')).run(now, row.source_household_id, row.recipient_household_id,
-        row.source_event_id, shareId)
+        row.source_event_uid, shareId)
     }
     const changed = db.prepare([
       'UPDATE event_share_grants SET status = ?, responded_at = ?, updated_at = ?',
@@ -310,9 +355,9 @@ export function revokeSelectedEventShare(db, { serverVerifiedUserId, sourceHouse
   const changed = db.prepare([
     "UPDATE event_share_grants SET status = 'revoked', updated_at = ?",
     'WHERE source_household_id = ? AND recipient_household_id = ?',
-    "AND source_event_id = ? AND status IN ('pending','accepted')",
+    "AND source_event_uid = ? AND status IN ('pending','accepted')",
   ].join(' ')).run(now, row.source_household_id, row.recipient_household_id,
-    row.source_event_id)
+    row.source_event_uid)
   if (row.status === 'declined') {
     db.prepare([
       "UPDATE event_share_grants SET status = 'revoked', updated_at = ?",
@@ -405,13 +450,21 @@ export function synchronizeTrustedSelectedEventShare(db, {
     summary = null
   }
   if (summary) {
+    // IDs may be reused after a delete or restore. Cancel OLD grants first.
+    // Never replace their snapshots with details from the replacement event.
+    const cancelled = db.prepare([
+      "UPDATE event_share_grants SET status = 'cancelled', updated_at = ?",
+      "WHERE source_household_id = ? AND source_event_id = ?",
+      "AND source_event_uid IS NOT ? AND status IN ('pending','accepted')",
+    ].join(' ')).run(Date.now(), from, sourceEventId, summary.eventUid)
     const changed = db.prepare([
       'UPDATE event_share_grants SET',
       'title = ?, date = ?, end_date = ?, time = ?, end_time = ?, updated_at = ?',
-      "WHERE source_household_id = ? AND source_event_id = ? AND status IN ('pending','accepted')",
+      "WHERE source_household_id = ? AND source_event_id = ?",
+      "AND source_event_uid = ? AND status IN ('pending','accepted')",
     ].join(' ')).run(summary.title, summary.date, summary.endDate,
-      summary.time, summary.endTime, Date.now(), from, sourceEventId)
-    return { updated: changed.changes, cancelled: 0 }
+      summary.time, summary.endTime, Date.now(), from, sourceEventId, summary.eventUid)
+    return { updated: changed.changes, cancelled: cancelled.changes }
   }
   const cancelled = db.prepare([
     "UPDATE event_share_grants SET status = 'cancelled', updated_at = ?",
