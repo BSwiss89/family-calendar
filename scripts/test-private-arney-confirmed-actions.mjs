@@ -100,7 +100,7 @@ test('untrusted/unsupported payloads are rejected before writes', t => {
     {action:'cancel',eventId:1,householdId:'family-b'},
   ]
   for(const request of bad)
-    assert.throws(()=>f.preview(request),/Invalid|would not change/)
+    assert.throws(()=>f.preview(request),/Invalid|would not change|cannot include/)
   f.db.prepare('UPDATE events SET repeat_unit=? WHERE id=1').run('week')
   assert.throws(()=>f.preview({action:'cancel',eventId:1}),/Recurring/)
   f.db.prepare('UPDATE events SET repeat_unit=NULL,end_date=? WHERE id=1').run('2026-12-21')
@@ -114,4 +114,15 @@ test('journal failure rolls back a pending source write and causes no outbox cha
     {beforeWrite:()=>{throw Error('central SQLite unavailable')}}),/central SQLite/)
   assert.equal(f.db.prepare('SELECT COUNT(*) n FROM events').get().n,1)
   assert.equal(countPrivateSourcePending(f.db),pending)
+})
+
+test('one signed confirmation cannot replay after later edits restore its exact original row', t => {
+  const f=fixture(t)
+  const preview=f.preview({action:'reschedule',eventId:1,newTime:'16:00'})
+  assert.equal(f.confirm({previewToken:preview.previewToken,confirm:true}).success,true)
+  f.db.prepare('UPDATE events SET time=? WHERE id=1').run('12:00')
+  assert.throws(()=>f.confirm({previewToken:preview.previewToken,confirm:true}),
+    /already used/)
+  assert.equal(f.db.prepare('SELECT time FROM events WHERE id=1').get().time,'12:00')
+  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM private_arney_confirmed_tokens').get().n,1)
 })

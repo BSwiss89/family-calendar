@@ -65,6 +65,12 @@ If central sync fails after a successful source COMMIT, it responds with a
 conservative ambiguity warning and retains both journals for retry, rather
 than claiming rollback or dropping the change.
 
+Confirmed preview hashes are consumed in a source-local SQLite table in the
+SAME transaction as the source event change. This blocks replay even if a
+subsequent trusted edit restores the original row snapshot. The table
+retains recent consumed tokens for 30 days, while previews expire in five
+minutes; failed source transactions roll back their token consumption.
+
 The helper and CI tests reject expired/tampered/replayed tokens, changing
 notes/people, switched accounts/households/devices, reused SQLite IDs,
 unconfirmed calls, invalid new times, and recurring or multi-day edits.

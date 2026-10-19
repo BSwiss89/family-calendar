@@ -162,6 +162,31 @@ export function confirmPrivateArneyAction({
         throw new ArneyActionError(409, 'Action preview no longer matches the event.')
       }
     }
+    // Source-local one-time consumption survives successful commits. Even if
+    // another edit later restores identical content, the SAME signed preview
+    // cannot perform a second modification. Failed writes roll this back.
+    sourceDb.exec([
+      'CREATE TABLE IF NOT EXISTS private_arney_confirmed_tokens (',
+      'token_sha256 TEXT PRIMARY KEY, applied_at INTEGER NOT NULL',
+      ') STRICT;',
+    ].join(' '))
+    const tokenHash = createHash('sha256')
+      .update(request.previewToken).digest('hex')
+    const already = sourceDb.prepare([
+      'SELECT 1 FROM private_arney_confirmed_tokens WHERE token_sha256=?',
+    ].join(' ')).get(tokenHash)
+    if (already) {
+      throw new ArneyActionError(409, 'Action preview already used. Review the event again.')
+    }
+    sourceDb.prepare([
+      'INSERT INTO private_arney_confirmed_tokens(token_sha256,applied_at)',
+      'VALUES (?,?)',
+    ].join(' ')).run(tokenHash, now)
+    // Tokens expire after five minutes. Keep longer-lived rejection history
+    // while preventing unbounded growth in a long-running household.
+    sourceDb.prepare([
+      'DELETE FROM private_arney_confirmed_tokens WHERE applied_at < ?',
+    ].join(' ')).run(now - 30 * 24 * 60 * 60 * 1000)
     const journal = beforeWrite({ sourceEventId: row.id })
     if (journal && typeof journal.then === 'function')
       throw new Error('Private action journal must be synchronous.')
