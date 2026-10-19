@@ -14,6 +14,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startPrivateHouseholdGateway } from '../Server/private-household-gateway.mjs'
 import { installPrivateEventIdentity } from '../Server/private-event-identity.mjs'
+import { installPrivateEventSourceOutbox } from '../Server/private-event-source-outbox.mjs'
 import {
   markEventShareSyncPending, countPendingEventShareSync,
   countUnresolvedEventShareSync,
@@ -1026,6 +1027,7 @@ test('client disconnect cannot clear a share update while backend is still commi
       INSERT INTO events VALUES
         (1,'Before disconnect','2026-12-20',NULL,'12:00',NULL,NULL);`)
       installPrivateEventIdentity(source)
+      installPrivateEventSourceOutbox(source)
       createHouseholdMembershipTables(central)
       setFamilyAccount(central, 'disconnect-a', 'Test Family A', testPassword)
       setFamilyAccount(central, 'disconnect-b', 'Test Family B', testPassword)
