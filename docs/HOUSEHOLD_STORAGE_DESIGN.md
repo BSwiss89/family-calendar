@@ -40,6 +40,43 @@ photo analysis capabilities. Household capture-inbox records and uploads
 remain stored in each household's isolated folders, but analysis is withheld
 in this private preview.
 
+## Source-transaction change outbox for ALL private event writes
+
+The private household backend now installs
+`Server/private-event-source-outbox.mjs` after the event-identity schema,
+but ONLY in explicitly opted-in isolated household test mode. Three SQLite
+triggers record an event ID/revision in the household's own SQLite transaction
+for `INSERT`, `UPDATE` and `DELETE` on the events table, independent of the
+API route. This also covers edits from AI, person changes and batch deletions
+made by the server or other trusted source SQLite writers. Rolled-back event
+transactions roll back the corresponding outbox entry automatically.
+
+The private gateway replays these source-local entries before serving
+invitations or accepted shared-event snapshots. For each source ID it
+synchronizes the allowlisted fields into CENTRAL sharing tables inside a
+central transaction, then deletes the source outbox entry ONLY if its revision
+has not changed. Failed central delivery, a crash before the source ack, and
+concurrent edits cannot permanently lose the source event's pending intent;
+replay is idempotent. Backlogs are bounded and errors fail closed rather than
+silently showing an old invitation. Restoring an offline household backup
+with undelivered source outbox entries is also refused.
+
+Tests cover AI-style direct SQL updates, whole-batch SQL deletion, aborted
+transactions, revision races, central replay failures and private two-family
+read-time reconciliation. These tests do NOT authorize enabling unreviewed
+AI or batch HTTP mutations on the private gateway. The existing API-level
+mutation denylist stays in effect until unknown-in-flight backend requests,
+resource quotas, and concurrent read/write fencing are reviewed.
+
+**Known remaining limitations:** The source and central SQLite databases
+cannot commit one common transaction; safe at-least-once reconciliation
+is used instead. Independent DB writers may commit after the last read-time
+check, so updates are eventually consistent, NOT a strict linearizable
+cross-household snapshot. Production needs single-writer process fencing,
+multi-gateway coordination, notification/periodic polling for faster delivery,
+complete restore validation, and resilience to unexpected table/trigger
+tampering. None of this code changes the existing live calendar.
+
 ## Private gateway: fail closed on unaudited event mutations
 
 The private multi-family gateway now uses one canonical mutation route policy
