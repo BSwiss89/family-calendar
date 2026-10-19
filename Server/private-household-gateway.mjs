@@ -30,6 +30,7 @@ import {
   selectHouseholdForVerifiedSession,
 } from './household-memberships.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
+import { installPrivateEventSourceOutbox, drainPrivateSourceOutbox } from './private-event-source-outbox.mjs'
 import { PRIVATE_UPSTREAM_HEADER, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
 import { inspectPrivateGatewayMutation } from './private-gateway-mutation-policy.mjs'
 import {
@@ -319,6 +320,75 @@ export async function startPrivateHouseholdGateway({
     // work remains. The private harness must fail closed for review.
     if (countPendingEventShareSync(identityDatabase) !== 0) {
       throw new Error('Unresolved household sharing reconciliation work.')
+    }
+
+    // The source database also records ALL event changes in the same SQLite
+    // transaction as the backend mutation (including AI and batch routes).
+    // Deliver each change into the central grants DB BEFORE acknowledging its
+    // source-local revision. A crash after central COMMIT but before source
+    // ACK simply retries an idempotent synchronization next time.
+    for (const householdId of portByHousehold.keys()) {
+      const storage = resolveHouseholdStorage({
+        serverDirectory, storageRoot, householdId,
+      })
+      const source = new DatabaseSync(storage.databasePath)
+      try {
+        const hasEvents = source.prepare([
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'",
+        ].join(' ')).get()
+        const registry = identityDatabase.prepare(
+          'SELECT id FROM household_registry WHERE storage_id = ?'
+        ).get(householdId)
+        const activeGrants = identityDatabase.prepare([
+          'SELECT COUNT(*) AS n FROM event_share_grants',
+          "WHERE source_household_id = ? AND status IN ('pending','accepted')",
+        ].join(' ')).get(registry.id).n
+        if (!hasEvents) {
+          if (activeGrants) throw new Error('Source events missing for active shares.')
+          continue
+        }
+        const hasOutbox = source.prepare([
+          "SELECT 1 FROM sqlite_master WHERE type='table'",
+          "AND name='event_source_share_outbox'",
+        ].join(' ')).get()
+        if (!hasOutbox && activeGrants) {
+          throw new Error('Existing active shares have no source change outbox.')
+        }
+        if (!hasOutbox) installPrivateEventSourceOutbox(source)
+        let remaining
+        let passes = 0
+        do {
+          if (++passes > 200) {
+            throw new Error('Source event change backlog not yet caught up.')
+          }
+          const result = drainPrivateSourceOutbox(source, {
+            limit: 100,
+            apply: ({ sourceEventId }) => {
+              // The single event's central snapshot transaction completes
+              // before clearing its source outbox revision.
+              identityDatabase.exec('BEGIN IMMEDIATE')
+              try {
+                synchronizeTrustedSelectedEventShare(identityDatabase, {
+                  sourceHouseholdId: householdId,
+                  sourceEventId,
+                  sourceDatabase: source,
+                })
+                identityDatabase.exec('COMMIT')
+              } catch (error) {
+                identityDatabase.exec('ROLLBACK')
+                throw error
+              }
+            },
+          })
+          if (result.remaining && result.acknowledged === 0) {
+            throw new Error('Source event reconciliation made no progress.')
+          }
+          total += result.acknowledged
+          remaining = result.remaining
+        } while (remaining > 0)
+      } finally {
+        source.close()
+      }
     }
     return total
   }
