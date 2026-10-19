@@ -58,7 +58,7 @@ async function chooseFreeLoopbackPort(used) {
   throw new Error('Could not allocate distinct non-production ports.')
 }
 
-function startHouseholdBackend(storageRoot, householdId, port) {
+function startHouseholdBackend(storageRoot, householdId, port, serviceToken) {
   const child = spawn(process.execPath, [entry], {
     cwd: checkout,
     windowsHide: true,
@@ -70,6 +70,7 @@ function startHouseholdBackend(storageRoot, householdId, port) {
       FAMILY_CALENDAR_HOUSEHOLD_STORAGE_ROOT: storageRoot,
       FAMILY_CALENDAR_HOUSEHOLD_ID: householdId,
       FAMILY_CALENDAR_HOUSEHOLD_TEST_ONLY: 'YES',
+      FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN: serviceToken,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -83,6 +84,7 @@ function startHouseholdBackend(storageRoot, householdId, port) {
     child,
     householdId,
     base: 'http://127.0.0.1:' + port,
+    serviceToken,
     logs: () => logs,
   }
 }
@@ -92,6 +94,7 @@ async function awaitHealthy(backend) {
     if (backend.child.exitCode !== null || backend.child.signalCode !== null) break
     try {
       const response = await fetch(backend.base + '/api/health', {
+        headers: { 'x-family-calendar-upstream-token': backend.serviceToken },
         signal: AbortSignal.timeout(1200),
       })
       if (response.ok && (await response.json()).status === 'ok') return
@@ -116,10 +119,13 @@ async function stopBackend(backend) {
   if (!stopped) throw new Error('Disposable backend did not stop: ' + backend.householdId)
 }
 
-async function seedEvent(base, event) {
+async function seedEvent(base, event, serviceToken) {
   const response = await fetch(base + '/api/events', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-family-calendar-upstream-token': serviceToken,
+    },
     body: JSON.stringify(event),
     signal: AbortSignal.timeout(6000),
   })
@@ -226,9 +232,14 @@ export async function startHouseholdBrowserDemo() {
       'family-a': await chooseFreeLoopbackPort(used),
       'family-b': await chooseFreeLoopbackPort(used),
     }
+    const backendTokens = {
+      'family-a': randomBytes(32).toString('hex'),
+      'family-b': randomBytes(32).toString('hex'),
+    }
     for (const householdId of ['family-a', 'family-b']) {
       backends.push(startHouseholdBackend(
         storageRoot, householdId, ports[householdId],
+        backendTokens[householdId],
       ))
     }
     await Promise.all(backends.map(awaitHealthy))
@@ -240,25 +251,26 @@ export async function startHouseholdBrowserDemo() {
       title: 'DEMO A — BBQ to share',
       time: '17:00',
       notes: 'Demo A private notes: must not be sent to Family B.',
-    })
+    }, backendTokens['family-a'])
     await seedEvent(backends[0].base, {
       date: privateEventDate,
       title: 'DEMO A — PRIVATE appointment',
       time: '09:00',
       notes: 'Demo A confidential details.',
-    })
+    }, backendTokens['family-a'])
     await seedEvent(backends[1].base, {
       date: privateEventDate,
       title: 'DEMO B — PRIVATE family event',
       time: '11:00',
       notes: 'Demo B confidential details.',
-    })
+    }, backendTokens['family-b'])
 
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central,
       serverDirectory,
       storageRoot,
       backendPorts: ports,
+      backendTokens,
     })
     // The gateway itself must never be directly reachable on a Tailscale or
     // LAN adapter. HTTPS for browser auth will be Tailscale Serve only.
