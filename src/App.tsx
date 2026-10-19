@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useCallback,
   useLayoutEffect,
   useRef,
   useState,
@@ -9,6 +10,18 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import SharedEventDetails from './SharedEventDetails'
+import './SharedEventsOverlay.css'
+import FamilyEventSharing from './FamilyEventSharing'
+import { DesktopInvitations, MobileInvitationReminder } from './InvitationCenter'
+import { useInvitationInbox } from './useInvitationInbox'
+import { useAuthenticatedCalendarIdentity } from './useAuthenticatedCalendarIdentity'
+import { useSharedEventFeed } from './useSharedEventFeed'
+import { sharedEventsInRange, formatSharedTime, type AcceptedSharedEvent } from './sharedEventOverlay'
+import { arneySpeechAvailable, beginArneySpeech, speakArneyReply, type ArneySpeechResult, type ArneySpeechSession } from './arneySpeech'
+import { readArneyPreferences } from './arneyPreferences'
+import { shouldOfferArneyTextFallback } from './arneyWakePhrase'
+import { parseArneySimpleCommand, type ArneySimpleCommand } from './arneyTextCommands'
 
 
 import {
@@ -1858,6 +1871,7 @@ const [page, setPage] =
     'meals' |
     'people' |
     'lists' |
+    'invitations' |
     'capture'
   >('home')
 
@@ -3463,6 +3477,30 @@ const calendarAddHoldTimerRef =
 const calendarAddLongPressRef =
   useRef(false)
 
+const arneySpeechSessionRef = useRef<ArneySpeechSession | null>(null)
+const arneyBufferedResultRef = useRef<ArneySpeechResult | null>(null)
+const arneyPreconditionRef = useRef('')
+const arneyReleasedRef = useRef(false)
+const arneyFailuresRef = useRef(0)
+const arneyCommandBusyRef = useRef(false)
+const [arneyListening, setArneyListening] = useState(false)
+const [arneyTextFallback, setArneyTextFallback] = useState(false)
+const arneyDesktopCommandHandlerRef = useRef<(text: string) => void>(() => {})
+
+useEffect(() => {
+  const onArneyCommand = (event: Event) => {
+    const command = (event as CustomEvent<string>).detail
+    if (typeof command !== 'string' || !command.trim() || arneyCommandBusyRef.current) return
+    setArneyTextFallback(false)
+    setAiCommandText(command)
+    setAiCommandResult('')
+    setAiCommandOpen(true)
+    arneyDesktopCommandHandlerRef.current(command)
+  }
+  window.addEventListener('arney:voice-command', onArneyCommand)
+  return () => window.removeEventListener('arney:voice-command', onArneyCommand)
+}, [])
+
 const [aiCommandOpen, setAiCommandOpen] =
   useState(false)
 
@@ -3479,6 +3517,11 @@ const [
   aiCancellationPreview,
   setAiCancellationPreview,
 ] = useState<any | null>(null)
+
+type ArneyListAdd = Extract<ArneySimpleCommand, { kind: 'add-list-item' }>
+type ArneyEventCreate = Extract<ArneySimpleCommand, { kind: 'create-event' }>
+const [arneyListPreview, setArneyListPreview] = useState<ArneyListAdd | null>(null)
+const [arneyEventPreview, setArneyEventPreview] = useState<ArneyEventCreate | null>(null)
 
 const [
   aiReschedulePreview,
@@ -3711,6 +3754,13 @@ const [
   () => window.innerWidth <= 1200
 )
   const [events, setEvents] = useState<CalendarEvent[]>([])
+  // Accepted snapshots are NOT editable local events; their IDs are separate.
+  const receivedSharedEvents = useSharedEventFeed(page === 'calendar')
+  const [selectedReceivedEvent, setSelectedReceivedEvent] = useState<AcceptedSharedEvent | null>(null)
+  const closeReceivedDetails = useCallback(() => setSelectedReceivedEvent(null), [])
+  const invitationInbox = useInvitationInbox()
+  const { account: signedInAccount, creators: verifiedEventCreators } =
+    useAuthenticatedCalendarIdentity(events)
 
 function positionMobileScheduleTimeline(
   targetDate: Date
@@ -4044,6 +4094,7 @@ async function confirmAiCancellation() {
         ? 'Recurring event occurrence canceled.'
         : 'Event canceled.'
     )
+    arneyReply('Event canceled successfully.')
   } catch (error) {
     showAppNotification(
       error instanceof Error
@@ -4126,6 +4177,7 @@ async function confirmAiReschedule() {
     setAiCommandOpen(false)
 
     showAppNotification('Event rescheduled successfully.')
+    arneyReply('Event rescheduled successfully.')
   } catch (error) {
     showAppNotification(
       error instanceof Error
@@ -4251,17 +4303,70 @@ async function submitAiCommand(
 
   if (
     command === '' ||
-    aiCommandLoading
+    aiCommandLoading ||
+    arneyCommandBusyRef.current
   ) {
     return
   }
 
+ arneyCommandBusyRef.current = true
  setAiCommandLoading(true)
 setAiCommandResult('')
 setAiCancellationPreview(null)
 setAiReschedulePreview(null)
+setArneyListPreview(null)
+setArneyEventPreview(null)
 
   try {
+    const simple = parseArneySimpleCommand(command, lists)
+    if (simple) arneyFailuresRef.current = 0
+    if (simple?.kind === 'list-query') {
+      const message = simple.items.length
+        ? simple.listName + ': ' + simple.items.join(', ') + '.'
+        : simple.listName + ' is empty.'
+      setAiCommandResult(message)
+      arneyReply(message)
+      return
+    }
+    if (simple?.kind === 'calendar-query') {
+      const date = new Date()
+      if (simple.when === 'tomorrow') date.setDate(date.getDate() + 1)
+      const key = getDateKeyFromDate(date)
+      const matching = events
+        .filter(event => getOccurrenceStartForDate(event, key) !== null)
+        .sort((first, second) => (first.time || '').localeCompare(second.time || ''))
+      const message = matching.length
+        ? 'On ' + key + ': ' + matching.slice(0, 20).map(item =>
+            item.title + (item.time ? ' at ' + item.time : '')
+          ).join('; ') + (matching.length > 20 ? '; and more.' : '.')
+        : 'No events scheduled for ' + key + '.'
+      setAiCommandResult(message)
+      arneyReply(message)
+      return
+    }
+    if (simple?.kind === 'add-list-item') {
+      if (readArneyPreferences().confirmBeforeChanges) {
+        setArneyListPreview(simple)
+        const message = 'Add ' + simple.item + ' to ' + simple.listName + '? Confirm below.'
+        setAiCommandResult(message)
+        arneyReply(message, true)
+      } else {
+        await applyArneyListWrite(simple, true)
+      }
+      return
+    }
+    if (simple?.kind === 'create-event') {
+      if (readArneyPreferences().confirmBeforeChanges) {
+        setArneyEventPreview(simple)
+        const message = 'Create ' + simple.title + ' on ' + simple.date
+          + (simple.time ? ' at ' + simple.time : '') + '? Confirm below.'
+        setAiCommandResult(message)
+        arneyReply(message, true)
+      } else {
+        await applyArneyEventWrite(simple, true)
+      }
+      return
+    }
     const intentResponse =
       await fetch(
         '/api/ai/intent',
@@ -4292,18 +4397,10 @@ setAiReschedulePreview(null)
       intentData.intent !== 'move_event'
     ) {
       setAiCommandResult(
-        JSON.stringify(
-          {
-            intent:
-              intentData.intent,
-            status:
-              'not_wired_yet',
-          },
-          null,
-          2
-        )
+        'I understood your request, but that command needs a specific date or supported list format. '
+          + 'Try "Schedule dentist tomorrow at 2 PM" or "Add milk to my Groceries list".'
       )
-
+      arneyVoiceFailure('That command is not supported yet.')
       return
     }
 
@@ -4346,18 +4443,15 @@ setAiReschedulePreview(null)
       setAiReschedulePreview(previewData)
     } 
 
+arneyFailuresRef.current = 0
 setAiCommandResult(
-  JSON.stringify(
-    {
-      intent:
-        intentData.intent,
-      preview:
-        previewData,
-    },
-    null,
-    2
-  )
+  previewData.status === 'ready_for_confirmation'
+    ? 'I found an event. Review the details and confirm below.'
+    : 'I need a little more information to identify the event.'
 )
+arneyReply(previewData.status === 'ready_for_confirmation'
+  ? 'Please review and confirm the event change.'
+  : 'I need more details to find the right event.', true)
   } catch (error) {
     setAiCommandResult(
       JSON.stringify(
@@ -4371,44 +4465,193 @@ setAiCommandResult(
         2
       )
     )
+    arneyVoiceFailure('I could not process that command.')
   } finally {
+    arneyCommandBusyRef.current = false
     setAiCommandLoading(false)
   }
 }
 
 
+arneyDesktopCommandHandlerRef.current = (command: string) => {
+  setAiCommandText(command)
+  // Only desktop wake commands signal their completion. Typed commands and
+  // mobile push-to-talk must not inadvertently restart desktop listening.
+  const notifyWakeFinished = () => window.dispatchEvent(new Event('arney:command-finished'))
+  void submitAiCommand(command).then(notifyWakeFinished, notifyWakeFinished)
+}
+
+async function applyArneyListWrite(preview: ArneyListAdd, alreadyLocked = false) {
+  if (!alreadyLocked) {
+    if (arneyCommandBusyRef.current) return
+    arneyCommandBusyRef.current = true
+    setAiCommandLoading(true)
+  }
+  try {
+    const list = lists.find(item => item.id === preview.listId)
+    if (!list || list.name !== preview.listName) throw new Error('List no longer exists.')
+    if (list.items.some(item => item.text.trim().toLowerCase() === preview.item.toLowerCase())) {
+      setAiCommandResult(preview.item + ' is already on ' + preview.listName + '.')
+      setArneyListPreview(null)
+      return
+    }
+    const response = await fetch('/api/lists/' + preview.listId + '/items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: preview.item }),
+    })
+    if (!response.ok) throw new Error('Could not add the list item.')
+    await loadLists()
+    setArneyListPreview(null)
+    const message = 'Added ' + preview.item + ' to ' + preview.listName + '.'
+    setAiCommandResult(message)
+    arneyReply(message)
+  } catch (error) {
+    setAiCommandResult(error instanceof Error ? error.message : 'List update failed.')
+    arneyReply('I could not update the list.', true)
+  } finally {
+    if (!alreadyLocked) {
+      arneyCommandBusyRef.current = false
+      setAiCommandLoading(false)
+    }
+  }
+}
+
+async function applyArneyEventWrite(preview: ArneyEventCreate, alreadyLocked = false) {
+  if (!alreadyLocked) {
+    if (arneyCommandBusyRef.current) return
+    arneyCommandBusyRef.current = true
+    setAiCommandLoading(true)
+  }
+  try {
+    const response = await fetch('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: preview.title,
+        date: preview.date,
+        time: preview.time,
+        personIds: [],
+      }),
+    })
+    if (!response.ok) throw new Error('Could not create the event.')
+    await loadEvents()
+    setArneyEventPreview(null)
+    const message = 'Created ' + preview.title + ' on ' + preview.date
+      + (preview.time ? ' at ' + preview.time : '') + '.'
+    setAiCommandResult(message)
+    arneyReply(message)
+  } catch (error) {
+    setAiCommandResult(error instanceof Error ? error.message : 'Event creation failed.')
+    arneyReply('I could not create the event.', true)
+  } finally {
+    if (!alreadyLocked) {
+      arneyCommandBusyRef.current = false
+      setAiCommandLoading(false)
+    }
+  }
+}
+
+function arneyReply(message: string, important = false) {
+  const mode = readArneyPreferences().responseMode
+  if (mode === 'always' || (mode === 'needed' && important)) speakArneyReply(message)
+}
+
+function arneyVoiceFailure(message: string, forceText = false) {
+  arneyFailuresRef.current += 1
+  if (forceText || shouldOfferArneyTextFallback(arneyFailuresRef.current)) {
+    setArneyTextFallback(true)
+    setAiCommandResult(message)
+    setAiCommandOpen(true)
+  } else {
+    showAppNotification(message + ' Hold + to try again.')
+  }
+  arneyReply(message, true)
+}
+
+function processArneyVoiceResult() {
+  const result = arneyBufferedResultRef.current
+  if (!arneyReleasedRef.current || !result) return
+  arneyBufferedResultRef.current = null
+  arneySpeechSessionRef.current = null
+  setArneyListening(false)
+  if (result.kind === 'transcript' && result.text.trim()) {
+    setArneyTextFallback(false)
+    setAiCommandText(result.text.trim())
+    setAiCommandResult('')
+    setAiCommandOpen(true)
+    void submitAiCommand(result.text.trim())
+  } else if (result.kind === 'error') {
+    const message = result.reason === 'not-allowed' || result.reason === 'service-not-allowed'
+      ? 'Microphone access was denied. Check your browser permissions.'
+      : 'Could not recognize speech (' + result.reason + ').'
+    arneyVoiceFailure(message, result.reason === 'not-allowed' || result.reason === 'service-not-allowed')
+  } else {
+    arneyVoiceFailure('I did not hear a command.')
+  }
+}
+
 function startCalendarAddHold() {
   calendarAddLongPressRef.current = false
-
-  if (
-    calendarAddHoldTimerRef.current !== null
-  ) {
-    window.clearTimeout(
-      calendarAddHoldTimerRef.current
-    )
-  }
-
-  calendarAddHoldTimerRef.current =
-    window.setTimeout(() => {
-      calendarAddHoldTimerRef.current = null
-      calendarAddLongPressRef.current = true
-
-            setAiCommandText('')
-      setQuickAddOpen(false)
-      setAiCommandOpen(true)
-    }, 800)
+  arneyReleasedRef.current = false
+  arneyBufferedResultRef.current = null
+  arneyPreconditionRef.current = ''
+  arneySpeechSessionRef.current?.cancel()
+  arneySpeechSessionRef.current = null
+  if (calendarAddHoldTimerRef.current !== null) window.clearTimeout(calendarAddHoldTimerRef.current)
+  // Short taps still open Quick Add. Only a hold starts voice recognition.
+  calendarAddHoldTimerRef.current = window.setTimeout(() => {
+    calendarAddHoldTimerRef.current = null
+    calendarAddLongPressRef.current = true
+    setQuickAddOpen(false)
+    const prefs = readArneyPreferences()
+    if (!prefs.browserSpeechEnabled) {
+      arneyPreconditionRef.current = 'Allow browser speech recognition in Arney settings first. Your browser may use cloud speech processing.'
+      return
+    }
+    if (!arneySpeechAvailable()) {
+      arneyPreconditionRef.current = 'Speech recognition is unavailable in this browser. You can type instead.'
+      return
+    }
+    setAiCommandText('')
+    setAiCommandResult('')
+    arneySpeechSessionRef.current = beginArneySpeech(result => {
+      arneyBufferedResultRef.current = result
+      setArneyListening(false)
+      processArneyVoiceResult()
+    }, setArneyListening)
+  }, 400)
 }
 
 function cancelCalendarAddHold() {
-  if (
-    calendarAddHoldTimerRef.current !== null
-  ) {
-    window.clearTimeout(
-      calendarAddHoldTimerRef.current
-    )
-
+  if (calendarAddHoldTimerRef.current !== null) {
+    window.clearTimeout(calendarAddHoldTimerRef.current)
     calendarAddHoldTimerRef.current = null
   }
+  if (!calendarAddLongPressRef.current) return
+  arneyReleasedRef.current = true
+  if (arneyPreconditionRef.current) {
+    setAiCommandResult(arneyPreconditionRef.current)
+    setArneyTextFallback(true)
+    setAiCommandOpen(true)
+    arneyPreconditionRef.current = ''
+    return
+  }
+  arneySpeechSessionRef.current?.stop()
+  processArneyVoiceResult()
+}
+
+function abortCalendarAddHold() {
+  if (calendarAddHoldTimerRef.current !== null) {
+    window.clearTimeout(calendarAddHoldTimerRef.current)
+    calendarAddHoldTimerRef.current = null
+  }
+  arneyReleasedRef.current = false
+  arneyBufferedResultRef.current = null
+  arneyPreconditionRef.current = ''
+  arneySpeechSessionRef.current?.cancel()
+  arneySpeechSessionRef.current = null
+  setArneyListening(false)
 }
 
 function consumeCalendarAddLongPress() {
@@ -11501,7 +11744,8 @@ function handleScheduleScroll() {
 }
 
 function getScheduleTimedEventLayouts(
-  scheduleDay: Date
+  scheduleDay: Date,
+  includeReceivedShares = false
 ) {
   const dateKey =
     getDateKeyFromDate(scheduleDay)
@@ -11510,7 +11754,8 @@ function getScheduleTimedEventLayouts(
     scheduleDayWidth - 10
 
   const timedEventLayouts: Array<{
-    calendarEvent: (typeof events)[number]
+    calendarEvent: CalendarEvent | null
+    sharedEvent: AcceptedSharedEvent | null
     dateKey: string
     visibleStart: number
     visibleEnd: number
@@ -11586,6 +11831,7 @@ function getScheduleTimedEventLayouts(
 
     timedEventLayouts.push({
       calendarEvent,
+      sharedEvent: null,
       dateKey,
       visibleStart,
       visibleEnd,
@@ -11597,6 +11843,29 @@ function getScheduleTimedEventLayouts(
     })
   }
 
+  if (includeReceivedShares) {
+    // Accepted event snapshots participate in the SAME collision layout.
+    // Never use their share IDs as local event IDs.
+    for (const sharedEvent of sharedEventsInRange(receivedSharedEvents, dateKey, dateKey)) {
+      if (sharedEvent.time === null) continue
+      const [hour, minute] = sharedEvent.time.split(':').map(Number)
+      const startMinutes = hour * 60 + minute
+      let endMinutes = startMinutes + 60
+      if (sharedEvent.endTime) {
+        const [endHour, endMinute] = sharedEvent.endTime.split(':').map(Number)
+        endMinutes = endHour * 60 + endMinute
+        if (endMinutes <= startMinutes) endMinutes += 1440
+      }
+      const visibleStart = Math.max(0, startMinutes)
+      const visibleEnd = Math.min(1440, endMinutes)
+      if (visibleEnd <= visibleStart) continue
+      timedEventLayouts.push({
+        calendarEvent: null, sharedEvent, dateKey, visibleStart, visibleEnd,
+        durationMinutes: visibleEnd - visibleStart, leftPx: 5,
+        widthPx: scheduleEventUsableWidth,
+      })
+    }
+  }
   timedEventLayouts.sort(
     (eventA, eventB) => {
       if (
@@ -11619,8 +11888,8 @@ function getScheduleTimedEventLayouts(
         )
       }
 
-      return eventA.calendarEvent.title.localeCompare(
-        eventB.calendarEvent.title
+      return (eventA.calendarEvent?.title ?? eventA.sharedEvent?.title ?? '').localeCompare(
+        (eventB.calendarEvent?.title ?? eventB.sharedEvent?.title ?? '')
       )
     }
   )
@@ -11701,8 +11970,8 @@ function getScheduleTimedEventLayouts(
           )
         }
 
-        return eventA.calendarEvent.title.localeCompare(
-          eventB.calendarEvent.title
+        return (eventA.calendarEvent?.title ?? eventA.sharedEvent?.title ?? '').localeCompare(
+          (eventB.calendarEvent?.title ?? eventB.sharedEvent?.title ?? '')
         )
       }
     )
@@ -11823,8 +12092,8 @@ function getScheduleTimedEventLayouts(
         )
       }
 
-      return eventA.calendarEvent.title.localeCompare(
-        eventB.calendarEvent.title
+      return (eventA.calendarEvent?.title ?? eventA.sharedEvent?.title ?? '').localeCompare(
+        (eventB.calendarEvent?.title ?? eventB.sharedEvent?.title ?? '')
       )
     }
   )
@@ -11919,7 +12188,7 @@ const mobileHiddenAllDayEventCount =
   mobileVisibleAllDayEvents.length
   const timedLayouts =
   getScheduleTimedEventLayouts(
-    targetDate
+    targetDate, true
   )
 
   return (
@@ -12128,6 +12397,20 @@ positionMobileScheduleTimeline(
         </div>
       )}
 
+      {sharedEventsInRange(receivedSharedEvents, targetDateKey, targetDateKey).some(shared => shared.time === null) && (
+        <div className="mobile-schedule-all-day shared-mobile-event-group">
+          <span className="mobile-schedule-all-day-label">Shared</span>
+          <div className="mobile-schedule-all-day-events">
+            {sharedEventsInRange(receivedSharedEvents, targetDateKey, targetDateKey).filter(shared => shared.time === null).map(shared => (
+              <button type="button" className="mobile-schedule-all-day-event shared-schedule-event"
+                key={`mobile-shared-${shared.shareId}-${targetDateKey}`}
+                onClick={() => setSelectedReceivedEvent(shared)}>
+                ↗ {shared.title} · {formatSharedTime(shared.time)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div
   className="mobile-schedule-timeline-scroll"
  
@@ -12295,6 +12578,7 @@ positionMobileScheduleTimeline(
               (timedLayout) => {
                 const calendarEvent =
                   timedLayout.calendarEvent
+                const sharedEvent = timedLayout.sharedEvent
 
                 const top =
                   (timedLayout.visibleStart /
@@ -12331,47 +12615,34 @@ const widthPercent =
                 return (
                   <button
                     type="button"
-                    className="mobile-schedule-event"
-                    key={`${targetDateKey}-${calendarEvent.id}`}
+                    className={`mobile-schedule-event${sharedEvent ? " shared-schedule-timed-event" : ""}`}
+                    key={sharedEvent ? `shared-${targetDateKey}-${sharedEvent.shareId}` : `${targetDateKey}-${calendarEvent!.id}`}
                     style={{
                       top: `${top}px`,
                       height: `${height}px`,
                       left: `calc(${leftPercent}% + 3px)`,
 width: `calc(${widthPercent}% - 6px)`,
-                      background:
-                        getEventBackground(
-                          calendarEvent.people
-                        ),
+                      background: sharedEvent ? '#e7f0ff' : getEventBackground(calendarEvent!.people),
                     }}
-                    onClick={() =>
-                      openEventDetails(
-                        calendarEvent,
-                        targetDateKey
-                      )
-                    }
+                    onClick={() => {
+                      if (sharedEvent) setSelectedReceivedEvent(sharedEvent)
+                      else openEventDetails(calendarEvent!, targetDateKey)
+                    }}
                   >
                     <strong>
-                      {calendarEvent.title}
+                      {sharedEvent ? `↗ ${sharedEvent.title}` : calendarEvent!.title}
                     </strong>
 
                     <span>
-                      {formatTime(
-                        calendarEvent.time!
-                      )}
-
-                      {calendarEvent.endTime &&
-                        ` – ${formatTime(
-                          calendarEvent.endTime
-                        )}`}
+                      {sharedEvent ? formatSharedTime(sharedEvent.time) : formatTime(calendarEvent!.time!)}
+                      {sharedEvent
+                        ? sharedEvent.endTime && ` – ${formatSharedTime(sharedEvent.endTime)}`
+                        : calendarEvent!.endTime && ` – ${formatTime(calendarEvent!.endTime)}`}
                     </span>
 
-                    {calendarEvent.location && (
-                      <small>
-                        {
-                          calendarEvent.location
-                        }
-                      </small>
-                    )}
+                    {sharedEvent
+                      ? <small>Shared by {sharedEvent.sharedBy} · Read only</small>
+                      : calendarEvent!.location && <small>{calendarEvent!.location}</small>}
                   </button>
                 )
               }
@@ -12673,6 +12944,19 @@ setIsAddingEvent(true)
 )}
             
               <div className="event-list">
+                {sharedEventsInRange(receivedSharedEvents, dateKey, dateKey).map(shared => (
+                  <button type="button" className="event shared-week-event"
+                    key={`shared-week-${shared.shareId}-${dateKey}`}
+                    onClick={(click) => {
+                      click.stopPropagation()
+                      if (!suppressWeekPagerClick()) setSelectedReceivedEvent(shared)
+                    }}>
+                    <div className="event-title">↗ {shared.title}</div>
+                    <div className="event-bottom-row">
+                      <span className="event-time">{formatSharedTime(shared.time)} · {shared.sharedBy}</span>
+                    </div>
+                  </button>
+                ))}
                 {dayEvents.map(
                   (calendarEvent) => {
                     const background =
@@ -13129,14 +13413,13 @@ const targetMiniMonthDays =
 )
   .filter(
     (timedEventLayout) =>
-      !isMultiDayEvent(
-        timedEventLayout.calendarEvent
-      )
+      timedEventLayout.calendarEvent !== null &&
+      !isMultiDayEvent(timedEventLayout.calendarEvent)
   )
   .map(
     (timedEventLayout) => {
       const calendarEvent =
-        timedEventLayout.calendarEvent
+        timedEventLayout.calendarEvent!
 
       const eventTop =
         (timedEventLayout.visibleStart /
@@ -13741,6 +14024,7 @@ const homeTodayMeals =
 
 const homeListPreview =
   lists.slice(0, 4)
+
 return (
     <main className="calendar-app">
       <header
@@ -13818,6 +14102,24 @@ return (
     <span>Lists</span>
   </button>
 
+  {invitationInbox.available && (
+    <button
+      type="button"
+      className={`sidebar-nav-button ${
+        page === 'invitations' ? 'active-sidebar-nav' : ''
+      }`}
+      onClick={() => setPage('invitations')}
+    >
+      <span className="sidebar-nav-icon">✉</span>
+      <span>Invitations</span>
+      {invitationInbox.invitations.length > 0 && (
+        <span className="invitation-sidebar-count">
+          {invitationInbox.invitations.length}
+        </span>
+      )}
+    </button>
+  )}
+
   <button
     type="button"
     className="sidebar-nav-button"
@@ -13847,6 +14149,19 @@ return (
 
   <div className="sidebar-nav-spacer" />
 
+  {signedInAccount && (
+    <button
+      type="button"
+      className="sidebar-nav-button family-account-nav"
+      title={`Signed in as ${signedInAccount.displayName}`}
+      onClick={() => window.location.assign('/account')}
+    >
+      <span className="sidebar-nav-icon">👤</span>
+      <span>{signedInAccount.displayName}</span>
+      <small>{signedInAccount.accountKind === 'hub' ? 'Hub' : 'Member'}</small>
+    </button>
+  )}
+
   <button
     type="button"
     className={`sidebar-nav-button ${
@@ -13861,6 +14176,7 @@ return (
   </button>
 </nav>
       </header>
+      <MobileInvitationReminder {...invitationInbox} />
       <div className="mobile-bottom-controls">
   <div
     className={`mobile-page-slider ${
@@ -13919,13 +14235,24 @@ return (
     </span>
   </div>
 
+  {signedInAccount && (
+    <button
+      type="button"
+      className="mobile-account-identity"
+      aria-label={`Account: ${signedInAccount.displayName}`}
+      title={`${signedInAccount.displayName} (${signedInAccount.accountKind})`}
+      onClick={() => window.location.assign('/account')}
+    >
+      <span aria-hidden="true">👤</span>
+    </button>
+  )}
   <button
   type="button"
   className="mobile-capture-button"
-  aria-label="Open Quick Add"
+  aria-label={arneyListening ? 'Arney listening; release to send' : 'Quick Add; hold to speak to Arney'}
   onPointerDown={startCalendarAddHold}
   onPointerUp={cancelCalendarAddHold}
-  onPointerCancel={cancelCalendarAddHold}
+  onPointerCancel={abortCalendarAddHold}
   onContextMenu={(event) => {
     event.preventDefault()
   }}
@@ -13939,6 +14266,11 @@ return (
 >
   +
 </button>
+  {arneyListening && (
+    <div className="arney-listening-indicator" role="status" aria-live="polite">
+      🎙 Arney is listening — release + to send
+    </div>
+  )}
 </div>
 
 {aiCommandOpen &&
@@ -13961,7 +14293,7 @@ return (
               Calendar Assistant
             </span>
 
-            <h2>What would you like to do?</h2>
+            <h2>Arney</h2>
           </div>
 
           <button
@@ -13983,17 +14315,26 @@ return (
     void submitAiCommand()
   }}
 >
+{arneyTextFallback ? (
           <textarea
             className="ai-command-input"
             value={aiCommandText}
-            onChange={(event) => {
-              setAiCommandText(
-                event.target.value
-              )
-            }}
-            placeholder="Try: Cancel my dentist appointment tomorrow at 2 PM"
+            onChange={(event) => setAiCommandText(event.target.value)}
+            placeholder="Type your command for Arney"
             autoFocus
           />
+        ) : (
+          <div className="arney-voice-transcript" aria-live="polite">
+            {aiCommandText ? (
+              <>
+                <strong>You said:</strong> {aiCommandText}
+                <button type="button" onClick={() => setArneyTextFallback(true)}>Edit command</button>
+              </>
+            ) : (
+              <span>Hold the + button to speak. Text becomes available after three failed attempts or if speech is unavailable.</span>
+            )}
+          </div>
+        )}
 {aiCancellationPreview?.status ===
   'needs_clarification' &&
   aiCancellationPreview.matches?.length === 0 && (
@@ -14384,10 +14725,43 @@ return (
     </div>
   )}
 
+{arneyListPreview && (
+  <div className="ai-cancel-confirmation">
+    <strong>Confirm list change</strong>
+    <span>Add "{arneyListPreview.item}" to {arneyListPreview.listName}?</span>
+    <div className="ai-cancel-confirmation-actions">
+      <button type="button" className="ai-command-cancel" onClick={() => {
+        setArneyListPreview(null)
+        setAiCommandResult('List change canceled.')
+      }}>Cancel</button>
+      <button type="button" className="ai-command-send" disabled={aiCommandLoading} onClick={() => {
+        void applyArneyListWrite(arneyListPreview)
+      }}>{aiCommandLoading ? 'Adding…' : 'Confirm Add'}</button>
+    </div>
+  </div>
+)}
+{arneyEventPreview && (
+  <div className="ai-cancel-confirmation">
+    <strong>Confirm calendar event</strong>
+    <span>{arneyEventPreview.title} — {arneyEventPreview.date}
+      {arneyEventPreview.time ? ' at ' + arneyEventPreview.time : ' (all day)'}</span>
+    <span>No person will be assigned. Edit the event afterward if needed.</span>
+    <div className="ai-cancel-confirmation-actions">
+      <button type="button" className="ai-command-cancel" onClick={() => {
+        setArneyEventPreview(null)
+        setAiCommandResult('Event creation canceled.')
+      }}>Cancel</button>
+      <button type="button" className="ai-command-send" disabled={aiCommandLoading} onClick={() => {
+        void applyArneyEventWrite(arneyEventPreview)
+      }}>{aiCommandLoading ? 'Creating…' : 'Confirm Event'}</button>
+    </div>
+  </div>
+)}
+
 {aiCommandResult !== '' && (
-  <pre className="ai-command-debug">
+  <div className="arney-response" role="status" aria-live="polite">
     {aiCommandResult}
-  </pre>
+  </div>
 )}
 
 
@@ -15755,6 +16129,10 @@ createPortal(
   </section>
 )}
 
+      {page === 'invitations' && (
+        <DesktopInvitations {...invitationInbox} />
+      )}
+
       {page === 'calendar' && (
        <section
   className={`dashboard ${
@@ -16070,6 +16448,8 @@ createPortal(
 </div>
 </div>
 
+<SharedEventDetails event={selectedReceivedEvent} onClose={closeReceivedDetails} />
+
 {calendarView === 'month' && (
   <div
     className="calendar-swipe-surface month-swipe-surface"
@@ -16193,6 +16573,18 @@ const dayMultiDayLaneCount =
     },
     0
   )
+const daySharedEventKey =
+  getDateKeyForMonth(
+    targetYear,
+    targetMonth,
+    day
+  )
+const sharedEventsForDay =
+  sharedEventsInRange(
+    receivedSharedEvents,
+    daySharedEventKey,
+    daySharedEventKey
+  )
 const maximumVisibleDayEventCount =
   Math.max(
     0,
@@ -16200,7 +16592,8 @@ const maximumVisibleDayEventCount =
       isCompactMonthLayout
         ? 3
         : 4
-    ) - dayMultiDayLaneCount
+    ) - dayMultiDayLaneCount -
+      (sharedEventsForDay.length > 0 ? 1 : 0)
   )
            const dayEvents = events
   .filter(
@@ -16362,6 +16755,29 @@ const visibleDayEventCount =
                         </button>
                       )
                     })}
+
+                  {sharedEventsForDay.slice(0, 1).map((sharedEvent) => (
+                    <button
+                      type="button"
+                      className="month-shared-event-chip"
+                      key={`shared-${sharedEvent.shareId}`}
+                      title={`${sharedEvent.title} — shared by ${sharedEvent.sharedBy}; read only`}
+                      aria-label={`View shared event ${sharedEvent.title} from ${sharedEvent.sharedBy}`}
+                      onClick={(event) => { event.stopPropagation(); setSelectedReceivedEvent(sharedEvent) }}
+                    >
+                      <span aria-hidden="true">↗ </span>
+                      {sharedEvent.time && (
+                        <span>{sharedEvent.time} </span>
+                      )}
+                      <span>{sharedEvent.title}</span>
+                      <span className="month-shared-event-source">
+                        · {sharedEvent.sharedBy}
+                        {sharedEventsForDay.length > 1
+                          ? ` +${sharedEventsForDay.length - 1}`
+                          : ''}
+                      </span>
+                    </button>
+                  ))}
 
                  {dayEvents.length > visibleDayEventCount && (
   <button
@@ -16931,6 +17347,14 @@ const visibleMultiDayLaneCount =
   </div>
 )}
                 <div className="schedule-all-day-events">
+                  {sharedEventsInRange(receivedSharedEvents, dateKey, dateKey).filter(shared => shared.time === null).map(shared => (
+                    <button type="button" className="schedule-all-day-event shared-schedule-event"
+                      key={`schedule-shared-${shared.shareId}-${dateKey}`}
+                      title={`Shared by ${shared.sharedBy} · ${formatSharedTime(shared.time)}`}
+                      onClick={() => setSelectedReceivedEvent(shared)}>
+                      ↗ {shared.title} · {formatSharedTime(shared.time)}
+                    </button>
+                  ))}
                   {visibleAllDayEvents
                     .map(
                       (calendarEvent) => (
@@ -17061,7 +17485,7 @@ const visibleMultiDayLaneCount =
 
            const timedEventLayouts =
   getScheduleTimedEventLayouts(
-    scheduleDay
+    scheduleDay, true
   )
 
             return (
@@ -17179,42 +17603,37 @@ const visibleMultiDayLaneCount =
     return (
       <button
         type="button"
-        className="schedule-event"
-        key={`${timedEventLayout.calendarEvent.id}-${timedEventLayout.dateKey}`}
+        className={`schedule-event${timedEventLayout.sharedEvent ? " shared-schedule-timed-event" : ""}`}
+        key={timedEventLayout.sharedEvent
+          ? `shared-${timedEventLayout.sharedEvent.shareId}-${timedEventLayout.dateKey}`
+          : `${timedEventLayout.calendarEvent!.id}-${timedEventLayout.dateKey}`}
         style={{
           top: `${top}px`,
           height: `${height}px`,
           left: `${timedEventLayout.leftPx}px`,
           width: `${timedEventLayout.widthPx}px`,
           right: 'auto',
-          background:
-            getEventBackground(
-              timedEventLayout.calendarEvent.people
-            ),
+          background: timedEventLayout.sharedEvent
+            ? '#e7f0ff'
+            : getEventBackground(timedEventLayout.calendarEvent!.people),
         }}
-        onClick={() =>
-          openEventDetails(
-            timedEventLayout.calendarEvent,
-            timedEventLayout.dateKey
-          )
-        }
+        onClick={() => {
+          if (timedEventLayout.sharedEvent) setSelectedReceivedEvent(timedEventLayout.sharedEvent)
+          else openEventDetails(timedEventLayout.calendarEvent!, timedEventLayout.dateKey)
+        }}
       >
-        <strong>
-  {
-    timedEventLayout.calendarEvent.title
-  }
-</strong>
-
-<span className="schedule-event-time">
-  {formatTime(
-    timedEventLayout.calendarEvent.time!
-  )}
-
-  {timedEventLayout.calendarEvent.endTime &&
-    ` – ${formatTime(
-      timedEventLayout.calendarEvent.endTime
-    )}`}
-</span>
+        <strong>{timedEventLayout.sharedEvent
+          ? `↗ ${timedEventLayout.sharedEvent.title}`
+          : timedEventLayout.calendarEvent!.title}</strong>
+        <span className="schedule-event-time">
+          {timedEventLayout.sharedEvent
+            ? formatSharedTime(timedEventLayout.sharedEvent.time)
+            : formatTime(timedEventLayout.calendarEvent!.time!)}
+          {timedEventLayout.sharedEvent
+            ? timedEventLayout.sharedEvent.endTime && ` – ${formatSharedTime(timedEventLayout.sharedEvent.endTime)}`
+            : timedEventLayout.calendarEvent!.endTime && ` – ${formatTime(timedEventLayout.calendarEvent!.endTime)}`}
+        </span>
+        {timedEventLayout.sharedEvent && <small>Shared by {timedEventLayout.sharedEvent.sharedBy}</small>}
       </button>
     )
   }
@@ -17487,7 +17906,10 @@ const visibleMultiDayLaneCount =
             <strong>Today's Events</strong>
 
             <span>
-              {dayViewEvents.length}
+              {dayViewEvents.length +
+                sharedEventsInRange(
+                  receivedSharedEvents, dayViewDateKey, dayViewDateKey
+                ).length}
             </span>
           </div>
 
@@ -17543,6 +17965,22 @@ const visibleMultiDayLaneCount =
                 )
               }
             )}
+            {sharedEventsInRange(
+              receivedSharedEvents, dayViewDateKey, dayViewDateKey
+            ).map(shared => (
+              <button type="button" className="day-summary-event day-summary-received-event"
+                key={`shared-event-${shared.shareId}`}
+                onClick={() => setSelectedReceivedEvent(shared)}
+                aria-label={`View shared event ${shared.title}, from ${shared.sharedBy}`}>
+                <span className="day-summary-event-color"
+                  style={{ background: '#5d8bbf' }} />
+                <span className="day-summary-event-text">
+                  <strong>{shared.title}</strong>
+                  <small>{formatSharedTime(shared.time)} · Shared by {shared.sharedBy}</small>
+                  <small>Read only</small>
+                </span>
+              </button>
+            ))}
           </div>
         </section>
       </aside>
@@ -17610,14 +18048,13 @@ const visibleMultiDayLaneCount =
 )
   .filter(
     (timedEventLayout) =>
-      !isMultiDayEvent(
-        timedEventLayout.calendarEvent
-      )
+      timedEventLayout.calendarEvent !== null &&
+      !isMultiDayEvent(timedEventLayout.calendarEvent)
   )
   .map(
     (timedEventLayout) => {
       const calendarEvent =
-        timedEventLayout.calendarEvent
+        timedEventLayout.calendarEvent!
 
       const eventTop =
         (timedEventLayout.visibleStart /
@@ -17936,6 +18373,17 @@ onClick={(event) => {
         <h2>
           {viewingCalendarEvent.title}
         </h2>
+        {verifiedEventCreators.find(creator =>
+          creator.eventId === viewingCalendarEvent.id) && (
+          <p className="event-verified-creator">
+            Created by: {verifiedEventCreators.find(creator =>
+              creator.eventId === viewingCalendarEvent.id)?.displayName}
+            {' · '}
+            {verifiedEventCreators.find(creator =>
+              creator.eventId === viewingCalendarEvent.id)?.accountKind === 'hub'
+              ? 'Family hub' : 'Member account'}
+          </p>
+        )}
       </div>
 
       <button
@@ -18087,6 +18535,8 @@ onClick={(event) => {
         </p>
       </div>
     )}
+
+    <FamilyEventSharing event={viewingCalendarEvent} />
 
     <div className="event-details-actions">
   <button
@@ -18427,7 +18877,15 @@ const occurrenceEndDate =
   </div>
 </div>
   )}
-</div>    
+</div>
+              {signedInAccount && (
+                <p className="event-verified-creator">
+                  Signed in as {signedInAccount.displayName}
+                  {' · '}
+                  {signedInAccount.accountKind === 'hub'
+                    ? 'Family hub' : 'Member account'}
+                </p>
+              )}
               {selectedDay === null ? (
                 <p>Click a day on the calendar first.</p>
               ) : (
@@ -19380,7 +19838,7 @@ const occurrenceEndDate =
                               type="button"
                   onPointerDown={startCalendarAddHold}
                   onPointerUp={cancelCalendarAddHold}
-                  onPointerCancel={cancelCalendarAddHold}
+                  onPointerCancel={abortCalendarAddHold}
                   onContextMenu={(event) => {
                     event.preventDefault()
                   }}
@@ -19467,7 +19925,7 @@ const occurrenceEndDate =
                 type="button"
         onPointerDown={startCalendarAddHold}
         onPointerUp={cancelCalendarAddHold}
-        onPointerCancel={cancelCalendarAddHold}
+        onPointerCancel={abortCalendarAddHold}
 onContextMenu={(event) => {
           event.preventDefault()
         }}

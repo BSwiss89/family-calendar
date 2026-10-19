@@ -6,6 +6,11 @@ import multer from 'multer'
 import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
+import { installFamilyAuth } from './family-auth.mjs'
+import { resolveHouseholdStorage } from './household-storage.mjs'
+import { installPrivateEventIdentity } from './private-event-identity.mjs'
+import { installPrivateEventSourceOutbox } from './private-event-source-outbox.mjs'
+import { installPrivateUpstreamGuard, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
 
 const app = express()
 // The live server defaults to 3001 / all interfaces.
@@ -24,8 +29,29 @@ const __dirname = path.dirname(__filename)
 // a future approved npm cutover must not boot against mixed package assets.
 assertCalendarReleaseBootSafe(path.resolve(__dirname, '..'))
 
-const dataFolder = path.join(__dirname, 'data')
-const uploadFolder = path.join(__dirname, 'uploads')
+// Off by default. This is an isolated, local-only test harness, NOT a
+// multi-household HTTP gateway. Never accept household selectors from clients.
+const householdStorage = resolveHouseholdStorage({
+  serverDirectory: __dirname,
+  storageRoot: process.env.FAMILY_CALENDAR_HOUSEHOLD_STORAGE_ROOT ?? null,
+  householdId: process.env.FAMILY_CALENDAR_HOUSEHOLD_ID ?? null,
+})
+
+if (householdStorage.mode === 'household') {
+  if (process.env.FAMILY_CALENDAR_HOUSEHOLD_TEST_ONLY !== 'YES') {
+    throw new Error('Household mode is restricted to explicit private integration tests.')
+  }
+  if (HOST !== '127.0.0.1' || [3001, 13001, 13002, 13003, 11434].includes(PORT)) {
+    throw new Error('Private household testing requires a non-production loopback listener.')
+  }
+  // Fail BEFORE opening a private household SQLite database. No direct
+  // loopback access without a server-provisioned channel capability.
+  requirePrivateUpstreamToken(process.env.FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN)
+  installPrivateUpstreamGuard(app, {
+    expectedToken: process.env.FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN,
+  })
+}
+const { dataFolder, uploadFolder, databasePath } = householdStorage
 const OLLAMA_URL =
   'http://127.0.0.1:11434/api/chat'
 
@@ -36,10 +62,10 @@ const CAPTURE_VISION_MODEL = LOCAL_AI_MODEL
 
 const distFolder = path.join(__dirname, '..', 'dist')
 
-fs.mkdirSync(dataFolder, { recursive: true })
-fs.mkdirSync(uploadFolder, { recursive: true })
-
-const databasePath = path.join(dataFolder, 'calendar.db')
+if (householdStorage.mode === 'legacy') {
+  fs.mkdirSync(dataFolder, { recursive: true })
+  fs.mkdirSync(uploadFolder, { recursive: true })
+}
 const database = new DatabaseSync(databasePath)
 
 database.exec(`PRAGMA foreign_keys = ON`)
@@ -347,6 +373,14 @@ if (!eventColumns.includes('location')) {
   `)
 }
 
+// Only disposable, explicitly opted-in private household backends receive
+// permanent event identities during this test phase. The existing legacy
+// calendar startup/database is unchanged.
+if (householdStorage.mode === 'household') {
+  installPrivateEventIdentity(database)
+  installPrivateEventSourceOutbox(database)
+}
+
 database.exec(`
   CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY,
@@ -595,6 +629,12 @@ database.exec(`
 `)
 
 app.use(express.json())
+
+// Installed before every calendar API, upload and static route. Required mode
+// protects the entire app, not just the sign-in screen. Disabled by default
+// while this draft PR is being privately reviewed; never enable public Funnel
+// until required mode and family credentials have been verified.
+installFamilyAuth(app, database, __dirname)
 
 function isValidDate(date) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date)

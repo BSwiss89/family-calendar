@@ -213,6 +213,11 @@ async function main() {
     for (const name of ['package.json', 'package-lock.json']) {
       fs.copyFileSync(path.join(source, name), path.join(app, name))
     }
+    fs.copyFileSync(path.join(source, 'Server', 'family-auth.mjs'), path.join(app, 'Server', 'family-auth.mjs'))
+    fs.copyFileSync(path.join(source, 'Server', 'household-storage.mjs'), path.join(app, 'Server', 'household-storage.mjs'))
+    fs.copyFileSync(path.join(source, 'Server', 'private-event-identity.mjs'), path.join(app, 'Server', 'private-event-identity.mjs'))
+    fs.copyFileSync(path.join(source, 'Server', 'private-event-source-outbox.mjs'), path.join(app, 'Server', 'private-event-source-outbox.mjs'))
+    fs.copyFileSync(path.join(source, 'Server', 'private-upstream-access.mjs'), path.join(app, 'Server', 'private-upstream-access.mjs'))
     fs.copyFileSync(path.join(source, 'Server', 'index.mjs'), path.join(app, 'Server', 'index.mjs'))
     fs.copyFileSync(path.join(source, 'dist', 'index.html'), path.join(app, 'dist', 'index.html'))
 
