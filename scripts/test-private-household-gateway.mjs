@@ -507,6 +507,31 @@ test('central authenticated gateway denies one family access to another family b
       cookie: cookieB,
     })).value.map(e => e.title), ['Family B private calendar'])
 
+    // Source SQLite triggers catch an AI-style update even when it bypasses
+    // ordinary PUT /api/events/:id. Read-time delivery updates only the
+    // existing, explicitly accepted invitation and leaves other fields private.
+    const outOfBand = new DatabaseSync(a.databasePath)
+    try {
+      outOfBand.prepare('UPDATE events SET title=?,time=? WHERE id=?')
+        .run('AI MOVED FAMILY A SHARED EVENT', '15:15', idToShare)
+      assert.ok(outOfBand.prepare(
+        'SELECT revision FROM event_source_share_outbox WHERE source_event_id=?'
+      ).get(idToShare).revision > 0)
+    } finally { outOfBand.close() }
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events.map(e => [e.title, e.time]),
+    [['AI MOVED FAMILY A SHARED EVENT', '15:15']])
+    const restored = new DatabaseSync(a.databasePath)
+    try {
+      restored.prepare('UPDATE events SET title=?,time=? WHERE id=?')
+        .run('Family A private calendar', '12:00', idToShare)
+    } finally { restored.close() }
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events.map(e => e.title), ['Family A private calendar'])
+    console.log('[PASS] Source SQLite outbox catches direct AI-style event updates.')
+
     // Simulate a real household backend committing an event change and the
     // authenticated gateway process dying BEFORE its old after-response hook.
     // The write-ahead intent was persisted in central SQLite first.
@@ -777,6 +802,41 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal(central.prepare(
       'SELECT status FROM event_share_grants WHERE id = ?',
     ).get(secondTempShareId).status, 'cancelled')
+
+    // A batch SQL delete bypasses /api/events/:id entirely. The durable
+    // source-local outbox still cancels its one explicitly accepted share.
+    const batchSource = new DatabaseSync(a.databasePath)
+    let batchEventId
+    try {
+      batchEventId = Number(batchSource.prepare(
+        'INSERT INTO events (date,title,time,batch_id) VALUES(?,?,?,?)'
+      ).run('2027-01-10', 'Batch source event', '08:00', 'private-batch-1')
+        .lastInsertRowid)
+    } finally { batchSource.close() }
+    const batchInvite = await json(gateway.base, '/api/shared-events/invite', {
+      cookie: cookieA,
+      body: { eventIds: [batchEventId], recipientHouseholdIds: ['family-b'] },
+    })
+    assert.equal(batchInvite.response.status, 201, JSON.stringify(batchInvite.value))
+    const batchShare = batchInvite.value.invitations[0].shareId
+    assert.equal((await json(gateway.base,
+      '/api/shared-events/' + batchShare + '/respond', {
+        cookie: cookieB, body: { decision: 'accepted' },
+      })).response.status, 200)
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events.map(x => x.title), ['Batch source event'])
+    const deleteBatch = new DatabaseSync(a.databasePath)
+    try {
+      assert.equal(deleteBatch.prepare('DELETE FROM events WHERE batch_id=?')
+        .run('private-batch-1').changes, 1)
+    } finally { deleteBatch.close() }
+    assert.deepEqual((await json(gateway.base, '/api/shared-events/accepted', {
+      cookie: cookieB,
+    })).value.events, [])
+    assert.equal(central.prepare('SELECT status FROM event_share_grants WHERE id=?')
+      .get(batchShare).status, 'cancelled')
+    console.log('[PASS] Source SQLite outbox catches an entire batch-delete path.')
     assert.deepEqual((await json(gateway.base, '/api/events', {
       cookie: cookieB,
     })).value.map(e => e.title), ['Family B private calendar'])
