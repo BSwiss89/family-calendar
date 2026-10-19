@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { startPrivateHouseholdGateway } from '../Server/private-household-gateway.mjs'
 import { installPrivateEventIdentity } from '../Server/private-event-identity.mjs'
 import { installPrivateEventSourceOutbox } from '../Server/private-event-source-outbox.mjs'
+import { setPrivateLocalAiMonthlyLimit } from '../Server/private-local-ai-budget.mjs'
 import {
   markEventShareSyncPending, countPendingEventShareSync,
   countUnresolvedEventShareSync,
@@ -323,8 +324,36 @@ test('central authenticated gateway denies one family access to another family b
     ).get().n, 0)
     console.log('[PASS] Alternative and noncanonical event writes cannot bypass sharing recovery.')
 
+    const noAiAllowance = await json(gateway.base, '/api/ai/intent', {
+      cookie: cookieA, body: { text: '' },
+    })
+    assert.equal(noAiAllowance.response.status, 429)
+    const initialAi = await json(gateway.base, '/api/ai-budget', { cookie: cookieA })
+    assert.equal(initialAi.response.status, 200)
+    assert.equal(initialAi.value.local.monthlyRequestLimit, 0)
+    assert.equal(initialAi.value.paidCloudEnabled, false)
+    setPrivateLocalAiMonthlyLimit(central, {
+      householdId: 'family-a', monthlyLimit: 1,
+    })
+    const classified = await json(gateway.base, '/api/ai/intent', {
+      cookie: cookieA, body: { text: '' },
+    })
+    // Intent request reaches the private backend's validation, but no Ollama
+    // call occurs for empty text; the attempt still costs one admission.
+    assert.equal(classified.response.status, 400)
+    assert.equal((await json(gateway.base, '/api/ai/intent', {
+      cookie: cookieA, body: { text: '' },
+    })).response.status, 429)
+    const aBudget = await json(gateway.base, '/api/ai-budget', { cookie: cookieA })
+    const bBudget = await json(gateway.base, '/api/ai-budget', { cookie: cookieB })
+    assert.equal(aBudget.value.local.usedRequests, 1)
+    assert.equal(aBudget.value.local.remainingRequests, 0)
+    assert.equal(bBudget.value.local.usedRequests, 0)
+    assert.equal(bBudget.value.local.monthlyRequestLimit, 0)
+    assert.equal((await json(gateway.base, '/api/ai-budget')).response.status, 401)
+    console.log('[PASS] Household local model requests are disabled by default and capped independently.')
+
     for (const endpoint of [
-      '/api/ai/intent',
       '/api/ai/cancel-preview',
       '/api/ai/reschedule-preview',
       '/api/capture/analyze-photo',
