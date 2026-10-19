@@ -40,6 +40,36 @@ photo analysis capabilities. Household capture-inbox records and uploads
 remain stored in each household's isolated folders, but analysis is withheld
 in this private preview.
 
+## Private per-household local Arney intent budget (opt-in, nonproduction)
+
+The private test gateway now has `Server/private-local-ai-budget.mjs`,
+a CENTRAL SQLite request-count ledger with one independent hard monthly
+allowance for each registered, active family. Limits default to **zero**
+(disabled). Only the trusted programmatic server API
+`setPrivateLocalAiMonthlyLimit` may opt an isolated household in; no
+browser route can set or reset quotas. Each admitted attempt is charged
+transactionally, even if the client cancels, supplies invalid input, or
+Ollama fails. Months use UTC, and separate households cannot spend each
+other's remaining requests. The authenticated `GET /api/ai-budget` displays
+the selected household's local attempts and current limit without exposing
+the other family's usage.
+
+Only canonical `POST /api/ai/intent` is eligible: it asks Ollama to
+classify a supplied string, with no calendar database query, no event write,
+and no cross-household prompt context. The gateway additionally permits
+at most one outstanding local model request globally; an ambiguous backend
+disconnect conservatively holds the slot until a gateway restart. All
+other AI routes, calendar-changing AI confirmations, and photo analysis
+remain disabled in the multi-family test gateway until their own data
+and recovery boundaries are reviewed. The legacy live Arney remains
+unchanged.
+
+This is a **local GPU-request-count cap**, not a dollar cap, API token cap,
+or paid cloud/Web search cost limit. Those planned household monthly dollar
+limits must separately measure real provider charges and fail before the
+configured spending ceiling. Production also requires durable GPU workload
+leases across gateway restarts, request timeouts, and fair scheduling.
+
 ## Source-transaction change outbox for ALL private event writes
 
 The private household backend now installs
