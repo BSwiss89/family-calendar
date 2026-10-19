@@ -25,6 +25,12 @@ test('canonical individual event changes are the only mutable event routes permi
 
 test('alternate event mutations fail closed instead of skipping durable journal', () => {
   const forbidden = [
+    ['POST', '/api/ai/intent'],
+    ['POST', '/api/ai/reschedule-preview'],
+    ['POST', '/api/ai/cancel-criteria'],
+    ['POST', '/api/capture/analyze-photo'],
+    ['POST', '/api/capture-inbox/1/analyze'],
+    ['POST', '/api/capture-inbox/1/analyze?x=1'],
     ['POST', '/api/ai/cancel-confirmed'],
     ['POST', '/api/ai/reschedule-confirmed'],
     ['POST', '/API/AI/CANCEL-CONFIRMED'],
@@ -58,7 +64,6 @@ test('unrelated household-scoped functionality is not accidentally blocked', () 
     ['POST', '/api/lists'],
     ['PUT', '/api/list-items/5'],
     ['POST', '/api/recipes'],
-    ['POST', '/api/ai/intent'],
     ['PATCH', '/api/people/5'],
     ['PUT', '/api/daily-notes/2026-12-20'],
   ]) {
