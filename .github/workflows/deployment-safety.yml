@@ -64,6 +64,8 @@ jobs:
         run: node --test scripts/test-private-offline-restore-rehearsal.mjs
       - name: Check central user-to-household grants and denial rules
         run: node --test scripts/test-household-memberships.mjs
+      - name: Reject unaudited event mutation routes in the private gateway
+        run: node --test scripts/test-private-gateway-mutation-policy.mjs
       - name: Exercise authenticated private household gateway end-to-end
         run: node --test scripts/test-private-household-gateway.mjs
       - name: Test explicitly selected event-only sharing and private calendar boundaries
