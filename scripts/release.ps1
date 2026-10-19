@@ -76,6 +76,15 @@ if ($LASTEXITCODE -ne 0 -or $changed.Count -eq 0) {
     throw 'Could not determine the proposed release files.'
 }
 
+$previewGate = Join-Path $test 'scripts\check-private-preview-release-scope.mjs'
+if (-not (Test-Path -LiteralPath $previewGate)) {
+    throw 'PRIVATE MULTI-FAMILY PREVIEW RELEASE BLOCKED: release guard is missing.'
+}
+& node $previewGate @changed | Out-Host
+if ($LASTEXITCODE -ne 0) {
+    throw 'PRIVATE MULTI-FAMILY PREVIEW RELEASE BLOCKED: draft-only household files need a separate reviewed release.'
+}
+
 $frontendAllowed = '^(src/|public/|\.github/|scripts/|docs/|index\.html$|README\.md$|\.gitignore$|eslint\.config\.js$|vite\.config\.ts$|tsconfig(?:\.[^/]+)?\.json$)'
 $notFrontend = @($changed | Where-Object { $_ -notmatch $frontendAllowed })
 if ($changed -contains 'package.json') {

@@ -64,6 +64,15 @@ function ReleasePlan {
     Ensure ($LASTEXITCODE -eq 0) 'Live version is ancestor of tested version'
     $changed = @(& git -C $test diff --name-only "$from..$to")
     Ensure ($LASTEXITCODE -eq 0) 'Release file list available'
+    $previewGate = Join-Path $test 'scripts\check-private-preview-release-scope.mjs'
+    if (-not (Test-Path -LiteralPath $previewGate)) {
+        throw 'PRIVATE MULTI-FAMILY PREVIEW RELEASE BLOCKED: release guard is missing.'
+    }
+    & node $previewGate @changed | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw 'PRIVATE MULTI-FAMILY PREVIEW RELEASE BLOCKED: draft-only household files need a separate reviewed release.'
+    }
+
     $allowed = '^(Server/index\.mjs$|src/|public/|\.github/|scripts/|docs/|index\.html$|README\.md$|\.gitignore$|eslint\.config\.js$|vite\.config\.ts$|tsconfig(?:\.[^/]+)?\.json$)'
     $blocked = @($changed | Where-Object { $_ -notmatch $allowed })
     if ($blocked.Count -gt 0) {
