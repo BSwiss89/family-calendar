@@ -17,6 +17,40 @@ test('ordinary small frontend, backend, and documentation releases remain eligib
   assert.equal(inspectPrivatePreviewReleaseFiles([]).allowed, true)
 })
 
+test('entire PR #47 release (including safety tests) remains deployable', () => {
+  // This is the actual seven-file release list from the 62e63b3 -> 88c6285
+  // guarded preview. The previous denylist wrongly matched its own test file.
+  const actualRelease = [
+    '.github/workflows/deployment-safety.yml',
+    'docs/RELEASE_MILESTONES.md',
+    'scripts/check-private-preview-release-scope.mjs',
+    'scripts/deploy-backend.ps1',
+    'scripts/deploy-frontend.ps1',
+    'scripts/release.ps1',
+    'scripts/test-private-preview-release-scope.mjs',
+  ]
+  assert.deepEqual(inspectPrivatePreviewReleaseFiles(actualRelease), {
+    allowed: true, invalid: [], draftOnly: [],
+  })
+  const cli = spawnSync(process.execPath, [script, ...actualRelease], {
+    encoding: 'utf8',
+  })
+  assert.equal(cli.status, 0, cli.stderr)
+  assert.match(cli.stdout, /scope check passed/)
+
+  // The exception must never grant a way to include a draft-only module.
+  for (const candidate of [
+    'scripts/test-private-household-gateway.mjs',
+    'scripts/test-private-arney-event-language.mjs',
+    'scripts/test-private-preview-release-scope.mjs.additional',
+    'Server/private-household-gateway.mjs',
+  ]) {
+    const denied = inspectPrivatePreviewReleaseFiles([...actualRelease, candidate])
+    assert.equal(denied.allowed, false, candidate)
+    assert.deepEqual(denied.draftOnly, [candidate])
+  }
+})
+
 test('PR #46 runtime and household-preview test artifacts cannot be released', () => {
   const paths = [
     'Server/private-household-gateway.mjs',
