@@ -213,7 +213,20 @@ async function main() {
     for (const name of ['package.json', 'package-lock.json']) {
       fs.copyFileSync(path.join(source, name), path.join(app, name))
     }
-    fs.copyFileSync(path.join(source, 'Server', 'index.mjs'), path.join(app, 'Server', 'index.mjs'))
+    // Copy the actual backend entry and its sibling modules into the
+    // disposable application. An index-only copy cannot exercise backend
+    // code that imports another file from Server/ (e.g. list-features.mjs).
+    // Do not copy Server/data, uploads, or other persisted household files.
+    const serverSource = path.join(source, 'Server')
+    const serverTarget = path.join(app, 'Server')
+    const serverModules = fs.readdirSync(serverSource, { withFileTypes: true })
+      .filter(entry => entry.isFile() && entry.name.endsWith('.mjs'))
+      .map(entry => entry.name)
+    requireSafe(serverModules.includes('index.mjs'), 'Candidate backend entry is missing')
+    for (const name of serverModules) {
+      fs.copyFileSync(path.join(serverSource, name), path.join(serverTarget, name))
+    }
+    console.log('[PASS] Isolated candidate includes all backend .mjs modules; excludes persisted data.')
     fs.copyFileSync(path.join(source, 'dist', 'index.html'), path.join(app, 'dist', 'index.html'))
 
     if (commitMode) {
