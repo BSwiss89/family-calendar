@@ -18476,3 +18476,22 @@ max-height:
   .list-item-edit-fields { flex-basis: 100%; }
   .list-item-edit-button, .list-item-delete { padding-inline: 8px; }
 }
+
+/* Automatic offline list organization; preserves existing list data. */
+.list-organize-button {
+  min-height: 44px;
+  padding: 9px 14px;
+  border: 1px solid #bfc5ea;
+  border-radius: 10px;
+  background: #ecf0ff;
+  color: #313f89;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.list-organize-button:disabled { opacity: 0.45; cursor: default; }
+@media (max-width: 600px) {
+  .list-category-toolbar select { min-width: 160px; }
+  .list-modal-actions .list-organize-button { flex: 1 1 auto; }
+}
