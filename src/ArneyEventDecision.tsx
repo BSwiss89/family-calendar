@@ -91,8 +91,9 @@ export default function ArneyEventDecision({
     setError('')
     try {
       // Confirmation is a distinct user gesture, never performed by selecting.
+      // The parent closes after refreshing the event list on success.
+      // Do not also report the review as canceled.
       await onConfirm(confirmed.previewToken)
-      onDismiss()
     } catch {
       setPreview(null)
       setConfirmationFailed(true)
