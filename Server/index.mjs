@@ -6,6 +6,11 @@ import multer from 'multer'
 import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
+import {
+  normalizeListCategory,
+  ensureListItemCategories,
+  duplicateListInDatabase,
+} from './list-features.mjs'
 
 const app = express()
 // The live server defaults to 3001 / all interfaces.
@@ -438,6 +443,7 @@ if (!listItemColumns.includes('sort_order')) {
     SET sort_order = id
   `)
 }
+ensureListItemCategories(database)
 
 database.exec(`
   CREATE TABLE IF NOT EXISTS meal_plans (
@@ -6705,7 +6711,7 @@ app.get('/api/lists', (request, response) => {
     .all()
 
   const itemStatement = database.prepare(`
-   SELECT id, list_id, text, completed, created_at, sort_order
+   SELECT id, list_id, text, completed, created_at, sort_order, category
 FROM list_items
 WHERE list_id = ?
 ORDER BY sort_order, id
@@ -6751,6 +6757,20 @@ app.post('/api/lists', (request, response) => {
   })
 })
 
+// Reuse a list in one transaction; the source items stay untouched and each
+// new item starts unchecked. This endpoint also works for empty lists.
+app.post('/api/lists/:id/duplicate', (request, response) => {
+  const sourceId = Number(request.params.id)
+  const name = request.body?.name
+  if (!Number.isSafeInteger(sourceId) || sourceId <= 0 ||
+      typeof name !== 'string' || name.trim().length < 1 || name.trim().length > 100) {
+    return response.status(400).json({ error: 'A valid list and new name are required.' })
+  }
+  const duplicated = duplicateListInDatabase(database, sourceId, name.trim())
+  if (!duplicated) return response.status(404).json({ error: 'List not found.' })
+  return response.status(201).json(duplicated)
+})
+
 app.delete('/api/lists/:id', (request, response) => {
   const id = Number(request.params.id)
 
@@ -6780,7 +6800,13 @@ app.delete('/api/lists/:id', (request, response) => {
 
 app.post('/api/lists/:id/items', (request, response) => {
   const listId = Number(request.params.id)
-  const { text } = request.body
+  const { text, category: rawCategory } = request.body
+  let category
+  try {
+    category = normalizeListCategory(rawCategory)
+  } catch {
+    return response.status(400).json({ error: 'Invalid list item category.' })
+  }
 
   if (
     !Number.isInteger(listId) ||
@@ -6822,10 +6848,10 @@ const nextSortOrder = Number(orderResult.max_order) + 1
 
 const result = database
   .prepare(`
-    INSERT INTO list_items (list_id, text, sort_order)
-    VALUES (?, ?, ?)
+    INSERT INTO list_items (list_id, text, sort_order, category)
+    VALUES (?, ?, ?, ?)
   `)
-  .run(listId, cleanText, nextSortOrder)
+  .run(listId, cleanText, nextSortOrder, category)
 
   response.status(201).json({
     id: Number(result.lastInsertRowid),
@@ -6833,12 +6859,13 @@ const result = database
     text: cleanText,
     completed: false,
     sort_order: nextSortOrder,
+    category,
   })
 })
 
 app.put('/api/list-items/:id', (request, response) => {
   const id = Number(request.params.id)
-  const { text, completed } = request.body
+  const { text, completed, category: rawCategory } = request.body
 
   if (!Number.isInteger(id) || id <= 0) {
     return response.status(400).json({
@@ -6848,7 +6875,7 @@ app.put('/api/list-items/:id', (request, response) => {
 
   const existingItem = database
     .prepare(`
-      SELECT id, list_id, text, completed
+      SELECT id, list_id, text, completed, category
       FROM list_items
       WHERE id = ?
     `)
@@ -6872,19 +6899,29 @@ app.put('/api/list-items/:id', (request, response) => {
         : 0
       : existingItem.completed
 
+  let nextCategory = existingItem.category
+  if (rawCategory !== undefined) {
+    try {
+      nextCategory = normalizeListCategory(rawCategory)
+    } catch {
+      return response.status(400).json({ error: 'Invalid list item category.' })
+    }
+  }
+
   database
     .prepare(`
       UPDATE list_items
-      SET text = ?, completed = ?
+      SET text = ?, completed = ?, category = ?
       WHERE id = ?
     `)
-    .run(nextText, nextCompleted, id)
+    .run(nextText, nextCompleted, nextCategory, id)
 
   response.json({
     id,
     list_id: existingItem.list_id,
     text: nextText,
     completed: Boolean(nextCompleted),
+    category: nextCategory,
   })
 })
 app.put('/api/lists/:id/reorder', (request, response) => {
