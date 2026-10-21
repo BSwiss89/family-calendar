@@ -23300,6 +23300,8 @@ capture.captureType !== 'other' && (
            onClick={() => {
   setSelectedListId(list.id)
   setNewListItemText('')
+  setNewListItemCategory('General')
+  setListCategoryFilter('All')
   setEditingListName(list.name)
   setListNameEditing(false)
 }}
@@ -23432,6 +23434,14 @@ capture.captureType !== 'other' && (
               if (!selectedList) {
                 return null
               }
+              const categoryOptions = Array.from(new Set(
+                selectedList.items.map((item) => item.category || 'General')
+              )).sort((a, b) => a.localeCompare(b))
+              const visibleItems = listCategoryFilter === 'All'
+                ? selectedList.items
+                : selectedList.items.filter(
+                    (item) => (item.category || 'General') === listCategoryFilter
+                  )
 
               return (
                 <>
@@ -23534,6 +23544,9 @@ capture.captureType !== 'other' && (
                   </div>
 
                   <div className="list-modal-actions">
+  <button className="list-reuse-button" type="button" onClick={() => reuseList(selectedList)}>
+    Reuse List
+  </button>
   <button
     className="clear-completed-button"
     type="button"
@@ -23553,8 +23566,13 @@ capture.captureType !== 'other' && (
 
                   
 
+                  <datalist id="list-category-suggestions">
+                    {['General', 'Produce', 'Dairy', 'Meat', 'Frozen', 'Pantry', 'Household', 'Errands', 'Work', 'Other'].map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
                   <form
-                    className="people-form"
+                    className="people-form list-quick-entry-form"
                     onSubmit={addListItem}
                   >
                     <label className="event-field">
@@ -23574,6 +23592,18 @@ capture.captureType !== 'other' && (
                         }
                       />
                     </label>
+                    <label className="event-field">
+                      Category
+                      <input
+                        className="event-input"
+                        type="text"
+                        list="list-category-suggestions"
+                        maxLength={40}
+                        placeholder="General, Produce, Errands..."
+                        value={newListItemCategory}
+                        onChange={(event) => setNewListItemCategory(event.target.value)}
+                      />
+                    </label>
 
                     <button
                       className="add-event-button"
@@ -23587,10 +23617,25 @@ capture.captureType !== 'other' && (
                     </button>
                   </form>
 
+                  <div className="list-category-toolbar">
+                    <label htmlFor="list-category-filter">Show category</label>
+                    <select
+                      id="list-category-filter"
+                      className="event-input"
+                      value={listCategoryFilter}
+                      onChange={(event) => setListCategoryFilter(event.target.value)}
+                    >
+                      <option value="All">All ({selectedList.items.length})</option>
+                      {categoryOptions.map((category) => (
+                        <option key={category} value={category}>{category}</option>
+                      ))}
+                    </select>
+                  </div>
                   <div className="list-items">
-                    {selectedList.items.length ===
-                    0 ? (
+                    {selectedList.items.length === 0 ? (
                       <p>No items yet.</p>
+                    ) : visibleItems.length === 0 ? (
+                      <p>No items in this category.</p>
                     ) : (
                       <DndContext
                         sensors={sensors}
@@ -23602,7 +23647,7 @@ capture.captureType !== 'other' && (
                         }
                       >
                         <SortableContext
-                          items={selectedList.items.map(
+                          items={visibleItems.map(
                             (item) =>
                               item.id
                           )}
@@ -23610,7 +23655,7 @@ capture.captureType !== 'other' && (
                             verticalListSortingStrategy
                           }
                         >
-                          {selectedList.items.map(
+                          {visibleItems.map(
                             (item) => (
                               <SortableListItem
                                 key={
@@ -23624,9 +23669,12 @@ capture.captureType !== 'other' && (
                                 editingText={
                                   editingListItemText
                                 }
+                                editingCategory={editingListItemCategory}
+                                canDrag={listCategoryFilter === 'All'}
                                 onEditingTextChange={
                                   setEditingListItemText
                                 }
+                                onEditingCategoryChange={setEditingListItemCategory}
                                 onStartEdit={
                                   startEditingListItem
                                 }
