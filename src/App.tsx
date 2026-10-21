@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
 
 
 import {
@@ -3445,6 +3446,7 @@ const [repeatCount, setRepeatCount] = useState(10)
   const [selectedPersonIds, setSelectedPersonIds] = useState<number[]>([])
 
   const [editingEventId, setEditingEventId] = useState<number | null>(null)
+  const [duplicateSourceEventId, setDuplicateSourceEventId] = useState<number | null>(null)
   const [viewingEventId, setViewingEventId] =
   useState<number | null>(null)
 
@@ -8947,7 +8949,9 @@ return
     }
 
     await loadEvents()
+    const wasDuplicate = duplicateSourceEventId !== null
     clearEventForm()
+    if (wasDuplicate) showAppNotification('Event copy created. Original event unchanged.')
   }
 
   async function saveBatchThisEventOnly() {
@@ -9335,6 +9339,7 @@ function openEventDetails(
     new Date(`${occurrenceDate}T00:00:00`)
 
   setEditingEventId(null)
+  setDuplicateSourceEventId(null)
   setEditingOccurrenceDate(null)
   setIsAddingEvent(false)
   setRecurringAction(null)
@@ -9358,7 +9363,7 @@ function startEditingEvent(
   calendarEvent: CalendarEvent,
   occurrenceDate: string
 ) {
-
+  setDuplicateSourceEventId(null)
   setEventTitle(calendarEvent.title)
  setEventTime(calendarEvent.time ?? '')
 setEventEndTime(calendarEvent.endTime ?? '')
@@ -9398,6 +9403,32 @@ setRepeatEndDateText(
   setEditingOccurrenceDate(occurrenceDate)
 }
 
+function startDuplicatingEvent(calendarEvent: CalendarEvent, occurrenceDate: string) {
+  // Prepare a new event using the selected occurrence. This makes no API call.
+  const draft = makeEventDuplicateDraft(calendarEvent, occurrenceDate)
+  clearEventForm()
+  setDuplicateSourceEventId(calendarEvent.id)
+  setEventTitle(draft.title)
+  setEventTime(draft.time)
+  setEventEndTime(draft.endTime)
+  setEventAllDay(draft.allDay)
+  setEventStartDate(draft.date)
+  setEventStartDateText(formatDateKeyForText(draft.date))
+  setEventEndDate(draft.endDate ?? '')
+  setEventEndDateText(draft.endDate ? formatDateKeyForText(draft.endDate) : '')
+  setEventNotes(draft.notes)
+  setEventLocation(draft.location)
+  setSelectedPersonIds(draft.personIds)
+  setRepeatUnit(draft.repeatUnit)
+  setRepeatInterval(draft.repeatInterval)
+  setRepeatEndType(draft.repeatEndType)
+  setRepeatEndDate('')
+  setRepeatEndDateText('')
+  setRepeatCount(10)
+  setEventDateMode('single')
+  setEventMultipleDates([])
+  setIsAddingEvent(true)
+}
   async function deleteEvent() {
   const activeEventId =
     editingEventId ?? viewingEventId
@@ -10190,6 +10221,7 @@ function closeEventModal() {
 }
  function clearEventForm() {
 setEditingEventId(null)
+setDuplicateSourceEventId(null)
 setViewingEventId(null)
 setViewingOccurrenceDate(null)
 setDetailsDeleteConfirmOpen(false)
@@ -18119,6 +18151,19 @@ onClick={(event) => {
 
   <button
     type="button"
+    className="event-details-duplicate-button"
+    aria-label="Duplicate event"
+    onClick={() => {
+      if (viewingStartDate !== null) {
+        startDuplicatingEvent(viewingCalendarEvent, viewingStartDate)
+      }
+    }}
+  >
+    Duplicate
+  </button>
+
+  <button
+    type="button"
     className="event-details-edit-button"
     onClick={() => {
       if (viewingDateKey === null) {
@@ -18382,7 +18427,9 @@ const occurrenceEndDate =
   <h2>
     {editingEventId !== null
       ? 'Edit Event'
-      : 'Add Event'}
+      : duplicateSourceEventId !== null
+        ? 'Duplicate Event'
+        : 'Add Event'}
   </h2>
 
   {people.length > 0 && (
@@ -18512,6 +18559,13 @@ const occurrenceEndDate =
   </p>
 )}
 
+                  {duplicateSourceEventId !== null && (
+                    <p className="event-duplicate-notice">
+                      Change the date or time, then create your copy.
+                      The original stays unchanged. Recurring events
+                      are copied as one non-repeating event.
+                    </p>
+                  )}
                   <form
                     className="event-form"
                     onSubmit={addOrUpdateEvent}
@@ -19281,7 +19335,9 @@ const occurrenceEndDate =
   >
     {editingEventId !== null
       ? 'Save Changes'
-      : 'Add Event'}
+      : duplicateSourceEventId !== null
+        ? 'Create Copy'
+        : 'Add Event'}
   </button>
 </div>
 </div>
