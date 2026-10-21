@@ -9,6 +9,8 @@ import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boo
 import {
   normalizeListCategory,
   ensureListItemCategories,
+  suggestListCategory,
+  organizeExistingListItems,
 } from './list-features.mjs'
 
 const app = express()
@@ -6756,6 +6758,19 @@ app.post('/api/lists', (request, response) => {
   })
 })
 
+// On-demand, conservative organizer for existing items in one selected list.
+app.post('/api/lists/:id/organize', (request, response) => {
+  const listId = Number(request.params.id)
+  if (!Number.isSafeInteger(listId) || listId <= 0) {
+    return response.status(400).json({ error: 'Invalid list ID.' })
+  }
+  const result = organizeExistingListItems(database, listId)
+  if (result === null) {
+    return response.status(404).json({ error: 'List not found.' })
+  }
+  return response.json(result)
+})
+
 app.delete('/api/lists/:id', (request, response) => {
   const id = Number(request.params.id)
 
@@ -6788,7 +6803,9 @@ app.post('/api/lists/:id/items', (request, response) => {
   const { text, category: rawCategory } = request.body
   let category
   try {
-    category = normalizeListCategory(rawCategory)
+    category = rawCategory === undefined
+      ? (suggestListCategory(text) ?? 'General')
+      : normalizeListCategory(rawCategory)
   } catch {
     return response.status(400).json({ error: 'Invalid list item category.' })
   }
