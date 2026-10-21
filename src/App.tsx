@@ -21,6 +21,9 @@ import { sharedEventsInRange, formatSharedTime, type AcceptedSharedEvent } from 
 import { arneySpeechAvailable, beginArneySpeech, speakArneyReply, type ArneySpeechResult, type ArneySpeechSession } from './arneySpeech'
 import { readArneyPreferences } from './arneyPreferences'
 import { shouldOfferArneyTextFallback } from './arneyWakePhrase'
+import ArneyPrivateEventFlow from './ArneyPrivateEventFlow'
+import type { ArneyEventDecisionData } from './ArneyEventDecision'
+import { isPrivateArneyEventCandidate } from './arneyPrivateEventCandidate.mjs'
 import { parseArneySimpleCommand, type ArneySimpleCommand } from './arneyTextCommands'
 
 
@@ -3522,6 +3525,10 @@ type ArneyListAdd = Extract<ArneySimpleCommand, { kind: 'add-list-item' }>
 type ArneyEventCreate = Extract<ArneySimpleCommand, { kind: 'create-event' }>
 const [arneyListPreview, setArneyListPreview] = useState<ArneyListAdd | null>(null)
 const [arneyEventPreview, setArneyEventPreview] = useState<ArneyEventCreate | null>(null)
+const [arneyPrivateDecision, setArneyPrivateDecision] = useState<{
+  id: number; data: ArneyEventDecisionData
+} | null>(null)
+const arneyPrivateDecisionCounter = useRef(0)
 
 const [
   aiReschedulePreview,
@@ -4316,6 +4323,7 @@ setAiCancellationPreview(null)
 setAiReschedulePreview(null)
 setArneyListPreview(null)
 setArneyEventPreview(null)
+setArneyPrivateDecision(null)
 
   try {
     const simple = parseArneySimpleCommand(command, lists)
@@ -4366,6 +4374,49 @@ setArneyEventPreview(null)
         await applyArneyEventWrite(simple, true)
       }
       return
+    }
+    // The isolated household gateway authenticates and signs these previews.
+    // An unknown route (404) means an older production backend: preserve its
+    // existing legacy command handler rather than changing production behavior.
+    if (isPrivateArneyEventCandidate(command)) {
+      const privateResponse = await fetch('/api/ai/event-action-interpret', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({text: command}),
+      })
+      if (privateResponse.status !== 404) {
+        const privateData = await privateResponse.json()
+        if (!privateResponse.ok) {
+          throw new Error(privateData.error || 'Private event preview unavailable.')
+        }
+        arneyFailuresRef.current = 0
+        if (privateData.status === 'needs_selection' ||
+            privateData.status === 'ready_for_confirmation') {
+          arneyPrivateDecisionCounter.current += 1
+          setArneyPrivateDecision({
+            id: arneyPrivateDecisionCounter.current,
+            data: privateData as ArneyEventDecisionData,
+          })
+          const message = privateData.status === 'needs_selection'
+            ? 'I found multiple matches. Choose the correct event below.'
+            : 'Review the event and confirm the change below.'
+          setAiCommandResult(message)
+          arneyReply(message, true)
+        } else {
+          const message = privateData.status === 'not_found'
+            ? 'I could not find that event in your household calendar.'
+            : privateData.status === 'too_many_matches'
+              ? 'Too many matching events. Open the calendar and select one.'
+              : privateData.status === 'unsupported_event'
+                ? 'Recurring or multi-day events need manual editing.'
+                : 'Please include the exact event title and original date. '
+                  + 'For example: Move event "Dentist Appointment" on 2026-12-20 '
+                  + 'to 2026-12-22 at 14:30.'
+          setAiCommandResult(message)
+          arneyReply(message, true)
+        }
+        return
+      }
     }
     const intentResponse =
       await fetch(
@@ -14278,6 +14329,7 @@ return (
     <div
       className="ai-command-overlay"
       onClick={() => {
+        setArneyPrivateDecision(null)
         setAiCommandOpen(false)
       }}
     >
@@ -14301,7 +14353,8 @@ return (
             className="ai-command-close"
             aria-label="Close AI command"
             onClick={() => {
-              setAiCommandOpen(false)
+              setArneyPrivateDecision(null)
+        setAiCommandOpen(false)
             }}
           >
             ×
@@ -14725,6 +14778,27 @@ return (
     </div>
   )}
 
+{arneyPrivateDecision && (
+  <ArneyPrivateEventFlow
+    key={arneyPrivateDecision.id}
+    data={arneyPrivateDecision.data}
+    onRefresh={loadEvents}
+    onSuccess={() => {
+      setArneyPrivateDecision(null)
+      setArneyPrivateDecision(null)
+        setAiCommandOpen(false)
+      setAiCommandText('')
+      setAiCommandResult('')
+      showAppNotification('Arney updated your event.')
+      arneyReply('Event updated successfully.')
+    }}
+    onDismiss={() => {
+      setArneyPrivateDecision(null)
+      setAiCommandResult('No event was changed.')
+    }}
+  />
+)}
+
 {arneyListPreview && (
   <div className="ai-cancel-confirmation">
     <strong>Confirm list change</strong>
@@ -14770,7 +14844,8 @@ return (
               type="button"
               className="ai-command-cancel"
               onClick={() => {
-                setAiCommandOpen(false)
+                setArneyPrivateDecision(null)
+        setAiCommandOpen(false)
               }}
             >
               Cancel
@@ -14781,7 +14856,8 @@ return (
               className="ai-command-send"
               disabled={
   aiCommandText.trim() === '' ||
-  aiCommandLoading
+  aiCommandLoading ||
+  arneyPrivateDecision !== null
 }
             >
               {aiCommandLoading
