@@ -18387,3 +18387,33 @@ max-height:
   font-size: 15px;
   white-space: nowrap;
 }
+
+/* Copy an event without changing its source, including on narrow phones. */
+.event-details-actions { flex-wrap: wrap; }
+.event-details-duplicate-button {
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid #c9c4ed;
+  border-radius: 12px;
+  background: #f1efff;
+  color: #373078;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 750;
+  cursor: pointer;
+  margin-left: auto;
+}
+.event-duplicate-notice {
+  margin: 4px 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f2f1fb;
+  color: #3c3769;
+  font-size: 13px;
+  line-height: 1.45;
+}
+@media (max-width: 460px) {
+  .event-details-actions { gap: 8px; }
+  .event-details-edit-button { min-width: 116px; padding-inline: 12px; }
+  .event-details-duplicate-button { padding-inline: 12px; }
+}
