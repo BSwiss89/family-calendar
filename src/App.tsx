@@ -1236,6 +1236,7 @@ type ListItem = {
   list_id: number
   text: string
   completed: boolean
+  category?: string
   created_at?: string
 }
 
@@ -1591,7 +1592,10 @@ type SortableListItemProps = {
   item: ListItem
   isEditing: boolean
   editingText: string
+  editingCategory?: string
+  canDrag?: boolean
   onEditingTextChange: (text: string) => void
+  onEditingCategoryChange?: (category: string) => void
   onStartEdit: (item: ListItem) => void
   onSaveEdit: (itemId: number) => void
   onCancelEdit: () => void
@@ -1661,7 +1665,10 @@ function SortableListItem({
   item,
   isEditing,
   editingText,
+  editingCategory = 'General',
+  canDrag = true,
   onEditingTextChange,
+  onEditingCategoryChange = () => {},
   onStartEdit,
   onSaveEdit,
   onCancelEdit,
@@ -1675,82 +1682,77 @@ function SortableListItem({
     transform,
     transition,
     isDragging,
-  } = useSortable({
-    id: item.id,
-  })
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.6 : 1,
-  }
+  } = useSortable({ id: item.id, disabled: !canDrag })
 
   return (
     <div
       ref={setNodeRef}
-      style={style}
-      className={`list-item-row ${
-        item.completed ? 'list-item-completed' : ''
-      }`}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
+      }}
+      className={`list-item-row ${item.completed ? 'list-item-completed' : ''}`}
     >
       <label className="list-item-checkbox-zone">
         <input
           type="checkbox"
           checked={item.completed}
           onChange={() => onToggle(item)}
+          aria-label={`${item.completed ? 'Uncheck' : 'Check off'} ${item.text}`}
         />
       </label>
-
       {isEditing ? (
         <div className="list-item-edit-area">
-          <input
-            className="event-input"
-            type="text"
-            value={editingText}
-            onChange={(event) =>
-              onEditingTextChange(event.target.value)
-            }
-          />
-
-          <button
-            type="button"
-            onClick={() => onSaveEdit(item.id)}
-          >
-            Save
-          </button>
-
-          <button
-            type="button"
-            onClick={onCancelEdit}
-          >
-            Cancel
-          </button>
+          <div className="list-item-edit-fields">
+            <input
+              className="event-input"
+              type="text"
+              aria-label="Item name"
+              maxLength={200}
+              value={editingText}
+              onChange={(event) => onEditingTextChange(event.target.value)}
+            />
+            <input
+              className="event-input"
+              type="text"
+              aria-label="Item category"
+              list="list-category-suggestions"
+              maxLength={40}
+              placeholder="Category (e.g. Produce)"
+              value={editingCategory}
+              onChange={(event) => onEditingCategoryChange(event.target.value)}
+            />
+          </div>
+          <button type="button" onClick={() => onSaveEdit(item.id)}>Save</button>
+          <button type="button" onClick={onCancelEdit}>Cancel</button>
         </div>
       ) : (
         <>
           <button
-            className="list-item-drag-area"
+            className="list-item-complete-text"
             type="button"
-            aria-label={`Move ${item.text}`}
+            aria-label={`${item.completed ? 'Uncheck' : 'Check off'} ${item.text}`}
+            onClick={() => onToggle(item)}
+          >
+            <span className="list-item-name">{item.text}</span>
+            {item.category && item.category !== 'General' && (
+              <span className="list-category-pill">{item.category}</span>
+            )}
+          </button>
+          <button
+            className="list-item-grip"
+            type="button"
+            aria-label={`Reorder ${item.text}`}
+            title={canDrag ? 'Drag to reorder' : 'Show all categories to reorder'}
+            disabled={!canDrag}
             {...attributes}
             {...listeners}
-          >
-            <span>{item.text}</span>
-          </button>
-
-          <button
-            className="list-item-edit-button"
-            type="button"
-            onClick={() => onStartEdit(item)}
-          >
+          >☰</button>
+          <button className="list-item-edit-button" type="button" onClick={() => onStartEdit(item)}>
             Edit
           </button>
-
-          <button
-            className="list-item-delete"
-            type="button"
-            onClick={() => onDelete(item.id)}
-          >
+          <button className="list-item-delete" type="button" onClick={() => onDelete(item.id)}>
             Delete
           </button>
         </>
@@ -3800,8 +3802,12 @@ const [dayNoteError, setDayNoteError] =
 const [newListName, setNewListName] = useState('')
 const [selectedListId, setSelectedListId] = useState<number | null>(null)
 const [newListItemText, setNewListItemText] = useState('')
+const [newListItemCategory, setNewListItemCategory] = useState('General')
+const [listCategoryFilter, setListCategoryFilter] = useState('All')
 const [editingListItemId, setEditingListItemId] = useState<number | null>(null)
 const [editingListItemText, setEditingListItemText] = useState('')
+const [editingListItemCategory, setEditingListItemCategory] = useState('General')
+const listToggleInFlightRef = useRef(new Set<number>())
 const [editingListName, setEditingListName] = useState('')
 const [mealPlans, setMealPlans] = useState<MealPlan[]>([])
 const [mealPlanItems, setMealPlanItems] =
@@ -10451,6 +10457,7 @@ async function addListItem(event: FormEvent<HTMLFormElement>) {
       },
       body: JSON.stringify({
         text: cleanText,
+        category: newListItemCategory.trim() || 'General',
       }),
     }
   )
@@ -10511,27 +10518,30 @@ async function addQuickListItem() {
   )
 }
 async function toggleListItem(item: ListItem) {
-  const response = await fetch(
-    `/api/list-items/${item.id}`,
-    {
+  if (listToggleInFlightRef.current.has(item.id)) return
+  listToggleInFlightRef.current.add(item.id)
+  const completed = !item.completed
+  setLists((current) => current.map((list) => ({
+    ...list,
+    items: list.items.map((entry) => entry.id === item.id
+      ? { ...entry, completed }
+      : entry),
+  })))
+  try {
+    const response = await fetch(`/api/list-items/${item.id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        completed: !item.completed,
-      }),
-    }
-  )
-
-  if (!response.ok) {
-   showAppNotification('Could not update the item.')
-    return
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed }),
+    })
+    if (!response.ok) throw new Error('Update failed')
+    await loadLists()
+  } catch {
+    showAppNotification('Could not update the item.')
+    await loadLists()
+  } finally {
+    listToggleInFlightRef.current.delete(item.id)
   }
-
-  await loadLists()
 }
-
 async function deleteListItem(itemId: number) {
   const response = await fetch(
     `/api/list-items/${itemId}`,
@@ -10597,11 +10607,13 @@ async function clearCompletedItems() {
 function startEditingListItem(item: ListItem) {
   setEditingListItemId(item.id)
   setEditingListItemText(item.text)
+  setEditingListItemCategory(item.category || 'General')
 }
 
 function cancelEditingListItem() {
   setEditingListItemId(null)
   setEditingListItemText('')
+  setEditingListItemCategory('General')
 }
 
 async function saveListItemEdit(itemId: number) {
@@ -10620,6 +10632,7 @@ async function saveListItemEdit(itemId: number) {
       },
       body: JSON.stringify({
         text: cleanText,
+        category: editingListItemCategory.trim() || 'General',
       }),
     }
   )
@@ -10633,7 +10646,7 @@ async function saveListItemEdit(itemId: number) {
   await loadLists()
 }
 async function handleListDragEnd(event: DragEndEvent) {
-  if (selectedListId === null) {
+  if (selectedListId === null || listCategoryFilter !== 'All') {
     return
   }
 
@@ -10700,6 +10713,35 @@ async function handleListDragEnd(event: DragEndEvent) {
     await loadLists()
   }
 }
+async function reuseList(list: CalendarList) {
+  const proposal = window.prompt('Name your reusable list copy:', `${list.name} (Copy)`)
+  if (proposal === null) return
+  const name = proposal.trim()
+  if (!name || name.length > 100) {
+    showAppNotification('Enter a name of 100 characters or fewer.')
+    return
+  }
+  try {
+    const response = await fetch(`/api/lists/${list.id}/duplicate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    if (!response.ok) throw new Error('Could not copy list')
+    const created = await response.json()
+    await loadLists()
+    setSelectedListId(created.id)
+    setEditingListName(created.name)
+    setListNameEditing(false)
+    setEditingListItemId(null)
+    setNewListItemText('')
+    setNewListItemCategory('General')
+    setListCategoryFilter('All')
+    showAppNotification(`Created ${name} with unchecked items.`)
+  } catch {
+    showAppNotification('Could not reuse this list.')
+  }
+}
 async function deleteList(listId: number) {
   const shouldDelete = window.confirm(
     'Delete this entire list and all of its items?'
@@ -10723,6 +10765,7 @@ async function deleteList(listId: number) {
 
   setSelectedListId(null)
   setNewListItemText('')
+  setListCategoryFilter('All')
   await loadLists()
 }
 async function renameList(event: FormEvent<HTMLFormElement>) {
