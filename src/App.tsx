@@ -2883,38 +2883,6 @@ const mobileScheduleDate =
       ? mobileScheduleMaxDate
       : normalizedMobileScheduleDate
 
-const mobileSchedulePreviousCandidate =
-  new Date(mobileScheduleDate)
-
-mobileSchedulePreviousCandidate.setDate(
-  mobileSchedulePreviousCandidate.getDate() -
-    1
-)
-
-const mobileScheduleNextCandidate =
-  new Date(mobileScheduleDate)
-
-mobileScheduleNextCandidate.setDate(
-  mobileScheduleNextCandidate.getDate() + 1
-)
-
-const mobileScheduleCanGoPrevious =
-  mobileSchedulePreviousCandidate >=
-  mobileScheduleMinDate
-
-const mobileScheduleCanGoNext =
-  mobileScheduleNextCandidate <=
-  mobileScheduleMaxDate
-
-const mobileSchedulePreviousDate =
-  mobileScheduleCanGoPrevious
-    ? mobileSchedulePreviousCandidate
-    : mobileScheduleDate
-
-const mobileScheduleNextDate =
-  mobileScheduleCanGoNext
-    ? mobileScheduleNextCandidate
-    : mobileScheduleDate
 const mobileScheduleBufferStartDate =
   new Date(mobileScheduleBufferCenterDate)
 
