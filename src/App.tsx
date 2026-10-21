@@ -10,6 +10,10 @@ import {
 import { createPortal } from 'react-dom'
 import './App.css'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
+import {
+  suggestListCategory,
+  SUGGESTED_LIST_CATEGORIES,
+} from '../Server/list-features.mjs'
 
 
 import {
@@ -3803,7 +3807,10 @@ const [newListName, setNewListName] = useState('')
 const [selectedListId, setSelectedListId] = useState<number | null>(null)
 const [newListItemText, setNewListItemText] = useState('')
 const [newListItemCategory, setNewListItemCategory] = useState('General')
+const [newListCategoryManuallySet, setNewListCategoryManuallySet] = useState(false)
 const [listCategoryFilter, setListCategoryFilter] = useState('All')
+const [listSortMode, setListSortMode] = useState<'category' | 'custom'>('category')
+const [isOrganizingList, setIsOrganizingList] = useState(false)
 const [editingListItemId, setEditingListItemId] = useState<number | null>(null)
 const [editingListItemText, setEditingListItemText] = useState('')
 const [editingListItemCategory, setEditingListItemCategory] = useState('General')
@@ -10468,6 +10475,8 @@ async function addListItem(event: FormEvent<HTMLFormElement>) {
   }
 
   setNewListItemText('')
+  setNewListItemCategory('General')
+  setNewListCategoryManuallySet(false)
   await loadLists()
 }
 
@@ -10557,6 +10566,28 @@ async function deleteListItem(itemId: number) {
 
   await loadLists()
 }
+async function organizeExistingList(listId: number) {
+  if (isOrganizingList) return
+  setIsOrganizingList(true)
+  try {
+    const response = await fetch(`/api/lists/${listId}/organize`, {
+      method: 'POST',
+    })
+    if (!response.ok) throw new Error('Organizer request failed')
+    const result: { categorized: number; remainingGeneral: number } = await response.json()
+    await loadLists()
+    setListCategoryFilter('All')
+    setListSortMode('category')
+    showAppNotification(result.categorized > 0
+      ? `Organized ${result.categorized} existing ${result.categorized === 1 ? 'item' : 'items'} by category.`
+      : 'No recognizable General items to organize.')
+  } catch {
+    showAppNotification('Could not organize this list.')
+  } finally {
+    setIsOrganizingList(false)
+  }
+}
+
 async function clearCompletedItems() {
   if (selectedListId === null) {
     return
@@ -10646,7 +10677,7 @@ async function saveListItemEdit(itemId: number) {
   await loadLists()
 }
 async function handleListDragEnd(event: DragEndEvent) {
-  if (selectedListId === null || listCategoryFilter !== 'All') {
+  if (selectedListId === null || listCategoryFilter !== 'All' || listSortMode !== 'custom') {
     return
   }
 
@@ -23272,7 +23303,9 @@ capture.captureType !== 'other' && (
   setSelectedListId(list.id)
   setNewListItemText('')
   setNewListItemCategory('General')
+  setNewListCategoryManuallySet(false)
   setListCategoryFilter('All')
+  setListSortMode('category')
   setEditingListName(list.name)
   setListNameEditing(false)
 }}
@@ -23408,11 +23441,31 @@ capture.captureType !== 'other' && (
               const categoryOptions = Array.from(new Set(
                 selectedList.items.map((item) => item.category || 'General')
               )).sort((a, b) => a.localeCompare(b))
-              const visibleItems = listCategoryFilter === 'All'
+              const filteredItems = listCategoryFilter === 'All'
                 ? selectedList.items
                 : selectedList.items.filter(
                     (item) => (item.category || 'General') === listCategoryFilter
                   )
+              const visibleItems = listSortMode === 'category'
+                ? [...filteredItems].sort((a, b) => {
+                    const categoryOf = (item: ListItem) => item.category || 'General'
+                    const orderOf = (category: string) => category === 'General'
+                      ? Number.MAX_SAFE_INTEGER
+                      : (SUGGESTED_LIST_CATEGORIES.indexOf(category) === -1
+                        ? SUGGESTED_LIST_CATEGORIES.length
+                        : SUGGESTED_LIST_CATEGORIES.indexOf(category))
+                    const categoryA = categoryOf(a)
+                    const categoryB = categoryOf(b)
+                    return orderOf(categoryA) - orderOf(categoryB)
+                      || categoryA.localeCompare(categoryB)
+                  })
+                : filteredItems
+              const canReorderList = listSortMode === 'custom'
+                && listCategoryFilter === 'All'
+              const canOrganizeExisting = selectedList.items.some(
+                (item) => (item.category || 'General') === 'General'
+                  && suggestListCategory(item.text) !== null
+              )
 
               return (
                 <>
@@ -23516,6 +23569,15 @@ capture.captureType !== 'other' && (
 
                   <div className="list-modal-actions">
   <button
+    className="list-organize-button"
+    type="button"
+    disabled={isOrganizingList || !canOrganizeExisting}
+    onClick={() => organizeExistingList(selectedList.id)}
+    title="Categorize recognizable General items without changing checkmarks or manual categories"
+  >
+    {isOrganizingList ? 'Organizing…' : 'Organize Existing Items'}
+  </button>
+  <button
     className="clear-completed-button"
     type="button"
     onClick={
@@ -23535,7 +23597,7 @@ capture.captureType !== 'other' && (
                   
 
                   <datalist id="list-category-suggestions">
-                    {['General', 'Produce', 'Dairy', 'Meat', 'Frozen', 'Pantry', 'Household', 'Errands', 'Work', 'Other'].map((name) => (
+                    {['General', ...SUGGESTED_LIST_CATEGORIES, 'Other'].map((name) => (
                       <option key={name} value={name} />
                     ))}
                   </datalist>
@@ -23553,11 +23615,13 @@ capture.captureType !== 'other' && (
                         value={
                           newListItemText
                         }
-                        onChange={(event) =>
-                          setNewListItemText(
-                            event.target.value
-                          )
-                        }
+                        onChange={(event) => {
+                          const nextText = event.target.value
+                          setNewListItemText(nextText)
+                          if (!newListCategoryManuallySet) {
+                            setNewListItemCategory(suggestListCategory(nextText) || 'General')
+                          }
+                        }}
                       />
                     </label>
                     <label className="event-field">
@@ -23569,7 +23633,10 @@ capture.captureType !== 'other' && (
                         maxLength={40}
                         placeholder="General, Produce, Errands..."
                         value={newListItemCategory}
-                        onChange={(event) => setNewListItemCategory(event.target.value)}
+                        onChange={(event) => {
+                          setNewListItemCategory(event.target.value)
+                          setNewListCategoryManuallySet(true)
+                        }}
                       />
                     </label>
 
@@ -23597,6 +23664,18 @@ capture.captureType !== 'other' && (
                       {categoryOptions.map((category) => (
                         <option key={category} value={category}>{category}</option>
                       ))}
+                    </select>
+                    <label htmlFor="list-sort-mode">Organize by</label>
+                    <select
+                      id="list-sort-mode"
+                      className="event-input"
+                      value={listSortMode}
+                      onChange={(event) => setListSortMode(
+                        event.target.value === 'custom' ? 'custom' : 'category'
+                      )}
+                    >
+                      <option value="category">Category (automatic)</option>
+                      <option value="custom">Custom order (drag)</option>
                     </select>
                   </div>
                   <div className="list-items">
@@ -23638,7 +23717,7 @@ capture.captureType !== 'other' && (
                                   editingListItemText
                                 }
                                 editingCategory={editingListItemCategory}
-                                canDrag={listCategoryFilter === 'All'}
+                                canDrag={canReorderList}
                                 onEditingTextChange={
                                   setEditingListItemText
                                 }
