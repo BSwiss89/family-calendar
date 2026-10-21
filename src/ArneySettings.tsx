@@ -82,7 +82,7 @@ export default function ArneySettings({ onChange }: Props) {
           checked={preferences.wakeWordsEnabled}
           onChange={(event) => update({ wakeWordsEnabled: event.target.checked })}
         />
-        <span><strong>Enable wake words</strong><span style={{ display: 'block' }}>Hey Arney, Arney, Computer. Works only while this page is active and you explicitly start listening; the browser may use cloud speech processing. No background or screen-locked listening.</span></span>
+        <span><strong>Enable wake words</strong><span style={{ display: 'block' }}>Hey Arney, Arney, Computer, Calendar, Hey Calendar. Works only while this page is active and you explicitly start listening; the browser may use cloud speech processing. No background or screen-locked listening.</span></span>
       </label>
       <label style={{ display: 'flex', gap: 10 }}>
         <input

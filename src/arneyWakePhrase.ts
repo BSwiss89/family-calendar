@@ -3,7 +3,7 @@ export function extractArneyWakeCommand(text: string): string | null {
   const normalized = text.trim()
   // Chrome often transcribes the spoken name "Arney" as "Arnie".
   // Accept only these explicit variants at the beginning of an utterance.
-  const match = /^(?:(?:hey[\s,]+)?(?:arney|arnie)|computer)\b[\s,.:;!?-]*(.*)$/i.exec(normalized)
+  const match = /^(?:(?:hey[\s,]+)?(?:arney|arnie|calendar)|computer)\b[\s,.:;!?-]*(.*)$/i.exec(normalized)
   return match ? match[1].trim() : null
 }
 

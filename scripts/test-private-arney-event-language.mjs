@@ -57,6 +57,8 @@ function fixture(t) {
 }
 
 test('narrow grammar accepts wake prefixes and ISO dates; rejects vague instructions safely', () => {
+  assert.deepEqual(parsePrivateArneyEventText('Hey Calendar, cancel event "Dentist Appointment" on 2026-12-20'), {action:'cancel', title:'Dentist Appointment', onDate:'2026-12-20'})
+  assert.deepEqual(parsePrivateArneyEventText('Calendar, move event "Dentist Appointment" on 2026-12-20 to 2026-12-22 at 14:30'), {action:'reschedule', title:'Dentist Appointment', onDate:'2026-12-20', newDate:'2026-12-22', newTime:'14:30'})
   assert.deepEqual(parsePrivateArneyEventText(
     'Hey Arney, please move event "Dentist Appointment" on 2026-12-20 to 2026-12-22 at 14:30.'
   ), { action:'reschedule', title:'Dentist Appointment', onDate:'2026-12-20',

@@ -9,6 +9,10 @@ test('wake words accept Arney, Chrome-transcribed Arnie, and Computer', () => {
   assert.equal(extractArneyWakeCommand('ARNIE, read my calendar'), 'read my calendar')
   assert.equal(extractArneyWakeCommand('hey arnie'), '')
   assert.equal(extractArneyWakeCommand('Computer, cancel my meeting'), 'cancel my meeting')
+  assert.equal(extractArneyWakeCommand('Calendar'), '')
+  assert.equal(extractArneyWakeCommand('calendar, add milk to groceries'), 'add milk to groceries')
+  assert.equal(extractArneyWakeCommand('Hey Calendar, what is on today?'), 'what is on today?')
+  assert.equal(extractArneyWakeCommand('HEY CALENDAR'), '')
 })
 test('wake words do not trigger on incidental mentions', () => {
   assert.equal(extractArneyWakeCommand('I met Arney yesterday'), null)
@@ -18,6 +22,9 @@ test('wake words do not trigger on incidental mentions', () => {
   assert.equal(extractArneyWakeCommand('arnies'), null)
   assert.equal(extractArneyWakeCommand('I said Arnie'), null)
   assert.equal(extractArneyWakeCommand('hey Armie'), null)
+  assert.equal(extractArneyWakeCommand('calendarize this'), null)
+  assert.equal(extractArneyWakeCommand('I opened the calendar'), null)
+  assert.equal(extractArneyWakeCommand('hey calendaring'), null)
 })
 test('text fallback appears on the third failure', () => {
   assert.equal(shouldOfferArneyTextFallback(0), false)

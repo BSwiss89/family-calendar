@@ -5,7 +5,7 @@ Status: Arney voice controls are implemented in draft PR #43 and must pass revie
 ## Getting started after approved deployment
 1. Open **Arney settings** (gear). Explicitly enable **Allow browser speech recognition** only if comfortable with browser-provider cloud transcription. This does not send audio to an OpenAI API or start listening automatically.
 2. On mobile, **tap** the blue + for the existing Quick Add sheet. **Hold** it for voice; a listening indicator appears, and **release** to finish speech recognition and submit a single command. Canceling the touch cancels the microphone session.
-3. On desktop/tablet, also enable wake words in Settings and click **Start Arney wake words** to begin foreground listening. Say "Hey Arney, [request]" or just "Hey Arney" and then speak the request during the next listening round. After Arney finishes processing the request and speaking its reply, the foreground listener resumes automatically. Click Stop to disable; it must stay off until explicitly restarted. The listener also stops when the page becomes hidden or permission is disabled.
+3. On desktop/tablet, also enable wake words in Settings and click **Start Arney wake words** to begin foreground listening. Say "Hey Arney, [request]", "Hey Calendar, [request]", or just the wake phrase and then speak the request during the next listening round. After Arney finishes processing the request and speaking its reply, the foreground listener resumes automatically. Click Stop to disable; it must stay off until explicitly restarted. The listener also stops when the page becomes hidden or permission is disabled.
 4. After a spoken command, review the transcript and any mutation preview before confirming. Destructive existing cancellation/reschedule flows always ask for confirmation.
 5. If the browser does not support recognition or access is disallowed, Arney offers typed input. Otherwise text fallback appears after three failed voice attempts; a recognized command may also be edited.
 
@@ -32,7 +32,7 @@ Status: Arney voice controls are implemented in draft PR #43 and must pass revie
 
 ## User experience
 - Mobile: press and hold the microphone control to capture speech; release to end capture and submit. Cancel on pointer cancellation; do not accidentally submit. Provide visible listening/processing/error states.
-- Desktop and tablet: opt-in wake word detection for "hey arney", "arney", and "computer". Make the phrase list extensible. Allow wake-word detection only while microphone permission and the active client support it; clearly indicate when unavailable or disabled.
+- Desktop and tablet: opt-in wake word detection for "hey arney", "arney", "computer", "calendar", and "hey calendar". Make the phrase list extensible. Allow wake-word detection only while microphone permission and the active client support it; clearly indicate when unavailable or disabled.
 - Do not show a text input by default. After three consecutive genuine speech recognition/understanding failures, offer text as an optional fallback. Reset the counter after a successful understanding. Clarification questions do not count as failures.
 - Settings: voice response mode (always, when needed, silent), wake-word toggle, and confirmation-before-changes toggle. Persist settings across restarts, with a safe default of wake words disabled until explicitly enabled and confirmation enabled.
 - In all modes provide visual state and results, even if speech output is enabled.
