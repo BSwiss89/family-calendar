@@ -26,6 +26,9 @@ jobs:
         run: npm run build
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
+      - name: Test private Arney event selection and confirmation in synthetic households
+        run: |
+          node --test scripts/test-arney-event-selection.mjs scripts/test-arney-private-event-candidate.mjs scripts/test-private-arney-event-language.mjs scripts/test-private-arney-confirmed-actions.mjs
       - name: Check recovery test JavaScript syntax
         run: node --check scripts/verify-sqlite-recovery.mjs
       - name: Check migration preflight JavaScript syntax

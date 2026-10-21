@@ -22,13 +22,17 @@ async function postPrivateEvent<T>(endpoint: string, payload: object): Promise<T
 
 export default function ArneyPrivateEventFlow({data,onRefresh,onSuccess,onDismiss}: Props) {
   async function onPreview(request: PreviewRequest): Promise<Confirm> {
-    const result = await postPrivateEvent<Confirm>('/api/ai/event-action-preview', request)
-    if (result.status !== 'ready_for_confirmation' ||
-        result.requiresConfirmation !== true || !result.previewToken ||
-        result.action !== request.action || result.eventId !== request.eventId) {
+    // Direct preview endpoint returns a signed preview without a status field.
+    // Only the text-interpreter endpoint wraps it in ready_for_confirmation.
+    const result = await postPrivateEvent<Omit<Confirm, 'status'>>(
+      '/api/ai/event-action-preview', request,
+    )
+    if (result.requiresConfirmation !== true || !result.previewToken ||
+        result.action !== request.action || result.eventId !== request.eventId ||
+        !result.current || !result.expiresAt) {
       throw Error('The preview did not match the selected event.')
     }
-    return result
+    return { ...result, status: 'ready_for_confirmation' }
   }
 
   async function onConfirm(token: string): Promise<void> {
