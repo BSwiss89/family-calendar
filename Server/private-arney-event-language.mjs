@@ -38,7 +38,7 @@ export function parsePrivateArneyEventText(text) {
   // Wake prefix is optional, but does not grant extra privileges.
   const phrase = text.trim().replace(/[.!?]$/, '').trim()
     .replace(/^(?:(?:hey[ ,]+)?(?:arney|calendar)[ ,]+|computer[ ,]+)?please\s+/i, '')
-    .replace(/^(?:(?:hey[ ,]+)?arney[ ,]+|computer[ ,]+)/i, '')
+    .replace(/^(?:(?:hey[ ,]+)?(?:arney|arnie|calendar)[ ,]+|computer[ ,]+)/i, '')
   const cancellation = CANCEL.exec(phrase)
   const moving = MOVE.exec(phrase)
   const match = cancellation ?? moving

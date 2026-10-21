@@ -9,7 +9,8 @@ import { installPrivateEventSourceOutbox } from '../Server/private-event-source-
 import {
   parsePrivateArneyEventText, interpretPrivateArneyEventAction,
 } from '../Server/private-arney-event-language.mjs'
-import { confirmPrivateArneyAction } from '../Server/private-arney-confirmed-actions.mjs'
+import { confirmPrivateArneyAction, previewPrivateArneyAction } from '../Server/private-arney-confirmed-actions.mjs'
+import { selectionPreviewRequest } from '../src/arneyEventSelection.mjs'
 
 const now = new Date('2026-10-19T20:00:00Z').getTime()
 
@@ -175,4 +176,32 @@ test('quoted title matching cannot inject SQL or broaden a tenant lookup', t => 
   assert.equal(result.status,'ready_for_confirmation')
   assert.equal(result.eventId,1)
   assert.equal(f.familyA.prepare('SELECT COUNT(*) n FROM events').get().n,1)
+})
+
+test('choosing a duplicate only asks the server for a fresh preview, not a write', t => {
+  const f = fixture(t)
+  f.familyA.prepare('INSERT INTO events(title,date,time) VALUES (?,?,?)')
+    .run('Dentist Appointment', '2026-12-20', '15:00')
+  const result = interpretPrivateArneyEventAction({
+    ...f.argsA,
+    text:'Hey Calendar, move event "Dentist Appointment" on 2026-12-20 to 2026-12-22 at 14:30',
+  })
+  assert.equal(result.status, 'needs_selection')
+  const id = result.options.find(option => option.time === '15:00').eventId
+  const request = selectionPreviewRequest(result, id)
+  assert.deepEqual(request, {
+    action:'reschedule',eventId:id,newDate:'2026-12-22',newTime:'14:30',
+  })
+  assert.equal(result.previewToken, undefined)
+  assert.equal(f.familyA.prepare('SELECT date FROM events WHERE id=?').get(id).date,'2026-12-20')
+  const preview = previewPrivateArneyAction({...f.argsA, request})
+  assert.equal(preview.requiresConfirmation,true)
+  assert.equal(preview.eventId,id)
+  assert.equal(f.familyA.prepare('SELECT date FROM events WHERE id=?').get(id).date,'2026-12-20')
+  assert.deepEqual(confirmPrivateArneyAction({
+    ...f.argsA,request:{confirm:true,previewToken:preview.previewToken},
+    now:now+1000,beforeWrite:()=>{},
+  }), {success:true,action:'reschedule',eventId:id})
+  assert.equal(f.familyA.prepare('SELECT date FROM events WHERE id=?').get(id).date,'2026-12-22')
+  assert.equal(f.familyA.prepare('SELECT date FROM events WHERE id=1').get().date,'2026-12-20')
 })

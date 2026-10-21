@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { selectionPreviewRequest } from './arneyEventSelection.mjs'
 import './ArneyEventDecision.css'
 
 type Option = {
@@ -8,7 +9,7 @@ type Option = {
   time: string | null
   supported: boolean
 }
-type PreviewRequest = {
+export type PreviewRequest = {
   action: 'cancel' | 'reschedule'
   eventId?: number
   newDate?: string
@@ -22,7 +23,8 @@ type Selection = {
   options: Option[]
   previewRequest: Omit<PreviewRequest, 'eventId'>
 }
-type Confirm = {
+export type Confirm = {
+  eventId: number
   status: 'ready_for_confirmation'
   action: 'cancel' | 'reschedule'
   current: { title: string; date: string; time: string | null }
@@ -48,14 +50,14 @@ export default function ArneyEventDecision({
   const [preview, setPreview] = useState<Confirm | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [confirmationFailed, setConfirmationFailed] = useState(false)
   const activeRequest = useRef(false)
-  const confirmed = preview ?? (data.status === 'ready_for_confirmation' ? data : null)
+  const confirmed = confirmationFailed ? null : (preview ?? (data.status === 'ready_for_confirmation' ? data : null))
 
   async function choose(option: Option) {
     if (activeRequest.current || !option.supported || data.status !== 'needs_selection') return
-    const request: PreviewRequest = {
-      ...data.previewRequest, eventId: option.eventId,
-    }
+    const request = selectionPreviewRequest(data, option.eventId)
+    if (!request) return
     activeRequest.current = true
     setBusy(true)
     setError('')
@@ -78,6 +80,12 @@ export default function ArneyEventDecision({
 
   async function confirm() {
     if (!confirmed || busy || activeRequest.current) return
+    if (!Number.isFinite(Date.parse(confirmed.expiresAt)) ||
+        Date.now() >= Date.parse(confirmed.expiresAt)) {
+      setConfirmationFailed(true)
+      setError('This approval expired. Start a new request to review the event.')
+      return
+    }
     activeRequest.current = true
     setBusy(true)
     setError('')
@@ -87,7 +95,8 @@ export default function ArneyEventDecision({
       onDismiss()
     } catch {
       setPreview(null)
-      setError('The event could not be changed. Review it again before confirming.')
+      setConfirmationFailed(true)
+      setError('The change could not be confirmed. Refresh your calendar before making another request.')
     } finally {
       activeRequest.current = false
       setBusy(false)
@@ -130,6 +139,7 @@ export default function ArneyEventDecision({
         </>
       ) : null}
       {error && <p role="alert">{error}</p>}
+      {confirmationFailed && <button type="button" onClick={onDismiss}>Close review</button>}
     </section>
   )
 }
