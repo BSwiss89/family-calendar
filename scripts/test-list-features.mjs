@@ -18,7 +18,7 @@ test('category migration is additive, repeatable, and keeps old rows', () => {
     db.prepare('INSERT INTO list_items (list_id, text, completed, sort_order) VALUES (1, ?, 1, 1)').run('Milk')
     ensureListItemCategories(db)
     ensureListItemCategories(db)
-    assert.deepEqual(db.prepare('SELECT text, completed, category FROM list_items').get(), {
+    assert.deepEqual({ ...db.prepare('SELECT text, completed, category FROM list_items').get() }, {
       text:'Milk', completed:1, category:'General',
     })
   } finally { db.close() }
