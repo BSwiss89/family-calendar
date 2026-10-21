@@ -9,7 +9,6 @@ import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boo
 import {
   normalizeListCategory,
   ensureListItemCategories,
-  duplicateListInDatabase,
 } from './list-features.mjs'
 
 const app = express()
@@ -6755,20 +6754,6 @@ app.post('/api/lists', (request, response) => {
     name: cleanName,
     items: [],
   })
-})
-
-// Reuse a list in one transaction; the source items stay untouched and each
-// new item starts unchecked. This endpoint also works for empty lists.
-app.post('/api/lists/:id/duplicate', (request, response) => {
-  const sourceId = Number(request.params.id)
-  const name = request.body?.name
-  if (!Number.isSafeInteger(sourceId) || sourceId <= 0 ||
-      typeof name !== 'string' || name.trim().length < 1 || name.trim().length > 100) {
-    return response.status(400).json({ error: 'A valid list and new name are required.' })
-  }
-  const duplicated = duplicateListInDatabase(database, sourceId, name.trim())
-  if (!duplicated) return response.status(404).json({ error: 'List not found.' })
-  return response.status(201).json(duplicated)
 })
 
 app.delete('/api/lists/:id', (request, response) => {

@@ -26,7 +26,7 @@ jobs:
         run: npm run build
       - name: Verify Duplicate Event drafts are independent of their source
         run: node --test scripts/test-duplicate-event.mjs
-      - name: Test list categories, additive migration, and atomic reuse
+      - name: Test list categories and additive migration
         run: node --test scripts/test-list-features.mjs
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs

@@ -10713,35 +10713,6 @@ async function handleListDragEnd(event: DragEndEvent) {
     await loadLists()
   }
 }
-async function reuseList(list: CalendarList) {
-  const proposal = window.prompt('Name your reusable list copy:', `${list.name} (Copy)`)
-  if (proposal === null) return
-  const name = proposal.trim()
-  if (!name || name.length > 100) {
-    showAppNotification('Enter a name of 100 characters or fewer.')
-    return
-  }
-  try {
-    const response = await fetch(`/api/lists/${list.id}/duplicate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    })
-    if (!response.ok) throw new Error('Could not copy list')
-    const created = await response.json()
-    await loadLists()
-    setSelectedListId(created.id)
-    setEditingListName(created.name)
-    setListNameEditing(false)
-    setEditingListItemId(null)
-    setNewListItemText('')
-    setNewListItemCategory('General')
-    setListCategoryFilter('All')
-    showAppNotification(`Created ${name} with unchecked items.`)
-  } catch {
-    showAppNotification('Could not reuse this list.')
-  }
-}
 async function deleteList(listId: number) {
   const shouldDelete = window.confirm(
     'Delete this entire list and all of its items?'
@@ -23544,9 +23515,6 @@ capture.captureType !== 'other' && (
                   </div>
 
                   <div className="list-modal-actions">
-  <button className="list-reuse-button" type="button" onClick={() => reuseList(selectedList)}>
-    Reuse List
-  </button>
   <button
     className="clear-completed-button"
     type="button"

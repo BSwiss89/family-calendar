@@ -18470,18 +18470,6 @@ max-height:
 .list-category-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
 .list-category-toolbar label { font-size: 13px; font-weight: 700; }
 .list-category-toolbar select { flex: 1; min-width: 130px; max-width: 240px; }
-.list-reuse-button {
-  min-height: 44px;
-  padding: 9px 14px;
-  border: 1px solid #c8c6e9;
-  border-radius: 10px;
-  background: #efeeff;
-  color: #40377c;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 750;
-  cursor: pointer;
-}
 @media (max-width: 600px) {
   .list-item-row { gap: 6px; padding-inline: 6px; }
   .list-item-edit-area { flex-wrap: wrap; }

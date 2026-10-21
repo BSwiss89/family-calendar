@@ -17,27 +17,3 @@ export function ensureListItemCategories(database) {
     database.exec("ALTER TABLE list_items ADD COLUMN category TEXT NOT NULL DEFAULT 'General'")
   }
 }
-
-export function duplicateListInDatabase(database, sourceId, newName) {
-  const original = database.prepare('SELECT id FROM lists WHERE id = ?').get(sourceId)
-  if (!original) return null
-  database.exec('BEGIN IMMEDIATE')
-  try {
-    const created = database.prepare('INSERT INTO lists (name) VALUES (?)').run(newName)
-    const newId = Number(created.lastInsertRowid)
-    const originalItems = database.prepare(
-      'SELECT text, category, sort_order FROM list_items WHERE list_id = ? ORDER BY sort_order, id'
-    ).all(sourceId)
-    const insert = database.prepare(
-      'INSERT INTO list_items (list_id, text, category, completed, sort_order) VALUES (?, ?, ?, 0, ?)'
-    )
-    originalItems.forEach((item, index) => {
-      insert.run(newId, item.text, item.category, index + 1)
-    })
-    database.exec('COMMIT')
-    return { id: newId, name: newName, copiedItems: originalItems.length }
-  } catch (error) {
-    database.exec('ROLLBACK')
-    throw error
-  }
-}
