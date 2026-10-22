@@ -18863,12 +18863,15 @@ max-height:
     display: none;
   }
   .calendar-app:has(.month-swipe-surface) .month-event-title {
-    display: block;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
     flex: 1 1 auto;
     width: 100%;
     min-width: 0;
     overflow: hidden;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
     text-overflow: ellipsis;
     font-weight: 750;
     font-size: 10px;
