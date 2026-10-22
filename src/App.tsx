@@ -3421,6 +3421,8 @@ const [storeFilter, setStoreFilter] = useState('all')
 const [shoppingStoreSettingsOpen, setShoppingStoreSettingsOpen] = useState(false)
 const [newShoppingStoreName, setNewShoppingStoreName] = useState('')
 const [storeSortBusy, setStoreSortBusy] = useState(false)
+const [listItemAddOpen, setListItemAddOpen] = useState(false)
+const [listMoreOpen, setListMoreOpen] = useState(false)
 const [captureInbox, setCaptureInbox] =
   useState<CaptureInboxItem[]>([])
 const [dayTimelineNow, setDayTimelineNow] =
@@ -10200,6 +10202,7 @@ async function addListItem(event: FormEvent<HTMLFormElement>) {
   setNewListItemText('')
   setNewListItemCategory('General')
   setNewListCategoryManuallySet(false)
+  setListItemAddOpen(false)
   await loadLists()
 }
 
@@ -23057,6 +23060,8 @@ capture.captureType !== 'other' && (
   setListCategoryFilter('All')
   setListSortMode(list.store_enabled ? 'store' : 'category')
   setStoreFilter('all')
+  setListItemAddOpen(false)
+  setListMoreOpen(false)
   setEditingListName(list.name)
   if (list.store_enabled) void sortListByStores(list.id, false)
   setListNameEditing(false)
@@ -23168,6 +23173,8 @@ capture.captureType !== 'other' && (
           className="list-modal-overlay"
           onClick={() => {
             setSelectedListId(null)
+            setListItemAddOpen(false)
+            setListMoreOpen(false)
             setNewListItemText('')
             setEditingListItemId(null)
             setEditingListItemText('')
@@ -23298,11 +23305,9 @@ capture.captureType !== 'other' && (
     </div>
   )}
 
-  <p>
-    {selectedList.items.length}{' '}
-    {selectedList.items.length === 1
-      ? 'item'
-      : 'items'}
+  <p className="list-header-count">
+    {selectedList.items.length} {selectedList.items.length === 1 ? 'item' : 'items'}
+    {selectedList.store_enabled && <span className="list-compact-sorting-status">Store sorting: On</span>}
   </p>
 </div>
 
@@ -23312,6 +23317,8 @@ capture.captureType !== 'other' && (
                       aria-label="Close list"
                       onClick={() => {
                         setSelectedListId(null)
+                        setListItemAddOpen(false)
+                        setListMoreOpen(false)
                         setNewListItemText('')
                         setEditingListItemId(
                           null
@@ -23325,106 +23332,52 @@ capture.captureType !== 'other' && (
                     </button>
                   </div>
 
-                  <div className="list-modal-actions">
-  <button className="list-organize-button list-store-enable" type="button"
-    onClick={() => void enableStoreSorting(selectedList.id, !selectedList.store_enabled)}>
-    {selectedList.store_enabled ? 'Store sorting: On' : 'Enable store sorting'}
-  </button>
-  {selectedList.store_enabled && <>
-    <button className="list-organize-button" type="button" disabled={storeSortBusy}
-      onClick={() => void sortListByStores(selectedList.id, false)}>Sort by store</button>
-    <button className="list-organize-button" type="button" disabled={storeSortBusy}
-      onClick={() => void sortListByStores(selectedList.id, true)}>
-      {storeSortBusy ? 'Sorting…' : 'Ask Arney (unknown items)'}
-    </button>
-  </>}
-  <button className="list-organize-button" type="button" onClick={() => {setShoppingStoreSettingsOpen(true);void loadShoppingStores()}}>
-    Manage stores
-  </button>
-  <button
-    className="list-organize-button"
-    type="button"
-    disabled={isOrganizingList || !canOrganizeExisting}
-    onClick={() => organizeExistingList(selectedList.id)}
-    title="Categorize recognizable General items without changing checkmarks or manual categories"
-  >
-    {isOrganizingList ? 'Organizing…' : 'Organize Existing Items'}
-  </button>
-  <button
-    className="clear-completed-button"
-    type="button"
-    onClick={
-      clearCompletedItems
-    }
-    disabled={
-      !selectedList.items.some(
-        (item) =>
-          item.completed
-      )
-    }
-  >
-    Clear Completed
-  </button>
-</div>
-
-                  
+                  <div className="list-compact-actions">
+                    <button className="list-add-primary" type="button" onClick={() => {
+                      setNewListItemText('')
+                      setNewListItemCategory('General')
+                      setNewListCategoryManuallySet(false)
+                      setListMoreOpen(false)
+                      setListItemAddOpen(true)
+                    }}>+ Add Item</button>
+                    {selectedList.store_enabled && <button className="list-ask-arney"
+                      type="button" disabled={storeSortBusy}
+                      onClick={() => void sortListByStores(selectedList.id, true)}>
+                      {storeSortBusy ? 'Sorting…' : '✦ Ask Arney'}
+                    </button>}
+                    <div className="list-more-control">
+                      <button className="list-more-button" type="button"
+                        aria-haspopup="menu" aria-expanded={listMoreOpen}
+                        onClick={() => setListMoreOpen(open => !open)}>••• More</button>
+                      {listMoreOpen && <div className="list-more-menu" role="menu">
+                        {selectedList.store_enabled && <>
+                          <button role="menuitem" type="button" disabled={storeSortBusy}
+                            onClick={() => {setListMoreOpen(false);void sortListByStores(selectedList.id, false)}}>
+                            Sort stores again</button>
+                          <button role="menuitem" type="button"
+                            onClick={() => {setListMoreOpen(false);setStoreFilter('all');setListCategoryFilter('All');setListSortMode(customSorting ? 'store' : 'custom')}}>
+                            {customSorting ? 'Use automatic sorting' : 'Custom order (drag)'}</button>
+                        </>}
+                        <button role="menuitem" type="button" disabled={isOrganizingList || !canOrganizeExisting}
+                          onClick={() => {setListMoreOpen(false);void organizeExistingList(selectedList.id)}}>
+                          Organize existing categories</button>
+                        {!selectedList.store_enabled && <button role="menuitem" type="button"
+                          onClick={() => {setListMoreOpen(false);void enableStoreSorting(selectedList.id, true)}}>
+                          Enable store sorting</button>}
+                        {selectedList.store_enabled && <button role="menuitem" type="button"
+                          onClick={() => {setListMoreOpen(false);void enableStoreSorting(selectedList.id, false)}}>
+                          Disable store sorting</button>}
+                        <button role="menuitem" type="button" disabled={!selectedList.items.some(item => item.completed)}
+                          onClick={() => {setListMoreOpen(false);void clearCompletedItems()}}>Clear completed</button>
+                      </div>}
+                    </div>
+                  </div>
 
                   <datalist id="list-category-suggestions">
                     {['General', ...SUGGESTED_LIST_CATEGORIES, 'Other'].map((name) => (
                       <option key={name} value={name} />
                     ))}
                   </datalist>
-                  <form
-                    className="people-form list-quick-entry-form"
-                    onSubmit={addListItem}
-                  >
-                    <label className="event-field">
-                      Add Item
-
-                      <input
-                        className="event-input"
-                        type="text"
-                        placeholder="Example: Milk"
-                        value={
-                          newListItemText
-                        }
-                        onChange={(event) => {
-                          const nextText = event.target.value
-                          setNewListItemText(nextText)
-                          if (!newListCategoryManuallySet) {
-                            setNewListItemCategory(suggestListCategory(nextText) || 'General')
-                          }
-                        }}
-                      />
-                    </label>
-                    <label className="event-field">
-                      Category
-                      <input
-                        className="event-input"
-                        type="text"
-                        list="list-category-suggestions"
-                        maxLength={40}
-                        placeholder="General, Produce, Errands..."
-                        value={newListItemCategory}
-                        onChange={(event) => {
-                          setNewListItemCategory(event.target.value)
-                          setNewListCategoryManuallySet(true)
-                        }}
-                      />
-                    </label>
-
-                    <button
-                      className="add-event-button"
-                      type="submit"
-                      disabled={
-                        newListItemText.trim() ===
-                        ''
-                      }
-                    >
-                      Add Item
-                    </button>
-                  </form>
-
                   {selectedList.store_enabled && <div className="shopping-store-tabs" role="group" aria-label="Filter shopping items by store">
                     <button type="button" className={storeFilter === 'all' ? 'selected' : ''}
                       aria-pressed={storeFilter === 'all'} onClick={() => setStoreFilter('all')}>All</button>
@@ -23557,6 +23510,42 @@ capture.captureType !== 'other' && (
         </div>,
         document.body
       )}
+    {selectedListId !== null && listItemAddOpen && createPortal(
+      <div className="list-item-add-overlay" onClick={() => setListItemAddOpen(false)}>
+        <section className="list-item-add-sheet" role="dialog" aria-modal="true"
+          aria-labelledby="list-item-add-heading" onClick={event => event.stopPropagation()}>
+          <div className="list-item-add-handle" aria-hidden="true" />
+          <div className="list-item-add-heading">
+            <h2 id="list-item-add-heading">Add Item</h2>
+            <button type="button" aria-label="Close Add Item" className="list-item-add-close"
+              onClick={() => setListItemAddOpen(false)}>×</button>
+          </div>
+          <form className="list-item-add-form" onSubmit={addListItem}>
+            <label className="event-field">Item name
+              <input className="event-input" type="text" maxLength={200}
+                placeholder="Example: Milk" value={newListItemText}
+                onChange={event => {
+                  const next = event.target.value
+                  setNewListItemText(next)
+                  if (!newListCategoryManuallySet) setNewListItemCategory(suggestListCategory(next) || 'General')
+                }}
+                autoFocus />
+            </label>
+            <label className="event-field">Category
+              <input className="event-input" type="text" maxLength={40}
+                list="list-category-suggestions" value={newListItemCategory}
+                placeholder="General, Produce, Dairy..."
+                onChange={event => {setNewListItemCategory(event.target.value);setNewListCategoryManuallySet(true)}} />
+            </label>
+            <div className="list-item-add-buttons">
+              <button type="button" className="list-item-add-cancel"
+                onClick={() => setListItemAddOpen(false)}>Cancel</button>
+              <button type="submit" className="list-item-add-save" disabled={!newListItemText.trim()}>Save</button>
+            </div>
+          </form>
+        </section>
+      </div>, document.body
+    )}
   </section>
 )}
 {shoppingStoreSettingsOpen && createPortal(
