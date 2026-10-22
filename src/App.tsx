@@ -5434,9 +5434,19 @@ async function savePeopleOrder() {
 
   async function loadLists() {
   const response = await fetch('/api/lists')
-  const data = await response.json()
-
-  setLists(data)
+  if (!response.ok) {
+    showAppNotification('Could not load lists.')
+    return
+  }
+  // SQLite stores booleans as INTEGER 0/1. Normalize at the API boundary:
+  // rendering a numeric zero with {value && <Control />} prints "0" in React.
+  const data: Array<Omit<CalendarList, 'store_enabled'> & {
+    store_enabled?: number | boolean
+  }> = await response.json()
+  setLists(data.map(list => ({
+    ...list,
+    store_enabled: list.store_enabled === true || list.store_enabled === 1,
+  })))
 }
 
 async function loadShoppingStores() {
@@ -5490,8 +5500,12 @@ async function enableStoreSorting(listId: number, enabled: boolean) {
     body:JSON.stringify({enabled}),
   })
   if (!response.ok) { showAppNotification('Could not update store sorting.'); return }
+  // Always return to the appropriate automatic mode when store sorting
+  // changes. A previous Custom order must not leave drag grips in this view.
   setListSortMode(enabled ? 'store' : 'category')
   setStoreFilter('all')
+  setListCategoryFilter('All')
+  setOpenListSwipe(null)
   await loadLists()
 }
 async function sortListByStores(listId: number, askArney: boolean) {
@@ -10364,7 +10378,8 @@ async function organizeExistingList(listId: number) {
     const result: { categorized: number; remainingGeneral: number } = await response.json()
     await loadLists()
     setListCategoryFilter('All')
-    setListSortMode('category')
+    setListSortMode(lists.find(list => list.id === listId)?.store_enabled ? 'store' : 'category')
+    setOpenListSwipe(null)
     showAppNotification(result.categorized > 0
       ? `Organized ${result.categorized} existing ${result.categorized === 1 ? 'item' : 'items'} by category.`
       : 'No recognizable General items to organize.')
@@ -23268,6 +23283,7 @@ capture.captureType !== 'other' && (
               if (!selectedList) {
                 return null
               }
+              const storeSortingEnabled = selectedList.store_enabled === true
               const categoryOptions = Array.from(new Set(
                 selectedList.items.map(item => item.category || 'General')
               )).sort((x, y) => x.localeCompare(y))
@@ -23288,19 +23304,19 @@ capture.captureType !== 'other' && (
                 shoppingStores.find(store => store.id === item.store_id)?.sort_order ?? Number.MAX_SAFE_INTEGER
               const customSorting = listSortMode === 'custom'
               const orderedItems = customSorting ? filteredItems
-                : selectedList.store_enabled
+                : storeSortingEnabled
                   ? [...filteredItems].sort((x, y) => storeRank(x) - storeRank(y)
                       || ((x.store_id ?? 0) - (y.store_id ?? 0))
                       || categoryCompare(x, y))
                   : [...filteredItems].sort(categoryCompare)
-              const storeVisibleItems = selectedList.store_enabled && storeFilter !== 'all'
+              const storeVisibleItems = storeSortingEnabled && storeFilter !== 'all'
                 ? orderedItems.filter(item => storeFilter === 'unsorted'
                     ? item.store_id == null : item.store_id === Number(storeFilter))
                 : orderedItems
               const visibleStores = shoppingStores.filter(store =>
                 store.enabled || selectedList.items.some(item => item.store_id === store.id))
               const canReorderList = customSorting && listCategoryFilter === 'All'
-                && (!selectedList.store_enabled || storeFilter === 'all')
+                && (!storeSortingEnabled || storeFilter === 'all')
               const canOrganizeExisting = selectedList.items.some(item =>
                 (item.category || 'General') === 'General' && suggestListCategory(item.text) !== null)
               return (
@@ -23378,7 +23394,7 @@ capture.captureType !== 'other' && (
 
   <p className="list-header-count">
     {selectedList.items.length} {selectedList.items.length === 1 ? 'item' : 'items'}
-    {selectedList.store_enabled && <span className="list-compact-sorting-status">Store sorting: On</span>}
+    {storeSortingEnabled && <span className="list-compact-sorting-status">Store sorting: On</span>}
   </p>
 </div>
 
@@ -23412,7 +23428,7 @@ capture.captureType !== 'other' && (
                       setListMoreOpen(false)
                       setListItemAddOpen(true)
                     }}>+ Add Item</button>
-                    {selectedList.store_enabled && <button className="list-ask-arney"
+                    {storeSortingEnabled && <button className="list-ask-arney"
                       type="button" disabled={storeSortBusy}
                       onClick={() => void sortListByStores(selectedList.id, true)}>
                       {storeSortBusy ? 'Sorting…' : '✦ Ask Arney'}
@@ -23422,7 +23438,7 @@ capture.captureType !== 'other' && (
                         aria-haspopup="menu" aria-expanded={listMoreOpen}
                         onClick={() => setListMoreOpen(open => !open)}>••• More</button>
                       {listMoreOpen && <div className="list-more-menu" role="menu">
-                        {selectedList.store_enabled && <button role="menuitem" type="button"
+                        {storeSortingEnabled && <button role="menuitem" type="button"
                           disabled={storeSortBusy}
                           onClick={() => {setListMoreOpen(false);void sortListByStores(selectedList.id, false)}}>
                           Sort stores again</button>}
@@ -23431,16 +23447,16 @@ capture.captureType !== 'other' && (
                             setListMoreOpen(false)
                             setStoreFilter('all')
                             setListCategoryFilter('All')
-                            setListSortMode(customSorting ? (selectedList.store_enabled ? 'store' : 'category') : 'custom')
+                            setListSortMode(customSorting ? (storeSortingEnabled ? 'store' : 'category') : 'custom')
                           }}>
                           {customSorting ? 'Use automatic sorting' : 'Custom order (drag)'}</button>
                         <button role="menuitem" type="button" disabled={isOrganizingList || !canOrganizeExisting}
                           onClick={() => {setListMoreOpen(false);void organizeExistingList(selectedList.id)}}>
                           Organize existing categories</button>
-                        {!selectedList.store_enabled && <button role="menuitem" type="button"
+                        {!storeSortingEnabled && <button role="menuitem" type="button"
                           onClick={() => {setListMoreOpen(false);void enableStoreSorting(selectedList.id, true)}}>
                           Enable store sorting</button>}
-                        {selectedList.store_enabled && <button role="menuitem" type="button"
+                        {storeSortingEnabled && <button role="menuitem" type="button"
                           onClick={() => {setListMoreOpen(false);void enableStoreSorting(selectedList.id, false)}}>
                           Disable store sorting</button>}
                         <button role="menuitem" type="button" disabled={!selectedList.items.some(item => item.completed)}
@@ -23454,7 +23470,7 @@ capture.captureType !== 'other' && (
                       <option key={name} value={name} />
                     ))}
                   </datalist>
-                  {selectedList.store_enabled && <div className="shopping-store-tabs" role="group" aria-label="Filter shopping items by store">
+                  {storeSortingEnabled && <div className="shopping-store-tabs" role="group" aria-label="Filter shopping items by store">
                     <button type="button" className={storeFilter === 'all' ? 'selected' : ''}
                       aria-pressed={storeFilter === 'all'} onClick={() => setStoreFilter('all')}>All</button>
                     {visibleStores.map(store => <button type="button" key={store.id}
@@ -23504,7 +23520,7 @@ capture.captureType !== 'other' && (
                         >
                           {storeVisibleItems.map((item, index) => (
                             <Fragment key={item.id}>
-                              {selectedList.store_enabled && storeFilter === 'all'
+                              {storeSortingEnabled && storeFilter === 'all'
                                 && !customSorting && (index === 0 || storeVisibleItems[index - 1].store_id !== item.store_id)
                                 && <div className="list-store-group-heading">
                                   {shoppingStores.find(store => store.id === item.store_id)?.name ?? 'Unsorted'}
@@ -23524,7 +23540,7 @@ capture.captureType !== 'other' && (
                                 }
                                 editingCategory={editingListItemCategory}
                                 editingStoreId={editingListItemStoreId}
-                                showStore={Boolean(selectedList.store_enabled)}
+                                showStore={Boolean(storeSortingEnabled)}
                                 stores={shoppingStores}
                                 canDrag={canReorderList}
                                 onEditingTextChange={
