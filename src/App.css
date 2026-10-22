@@ -19909,6 +19909,9 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   height: 330px;
   display: block;
   overflow: hidden;
+  /* The mockup fades its final band seamlessly into the warm page. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 68%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 68%, transparent 100%);
 }
 .lists-overview .lists-overview-heading,
 .lists-overview .list-page-grid {position:relative;z-index:1;}
