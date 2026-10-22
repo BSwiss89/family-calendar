@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -20,6 +21,7 @@ import {
   closestCenter,
   DndContext,
   KeyboardSensor,
+  useDndContext,
   PointerSensor,
   useSensor,
   useSensors,
@@ -1241,12 +1243,22 @@ type ListItem = {
   text: string
   completed: boolean
   category?: string
+  store_id?: number | null
+  store_manual?: boolean
   created_at?: string
+}
+
+type ShoppingStore = {
+  id: number
+  name: string
+  enabled: boolean
+  sort_order: number
 }
 
 type CalendarList = {
   id: number
   name: string
+  store_enabled?: boolean
   created_at?: string
   items: ListItem[]
 }
@@ -1597,14 +1609,20 @@ type SortableListItemProps = {
   isEditing: boolean
   editingText: string
   editingCategory?: string
+  editingStoreId?: number | null
+  showStore?: boolean
+  stores?: ShoppingStore[]
   canDrag?: boolean
   onEditingTextChange: (text: string) => void
   onEditingCategoryChange?: (category: string) => void
+  onEditingStoreChange?: (storeId: number | null) => void
   onStartEdit: (item: ListItem) => void
   onSaveEdit: (itemId: number) => void
   onCancelEdit: () => void
   onToggle: (item: ListItem) => void
   onDelete: (itemId: number) => void
+  swipeSide: 'edit' | 'delete' | null
+  onSwipeChange: (side: 'edit' | 'delete' | null) => void
 }
 
 type HomeWidgetId =
@@ -1670,97 +1688,189 @@ function SortableListItem({
   isEditing,
   editingText,
   editingCategory = 'General',
+  editingStoreId = null,
+  showStore = false,
+  stores = [],
   canDrag = true,
   onEditingTextChange,
   onEditingCategoryChange = () => {},
+  onEditingStoreChange = () => {},
   onStartEdit,
   onSaveEdit,
   onCancelEdit,
   onToggle,
   onDelete,
+  swipeSide,
+  onSwipeChange,
 }: SortableListItemProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: item.id, disabled: !canDrag })
+  const { active } = useDndContext()
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({
+      id: item.id,
+      disabled: !canDrag,
+      // Reordering should only move rows during a gesture. Layout animations
+      // on first render can leave stale dnd-kit offsets in iPhone Safari.
+      animateLayoutChanges: () => false,
+    })
+  const moveDuringDrag = canDrag && active !== null
+
+  // Signed offset: positive = Edit on the left, negative = Delete on the right.
+  const [swipeOffset, setSwipeOffset] = useState(0)
+  // A new badge node after a swipe prevents stale iOS Safari text layers.
+  const [badgeRevision, setBadgeRevision] = useState(0)
+  const offsetRef = useRef(0)
+  const suppressClickRef = useRef(0)
+  const gestureRef = useRef({
+    pointerId: -1, startX: 0, startY: 0, originalOffset: 0, dragging: false,
+  })
+  function setOffset(next: number) {
+    offsetRef.current = next
+    setSwipeOffset(next)
+  }
+  useEffect(() => {
+    if (gestureRef.current.pointerId !== -1) return
+    setOffset(swipeSide === 'edit' ? 94 : swipeSide === 'delete' ? -94 : 0)
+    setBadgeRevision(value => value + 1)
+  }, [swipeSide])
+  function swipeStart(event: PointerEvent<HTMLDivElement>) {
+    if (window.innerWidth > 760 || event.pointerType === 'mouse' || isEditing || isDragging) return
+    const target = event.target as HTMLElement
+    if (target.closest('input, textarea, select, .list-item-grip, .list-item-swipe-action')) return
+    gestureRef.current = {
+      pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+      originalOffset: offsetRef.current, dragging: false,
+    }
+  }
+  function swipeMove(event: PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current
+    if (gesture.pointerId !== event.pointerId) return
+    const dx = event.clientX - gesture.startX
+    const dy = event.clientY - gesture.startY
+    if (!gesture.dragging) {
+      // Vertical scroll always wins; never hijack a normal scroll gesture.
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) {
+        gesture.pointerId = -1
+        return
+      }
+      if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy) * 1.2) return
+      gesture.dragging = true
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+    setOffset(Math.max(-94, Math.min(94, gesture.originalOffset + dx)))
+  }
+  function swipeEnd(event: PointerEvent<HTMLDivElement>, cancelled = false) {
+    const gesture = gestureRef.current
+    if (gesture.pointerId !== event.pointerId) return
+    gesture.pointerId = -1
+    if (!gesture.dragging) return
+    suppressClickRef.current = performance.now() + 450
+    const next = cancelled ? gesture.originalOffset : offsetRef.current
+    const side = next >= 44 ? 'edit' : next <= -44 ? 'delete' : null
+    onSwipeChange(side)
+    setOffset(side === 'edit' ? 94 : side === 'delete' ? -94 : 0)
+    setBadgeRevision(value => value + 1)
+  }
 
   return (
-    <div
-      ref={setNodeRef}
+    <div ref={setNodeRef}
       style={{
-        transform: CSS.Transform.toString(transform),
-        transition,
-        opacity: isDragging ? 0.6 : 1,
+        // dnd-kit must not transform rows when no drag is active.
+        // This avoids clipping the first grips until the initial drag remeasures them.
+        transform: moveDuringDrag && transform ? CSS.Transform.toString(transform) : undefined,
+        transition: moveDuringDrag ? transition : undefined,
+        opacity: isDragging ? .6 : 1,
       }}
-      className={`list-item-row ${item.completed ? 'list-item-completed' : ''}`}
-    >
-      <label className="list-item-checkbox-zone">
-        <input
-          type="checkbox"
-          checked={item.completed}
-          onChange={() => onToggle(item)}
-          aria-label={`${item.completed ? 'Uncheck' : 'Check off'} ${item.text}`}
-        />
-      </label>
-      {isEditing ? (
-        <div className="list-item-edit-area">
-          <div className="list-item-edit-fields">
-            <input
-              className="event-input"
-              type="text"
-              aria-label="Item name"
-              maxLength={200}
-              value={editingText}
-              onChange={(event) => onEditingTextChange(event.target.value)}
-            />
-            <input
-              className="event-input"
-              type="text"
-              aria-label="Item category"
-              list="list-category-suggestions"
-              maxLength={40}
-              placeholder="Category (e.g. Produce)"
-              value={editingCategory}
-              onChange={(event) => onEditingCategoryChange(event.target.value)}
-            />
+      className="list-item-swipe-shell"
+      data-list-item-id={item.id}
+      onPointerDown={swipeStart}
+      onPointerMove={swipeMove}
+      onPointerUp={swipeEnd}
+      onPointerCancel={event => swipeEnd(event, true)}
+      onClickCapture={event => {
+        if ((event.target as HTMLElement).closest('.list-item-swipe-action')) return
+        if (performance.now() < suppressClickRef.current) {
+          event.preventDefault()
+          event.stopPropagation()
+        } else if (swipeSide !== null) {
+          onSwipeChange(null)
+          if (!(event.target as HTMLElement).closest('input[type="checkbox"]')) {
+            event.preventDefault()
+            event.stopPropagation()
+          }
+        }
+      }}>
+      <button type="button" className="list-item-swipe-action list-item-swipe-edit"
+        style={{opacity: swipeOffset > 0 ? 1 : 0, pointerEvents: swipeOffset > 0 ? 'auto' : 'none'}}
+        aria-label={`Edit ${item.text}`}
+        onFocus={() => { if (window.innerWidth <= 760) onSwipeChange('edit') }}
+        onClick={() => {onSwipeChange(null);onStartEdit(item)}}>Edit</button>
+      <button type="button" className="list-item-swipe-action list-item-swipe-delete"
+        style={{opacity: swipeOffset < 0 ? 1 : 0, pointerEvents: swipeOffset < 0 ? 'auto' : 'none'}}
+        aria-label={`Delete ${item.text}`}
+        onFocus={() => { if (window.innerWidth <= 760) onSwipeChange('delete') }}
+        onClick={() => {onSwipeChange(null);onDelete(item.id)}}>Delete</button>
+      <div className={`list-item-row list-item-swipe-foreground ${item.completed ? 'list-item-completed' : ''}`}
+        style={{ left: swipeOffset === 0 ? undefined : `${swipeOffset}px`,
+          transition: gestureRef.current.dragging ? 'none' : 'left 175ms ease-out' }}>
+        <label className="list-item-checkbox-zone">
+          <input type="checkbox" checked={item.completed}
+            onChange={() => onToggle(item)}
+            aria-label={`${item.completed ? 'Uncheck' : 'Check off'} ${item.text}`} />
+        </label>
+        {isEditing ? (
+          <div className="list-item-edit-area">
+            <div className="list-item-edit-fields">
+              <input className="event-input" type="text" aria-label="Item name"
+                maxLength={200} value={editingText}
+                onChange={event => onEditingTextChange(event.target.value)} />
+              <input className="event-input" type="text" aria-label="Item category"
+                list="list-category-suggestions" maxLength={40}
+                placeholder="Category (e.g. Produce)" value={editingCategory}
+                onChange={event => onEditingCategoryChange(event.target.value)} />
+              {showStore && <label className="list-store-edit-label">Store
+                <select className="event-input" value={editingStoreId ?? ''}
+                  onChange={event => onEditingStoreChange(event.target.value ? Number(event.target.value) : null)}>
+                  <option value="">Unsorted</option>
+                  {stores.map(store => <option key={store.id} value={store.id}>
+                    {store.name}{!store.enabled ? ' (hidden)' : ''}
+                  </option>)}
+                </select>
+              </label>}
+            </div>
+            <button type="button" onClick={() => onSaveEdit(item.id)}>Save</button>
+            <button type="button" onClick={onCancelEdit}>Cancel</button>
           </div>
-          <button type="button" onClick={() => onSaveEdit(item.id)}>Save</button>
-          <button type="button" onClick={onCancelEdit}>Cancel</button>
-        </div>
-      ) : (
-        <>
-          <button
-            className="list-item-complete-text"
-            type="button"
+        ) : <>
+          <button className="list-item-complete-text" type="button"
             aria-label={`${item.completed ? 'Uncheck' : 'Check off'} ${item.text}`}
-            onClick={() => onToggle(item)}
-          >
+            onClick={() => onToggle(item)}>
             <span className="list-item-name">{item.text}</span>
-            {item.category && item.category !== 'General' && (
-              <span className="list-category-pill">{item.category}</span>
-            )}
           </button>
-          <button
-            className="list-item-grip"
-            type="button"
-            aria-label={`Reorder ${item.text}`}
-            title={canDrag ? 'Drag to reorder' : 'Show all categories to reorder'}
-            disabled={!canDrag}
-            {...attributes}
-            {...listeners}
-          >☰</button>
-          <button className="list-item-edit-button" type="button" onClick={() => onStartEdit(item)}>
-            Edit
-          </button>
-          <button className="list-item-delete" type="button" onClick={() => onDelete(item.id)}>
-            Delete
-          </button>
-        </>
-      )}
+          {item.category && item.category !== 'General' && (
+            <span
+              key={`${item.id}-${badgeRevision}`}
+              className="list-category-pill list-item-category-tag"
+              title={item.category}
+              aria-label={`Category: ${item.category}`}
+            >{item.category}</span>
+          )}
+          {canDrag && <button className="list-item-grip" type="button"
+            aria-label={`Reorder ${item.text}`} title="Drag to reorder"
+            {...attributes} {...listeners}>
+            <span className="list-item-grip-face" aria-hidden="true">
+              <svg className="list-item-grip-icon" viewBox="0 0 24 24"
+                width="18" height="18" fill="none" stroke="currentColor"
+                strokeWidth="2.4" strokeLinecap="round">
+                <path d="M5 7h14M5 12h14M5 17h14" />
+              </svg>
+            </span>
+          </button>}
+          <button className="list-item-edit-button" type="button"
+            onClick={() => onStartEdit(item)}>Edit</button>
+          <button className="list-item-delete" type="button"
+            onClick={() => onDelete(item.id)}>Delete</button>
+        </>}
+      </div>
     </div>
   )
 }
@@ -3388,6 +3498,14 @@ function positionMobileScheduleTimeline(
 const [calendarPersonFilterId, setCalendarPersonFilterId] =
   useState<number | null>(null)
 const [lists, setLists] = useState<CalendarList[]>([])
+const [shoppingStores, setShoppingStores] = useState<ShoppingStore[]>([])
+const [storeFilter, setStoreFilter] = useState('all')
+const [shoppingStoreSettingsOpen, setShoppingStoreSettingsOpen] = useState(false)
+const [newShoppingStoreName, setNewShoppingStoreName] = useState('')
+const [storeSortBusy, setStoreSortBusy] = useState(false)
+const [listItemAddOpen, setListItemAddOpen] = useState(false)
+const [listMoreOpen, setListMoreOpen] = useState(false)
+const [openListSwipe, setOpenListSwipe] = useState<{itemId: number; side: 'edit' | 'delete'} | null>(null)
 const [captureInbox, setCaptureInbox] =
   useState<CaptureInboxItem[]>([])
 const [dayTimelineNow, setDayTimelineNow] =
@@ -3419,11 +3537,13 @@ const [newListItemText, setNewListItemText] = useState('')
 const [newListItemCategory, setNewListItemCategory] = useState('General')
 const [newListCategoryManuallySet, setNewListCategoryManuallySet] = useState(false)
 const [listCategoryFilter, setListCategoryFilter] = useState('All')
-const [listSortMode, setListSortMode] = useState<'category' | 'custom'>('category')
+const [listSortMode, setListSortMode] = useState<'store' | 'category' | 'custom'>('category')
 const [isOrganizingList, setIsOrganizingList] = useState(false)
 const [editingListItemId, setEditingListItemId] = useState<number | null>(null)
 const [editingListItemText, setEditingListItemText] = useState('')
 const [editingListItemCategory, setEditingListItemCategory] = useState('General')
+const [editingListItemStoreId, setEditingListItemStoreId] = useState<number | null>(null)
+const [editingListItemStoreChanged, setEditingListItemStoreChanged] = useState(false)
 const listToggleInFlightRef = useRef(new Set<number>())
 const [editingListName, setEditingListName] = useState('')
 const [mealPlans, setMealPlans] = useState<MealPlan[]>([])
@@ -5238,6 +5358,7 @@ useEffect(() => {
   loadEvents()
   loadPeople()
   loadLists()
+  void loadShoppingStores()
   loadCaptureInbox()
   loadMealPlans()
   loadMealPlanItems()
@@ -5336,9 +5457,100 @@ async function savePeopleOrder() {
 
   async function loadLists() {
   const response = await fetch('/api/lists')
-  const data = await response.json()
+  if (!response.ok) {
+    showAppNotification('Could not load lists.')
+    return
+  }
+  // SQLite stores booleans as INTEGER 0/1. Normalize at the API boundary:
+  // rendering a numeric zero with {value && <Control />} prints "0" in React.
+  const data: Array<Omit<CalendarList, 'store_enabled'> & {
+    store_enabled?: number | boolean
+  }> = await response.json()
+  setLists(data.map(list => ({
+    ...list,
+    store_enabled: list.store_enabled === true || list.store_enabled === 1,
+  })))
+}
 
-  setLists(data)
+async function loadShoppingStores() {
+  const response = await fetch('/api/shopping-stores')
+  if (!response.ok) return
+  const data: ShoppingStore[] = await response.json()
+  setShoppingStores(data)
+}
+async function updateShoppingStore(id: number, change: {enabled?: boolean; sort_order?: number}) {
+  const response = await fetch('/api/shopping-stores/' + id, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(change),
+  })
+  if (!response.ok) {
+    showAppNotification('Could not update store settings.')
+    return false
+  }
+  await loadShoppingStores()
+  return true
+}
+async function addShoppingStore(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault()
+  const name = newShoppingStoreName.trim()
+  if (!name) return
+  const response = await fetch('/api/shopping-stores', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name}),
+  })
+  if (!response.ok) {
+    showAppNotification('Could not add store. Check for a duplicate name.')
+    return
+  }
+  setNewShoppingStoreName('')
+  await loadShoppingStores()
+}
+async function moveShoppingStore(storeId: number, direction: number) {
+  const index = shoppingStores.findIndex(store => store.id === storeId)
+  const neighbor = shoppingStores[index + direction]
+  if (index < 0 || !neighbor) return
+  const first = shoppingStores[index]
+  const firstOrder = first.sort_order
+  const secondOrder = neighbor.sort_order
+  const temp = Math.max(...shoppingStores.map(store => store.sort_order), 0) + 10
+  if (!await updateShoppingStore(first.id,{sort_order: temp})) return
+  if (!await updateShoppingStore(neighbor.id,{sort_order: firstOrder})) return
+  await updateShoppingStore(first.id,{sort_order: secondOrder})
+}
+async function enableStoreSorting(listId: number, enabled: boolean) {
+  const response = await fetch('/api/lists/' + listId + '/store-sorting', {
+    method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({enabled}),
+  })
+  if (!response.ok) { showAppNotification('Could not update store sorting.'); return }
+  // Always return to the appropriate automatic mode when store sorting
+  // changes. A previous Custom order must not leave drag grips in this view.
+  setListSortMode(enabled ? 'store' : 'category')
+  setStoreFilter('all')
+  setListCategoryFilter('All')
+  setOpenListSwipe(null)
+  await loadLists()
+}
+async function sortListByStores(listId: number, askArney: boolean) {
+  if (storeSortBusy) return
+  setStoreSortBusy(true)
+  try {
+    const response = await fetch('/api/lists/' + listId + '/sort-stores', {
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({askArney}),
+    })
+    if (!response.ok) throw new Error('Store organizer failed')
+    const result: {sorted:number; aiSorted:number; remaining:number; aiAvailable:boolean|null} = await response.json()
+    await loadLists()
+    if (askArney || result.sorted > 0) {
+      const count = result.sorted + result.aiSorted
+      showAppNotification(askArney && result.aiAvailable === false
+        ? 'Local Arney is unavailable. Offline sorting still works.'
+        : count ? 'Sorted ' + count + ' items by store.'
+          : 'No further store suggestions. Unsorted items stay visible.')
+    }
+  } catch { showAppNotification('Could not organize stores.') }
+  finally { setStoreSortBusy(false) }
 }
 
 async function loadCaptureInbox() {
@@ -10087,6 +10299,7 @@ async function addListItem(event: FormEvent<HTMLFormElement>) {
   setNewListItemText('')
   setNewListItemCategory('General')
   setNewListCategoryManuallySet(false)
+  setListItemAddOpen(false)
   await loadLists()
 }
 
@@ -10162,6 +10375,7 @@ async function toggleListItem(item: ListItem) {
   }
 }
 async function deleteListItem(itemId: number) {
+  setOpenListSwipe(null)
   const response = await fetch(
     `/api/list-items/${itemId}`,
     {
@@ -10187,7 +10401,8 @@ async function organizeExistingList(listId: number) {
     const result: { categorized: number; remainingGeneral: number } = await response.json()
     await loadLists()
     setListCategoryFilter('All')
-    setListSortMode('category')
+    setListSortMode(lists.find(list => list.id === listId)?.store_enabled ? 'store' : 'category')
+    setOpenListSwipe(null)
     showAppNotification(result.categorized > 0
       ? `Organized ${result.categorized} existing ${result.categorized === 1 ? 'item' : 'items'} by category.`
       : 'No recognizable General items to organize.')
@@ -10246,15 +10461,20 @@ async function clearCompletedItems() {
   await loadLists()
 }
 function startEditingListItem(item: ListItem) {
+  setOpenListSwipe(null)
   setEditingListItemId(item.id)
   setEditingListItemText(item.text)
   setEditingListItemCategory(item.category || 'General')
+  setEditingListItemStoreId(item.store_id ?? null)
+  setEditingListItemStoreChanged(false)
 }
 
 function cancelEditingListItem() {
   setEditingListItemId(null)
   setEditingListItemText('')
   setEditingListItemCategory('General')
+  setEditingListItemStoreId(null)
+  setEditingListItemStoreChanged(false)
 }
 
 async function saveListItemEdit(itemId: number) {
@@ -10274,6 +10494,7 @@ async function saveListItemEdit(itemId: number) {
       body: JSON.stringify({
         text: cleanText,
         category: editingListItemCategory.trim() || 'General',
+        ...(editingListItemStoreChanged ? { store_id: editingListItemStoreId } : {}),
       }),
     }
   )
@@ -15486,6 +15707,11 @@ createPortal(
         Arney Voice Settings
         <span aria-hidden="true">›</span>
       </button>
+      <button className="mobile-settings-option" type="button" onClick={() => {
+        setMobileSettingsOpen(false)
+        setShoppingStoreSettingsOpen(true)
+        void loadShoppingStores()
+      }}>Shopping Stores <span aria-hidden="true">›</span></button>
       <button
         className="mobile-settings-option"
         type="button"
@@ -22932,8 +23158,13 @@ capture.captureType !== 'other' && (
   setNewListItemCategory('General')
   setNewListCategoryManuallySet(false)
   setListCategoryFilter('All')
-  setListSortMode('category')
+  setListSortMode(list.store_enabled ? 'store' : 'category')
+  setStoreFilter('all')
+  setListItemAddOpen(false)
+  setListMoreOpen(false)
+  setOpenListSwipe(null)
   setEditingListName(list.name)
+  if (list.store_enabled) void sortListByStores(list.id, false)
   setListNameEditing(false)
 }}
           >
@@ -23043,6 +23274,9 @@ capture.captureType !== 'other' && (
           className="list-modal-overlay"
           onClick={() => {
             setSelectedListId(null)
+            setListItemAddOpen(false)
+            setListMoreOpen(false)
+            setOpenListSwipe(null)
             setNewListItemText('')
             setEditingListItemId(null)
             setEditingListItemText('')
@@ -23050,6 +23284,13 @@ capture.captureType !== 'other' && (
         >
           <div
             className="list-modal list-detail-modal"
+            onClickCapture={event => {
+              if (!openListSwipe) return
+              const row = (event.target as HTMLElement).closest<HTMLElement>('.list-item-swipe-shell')
+              if (!row || row.dataset.listItemId !== String(openListSwipe.itemId)) {
+                setOpenListSwipe(null)
+              }
+            }}
             onClick={(event) => {
               event.stopPropagation()
             }}
@@ -23065,35 +23306,42 @@ capture.captureType !== 'other' && (
               if (!selectedList) {
                 return null
               }
+              const storeSortingEnabled = selectedList.store_enabled === true
               const categoryOptions = Array.from(new Set(
-                selectedList.items.map((item) => item.category || 'General')
-              )).sort((a, b) => a.localeCompare(b))
-              const filteredItems = listCategoryFilter === 'All'
-                ? selectedList.items
-                : selectedList.items.filter(
-                    (item) => (item.category || 'General') === listCategoryFilter
-                  )
-              const visibleItems = listSortMode === 'category'
-                ? [...filteredItems].sort((a, b) => {
-                    const categoryOf = (item: ListItem) => item.category || 'General'
-                    const orderOf = (category: string) => category === 'General'
-                      ? Number.MAX_SAFE_INTEGER
-                      : (SUGGESTED_LIST_CATEGORIES.indexOf(category) === -1
-                        ? SUGGESTED_LIST_CATEGORIES.length
-                        : SUGGESTED_LIST_CATEGORIES.indexOf(category))
-                    const categoryA = categoryOf(a)
-                    const categoryB = categoryOf(b)
-                    return orderOf(categoryA) - orderOf(categoryB)
-                      || categoryA.localeCompare(categoryB)
-                  })
-                : filteredItems
-              const canReorderList = listSortMode === 'custom'
-                && listCategoryFilter === 'All'
-              const canOrganizeExisting = selectedList.items.some(
-                (item) => (item.category || 'General') === 'General'
-                  && suggestListCategory(item.text) !== null
+                selectedList.items.map(item => item.category || 'General')
+              )).sort((x, y) => x.localeCompare(y))
+              const filteredItems = selectedList.items.filter(item =>
+                listCategoryFilter === 'All' || (item.category || 'General') === listCategoryFilter
               )
-
+              const categoryRank = (item: ListItem) => {
+                const category = item.category || 'General'
+                if (category === 'General') return 9999
+                const index = SUGGESTED_LIST_CATEGORIES.indexOf(category)
+                return index < 0 ? SUGGESTED_LIST_CATEGORIES.length : index
+              }
+              const categoryCompare = (x: ListItem, y: ListItem) =>
+                categoryRank(x) - categoryRank(y)
+                || (x.category || 'General').localeCompare(y.category || 'General')
+                || x.id - y.id
+              const storeRank = (item: ListItem) =>
+                shoppingStores.find(store => store.id === item.store_id)?.sort_order ?? Number.MAX_SAFE_INTEGER
+              const customSorting = listSortMode === 'custom'
+              const orderedItems = customSorting ? filteredItems
+                : storeSortingEnabled
+                  ? [...filteredItems].sort((x, y) => storeRank(x) - storeRank(y)
+                      || ((x.store_id ?? 0) - (y.store_id ?? 0))
+                      || categoryCompare(x, y))
+                  : [...filteredItems].sort(categoryCompare)
+              const storeVisibleItems = storeSortingEnabled && storeFilter !== 'all'
+                ? orderedItems.filter(item => storeFilter === 'unsorted'
+                    ? item.store_id == null : item.store_id === Number(storeFilter))
+                : orderedItems
+              const visibleStores = shoppingStores.filter(store =>
+                store.enabled || selectedList.items.some(item => item.store_id === store.id))
+              const canReorderList = customSorting && listCategoryFilter === 'All'
+                && (!storeSortingEnabled || storeFilter === 'all')
+              const canOrganizeExisting = selectedList.items.some(item =>
+                (item.category || 'General') === 'General' && suggestListCategory(item.text) !== null)
               return (
                 <>
                   <div className="list-modal-header">
@@ -23167,11 +23415,9 @@ capture.captureType !== 'other' && (
     </div>
   )}
 
-  <p>
-    {selectedList.items.length}{' '}
-    {selectedList.items.length === 1
-      ? 'item'
-      : 'items'}
+  <p className="list-header-count">
+    {selectedList.items.length} {selectedList.items.length === 1 ? 'item' : 'items'}
+    {storeSortingEnabled && <span className="list-compact-sorting-status">Store sorting: On</span>}
   </p>
 </div>
 
@@ -23181,6 +23427,9 @@ capture.captureType !== 'other' && (
                       aria-label="Close list"
                       onClick={() => {
                         setSelectedListId(null)
+                        setListItemAddOpen(false)
+                        setListMoreOpen(false)
+                        setOpenListSwipe(null)
                         setNewListItemText('')
                         setEditingListItemId(
                           null
@@ -23194,91 +23443,66 @@ capture.captureType !== 'other' && (
                     </button>
                   </div>
 
-                  <div className="list-modal-actions">
-  <button
-    className="list-organize-button"
-    type="button"
-    disabled={isOrganizingList || !canOrganizeExisting}
-    onClick={() => organizeExistingList(selectedList.id)}
-    title="Categorize recognizable General items without changing checkmarks or manual categories"
-  >
-    {isOrganizingList ? 'Organizing…' : 'Organize Existing Items'}
-  </button>
-  <button
-    className="clear-completed-button"
-    type="button"
-    onClick={
-      clearCompletedItems
-    }
-    disabled={
-      !selectedList.items.some(
-        (item) =>
-          item.completed
-      )
-    }
-  >
-    Clear Completed
-  </button>
-</div>
-
-                  
+                  <div className="list-compact-actions">
+                    <button className="list-add-primary" type="button" onClick={() => {
+                      setNewListItemText('')
+                      setNewListItemCategory('General')
+                      setNewListCategoryManuallySet(false)
+                      setListMoreOpen(false)
+                      setListItemAddOpen(true)
+                    }}>+ Add Item</button>
+                    {storeSortingEnabled && <button className="list-ask-arney"
+                      type="button" disabled={storeSortBusy}
+                      onClick={() => void sortListByStores(selectedList.id, true)}>
+                      {storeSortBusy ? 'Sorting…' : '✦ Ask Arney'}
+                    </button>}
+                    <div className="list-more-control">
+                      <button className="list-more-button" type="button"
+                        aria-haspopup="menu" aria-expanded={listMoreOpen}
+                        onClick={() => setListMoreOpen(open => !open)}>••• More</button>
+                      {listMoreOpen && <div className="list-more-menu" role="menu">
+                        {storeSortingEnabled && <button role="menuitem" type="button"
+                          disabled={storeSortBusy}
+                          onClick={() => {setListMoreOpen(false);void sortListByStores(selectedList.id, false)}}>
+                          Sort stores again</button>}
+                        <button role="menuitem" type="button"
+                          onClick={() => {
+                            setListMoreOpen(false)
+                            setStoreFilter('all')
+                            setListCategoryFilter('All')
+                            setListSortMode(customSorting ? (storeSortingEnabled ? 'store' : 'category') : 'custom')
+                          }}>
+                          {customSorting ? 'Use automatic sorting' : 'Custom order (drag)'}</button>
+                        <button role="menuitem" type="button" disabled={isOrganizingList || !canOrganizeExisting}
+                          onClick={() => {setListMoreOpen(false);void organizeExistingList(selectedList.id)}}>
+                          Organize existing categories</button>
+                        {!storeSortingEnabled && <button role="menuitem" type="button"
+                          onClick={() => {setListMoreOpen(false);void enableStoreSorting(selectedList.id, true)}}>
+                          Enable store sorting</button>}
+                        {storeSortingEnabled && <button role="menuitem" type="button"
+                          onClick={() => {setListMoreOpen(false);void enableStoreSorting(selectedList.id, false)}}>
+                          Disable store sorting</button>}
+                        <button role="menuitem" type="button" disabled={!selectedList.items.some(item => item.completed)}
+                          onClick={() => {setListMoreOpen(false);void clearCompletedItems()}}>Clear completed</button>
+                      </div>}
+                    </div>
+                  </div>
 
                   <datalist id="list-category-suggestions">
                     {['General', ...SUGGESTED_LIST_CATEGORIES, 'Other'].map((name) => (
                       <option key={name} value={name} />
                     ))}
                   </datalist>
-                  <form
-                    className="people-form list-quick-entry-form"
-                    onSubmit={addListItem}
-                  >
-                    <label className="event-field">
-                      Add Item
-
-                      <input
-                        className="event-input"
-                        type="text"
-                        placeholder="Example: Milk"
-                        value={
-                          newListItemText
-                        }
-                        onChange={(event) => {
-                          const nextText = event.target.value
-                          setNewListItemText(nextText)
-                          if (!newListCategoryManuallySet) {
-                            setNewListItemCategory(suggestListCategory(nextText) || 'General')
-                          }
-                        }}
-                      />
-                    </label>
-                    <label className="event-field">
-                      Category
-                      <input
-                        className="event-input"
-                        type="text"
-                        list="list-category-suggestions"
-                        maxLength={40}
-                        placeholder="General, Produce, Errands..."
-                        value={newListItemCategory}
-                        onChange={(event) => {
-                          setNewListItemCategory(event.target.value)
-                          setNewListCategoryManuallySet(true)
-                        }}
-                      />
-                    </label>
-
-                    <button
-                      className="add-event-button"
-                      type="submit"
-                      disabled={
-                        newListItemText.trim() ===
-                        ''
-                      }
-                    >
-                      Add Item
-                    </button>
-                  </form>
-
+                  {storeSortingEnabled && <div className="shopping-store-tabs" role="group" aria-label="Filter shopping items by store">
+                    <button type="button" className={storeFilter === 'all' ? 'selected' : ''}
+                      aria-pressed={storeFilter === 'all'} onClick={() => setStoreFilter('all')}>All</button>
+                    {visibleStores.map(store => <button type="button" key={store.id}
+                      className={storeFilter === String(store.id) ? 'selected' : ''}
+                      aria-pressed={storeFilter === String(store.id)}
+                      onClick={() => setStoreFilter(String(store.id))}>{store.name}{!store.enabled ? ' (hidden)' : ''}</button>)}
+                    <button type="button" className={storeFilter === 'unsorted' ? 'selected' : ''}
+                      aria-pressed={storeFilter === 'unsorted'} onClick={() => setStoreFilter('unsorted')}>Unsorted</button>
+                  </div>}
                   <div className="list-category-toolbar">
                     <label htmlFor="list-category-filter">Show category</label>
                     <select
@@ -23292,23 +23516,11 @@ capture.captureType !== 'other' && (
                         <option key={category} value={category}>{category}</option>
                       ))}
                     </select>
-                    <label htmlFor="list-sort-mode">Organize by</label>
-                    <select
-                      id="list-sort-mode"
-                      className="event-input"
-                      value={listSortMode}
-                      onChange={(event) => setListSortMode(
-                        event.target.value === 'custom' ? 'custom' : 'category'
-                      )}
-                    >
-                      <option value="category">Category (automatic)</option>
-                      <option value="custom">Custom order (drag)</option>
-                    </select>
                   </div>
                   <div className="list-items">
                     {selectedList.items.length === 0 ? (
                       <p>No items yet.</p>
-                    ) : visibleItems.length === 0 ? (
+                    ) : storeVisibleItems.length === 0 ? (
                       <p>No items in this category.</p>
                     ) : (
                       <DndContext
@@ -23321,7 +23533,7 @@ capture.captureType !== 'other' && (
                         }
                       >
                         <SortableContext
-                          items={visibleItems.map(
+                          items={storeVisibleItems.map(
                             (item) =>
                               item.id
                           )}
@@ -23329,8 +23541,14 @@ capture.captureType !== 'other' && (
                             verticalListSortingStrategy
                           }
                         >
-                          {visibleItems.map(
-                            (item) => (
+                          {storeVisibleItems.map((item, index) => (
+                            <Fragment key={item.id}>
+                              {storeSortingEnabled && storeFilter === 'all'
+                                && !customSorting && (index === 0 || storeVisibleItems[index - 1].store_id !== item.store_id)
+                                && <div className="list-store-group-heading">
+                                  {shoppingStores.find(store => store.id === item.store_id)?.name ?? 'Unsorted'}
+                                  <span>({storeVisibleItems.filter(entry => entry.store_id === item.store_id).length})</span>
+                                </div>}
                               <SortableListItem
                                 key={
                                   item.id
@@ -23344,11 +23562,15 @@ capture.captureType !== 'other' && (
                                   editingListItemText
                                 }
                                 editingCategory={editingListItemCategory}
+                                editingStoreId={editingListItemStoreId}
+                                showStore={Boolean(storeSortingEnabled)}
+                                stores={shoppingStores}
                                 canDrag={canReorderList}
                                 onEditingTextChange={
                                   setEditingListItemText
                                 }
                                 onEditingCategoryChange={setEditingListItemCategory}
+                                onEditingStoreChange={id => {setEditingListItemStoreId(id); setEditingListItemStoreChanged(true)}}
                                 onStartEdit={
                                   startEditingListItem
                                 }
@@ -23364,9 +23586,13 @@ capture.captureType !== 'other' && (
                                 onDelete={
                                   deleteListItem
                                 }
+                                swipeSide={openListSwipe?.itemId === item.id ? openListSwipe.side : null}
+                                onSwipeChange={side => setOpenListSwipe(
+                                  side === null ? null : { itemId: item.id, side }
+                                )}
                               />
-                            )
-                          )}
+                            </Fragment>
+                          ))}
                         </SortableContext>
                       </DndContext>
                     )}
@@ -23403,7 +23629,82 @@ capture.captureType !== 'other' && (
         </div>,
         document.body
       )}
+    {selectedListId !== null && listItemAddOpen && createPortal(
+      <div className="list-item-add-overlay" onClick={() => setListItemAddOpen(false)}>
+        <section className="list-item-add-sheet" role="dialog" aria-modal="true"
+          aria-labelledby="list-item-add-heading" onClick={event => event.stopPropagation()}>
+          <div className="list-item-add-handle" aria-hidden="true" />
+          <div className="list-item-add-heading">
+            <h2 id="list-item-add-heading">Add Item</h2>
+            <button type="button" aria-label="Close Add Item" className="list-item-add-close"
+              onClick={() => setListItemAddOpen(false)}>×</button>
+          </div>
+          <form className="list-item-add-form" onSubmit={addListItem}>
+            <label className="event-field">Item name
+              <input className="event-input" type="text" maxLength={200}
+                placeholder="Example: Milk" value={newListItemText}
+                onChange={event => {
+                  const next = event.target.value
+                  setNewListItemText(next)
+                  if (!newListCategoryManuallySet) setNewListItemCategory(suggestListCategory(next) || 'General')
+                }}
+                autoFocus />
+            </label>
+            <label className="event-field">Category
+              <input className="event-input" type="text" maxLength={40}
+                list="list-category-suggestions" value={newListItemCategory}
+                placeholder="General, Produce, Dairy..."
+                onChange={event => {setNewListItemCategory(event.target.value);setNewListCategoryManuallySet(true)}} />
+            </label>
+            <div className="list-item-add-buttons">
+              <button type="button" className="list-item-add-cancel"
+                onClick={() => setListItemAddOpen(false)}>Cancel</button>
+              <button type="submit" className="list-item-add-save" disabled={!newListItemText.trim()}>Save</button>
+            </div>
+          </form>
+        </section>
+      </div>, document.body
+    )}
   </section>
+)}
+{shoppingStoreSettingsOpen && createPortal(
+  <div className="shopping-store-settings-overlay" onClick={() => setShoppingStoreSettingsOpen(false)}>
+    <section className="shopping-store-settings-panel" role="dialog" aria-modal="true"
+      aria-labelledby="shopping-stores-heading" onClick={event => event.stopPropagation()}>
+      <div className="shopping-store-settings-header">
+        <h2 id="shopping-stores-heading">Shopping Stores</h2>
+        <button className="shopping-store-settings-close" type="button" aria-label="Close shopping store settings"
+          onClick={() => setShoppingStoreSettingsOpen(false)}>×</button>
+      </div>
+      <p>Choose stores for automatic sorting. Hidden stores keep their items and saved preferences.</p>
+      <div className="shopping-store-settings-list">
+        {shoppingStores.map((store, index) => (
+          <div className="shopping-store-settings-row" key={store.id}>
+            <label><input type="checkbox" checked={store.enabled}
+              onChange={event => void updateShoppingStore(store.id,{enabled:event.target.checked})} />
+              <span>{store.name}</span></label>
+            <div className="shopping-store-move-buttons">
+              <button type="button" disabled={index === 0} aria-label={'Move ' + store.name + ' earlier'}
+                onClick={() => void moveShoppingStore(store.id, -1)}>↑</button>
+              <button type="button" disabled={index === shoppingStores.length - 1}
+                aria-label={'Move ' + store.name + ' later'}
+                onClick={() => void moveShoppingStore(store.id, 1)}>↓</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <form className="shopping-store-add" onSubmit={addShoppingStore}>
+        <label htmlFor="shopping-store-new">Add custom store</label>
+        <div><input className="event-input" type="text" id="shopping-store-new"
+          maxLength={50} value={newShoppingStoreName}
+          onChange={event => setNewShoppingStoreName(event.target.value)}
+          placeholder="Store name" />
+          <button type="submit" disabled={!newShoppingStoreName.trim()}>Add</button>
+        </div>
+      </form>
+      <p className="shopping-stores-footnote">Suggestions are preferences, not live inventory or pricing. Arney runs locally only when you request it.</p>
+    </section>
+  </div>, document.body
 )}
     </main>
   )

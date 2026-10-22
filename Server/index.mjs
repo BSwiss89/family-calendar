@@ -12,6 +12,9 @@ import {
   suggestListCategory,
   organizeExistingListItems,
 } from './list-features.mjs'
+import { ensureShoppingStores, getShoppingStores, looksLikeShoppingList, requireStoreId,
+  suggestShoppingStoreId, organizeShoppingStores, saveShoppingStoreCorrection,
+  sortUnknownStoresWithOllama } from './smart-stores.mjs'
 
 const app = express()
 // The live server defaults to 3001 / all interfaces.
@@ -445,6 +448,7 @@ if (!listItemColumns.includes('sort_order')) {
   `)
 }
 ensureListItemCategories(database)
+ensureShoppingStores(database)
 
 database.exec(`
   CREATE TABLE IF NOT EXISTS meal_plans (
@@ -6705,14 +6709,14 @@ return response.status(500).json({
 app.get('/api/lists', (request, response) => {
   const lists = database
     .prepare(`
-      SELECT id, name, created_at
+      SELECT id, name, created_at, store_enabled
       FROM lists
       ORDER BY id
     `)
     .all()
 
   const itemStatement = database.prepare(`
-   SELECT id, list_id, text, completed, created_at, sort_order, category
+   SELECT id, list_id, text, completed, created_at, sort_order, category, store_id, store_manual
 FROM list_items
 WHERE list_id = ?
 ORDER BY sort_order, id
@@ -6723,6 +6727,7 @@ ORDER BY sort_order, id
     items: itemStatement.all(list.id).map((item) => ({
       ...item,
       completed: Boolean(item.completed),
+      store_manual: Boolean(item.store_manual),
     })),
   }))
 
@@ -6746,16 +6751,77 @@ app.post('/api/lists', (request, response) => {
 
   const result = database
     .prepare(`
-      INSERT INTO lists (name)
-      VALUES (?)
+      INSERT INTO lists (name, store_enabled)
+      VALUES (?, ?)
     `)
-    .run(cleanName)
+    .run(cleanName, looksLikeShoppingList(cleanName) ? 1 : 0)
 
   response.status(201).json({
     id: Number(result.lastInsertRowid),
     name: cleanName,
+    store_enabled: looksLikeShoppingList(cleanName),
     items: [],
   })
+})
+
+// Store settings persist for the whole household. Disabling a store does not
+// remove items or their saved manual preferences.
+app.get('/api/shopping-stores', (request, response) => {
+  response.json(getShoppingStores(database))
+})
+app.post('/api/shopping-stores', (request, response) => {
+  const name = request.body?.name
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 50) {
+    return response.status(400).json({ error: 'Store name must be 1–50 characters.' })
+  }
+  try {
+    const max = database.prepare('SELECT COALESCE(MAX(sort_order), 0) AS value FROM shopping_stores').get().value
+    const saved = database.prepare('INSERT INTO shopping_stores (name, sort_order) VALUES (?, ?)').run(name.trim(), max + 1)
+    return response.status(201).json({ id: Number(saved.lastInsertRowid), name: name.trim(), enabled: true, sort_order: max + 1 })
+  } catch {
+    return response.status(409).json({ error: 'This store already exists.' })
+  }
+})
+app.put('/api/shopping-stores/:id', (request, response) => {
+  const id = Number(request.params.id)
+  if (!Number.isSafeInteger(id) || id <= 0) return response.status(400).json({ error: 'Invalid store ID.' })
+  const existing = database.prepare('SELECT id FROM shopping_stores WHERE id = ?').get(id)
+  if (!existing) return response.status(404).json({ error: 'Store not found.' })
+  const { enabled, sort_order } = request.body ?? {}
+  if ((enabled !== undefined && typeof enabled !== 'boolean') ||
+      (sort_order !== undefined && (!Number.isSafeInteger(sort_order) || sort_order < 0 || sort_order > 100000))) {
+    return response.status(400).json({ error: 'Invalid store settings.' })
+  }
+  database.prepare('UPDATE shopping_stores SET enabled = COALESCE(?, enabled), sort_order = COALESCE(?, sort_order) WHERE id = ?')
+    .run(enabled === undefined ? null : Number(enabled), sort_order ?? null, id)
+  return response.json(getShoppingStores(database).find(store => store.id === id))
+})
+app.put('/api/lists/:id/store-sorting', (request, response) => {
+  const listId = Number(request.params.id)
+  if (!Number.isSafeInteger(listId) || listId <= 0 || typeof request.body?.enabled !== 'boolean') {
+    return response.status(400).json({ error: 'Invalid store sorting settings.' })
+  }
+  const result = database.prepare('UPDATE lists SET store_enabled = ? WHERE id = ?').run(Number(request.body.enabled), listId)
+  if (!result.changes) return response.status(404).json({ error: 'List not found.' })
+  if (request.body.enabled) { organizeExistingListItems(database, listId); organizeShoppingStores(database, listId) }
+  return response.json({ store_enabled: request.body.enabled })
+})
+app.post('/api/lists/:id/sort-stores', async (request, response) => {
+  const listId = Number(request.params.id)
+  if (!Number.isSafeInteger(listId) || listId <= 0) return response.status(400).json({ error: 'Invalid list ID.' })
+  // First use learned preferences and deterministic offline rules; AI is only
+  // requested explicitly for the remaining ambiguous items.
+  const selectedList = database.prepare('SELECT store_enabled FROM lists WHERE id = ?').get(listId)
+  if (!selectedList) return response.status(404).json({ error: 'List not found.' })
+  if (!selectedList.store_enabled) return response.status(400).json({ error: 'Enable store sorting for this list first.' })
+  organizeExistingListItems(database, listId)
+  const baseline = organizeShoppingStores(database, listId)
+  if (!baseline) return response.status(404).json({ error: 'List not found.' })
+  if (baseline.disabled) return response.status(400).json({ error: 'Enable store sorting for this list first.' })
+  const ai = request.body?.askArney === true
+    ? await sortUnknownStoresWithOllama(database, listId, OLLAMA_URL, LOCAL_AI_MODEL)
+    : { aiSorted: 0, aiAvailable: null }
+  return response.json({ ...baseline, ...ai })
 })
 
 // On-demand, conservative organizer for existing items in one selected list.
@@ -6824,7 +6890,7 @@ app.post('/api/lists/:id/items', (request, response) => {
 
   const list = database
     .prepare(`
-      SELECT id
+      SELECT id, store_enabled
       FROM lists
       WHERE id = ?
     `)
@@ -6850,10 +6916,10 @@ const nextSortOrder = Number(orderResult.max_order) + 1
 
 const result = database
   .prepare(`
-    INSERT INTO list_items (list_id, text, sort_order, category)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO list_items (list_id, text, sort_order, category, store_id)
+    VALUES (?, ?, ?, ?, ?)
   `)
-  .run(listId, cleanText, nextSortOrder, category)
+  .run(listId, cleanText, nextSortOrder, category, list.store_enabled ? suggestShoppingStoreId(database, cleanText, category) : null)
 
   response.status(201).json({
     id: Number(result.lastInsertRowid),
@@ -6862,12 +6928,14 @@ const result = database
     completed: false,
     sort_order: nextSortOrder,
     category,
+    store_id: list.store_enabled ? suggestShoppingStoreId(database, cleanText, category) : null,
+    store_manual: false,
   })
 })
 
 app.put('/api/list-items/:id', (request, response) => {
   const id = Number(request.params.id)
-  const { text, completed, category: rawCategory } = request.body
+  const { text, completed, category: rawCategory, store_id: rawStoreId } = request.body
 
   if (!Number.isInteger(id) || id <= 0) {
     return response.status(400).json({
@@ -6877,7 +6945,7 @@ app.put('/api/list-items/:id', (request, response) => {
 
   const existingItem = database
     .prepare(`
-      SELECT id, list_id, text, completed, category
+      SELECT id, list_id, text, completed, category, store_id, store_manual
       FROM list_items
       WHERE id = ?
     `)
@@ -6910,6 +6978,17 @@ app.put('/api/list-items/:id', (request, response) => {
     }
   }
 
+  let nextStoreId = existingItem.store_id
+  if (Object.hasOwn(request.body, 'store_id')) {
+    try { nextStoreId = requireStoreId(database, rawStoreId) } catch {
+      return response.status(400).json({ error: 'Invalid shopping store.' })
+    }
+    saveShoppingStoreCorrection(database, id, nextStoreId)
+  } else if (!existingItem.store_manual && (nextText !== existingItem.text || nextCategory !== existingItem.category)) {
+    const list = database.prepare('SELECT store_enabled FROM lists WHERE id = ?').get(existingItem.list_id)
+    nextStoreId = list?.store_enabled ? suggestShoppingStoreId(database, nextText, nextCategory) : null
+    database.prepare('UPDATE list_items SET store_id = ? WHERE id = ?').run(nextStoreId, id)
+  }
   database
     .prepare(`
       UPDATE list_items
@@ -6918,12 +6997,20 @@ app.put('/api/list-items/:id', (request, response) => {
     `)
     .run(nextText, nextCompleted, nextCategory, id)
 
+  // A manual selection should be learned under the final edited item name.
+  if (Object.hasOwn(request.body, 'store_id') && nextText !== existingItem.text) {
+    const key = nextText.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ').slice(0, 200)
+    if (key) database.prepare('INSERT INTO shopping_store_preferences (item_key, store_id) VALUES (?, ?) ON CONFLICT(item_key) DO UPDATE SET store_id = excluded.store_id').run(key, nextStoreId)
+  }
+
   response.json({
     id,
     list_id: existingItem.list_id,
     text: nextText,
     completed: Boolean(nextCompleted),
     category: nextCategory,
+    store_id: nextStoreId,
+    store_manual: Object.hasOwn(request.body, 'store_id') ? true : Boolean(existingItem.store_manual),
   })
 })
 app.put('/api/lists/:id/reorder', (request, response) => {

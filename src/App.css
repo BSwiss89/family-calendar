@@ -18879,3 +18879,262 @@ max-height:
     text-align: left;
   }
 }
+
+
+/* Smart shopping-store organization: mobile-first compact tabs and settings. */
+.shopping-store-tabs { display:flex;gap:6px;overflow-x:auto;overscroll-behavior-inline:contain;
+  padding:10px 2px 7px;scrollbar-width:thin;max-width:100%; }
+.shopping-store-tabs button { flex:0 0 auto;min-height:38px;padding:7px 13px;border-radius:999px;
+  border:1px solid #cdd0d7;background:#f2f2f5;color:#303744;font:inherit;font-size:13px;font-weight:650; }
+.shopping-store-tabs button.selected { background:#303b60;color:#fff;border-color:#303b60; }
+.list-store-edit-label {display:grid;gap:5px;color:#454545;font-size:13px;font-weight:600}
+.list-store-edit-label select {min-height:44px}
+.list-category-pill {margin-left:auto;flex-shrink:0;max-width:44%;text-align:right}
+.list-item-complete-text {min-width:0}
+.list-store-enable {background:#e6efe8;border-color:#a4c7aa;color:#285a37}
+.shopping-store-settings-overlay {position:fixed;inset:0;z-index:13000;display:flex;justify-content:center;
+  align-items:center;padding:16px;background:rgba(15,20,30,.55)}
+.shopping-store-settings-panel {width:min(450px,100%);max-height:90dvh;overflow:auto;background:#faf9f6;
+  color:#242830;border-radius:16px;padding:20px;box-shadow:0 16px 60px #0004;}
+.shopping-store-settings-header {display:flex;align-items:center;justify-content:space-between;gap:12px}
+.shopping-store-settings-header h2 {margin:0;font-size:22px}
+.shopping-store-settings-close {border:0;background:#e7e7e7;border-radius:9px;min-width:44px;min-height:44px;font-size:22px}
+.shopping-store-settings-panel p {color:#61666e;font-size:13px;line-height:1.45}
+.shopping-store-settings-list {display:grid;gap:7px;margin:16px 0}
+.shopping-store-settings-row {display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:7px 8px;border:1px solid #ddd;border-radius:9px;background:#fff}
+.shopping-store-settings-row label {display:flex;align-items:center;gap:10px;min-width:0;cursor:pointer;font-weight:600}
+.shopping-store-settings-row input {width:20px;height:20px;accent-color:#46559b}
+.shopping-store-move-buttons {display:flex;gap:5px}
+.shopping-store-move-buttons button {width:36px;height:36px;border:1px solid #ddd;border-radius:8px;background:#f5f5f6;font-size:18px}
+.shopping-store-move-buttons button:disabled {opacity:.3}
+.shopping-store-add {display:grid;gap:8px}
+.shopping-store-add > div {display:flex;gap:8px}
+.shopping-store-add input {flex:1;min-width:0}
+.shopping-store-add button {padding:8px 16px;border:0;border-radius:9px;background:#303b60;color:#fff;font-weight:700}
+.shopping-store-add button:disabled {opacity:.5}
+@media (max-width:600px) {
+ .shopping-store-settings-overlay {align-items:flex-end;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+ .shopping-store-settings-panel {max-height:calc(100dvh - 35px);border-radius:18px}
+ .list-modal-actions {gap:8px}
+ .list-modal-actions .list-store-enable {min-width:100%}
+ .shopping-store-tabs {margin-inline:-4px}
+}
+
+/* List item text remains left-aligned; its category label sits on the right. */
+.list-item-complete-text {flex-direction:row;align-items:center;justify-content:flex-start;gap:6px}
+.list-item-complete-text .list-item-name {flex:1 1 auto;min-width:0;text-align:left}
+.list-item-complete-text .list-category-pill {flex:0 1 auto;max-width:45%;margin-left:auto;overflow-wrap:anywhere}
+
+/* Store headings appear only when viewing All stores, never beneath a selected store tab. */
+.list-store-group-heading {display:flex;align-items:center;gap:6px;padding:6px 10px;margin:9px 0 5px;background:#eff0f3;color:#343a44;border-radius:8px;font-size:13px;font-weight:750}
+.list-store-group-heading span {font-weight:500;color:#6c737f}
+.list-category-toolbar {margin-top:8px;margin-bottom:6px}
+
+/* Compact mobile list controls and an Add Item bottom sheet. */
+.list-header-count {display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.list-compact-sorting-status {font-size:12px;font-weight:700;color:#235e38;
+  border:1px solid #bbd5c2;background:#e9f3eb;border-radius:999px;padding:3px 9px}
+.list-compact-actions {display:flex;align-items:center;gap:8px;margin-bottom:5px;min-width:0}
+.list-compact-actions button {font:inherit;font-weight:700;border-radius:10px;min-height:44px;cursor:pointer}
+.list-add-primary {background:#3554cb;color:#fff;border:1px solid #3554cb;padding:9px 15px;flex:1 1 auto}
+.list-ask-arney {background:#edf1ff;color:#304587;border:1px solid #bec8f3;padding:9px 12px;flex:1 1 auto}
+.list-more-control {position:relative;flex:0 0 auto}
+.list-more-button {background:#f2f3f7;border:1px solid #d3d8e3;color:#33405b;padding:8px 12px}
+.list-more-menu {position:absolute;right:0;top:calc(100% + 6px);z-index:10;min-width:235px;
+  padding:6px;background:#fff;border:1px solid #dde1e8;box-shadow:0 12px 35px #0002;
+  border-radius:12px;display:grid;gap:2px}
+.list-more-menu button {width:100%;background:transparent;color:#283246;border:0;
+  min-height:42px;text-align:left;font-size:14px;font-weight:600;padding:9px 10px}
+.list-more-menu button:disabled {opacity:.4}
+.list-more-menu button:not(:disabled):active {background:#f0f1f5}
+.list-item-add-overlay {position:fixed;inset:0;z-index:24020;background:rgba(18,24,33,.47);
+  display:flex;justify-content:center;align-items:flex-end;padding:0}
+.list-item-add-sheet {position:relative;width:min(680px,100%);max-height:90dvh;overflow-y:auto;
+  background:#fff;border-radius:22px 22px 0 0;
+  padding:14px 20px calc(20px + env(safe-area-inset-bottom));box-shadow:0 -12px 35px #0002}
+.list-item-add-handle {height:5px;width:44px;border-radius:999px;background:#c9ccd2;margin:0 auto 12px}
+.list-item-add-heading {display:flex;align-items:center;justify-content:space-between;gap:12px}
+.list-item-add-heading h2 {margin:0 0 12px;font-size:23px}
+.list-item-add-close {width:44px;height:44px;border-radius:50%;border:0;font-size:24px;
+  background:#f1f2f4;color:#202630}
+.list-item-add-form {display:grid;gap:16px}
+.list-item-add-buttons {display:flex;gap:10px}
+.list-item-add-buttons button {min-height:47px;border-radius:10px;flex:1;font-size:15px;font-weight:750;border:0}
+.list-item-add-cancel {background:#e9eaef;color:#334178}
+.list-item-add-save {background:#3051b7;color:#fff}
+.list-item-add-save:disabled {opacity:.45}
+@media (max-width:760px) {
+ .list-compact-actions .list-add-primary {padding:8px 10px}
+ .list-compact-actions .list-ask-arney {padding:8px 9px}
+ .list-more-button {padding:8px 10px}
+ .list-item-add-sheet {width:100%;padding:14px 18px calc(18px + env(safe-area-inset-bottom))}
+}
+
+/* Mobile item swipes. Use positional movement rather than a permanent GPU
+   transform to prevent duplicated category pills on Safari/iPhone. */
+.list-item-swipe-shell {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-width: 0;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  background: white;
+}
+.list-item-swipe-shell .list-item-row { margin: 0; min-height: 58px; }
+.list-item-swipe-foreground {
+  position: relative;
+  left: 0;
+  z-index: 1;
+  width: 100%;
+  min-width: 0;
+  background: #fff;
+}
+.list-item-swipe-action {display: none}
+.list-item-complete-text .list-category-pill {
+  display: block;
+  flex: 0 1 auto;
+  max-width: 46%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width:760px) {
+  .list-item-swipe-shell,.list-item-swipe-foreground {touch-action:pan-y}
+  .list-item-swipe-action {
+    display:flex;align-items:center;justify-content:center;
+    position:absolute;top:0;bottom:0;width:94px;
+    color:#fff;border:0;font-size:15px;font-weight:750
+  }
+  .list-item-swipe-edit {left:0;background:#355bb5}
+  .list-item-swipe-delete {right:0;background:#c91f33}
+  .list-item-edit-button,.list-item-delete {display:none}
+  .list-item-complete-text {flex:1 1 auto}
+}
+
+
+/* Keep the category on its own stable flex cell rather than nesting it in
+   the moving/tappable button. Fixes duplicated badge paint on iOS Safari. */
+.list-item-swipe-foreground.list-item-row {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  /* The swipe shell clips horizontal slide only. Clipping this inner flex row
+     hid the first two grip icons until dnd-kit performed a remeasurement. */
+  overflow: visible;
+}
+.list-item-swipe-foreground > .list-item-complete-text {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+  padding-right: 0;
+  text-align: left;
+}
+.list-item-swipe-foreground > .list-item-complete-text .list-item-name {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.list-item-swipe-foreground > .list-item-category-tag {
+  position: relative;
+  display: inline-block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 43%;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  align-self: center;
+  isolation: isolate;
+  contain: paint;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+@media (max-width: 760px) {
+  .list-item-swipe-foreground > .list-item-category-tag {
+    max-width: 43%;
+  }
+}
+
+
+/* Respect the swipe shell's available width. Drag is visible only in Custom
+   order mode; when present it owns one unshrinkable touch-sized column. */
+.list-item-swipe-foreground.list-item-row {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  gap: 8px;
+}
+.list-item-swipe-foreground > .list-item-grip {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  padding: 0;
+  margin: 0;
+  line-height: 1;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: visible;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.list-item-swipe-foreground > .list-item-category-tag {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 38%;
+  margin-left: auto;
+  margin-right: 0;
+  text-align: center;
+}
+
+
+/* iPhone Safari: draw the custom-order grip on its own composited face.
+   Its background is no longer painted directly on the DnD listener button,
+   which could leave the first grip's top edge unpainted until a drag. */
+.list-item-swipe-foreground > .list-item-grip {
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+  overflow: visible;
+  isolation: isolate;
+  -webkit-tap-highlight-color: transparent;
+}
+.list-item-grip-face {
+  display: flex;
+  flex: 0 0 44px;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  background: #f3f3f6;
+  border-radius: 12px;
+  box-sizing: border-box;
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  pointer-events: none;
+}
+.list-item-grip-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  color: #4f5359;
+  pointer-events: none;
+}
