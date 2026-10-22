@@ -19101,3 +19101,40 @@ max-height:
   margin-right: 0;
   text-align: center;
 }
+
+
+/* iPhone Safari: draw the custom-order grip on its own composited face.
+   Its background is no longer painted directly on the DnD listener button,
+   which could leave the first grip's top edge unpainted until a drag. */
+.list-item-swipe-foreground > .list-item-grip {
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+  overflow: visible;
+  isolation: isolate;
+  -webkit-tap-highlight-color: transparent;
+}
+.list-item-grip-face {
+  display: flex;
+  flex: 0 0 44px;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  background: #f3f3f6;
+  border-radius: 12px;
+  box-sizing: border-box;
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  pointer-events: none;
+}
+.list-item-grip-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  color: #4f5359;
+  pointer-events: none;
+}
