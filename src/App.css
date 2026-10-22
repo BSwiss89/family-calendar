@@ -18920,3 +18920,8 @@ max-height:
  .list-modal-actions .list-store-enable {min-width:100%}
  .shopping-store-tabs {margin-inline:-4px}
 }
+
+/* List item text remains left-aligned; its category label sits on the right. */
+.list-item-complete-text {flex-direction:row;align-items:center;justify-content:flex-start;gap:6px}
+.list-item-complete-text .list-item-name {flex:1 1 auto;min-width:0;text-align:left}
+.list-item-complete-text .list-category-pill {flex:0 1 auto;max-width:45%;margin-left:auto;overflow-wrap:anywhere}

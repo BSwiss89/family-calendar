@@ -6811,6 +6811,9 @@ app.post('/api/lists/:id/sort-stores', async (request, response) => {
   if (!Number.isSafeInteger(listId) || listId <= 0) return response.status(400).json({ error: 'Invalid list ID.' })
   // First use learned preferences and deterministic offline rules; AI is only
   // requested explicitly for the remaining ambiguous items.
+  const selectedList = database.prepare('SELECT store_enabled FROM lists WHERE id = ?').get(listId)
+  if (!selectedList) return response.status(404).json({ error: 'List not found.' })
+  if (!selectedList.store_enabled) return response.status(400).json({ error: 'Enable store sorting for this list first.' })
   organizeExistingListItems(database, listId)
   const baseline = organizeShoppingStores(database, listId)
   if (!baseline) return response.status(404).json({ error: 'List not found.' })
