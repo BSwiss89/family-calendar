@@ -1870,6 +1870,7 @@ const [page, setPage] =
 
 const [isEditingHome, setIsEditingHome] =
   useState(false)
+const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
 
   const [homeWeatherSize, setHomeWeatherSize] =
   useState<'small' | 'medium' | 'large'>(
@@ -2487,365 +2488,6 @@ const mobileScheduleEmptyTapRef = useRef({
 
 const mobileScheduleSuppressClickUntilRef =
   useRef(0)
-const mobileCalendarEdgeTapRef = useRef({
-  pointerId: -1,
-  startX: 0,
-  startY: 0,
-  lastEdge: '' as '' | 'left' | 'right',
-  lastTapTime: 0,
-})
-
-const mobileScheduleEdgeTapRef = useRef({
-  pointerId: -1,
-  startX: 0,
-  startY: 0,
-  lastEdge: '' as '' | 'left' | 'right',
-  lastTapTime: 0,
-})
-
-const mobileMealsEdgeTapRef = useRef({
-  pointerId: -1,
-  startX: 0,
-  startY: 0,
-  lastEdge: '' as '' | 'left' | 'right',
-  lastTapTime: 0,
-})
-
-function getMobileScreenEdge(
-  clientX: number
-) {
-  if (window.innerWidth > 760) {
-    return null
-  }
-
-  const edgeWidth =
-    Math.max(
-      44,
-      Math.min(
-        56,
-        window.innerWidth * 0.12
-      )
-    )
-
-  if (clientX <= edgeWidth) {
-    return 'left'
-  }
-
-  if (
-    clientX >=
-    window.innerWidth - edgeWidth
-  ) {
-    return 'right'
-  }
-
-  return null
-}
-
-
-
-function handleMobileCalendarEdgePointerDown(
-  event: PointerEvent<HTMLDivElement>
-) {
-  const edge =
-    getMobileScreenEdge(
-      event.clientX
-    )
-
-  if (!edge) {
-    mobileCalendarEdgeTapRef.current.pointerId =
-      -1
-    return
-  }
-
-  mobileCalendarEdgeTapRef.current.pointerId =
-    event.pointerId
-
-  mobileCalendarEdgeTapRef.current.startX =
-    event.clientX
-
-  mobileCalendarEdgeTapRef.current.startY =
-    event.clientY
-}
-
-function handleMobileCalendarEdgePointerUp(
-  event: PointerEvent<HTMLDivElement>
-) {
-  const tap =
-    mobileCalendarEdgeTapRef.current
-
-  if (
-    tap.pointerId !==
-    event.pointerId
-  ) {
-    return
-  }
-
-  tap.pointerId = -1
-
-  const movedX =
-    Math.abs(
-      event.clientX - tap.startX
-    )
-
-  const movedY =
-    Math.abs(
-      event.clientY - tap.startY
-    )
-
-  if (
-    movedX > 18 ||
-    movedY > 18
-  ) {
-    return
-  }
-
-  const edge =
-    getMobileScreenEdge(
-      event.clientX
-    )
-
-  if (!edge) {
-    return
-  }
-
-  const now =
-    performance.now()
-
-  const isDoubleTap =
-    tap.lastEdge === edge &&
-    now - tap.lastTapTime <= 450
-
-  tap.lastEdge = edge
-  tap.lastTapTime = now
-
-  if (!isDoubleTap) {
-    return
-  }
-
-  tap.lastEdge = ''
-  tap.lastTapTime = 0
-
-  weekPagerSuppressClickUntilRef.current =
-    now + 550
-
-  if (edge === 'left') {
-    goToPreviousPeriod()
-    return
-  }
-
-  goToNextPeriod()
-}
-
-function handleMobileScheduleEdgePointerDown(
-  event: PointerEvent<HTMLDivElement>
-) {
-  const edge =
-    getMobileScreenEdge(
-      event.clientX
-    )
-
-  if (!edge) {
-    mobileScheduleEdgeTapRef.current.pointerId =
-      -1
-    return
-  }
-
-  mobileScheduleEdgeTapRef.current.pointerId =
-    event.pointerId
-
-  mobileScheduleEdgeTapRef.current.startX =
-    event.clientX
-
-  mobileScheduleEdgeTapRef.current.startY =
-    event.clientY
-}
-
-function handleMobileScheduleEdgePointerUp(
-  event: PointerEvent<HTMLDivElement>
-) {
-  const tap =
-    mobileScheduleEdgeTapRef.current
-
-  if (
-    tap.pointerId !==
-    event.pointerId
-  ) {
-    return
-  }
-
-  tap.pointerId = -1
-
-  const movedX =
-    Math.abs(
-      event.clientX - tap.startX
-    )
-
-  const movedY =
-    Math.abs(
-      event.clientY - tap.startY
-    )
-
-  if (
-    movedX > 18 ||
-    movedY > 18
-  ) {
-    return
-  }
-
-  const edge =
-    getMobileScreenEdge(
-      event.clientX
-    )
-
-  if (!edge) {
-    return
-  }
-
-  const now =
-    performance.now()
-
-  const isDoubleTap =
-    tap.lastEdge === edge &&
-    now - tap.lastTapTime <= 450
-
-  tap.lastEdge = edge
-  tap.lastTapTime = now
-
-  if (!isDoubleTap) {
-    return
-  }
-
-  tap.lastEdge = ''
-  tap.lastTapTime = 0
-
-  mobileScheduleSuppressClickUntilRef.current =
-    now + 550
-
-  if (
-    edge === 'left' &&
-    mobileScheduleCanGoPrevious
-  ) {
-    setWeekDate(
-      new Date(
-        mobileSchedulePreviousDate
-      )
-    )
-
-    return
-  }
-
-  if (
-    edge === 'right' &&
-    mobileScheduleCanGoNext
-  ) {
-    setWeekDate(
-      new Date(
-        mobileScheduleNextDate
-      )
-    )
-  }
-}
-
-function handleMobileMealsEdgePointerDown(
-  event: PointerEvent<HTMLDivElement>
-) {
-  const edge =
-    getMobileScreenEdge(
-      event.clientX
-    )
-
-  if (!edge) {
-    mobileMealsEdgeTapRef.current.pointerId =
-      -1
-
-    return
-  }
-
-  mobileMealsEdgeTapRef.current.pointerId =
-    event.pointerId
-
-  mobileMealsEdgeTapRef.current.startX =
-    event.clientX
-
-  mobileMealsEdgeTapRef.current.startY =
-    event.clientY
-}
-
-function handleMobileMealsEdgePointerUp(
-  event: PointerEvent<HTMLDivElement>
-) {
-  const tap =
-    mobileMealsEdgeTapRef.current
-
-  if (
-    tap.pointerId !==
-    event.pointerId
-  ) {
-    return
-  }
-
-  tap.pointerId = -1
-
-  const movedX =
-    Math.abs(
-      event.clientX - tap.startX
-    )
-
-  const movedY =
-    Math.abs(
-      event.clientY - tap.startY
-    )
-
-  if (
-    movedX > 18 ||
-    movedY > 18
-  ) {
-    return
-  }
-
-  const edge =
-    getMobileScreenEdge(
-      event.clientX
-    )
-
-  if (!edge) {
-    return
-  }
-
-  const now =
-    performance.now()
-
-  const isDoubleTap =
-    tap.lastEdge === edge &&
-    now - tap.lastTapTime <= 450
-
-  tap.lastEdge = edge
-  tap.lastTapTime = now
-
-  if (!isDoubleTap) {
-    return
-  }
-
-  tap.lastEdge = ''
-  tap.lastTapTime = 0
-
-  setMobileMealsDate(
-    (currentDate) => {
-      const nextDate =
-        new Date(currentDate)
-
-      nextDate.setDate(
-        nextDate.getDate() +
-          (edge === 'left'
-            ? -1
-            : 1)
-      )
-
-      return nextDate
-    }
-  )
-}
-
 function resetMobileMealsSwipeGesture() {
   const gesture =
     mobileMealsGestureRef.current
@@ -3241,38 +2883,6 @@ const mobileScheduleDate =
       ? mobileScheduleMaxDate
       : normalizedMobileScheduleDate
 
-const mobileSchedulePreviousCandidate =
-  new Date(mobileScheduleDate)
-
-mobileSchedulePreviousCandidate.setDate(
-  mobileSchedulePreviousCandidate.getDate() -
-    1
-)
-
-const mobileScheduleNextCandidate =
-  new Date(mobileScheduleDate)
-
-mobileScheduleNextCandidate.setDate(
-  mobileScheduleNextCandidate.getDate() + 1
-)
-
-const mobileScheduleCanGoPrevious =
-  mobileSchedulePreviousCandidate >=
-  mobileScheduleMinDate
-
-const mobileScheduleCanGoNext =
-  mobileScheduleNextCandidate <=
-  mobileScheduleMaxDate
-
-const mobileSchedulePreviousDate =
-  mobileScheduleCanGoPrevious
-    ? mobileSchedulePreviousCandidate
-    : mobileScheduleDate
-
-const mobileScheduleNextDate =
-  mobileScheduleCanGoNext
-    ? mobileScheduleNextCandidate
-    : mobileScheduleDate
 const mobileScheduleBufferStartDate =
   new Date(mobileScheduleBufferCenterDate)
 
@@ -13826,12 +13436,15 @@ return (
       ? 'top-bar-meals'
       : page === 'home'
         ? 'top-bar-home'
-        : ''
+        : page === 'lists'
+          ? 'top-bar-lists'
+          : ''
   }`}
 >
      {page !== 'meals' &&
   page !== 'home' &&
-  page !== 'calendar' && (
+  page !== 'calendar' &&
+  page !== 'lists' && (
   <div>
     <h1>Family Calendar</h1>
     <p>{fullDate}</p>
@@ -15829,7 +15442,76 @@ createPortal(
       className="home-ai-buddy-zone"
       aria-hidden="true"
     />
+    <button
+      type="button"
+      className="home-mobile-settings-button"
+      onClick={() => setMobileSettingsOpen(true)}
+    >
+      Settings
+    </button>
   </section>
+)}
+{mobileSettingsOpen && createPortal(
+  <div
+    className="mobile-settings-overlay"
+    onClick={() => setMobileSettingsOpen(false)}
+  >
+    <section
+      className="mobile-settings-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mobile-settings-title"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="mobile-settings-heading">
+        <h2 id="mobile-settings-title">Settings</h2>
+        <button
+          className="mobile-settings-close"
+          type="button"
+          aria-label="Close settings"
+          onClick={() => setMobileSettingsOpen(false)}
+        >
+          ×
+        </button>
+      </div>
+      <p>Manage your family calendar preferences.</p>
+      <button
+        className="mobile-settings-option"
+        type="button"
+        onClick={() => {
+          setMobileSettingsOpen(false)
+          window.dispatchEvent(new Event('family-calendar:open-arney-settings'))
+        }}
+      >
+        Arney Voice Settings
+        <span aria-hidden="true">›</span>
+      </button>
+      <button
+        className="mobile-settings-option"
+        type="button"
+        onClick={() => {
+          setMobileSettingsOpen(false)
+          setPage('people')
+        }}
+      >
+        Manage People
+        <span aria-hidden="true">›</span>
+      </button>
+      <button
+        className="mobile-settings-option"
+        type="button"
+        onClick={() => {
+          setMobileSettingsOpen(false)
+          setIsEditingHome(true)
+          setPage('home')
+        }}
+      >
+        Customize Home
+        <span aria-hidden="true">›</span>
+      </button>
+    </section>
+  </div>,
+  document.body
 )}
 
       {page === 'calendar' && (
@@ -15844,38 +15526,6 @@ createPortal(
     : ''
 }`}
 >
-   {(calendarView === 'month' ||
-      calendarView === 'schedule') && (
-      <>
-        <div
-          className="mobile-screen-edge-tap mobile-screen-edge-tap-left"
-          onPointerDown={
-            calendarView === 'schedule'
-              ? handleMobileScheduleEdgePointerDown
-              : handleMobileCalendarEdgePointerDown
-          }
-          onPointerUp={
-            calendarView === 'schedule'
-              ? handleMobileScheduleEdgePointerUp
-              : handleMobileCalendarEdgePointerUp
-          }
-        />
-
-        <div
-          className="mobile-screen-edge-tap mobile-screen-edge-tap-right"
-          onPointerDown={
-            calendarView === 'schedule'
-              ? handleMobileScheduleEdgePointerDown
-              : handleMobileCalendarEdgePointerDown
-          }
-          onPointerUp={
-            calendarView === 'schedule'
-              ? handleMobileScheduleEdgePointerUp
-              : handleMobileCalendarEdgePointerUp
-          }
-        />
-      </>
-    )}
           <div
   className={`calendar-panel ${
     calendarViewChanging
@@ -19909,29 +19559,6 @@ openAddForm()
       )}
 {page === 'meals' && (
   <section className="meals-page">
-    {mealsView === 'planner' && (
-  <>
-    <div
-      className="mobile-screen-edge-tap mobile-screen-edge-tap-left"
-      onPointerDown={
-        handleMobileMealsEdgePointerDown
-      }
-      onPointerUp={
-        handleMobileMealsEdgePointerUp
-      }
-    />
-
-    <div
-      className="mobile-screen-edge-tap mobile-screen-edge-tap-right"
-      onPointerDown={
-        handleMobileMealsEdgePointerDown
-      }
-      onPointerUp={
-        handleMobileMealsEdgePointerUp
-      }
-    />
-  </>
-)}
     <div className="meals-page-header">
       <div>
         <span className="meals-page-eyebrow">

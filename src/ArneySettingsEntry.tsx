@@ -31,24 +31,30 @@ export default function ArneySettingsEntry() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open])
 
-  const button = (mobile: boolean) => (
+  // The phone entry is inside Home > Settings; retain desktop sidebar access.
+  useEffect(() => {
+    const openFromSettings = () => setOpen(true)
+    window.addEventListener('family-calendar:open-arney-settings', openFromSettings)
+    return () => window.removeEventListener('family-calendar:open-arney-settings', openFromSettings)
+  }, [])
+
+  const button = () => (
     <button
       type="button"
-      className={mobile ? 'arney-settings-mobile' : 'sidebar-nav-button arney-settings-nav'}
+      className="sidebar-nav-button arney-settings-nav"
       aria-label="Open Arney voice settings"
       aria-haspopup="dialog"
       aria-expanded={open}
       onClick={() => setOpen(true)}
     >
-      <span aria-hidden="true">{mobile ? '⚙' : '⚙'}</span>
-      {!mobile && <span>Arney settings</span>}
+      <span aria-hidden="true">⚙</span>
+      <span>Arney settings</span>
     </button>
   )
 
   return (
     <>
-      {targets.sidebar && createPortal(button(false), targets.sidebar)}
-      {createPortal(button(true), document.body)}
+      {targets.sidebar && createPortal(button(), targets.sidebar)}
       {open && createPortal(
         <div className="arney-settings-backdrop" onMouseDown={event => {
           if (event.target === event.currentTarget) setOpen(false)
