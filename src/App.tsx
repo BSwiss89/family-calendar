@@ -23226,89 +23226,66 @@ capture.captureType !== 'other' && (
 
     {listCreateOpen &&
       createPortal(
-        <div
-          className="list-modal-overlay"
+        <div className="list-modal-overlay list-create-sheet-overlay"
           onClick={() => {
             setListCreateOpen(false)
             setNewListName('')
             setNewListIcon(null)
             setListIconPickerTarget(null)
-          }}
-        >
-          <div
-            className="list-modal list-create-modal"
-            onClick={(event) => {
-              event.stopPropagation()
-            }}
-          >
-            <div className="list-modal-header">
-              <div>
-                <span className="quick-add-eyebrow">
-                  Lists
-                </span>
-
-                <h2>Create List</h2>
-              </div>
-
-              <button
-                className="quick-add-close"
-                type="button"
-                aria-label="Close Create List"
+          }}>
+          <section className="list-modal list-create-modal list-create-bottom-sheet"
+            role="dialog" aria-modal="true" aria-labelledby="list-create-title"
+            onClick={event => event.stopPropagation()}>
+            <div className="list-create-sheet-handle" aria-hidden="true"/>
+            <div className="list-create-sheet-toolbar">
+              <button type="button" className="list-create-sheet-cancel"
                 onClick={() => {
                   setListCreateOpen(false)
                   setNewListName('')
                   setNewListIcon(null)
                   setListIconPickerTarget(null)
-                }}
-              >
-                ×
+                }}>Cancel</button>
+              <h2 id="list-create-title">Create List</h2>
+              <button className="list-create-sheet-submit" type="submit"
+                form="list-create-main-form" disabled={!newListName.trim()}>
+                Create
               </button>
             </div>
-
-            <form
+            <form id="list-create-main-form"
               className="people-form list-create-form"
-              onSubmit={createList}
-            >
-              <button className="list-create-icon-chooser" type="button"
-                onClick={() => setListIconPickerTarget('create')}
-                aria-label="Choose an icon for this list">
-                <span className={`list-create-icon-spot ${newListIcon ? 'selected' : ''}`}
-                  style={newListIcon ? { backgroundColor: getListIconOption(newListIcon)?.tone } : undefined}>
-                  {newListIcon ? <ListIcon id={newListIcon} width={29} height={29}/> : <span aria-hidden="true">+</span>}
-                </span>
-                <span>{newListIcon ? getListIconOption(newListIcon)?.label : 'Choose an icon'}</span>
-                <span className="list-create-icon-arrow" aria-hidden="true">›</span>
-              </button>
-              <label className="event-field">
-                List Name
-
-                <input
-                  className="event-input"
-                  type="text"
-                  placeholder="Example: Groceries"
-                  value={newListName}
-                  onChange={(event) => {
-                    setNewListName(
-                      event.target.value
-                    )
-                  }}
-                  autoFocus
-                />
-              </label>
-
-              <button
-                className="add-event-button"
-                type="submit"
-                disabled={
-                  newListName.trim() === ''
-                }
-              >
-                Create List
-              </button>
+              onSubmit={createList}>
+              <div className="list-create-fields">
+                <div className="list-create-icon-setting">
+                  <span className="list-create-field-heading">Icon</span>
+                  <button className="list-create-icon-chooser" type="button"
+                    onClick={() => setListIconPickerTarget('create')}
+                    aria-label="Choose an icon for this list">
+                    <span className={newListIcon ? 'list-create-icon-spot selected' : 'list-create-icon-spot'}
+                      style={newListIcon
+                        ? { backgroundColor: getListIconOption(newListIcon)?.tone }
+                        : undefined}>
+                      {newListIcon
+                        ? <ListIcon id={newListIcon} width={30} height={30}/>
+                        : null}
+                    </span>
+                    <span className="list-create-icon-name">
+                      {newListIcon ? getListIconOption(newListIcon)?.label : 'Choose an icon'}
+                    </span>
+                    <span className="list-create-icon-arrow" aria-hidden="true">›</span>
+                  </button>
+                </div>
+                <label className="list-create-name-field">
+                  <span className="list-create-field-heading">List Name</span>
+                  <input className="event-input list-create-name-input"
+                    type="text" placeholder="e.g. Groceries, Work, Travel..."
+                    maxLength={100} value={newListName}
+                    onChange={event => setNewListName(event.target.value)}
+                  />
+                </label>
+              </div>
             </form>
-          </div>
-        </div>,
-        document.body
+          </section>
+        </div>, document.body
       )}
 
     {listIconPickerTarget !== null && createPortal(
@@ -23322,7 +23299,6 @@ capture.captureType !== 'other' && (
             <button type="button" className="list-icon-picker-close"
               aria-label="Close icon picker" onClick={() => setListIconPickerTarget(null)}>×</button>
           </div>
-          <p>Pick an icon for this list. You can change it later.</p>
           <div className="list-icon-picker-grid">
             {LIST_ICON_OPTIONS.map(option => (
               <button type="button" key={option.id}
@@ -23340,7 +23316,6 @@ capture.captureType !== 'other' && (
                 <span className="list-icon-choice-art" style={{backgroundColor: option.tone}}>
                   <ListIcon id={option.id} width={25} height={25}/>
                 </span>
-                <span>{option.label}</span>
               </button>
             ))}
           </div>
