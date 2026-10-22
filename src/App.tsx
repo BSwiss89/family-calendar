@@ -1981,6 +1981,20 @@ const [page, setPage] =
 const [isEditingHome, setIsEditingHome] =
   useState(false)
 const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
+const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
+
+useEffect(() => {
+  let cancelled = false
+  fetch('/api/auth/status', { credentials: 'same-origin', cache: 'no-store' })
+    .then((response) => response.ok ? response.json() : null)
+    .then((status) => {
+      if (!cancelled) setFamilyAuthEnabled(status?.enabled === true)
+    })
+    .catch(() => {
+      if (!cancelled) setFamilyAuthEnabled(false)
+    })
+  return () => { cancelled = true }
+}, [])
 
   const [homeWeatherSize, setHomeWeatherSize] =
   useState<'small' | 'medium' | 'large'>(
@@ -13758,6 +13772,17 @@ return (
 
   <div className="sidebar-nav-spacer" />
 
+  {familyAuthEnabled && (
+    <button
+      type="button"
+      className="sidebar-nav-button"
+      onClick={() => window.location.assign('/account')}
+    >
+      <span className="sidebar-nav-icon">👤</span>
+      <span>Family Account</span>
+    </button>
+  )}
+
   <button
     type="button"
     className={`sidebar-nav-button ${
@@ -15696,6 +15721,16 @@ createPortal(
         </button>
       </div>
       <p>Manage your family calendar preferences.</p>
+      {familyAuthEnabled && (
+        <button
+          className="mobile-settings-option"
+          type="button"
+          onClick={() => window.location.assign('/account')}
+        >
+          Family Account &amp; Sign Out
+          <span aria-hidden="true">›</span>
+        </button>
+      )}
       <button
         className="mobile-settings-option"
         type="button"
