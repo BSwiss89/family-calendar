@@ -50,5 +50,7 @@ jobs:
           }
       - name: Verify private preview cannot be released by manual or automatic paths
         run: node --test scripts/test-private-preview-release-scope.mjs
+      - name: Validate family authentication security in private mode
+        run: node --test scripts/test-family-auth.mjs
       - name: Build frontend
         run: npm run build
