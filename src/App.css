@@ -19599,3 +19599,119 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   z-index: 200 !important;
   pointer-events: none !important;
 }
+
+
+/* Closer to the original soft, flowing Lists mockup. The accents deliberately
+   inherit the calendar theme; list icons retain their own optional colors. */
+.lists-overview {
+  --lists-accent: var(--calendar-theme-color, #bea992);
+  --lists-wave-one: color-mix(in srgb, var(--lists-accent) 22%, #ffffff);
+  --lists-wave-two: color-mix(in srgb, var(--lists-accent) 13%, #ffffff);
+}
+.lists-overview::before,
+.lists-overview::after {
+  clip-path: none;
+  pointer-events: none;
+  width: auto;
+  top: -116px;
+  left: -28px;
+  right: -28px;
+  height: 340px;
+  opacity: 1;
+  border-radius: 0 0 48% 45% / 0 0 37% 35%;
+}
+.lists-overview::before {
+  background: linear-gradient(120deg,
+      color-mix(in srgb, var(--lists-accent) 13%, #faf6f1),
+      color-mix(in srgb, var(--lists-accent) 23%, #fdfbf9) 53%,
+      color-mix(in srgb, var(--lists-accent) 8%, #ffffff));
+  transform: rotate(-5deg) translateY(15px);
+}
+.lists-overview::after {
+  height: 298px;
+  top: -111px;
+  opacity: .65;
+  border-radius: 0 0 60% 40% / 0 0 39% 30%;
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--lists-accent) 9%, #fff),
+    color-mix(in srgb, var(--lists-accent) 20%, #fff) 65%,
+    transparent);
+  transform: rotate(7deg) translateY(-13px);
+}
+.lists-overview .lists-overview-heading {
+  margin-bottom: 30px;
+  padding-top: 16px;
+}
+.lists-overview .list-page-grid {gap: 14px}
+.lists-overview .themed-list-card {
+  min-height: 108px;
+  gap: 14px;
+  padding: 16px 19px;
+  background: linear-gradient(108deg, rgba(255,255,255,.96),
+    color-mix(in srgb, var(--lists-accent) 3%, #fff));
+  border: 1px solid rgba(255,255,255,.94);
+  border-radius: 22px;
+  box-shadow:
+    0 14px 25px rgba(73,61,48,.08),
+    0 2px 5px rgba(73,61,48,.045);
+}
+.lists-overview .themed-list-card::after {
+  inset: auto -5% -7% 34%;
+  height: 81%;
+  opacity: .8;
+  border-radius: 82% 0 0 0 / 92% 0 0 0;
+  background: linear-gradient(118deg, transparent 6%,
+    color-mix(in srgb, var(--lists-accent) 6%, #fff) 48%,
+    color-mix(in srgb, var(--lists-accent) 17%, #fff) 98%);
+  transform: rotate(-8deg);
+}
+.lists-overview .themed-list-card-icon {
+  flex-basis: 64px;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--list-icon-tone, #8795a8);
+  box-shadow: inset 0 2px 4px #ffffff32;
+}
+.lists-overview .themed-list-card-icon.themed-list-icon-neutral {
+  background: #e9edf4;
+  color: #78889e;
+}
+.themed-list-card-divider {
+  display: block;
+  flex: 0 0 1px;
+  width: 1px;
+  height: 52px;
+  background: color-mix(in srgb, var(--lists-accent) 25%, #d9dbe0);
+  opacity: .8;
+}
+.lists-overview .themed-list-card-name {
+  font-weight: 750;
+  font-size: clamp(17px, 2.6vw, 21px);
+  letter-spacing: -.02em;
+}
+.lists-overview .themed-list-card-count {
+  background: #e8edf7;
+  color: #46566d;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+.lists-overview .themed-list-card-chevron {
+  color: #58657b;
+  font-weight: 400;
+}
+@media(max-width: 760px) {
+  .lists-overview::before, .lists-overview::after {left:-20px;right:-20px;}
+  .lists-overview::before {top:-94px;height:280px;}
+  .lists-overview::after {top:-97px;height:266px;}
+  .lists-overview .lists-overview-heading {margin-bottom:25px;padding-top:12px}
+  .lists-overview .themed-list-card {
+    min-height: 94px;
+    border-radius: 18px;
+    padding: 13px 14px;
+    gap: 11px;
+  }
+  .lists-overview .themed-list-card-icon {flex-basis:56px;width:56px;height:56px}
+  .themed-list-card-divider {height:44px}
+  .lists-overview .themed-list-card-name {font-size:17px}
+}

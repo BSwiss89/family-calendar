@@ -23196,6 +23196,7 @@ capture.captureType !== 'other' && (
             <span className={`themed-list-card-icon ${list.icon ? '' : 'themed-list-icon-neutral'}`}>
               <ListIcon id={list.icon} width={26} height={26} />
             </span>
+            <span className="themed-list-card-divider" aria-hidden="true" />
             <span className="themed-list-card-copy">
               <span className="themed-list-card-name">{list.name}</span>
               <span className="themed-list-card-count">
