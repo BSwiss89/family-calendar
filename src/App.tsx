@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -23190,43 +23191,40 @@ capture.captureType !== 'other' && (
                 return null
               }
               const categoryOptions = Array.from(new Set(
-                selectedList.items.map((item) => item.category || 'General')
-              )).sort((a, b) => a.localeCompare(b))
-              const filteredItems = listCategoryFilter === 'All'
-                ? selectedList.items
-                : selectedList.items.filter(
-                    (item) => (item.category || 'General') === listCategoryFilter
-                  )
-              const visibleItems = listSortMode === 'category'
-                ? [...filteredItems].sort((a, b) => {
-                    const categoryOf = (item: ListItem) => item.category || 'General'
-                    const orderOf = (category: string) => category === 'General'
-                      ? Number.MAX_SAFE_INTEGER
-                      : (SUGGESTED_LIST_CATEGORIES.indexOf(category) === -1
-                        ? SUGGESTED_LIST_CATEGORIES.length
-                        : SUGGESTED_LIST_CATEGORIES.indexOf(category))
-                    const categoryA = categoryOf(a)
-                    const categoryB = categoryOf(b)
-                    return orderOf(categoryA) - orderOf(categoryB)
-                      || categoryA.localeCompare(categoryB)
-                  })
-                : filteredItems
-              const storeOrderedItems = listSortMode === 'store' && selectedList.store_enabled
-                ? [...visibleItems].sort((a, b) => {
-                    const order = (item: ListItem) => shoppingStores.find(store => store.id === item.store_id)?.sort_order ?? Number.MAX_SAFE_INTEGER
-                    return order(a) - order(b) || (a.category || 'General').localeCompare(b.category || 'General') || a.id - b.id
-                  }) : visibleItems
-              const storeVisibleItems = selectedList.store_enabled && storeFilter !== 'all'
-                ? storeOrderedItems.filter(item => storeFilter === 'unsorted' ? item.store_id == null : item.store_id === Number(storeFilter))
-                : storeOrderedItems
-              const visibleStores = shoppingStores.filter(store => store.enabled || selectedList.items.some(item => item.store_id === store.id))
-              const canReorderList = listSortMode === 'custom'
-                && listCategoryFilter === 'All'
-              const canOrganizeExisting = selectedList.items.some(
-                (item) => (item.category || 'General') === 'General'
-                  && suggestListCategory(item.text) !== null
+                selectedList.items.map(item => item.category || 'General')
+              )).sort((x, y) => x.localeCompare(y))
+              const filteredItems = selectedList.items.filter(item =>
+                listCategoryFilter === 'All' || (item.category || 'General') === listCategoryFilter
               )
-
+              const categoryRank = (item: ListItem) => {
+                const category = item.category || 'General'
+                if (category === 'General') return 9999
+                const index = SUGGESTED_LIST_CATEGORIES.indexOf(category)
+                return index < 0 ? SUGGESTED_LIST_CATEGORIES.length : index
+              }
+              const categoryCompare = (x: ListItem, y: ListItem) =>
+                categoryRank(x) - categoryRank(y)
+                || (x.category || 'General').localeCompare(y.category || 'General')
+                || x.id - y.id
+              const storeRank = (item: ListItem) =>
+                shoppingStores.find(store => store.id === item.store_id)?.sort_order ?? Number.MAX_SAFE_INTEGER
+              const customSorting = listSortMode === 'custom'
+              const orderedItems = customSorting ? filteredItems
+                : selectedList.store_enabled
+                  ? [...filteredItems].sort((x, y) => storeRank(x) - storeRank(y)
+                      || ((x.store_id ?? 0) - (y.store_id ?? 0))
+                      || categoryCompare(x, y))
+                  : [...filteredItems].sort(categoryCompare)
+              const storeVisibleItems = selectedList.store_enabled && storeFilter !== 'all'
+                ? orderedItems.filter(item => storeFilter === 'unsorted'
+                    ? item.store_id == null : item.store_id === Number(storeFilter))
+                : orderedItems
+              const visibleStores = shoppingStores.filter(store =>
+                store.enabled || selectedList.items.some(item => item.store_id === store.id))
+              const canReorderList = customSorting && listCategoryFilter === 'All'
+                && (!selectedList.store_enabled || storeFilter === 'all')
+              const canOrganizeExisting = selectedList.items.some(item =>
+                (item.category || 'General') === 'General' && suggestListCategory(item.text) !== null)
               return (
                 <>
                   <div className="list-modal-header">
@@ -23450,19 +23448,6 @@ capture.captureType !== 'other' && (
                         <option key={category} value={category}>{category}</option>
                       ))}
                     </select>
-                    <label htmlFor="list-sort-mode">Organize by</label>
-                    <select
-                      id="list-sort-mode"
-                      className="event-input"
-                      value={listSortMode}
-                      onChange={(event) => setListSortMode(
-                        event.target.value === 'custom' ? 'custom' : event.target.value === 'store' ? 'store' : 'category'
-                      )}
-                    >
-                      {selectedList.store_enabled && <option value="store">Store, then category</option>}
-                      <option value="category">Category (automatic)</option>
-                      <option value="custom">Custom order (drag)</option>
-                    </select>
                   </div>
                   <div className="list-items">
                     {selectedList.items.length === 0 ? (
@@ -23488,8 +23473,14 @@ capture.captureType !== 'other' && (
                             verticalListSortingStrategy
                           }
                         >
-                          {storeVisibleItems.map(
-                            (item) => (
+                          {storeVisibleItems.map((item, index) => (
+                            <Fragment key={item.id}>
+                              {selectedList.store_enabled && storeFilter === 'all'
+                                && !customSorting && (index === 0 || storeVisibleItems[index - 1].store_id !== item.store_id)
+                                && <div className="list-store-group-heading">
+                                  {shoppingStores.find(store => store.id === item.store_id)?.name ?? 'Unsorted'}
+                                  <span>({storeVisibleItems.filter(entry => entry.store_id === item.store_id).length})</span>
+                                </div>}
                               <SortableListItem
                                 key={
                                   item.id
@@ -23528,8 +23519,8 @@ capture.captureType !== 'other' && (
                                   deleteListItem
                                 }
                               />
-                            )
-                          )}
+                            </Fragment>
+                          ))}
                         </SortableContext>
                       </DndContext>
                     )}

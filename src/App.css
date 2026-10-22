@@ -18925,3 +18925,8 @@ max-height:
 .list-item-complete-text {flex-direction:row;align-items:center;justify-content:flex-start;gap:6px}
 .list-item-complete-text .list-item-name {flex:1 1 auto;min-width:0;text-align:left}
 .list-item-complete-text .list-category-pill {flex:0 1 auto;max-width:45%;margin-left:auto;overflow-wrap:anywhere}
+
+/* Store headings appear only when viewing All stores, never beneath a selected store tab. */
+.list-store-group-heading {display:flex;align-items:center;gap:6px;padding:6px 10px;margin:9px 0 5px;background:#eff0f3;color:#343a44;border-radius:8px;font-size:13px;font-weight:750}
+.list-store-group-heading span {font-weight:500;color:#6c737f}
+.list-category-toolbar {margin-top:8px;margin-bottom:6px}
