@@ -19138,3 +19138,288 @@ max-height:
   color: #4f5359;
   pointer-events: none;
 }
+
+
+/* PR #53 — Theme-ready, wave-accented Lists overview.
+   The future global theme control only needs to set --calendar-theme-color on
+   .calendar-app or :root; waves automatically track that color. */
+.lists-overview {
+  --lists-accent: var(--calendar-theme-color, #5289df);
+  --lists-wave-one: color-mix(in srgb, var(--lists-accent) 18%, #ffffff);
+  --lists-wave-two: color-mix(in srgb, var(--lists-accent) 9%, #ffffff);
+  position: relative;
+  isolation: isolate;
+  min-height: calc(100dvh - 205px);
+  padding-top: 20px;
+}
+.lists-overview::before,
+.lists-overview::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+  top: -16px;
+  left: -24px;
+  right: -24px;
+  height: 230px;
+}
+.lists-overview::before {
+  background: linear-gradient(110deg, var(--lists-wave-two), var(--lists-wave-one));
+  clip-path: polygon(0 0, 100% 0, 100% 44%, 80% 51%, 63% 68%, 42% 61%, 22% 45%, 0 53%);
+}
+.lists-overview::after {
+  top: 8px;
+  height: 202px;
+  opacity: .74;
+  background: linear-gradient(125deg, transparent, var(--lists-wave-two) 30%, var(--lists-wave-one) 83%);
+  clip-path: polygon(0 0, 100% 0, 100% 50%, 78% 64%, 55% 54%, 32% 62%, 0 38%);
+}
+.lists-overview .lists-overview-heading {
+  position: relative;
+  margin-bottom: 25px;
+  padding: 6px 0 8px;
+}
+.lists-overview-heading h2 {
+  font-size: clamp(32px, 5vw, 40px);
+  font-weight: 800;
+  letter-spacing: -.025em;
+  color: #1a2438;
+}
+.lists-overview-heading p {
+  max-width: 42rem;
+  color: #586374;
+  line-height: 1.4;
+}
+.lists-overview .list-page-grid {
+  position: relative;
+  display: grid;
+  gap: 13px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+}
+.lists-overview .themed-list-card {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  min-height: 98px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 14px 17px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.89);
+  border-radius: 20px;
+  background: rgba(255,255,255,.93);
+  box-shadow: 0 8px 20px rgba(40, 48, 64, .08), 0 1px 3px rgba(40,48,64,.035);
+  color: #1d2638;
+  text-align: left;
+  cursor: pointer;
+}
+.lists-overview .themed-list-card::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: auto 0 0 43%;
+  height: 70%;
+  background: linear-gradient(110deg, transparent 2%, var(--lists-wave-two) 65%, var(--lists-wave-one));
+  border-top-left-radius: 100% 85%;
+  pointer-events: none;
+}
+.lists-overview .themed-list-card:hover {box-shadow: 0 12px 22px rgba(40,48,64,.12)}
+.lists-overview .themed-list-card:focus-visible {outline: 3px solid var(--lists-accent);outline-offset: 3px}
+.themed-list-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  border-radius: 17px;
+  background: var(--list-icon-tone);
+  color: #fff;
+  box-shadow: inset 0 1px 2px #ffffff2e;
+}
+.themed-list-card-icon.themed-list-icon-neutral {background: #e9eef6;color: #76879e}
+.themed-list-card-copy {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 6px;
+}
+.themed-list-card-name {
+  font-size: clamp(16px, 2.5vw, 20px);
+  font-weight: 750;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.themed-list-card-count {
+  color: #535e73;
+  background: rgba(232,237,247,.78);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 9px;
+}
+.themed-list-card-chevron {flex: 0 0 auto;font-size: 30px;font-weight: 300;color: #77859e;line-height: 1}
+
+/* Create List is the first sheet, while the icon chooser is a second,
+   higher sheet. Do not reposition the fixed blue plus when either opens. */
+.list-create-form {gap: 18px}
+.list-create-icon-chooser {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 10px;
+  background: #fafbfe;
+  border: 1px solid #e6e9f2;
+  border-radius: 14px;
+  text-align: left;
+  color: #5b6374;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.list-create-icon-spot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 60px;
+  width: 60px;
+  height: 60px;
+  border: 2px dashed #aab3c2;
+  border-radius: 18px;
+  background: #f0f2f6;
+  font-size: 25px;
+  color: #6f7c91;
+}
+.list-create-icon-spot.selected {border: 0;color: white}
+.list-create-icon-arrow {margin-left: auto;color: #73809a;font-size: 29px}
+.list-detail-icon-edit {
+  display: inline-flex;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 13px;
+  color: #fff;
+  background: var(--list-icon-tone, #8795a8);
+  cursor: pointer;
+}
+.list-icon-picker-overlay {
+  position: fixed;
+  z-index: 24100;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(21,29,43,.54);
+  backdrop-filter: blur(6px);
+}
+.list-icon-picker-modal {
+  width: min(600px, 100%);
+  max-height: min(83dvh, 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+  padding: 16px 18px calc(22px + env(safe-area-inset-bottom));
+  border-radius: 22px 22px 18px 18px;
+  background: #fff;
+  box-shadow: 0 -8px 35px #0002;
+  color: #1d2638;
+}
+.list-icon-picker-handle {
+  width: 44px;
+  height: 5px;
+  border-radius: 10px;
+  background: #c5c9d1;
+  margin: 0 auto 10px;
+}
+.list-icon-picker-heading {display: flex;justify-content: space-between;align-items: center;gap: 10px}
+.list-icon-picker-heading h2 {margin: 0;font-size: 22px}
+.list-icon-picker-close {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border: 0;
+  border-radius: 50%;
+  color: #293345;
+  background: #f1f2f5;
+  font-size: 25px;
+  cursor: pointer;
+}
+.list-icon-picker-modal > p {font-size: 14px;color: #647186;margin: 6px 0 16px}
+.list-icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0,1fr));
+  gap: 10px 7px;
+}
+.list-icon-picker-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 2px;
+  border: 2px solid transparent;
+  background: transparent;
+  border-radius: 14px;
+  font-size: 11px;
+  color: #4c5361;
+  cursor: pointer;
+}
+.list-icon-picker-choice[aria-pressed="true"] {border-color: #2d70df;background: #ebf2ff}
+.list-icon-choice-art {
+  width: 50px;
+  height: 50px;
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.list-icon-picker-choice > span:last-child {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list-icon-clear-choice {
+  display: block;
+  min-height: 44px;
+  border: 1px solid #d6dce7;
+  border-radius: 12px;
+  margin: 16px 0 0;
+  padding: 8px 16px;
+  color: #45526a;
+  background: #f5f7fa;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+body:has(.list-create-modal) .lists-overview > .calendar-floating-add,
+body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
+  /* Fixed at its original bottom-right position, simply beneath modal scrims. */
+  z-index: 200 !important;
+  pointer-events: none !important;
+  transform: none !important;
+}
+@media (max-width: 760px) {
+  .lists-overview {padding-top: 8px;min-height: calc(100dvh - 150px)}
+  .lists-overview::before,.lists-overview::after {left:-16px;right:-16px}
+  .lists-overview .list-page-grid {grid-template-columns: minmax(0,1fr);gap:12px}
+  .lists-overview .themed-list-card {min-height: 88px;padding: 12px 13px;gap:12px;border-radius:18px}
+  .themed-list-card-icon {width:53px;height:53px;flex-basis:53px}
+  .themed-list-card-name {font-size: 17px}
+  .list-icon-picker-overlay {padding: 0}
+  .list-icon-picker-modal {width:100%;max-height: 82dvh;border-radius:24px 24px 0 0}
+  .list-icon-picker-grid {grid-template-columns: repeat(4,minmax(0,1fr));gap: 9px 4px}
+  .list-icon-choice-art {width:54px;height:54px}
+}
+@media (prefers-reduced-motion: reduce) {
+  .lists-overview .themed-list-card {transition:none}
+}
