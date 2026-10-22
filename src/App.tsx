@@ -5,11 +5,13 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type CSSProperties,
   type FormEvent,
   type PointerEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
 import {
   suggestListCategory,
@@ -1258,6 +1260,7 @@ type ShoppingStore = {
 type CalendarList = {
   id: number
   name: string
+  icon?: string | null
   store_enabled?: boolean
   created_at?: string
   items: ListItem[]
@@ -3243,6 +3246,8 @@ const [capturePreviewUrl, setCapturePreviewUrl] = useState('')
 const [captureNote, setCaptureNote] = useState('')
 const [captureSaving, setCaptureSaving] = useState(false)
 const [listCreateOpen, setListCreateOpen] = useState(false)
+const [newListIcon, setNewListIcon] = useState<string | null>(null)
+const [listIconPickerTarget, setListIconPickerTarget] = useState<'create' | number | null>(null)
 const [listNameEditing, setListNameEditing] = useState(false)
   const [sidebarContentChanging, setSidebarContentChanging] = useState(false)
   const [calendarViewChanging, setCalendarViewChanging] = useState(false)
@@ -10252,6 +10257,7 @@ async function createList(event: FormEvent<HTMLFormElement>) {
     },
     body: JSON.stringify({
       name: cleanName,
+      icon: newListIcon,
     }),
   })
 
@@ -10261,9 +10267,25 @@ async function createList(event: FormEvent<HTMLFormElement>) {
   }
 
   setNewListName('')
-setListCreateOpen(false)
-await loadLists()
+  setNewListIcon(null)
+  setListIconPickerTarget(null)
+  setListCreateOpen(false)
+  await loadLists()
 }
+
+async function changeExistingListIcon(listId: number, icon: string | null) {
+  const response = await fetch(`/api/lists/${listId}/icon`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ icon }),
+  })
+  if (!response.ok) {
+    showAppNotification('Could not save the list icon.')
+    return
+  }
+  await loadLists()
+}
+
 async function addListItem(event: FormEvent<HTMLFormElement>) {
   event.preventDefault()
 
@@ -23130,8 +23152,41 @@ capture.captureType !== 'other' && (
 )}
 
       {page === 'lists' && (
-  <section className="people-page">
-    <div className="people-page-heading">
+  <section className="people-page lists-overview">
+    {/* Reference-matched layered scallop/sweep artwork behind the Lists heading.
+        Kept as live vector paths so future theme colors can recolor every band. */}
+    <svg className="lists-reference-header-waves" viewBox="0 0 864 320"
+      preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="lists-wave-field" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="var(--lists-header-base)" />
+          <stop offset="60%" stopColor="var(--lists-header-warm)" />
+          <stop offset="100%" stopColor="var(--lists-header-base)" />
+        </linearGradient>
+        <linearGradient id="lists-wave-light" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="var(--lists-wave-ivory)" />
+          <stop offset="60%" stopColor="var(--lists-wave-mist)" />
+          <stop offset="100%" stopColor="var(--lists-wave-ivory)" />
+        </linearGradient>
+        <linearGradient id="lists-wave-depth" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="var(--lists-wave-shadow)" />
+          <stop offset="58%" stopColor="var(--lists-header-warm)" />
+          <stop offset="100%" stopColor="var(--lists-wave-mist)" />
+        </linearGradient>
+      </defs>
+      <rect width="864" height="320" fill="url(#lists-wave-field)" />
+      <path d="M0 0H864V110C757 47 700 39 575 80C449 121 389 172 272 135C159 100 69 111 0 82Z"
+        fill="url(#lists-wave-light)" opacity=".65" />
+      <path d="M0 0H864V31C761 18 671 84 568 109C433 145 369 81 266 67C166 53 91 102 0 78Z"
+        fill="var(--lists-wave-ivory)" opacity=".55" />
+      <path d="M0 130C130 84 219 88 324 143C443 205 528 146 653 106C746 75 816 86 864 99V320H0Z"
+        fill="url(#lists-wave-depth)" opacity=".5" />
+      <path d="M0 177C144 137 195 126 305 163C435 210 514 176 643 130C729 100 814 91 864 113V320H0Z"
+        fill="var(--lists-header-warm)" opacity=".47" />
+      <path d="M0 241C131 223 249 249 368 268C492 288 581 237 688 235C763 234 815 256 864 247V320H0Z"
+        fill="var(--lists-header-base)" opacity=".6" />
+    </svg>
+    <div className="people-page-heading lists-overview-heading">
       <div>
         <h2>Lists</h2>
         <p>
@@ -23149,8 +23204,11 @@ capture.captureType !== 'other' && (
       ) : (
         lists.map((list) => (
           <button
-            className="person-card list-card-button"
+            className="person-card list-card-button themed-list-card"
             key={list.id}
+            style={{
+              '--list-icon-tone': getListIconOption(list.icon)?.tone ?? '#8795a8',
+            } as CSSProperties}
             type="button"
            onClick={() => {
   setSelectedListId(list.id)
@@ -23168,14 +23226,17 @@ capture.captureType !== 'other' && (
   setListNameEditing(false)
 }}
           >
-            <h3>{list.name}</h3>
-
-            <p>
-              {list.items.length}{' '}
-              {list.items.length === 1
-                ? 'item'
-                : 'items'}
-            </p>
+            <span className={`themed-list-card-icon ${list.icon ? '' : 'themed-list-icon-neutral'}`}>
+              <ListIcon id={list.icon} width={26} height={26} />
+            </span>
+            <span className="themed-list-card-divider" aria-hidden="true" />
+            <span className="themed-list-card-copy">
+              <span className="themed-list-card-name">{list.name}</span>
+              <span className="themed-list-card-count">
+                {list.items.length} {list.items.length === 1 ? 'item' : 'items'}
+              </span>
+            </span>
+            <span className="themed-list-card-chevron" aria-hidden="true">›</span>
           </button>
         ))
       )}
@@ -23187,6 +23248,8 @@ capture.captureType !== 'other' && (
       aria-label="Create list"
       onClick={() => {
         setNewListName('')
+        setNewListIcon(null)
+        setListIconPickerTarget(null)
         setListCreateOpen(true)
       }}
     >
@@ -23197,76 +23260,104 @@ capture.captureType !== 'other' && (
 
     {listCreateOpen &&
       createPortal(
-        <div
-          className="list-modal-overlay"
+        <div className="list-modal-overlay list-create-sheet-overlay"
           onClick={() => {
             setListCreateOpen(false)
             setNewListName('')
-          }}
-        >
-          <div
-            className="list-modal list-create-modal"
-            onClick={(event) => {
-              event.stopPropagation()
-            }}
-          >
-            <div className="list-modal-header">
-              <div>
-                <span className="quick-add-eyebrow">
-                  Lists
-                </span>
-
-                <h2>Create List</h2>
-              </div>
-
-              <button
-                className="quick-add-close"
-                type="button"
-                aria-label="Close Create List"
+            setNewListIcon(null)
+            setListIconPickerTarget(null)
+          }}>
+          <section className="list-modal list-create-modal list-create-bottom-sheet"
+            role="dialog" aria-modal="true" aria-labelledby="list-create-title"
+            onClick={event => event.stopPropagation()}>
+            <div className="list-create-sheet-handle" aria-hidden="true"/>
+            <div className="list-create-sheet-toolbar">
+              <button type="button" className="list-create-sheet-cancel"
                 onClick={() => {
                   setListCreateOpen(false)
                   setNewListName('')
-                }}
-              >
-                ×
+                  setNewListIcon(null)
+                  setListIconPickerTarget(null)
+                }}>Cancel</button>
+              <h2 id="list-create-title">Create List</h2>
+              <button className="list-create-sheet-submit" type="submit"
+                form="list-create-main-form" disabled={!newListName.trim()}>
+                Create
               </button>
             </div>
-
-            <form
-              className="people-form"
-              onSubmit={createList}
-            >
-              <label className="event-field">
-                List Name
-
-                <input
-                  className="event-input"
-                  type="text"
-                  placeholder="Example: Groceries"
-                  value={newListName}
-                  onChange={(event) => {
-                    setNewListName(
-                      event.target.value
-                    )
-                  }}
-                  autoFocus
-                />
-              </label>
-
-              <button
-                className="add-event-button"
-                type="submit"
-                disabled={
-                  newListName.trim() === ''
-                }
-              >
-                Create List
-              </button>
+            <form id="list-create-main-form"
+              className="people-form list-create-form"
+              onSubmit={createList}>
+              <div className="list-create-fields">
+                <div className="list-create-main-row">
+                  <button className="list-create-icon-chooser" type="button"
+                    onClick={() => setListIconPickerTarget('create')}
+                    aria-label={newListIcon ? 'Change list icon' : 'Add a list icon'}
+                    title={newListIcon ? 'Change icon' : 'Add icon'}>
+                    <span className={newListIcon ? 'list-create-icon-spot selected' : 'list-create-icon-spot'}
+                      style={newListIcon
+                        ? { backgroundColor: getListIconOption(newListIcon)?.tone }
+                        : undefined}>
+                      {newListIcon
+                        ? <ListIcon id={newListIcon} width={30} height={30}/>
+                        : <span className="list-create-icon-plus" aria-hidden="true">+</span>}
+                    </span>
+                  </button>
+                  <label className="list-create-name-field">
+                    <span className="list-create-field-heading">List Name</span>
+                    <input className="event-input list-create-name-input"
+                      type="text" placeholder="e.g. Groceries, Work, Travel..."
+                      maxLength={100} value={newListName}
+                      onChange={event => setNewListName(event.target.value)}
+                    />
+                  </label>
+                </div>
+              </div>
             </form>
-          </div>
-        </div>,
-        document.body
+          </section>
+        </div>, document.body
       )}
+
+    {listIconPickerTarget !== null && createPortal(
+      <div className="list-icon-picker-overlay"
+        onClick={() => setListIconPickerTarget(null)}>
+        <section className="list-icon-picker-modal" role="dialog" aria-modal="true"
+          aria-labelledby="list-icon-picker-title" onClick={event => event.stopPropagation()}>
+          <div className="list-icon-picker-handle" aria-hidden="true"/>
+          <div className="list-icon-picker-heading">
+            <h2 id="list-icon-picker-title">Choose an icon</h2>
+            <button type="button" className="list-icon-picker-close"
+              aria-label="Close icon picker" onClick={() => setListIconPickerTarget(null)}>×</button>
+          </div>
+          <div className="list-icon-picker-grid">
+            {LIST_ICON_OPTIONS.map(option => (
+              <button type="button" key={option.id}
+                aria-label={option.label}
+                aria-pressed={listIconPickerTarget === 'create'
+                  ? newListIcon === option.id
+                  : lists.find(list => list.id === listIconPickerTarget)?.icon === option.id}
+                className="list-icon-picker-choice"
+                onClick={() => {
+                  const target = listIconPickerTarget
+                  if (target === 'create') setNewListIcon(option.id)
+                  else if (typeof target === 'number') void changeExistingListIcon(target, option.id)
+                  setListIconPickerTarget(null)
+                }}>
+                <span className="list-icon-choice-art" style={{backgroundColor: option.tone}}>
+                  <ListIcon id={option.id} width={25} height={25}/>
+                </span>
+              </button>
+            ))}
+          </div>
+          <button type="button" className="list-icon-clear-choice" onClick={() => {
+            const target = listIconPickerTarget
+            if (target === 'create') setNewListIcon(null)
+            else if (typeof target === 'number') void changeExistingListIcon(target, null)
+            setListIconPickerTarget(null)
+          }}>No icon</button>
+        </section>
+      </div>, document.body
+    )}
 
     {selectedListId !== null &&
       createPortal(
@@ -23394,6 +23485,14 @@ capture.captureType !== 'other' && (
     </form>
   ) : (
     <div className="list-title-row">
+      <button type="button" className="list-detail-icon-edit"
+        aria-label="Change list icon" title="Change list icon"
+        style={{
+          '--list-icon-tone': getListIconOption(selectedList.icon)?.tone ?? '#8795a8',
+        } as CSSProperties}
+        onClick={() => setListIconPickerTarget(selectedList.id)}>
+        <ListIcon id={selectedList.icon} width={22} height={22} />
+      </button>
       <h2>
         {selectedList.name}
       </h2>
@@ -23648,7 +23747,7 @@ capture.captureType !== 'other' && (
                   setNewListItemText(next)
                   if (!newListCategoryManuallySet) setNewListItemCategory(suggestListCategory(next) || 'General')
                 }}
-                autoFocus />
+              />
             </label>
             <label className="event-field">Category
               <input className="event-input" type="text" maxLength={40}

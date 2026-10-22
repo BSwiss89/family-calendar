@@ -19138,3 +19138,839 @@ max-height:
   color: #4f5359;
   pointer-events: none;
 }
+
+
+/* PR #53 — Theme-ready, wave-accented Lists overview.
+   The future global theme control only needs to set --calendar-theme-color on
+   .calendar-app or :root; waves automatically track that color. */
+.lists-overview {
+  --lists-accent: var(--calendar-theme-color, #5289df);
+  --lists-wave-one: color-mix(in srgb, var(--lists-accent) 18%, #ffffff);
+  --lists-wave-two: color-mix(in srgb, var(--lists-accent) 9%, #ffffff);
+  position: relative;
+  isolation: isolate;
+  min-height: calc(100dvh - 205px);
+  padding-top: 20px;
+}
+.lists-overview::before,
+.lists-overview::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+  top: -16px;
+  left: -24px;
+  right: -24px;
+  height: 230px;
+}
+.lists-overview::before {
+  background: linear-gradient(110deg, var(--lists-wave-two), var(--lists-wave-one));
+  clip-path: polygon(0 0, 100% 0, 100% 44%, 80% 51%, 63% 68%, 42% 61%, 22% 45%, 0 53%);
+}
+.lists-overview::after {
+  top: 8px;
+  height: 202px;
+  opacity: .74;
+  background: linear-gradient(125deg, transparent, var(--lists-wave-two) 30%, var(--lists-wave-one) 83%);
+  clip-path: polygon(0 0, 100% 0, 100% 50%, 78% 64%, 55% 54%, 32% 62%, 0 38%);
+}
+.lists-overview .lists-overview-heading {
+  position: relative;
+  margin-bottom: 25px;
+  padding: 6px 0 8px;
+}
+.lists-overview-heading h2 {
+  font-size: clamp(32px, 5vw, 40px);
+  font-weight: 800;
+  letter-spacing: -.025em;
+  color: #1a2438;
+}
+.lists-overview-heading p {
+  max-width: 42rem;
+  color: #586374;
+  line-height: 1.4;
+}
+.lists-overview .list-page-grid {
+  position: relative;
+  display: grid;
+  gap: 13px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+}
+.lists-overview .themed-list-card {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  min-height: 98px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 14px 17px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.89);
+  border-radius: 20px;
+  background: rgba(255,255,255,.93);
+  box-shadow: 0 8px 20px rgba(40, 48, 64, .08), 0 1px 3px rgba(40,48,64,.035);
+  color: #1d2638;
+  text-align: left;
+  cursor: pointer;
+}
+.lists-overview .themed-list-card::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: auto 0 0 43%;
+  height: 70%;
+  background: linear-gradient(110deg, transparent 2%, var(--lists-wave-two) 65%, var(--lists-wave-one));
+  border-top-left-radius: 100% 85%;
+  pointer-events: none;
+}
+.lists-overview .themed-list-card:hover {box-shadow: 0 12px 22px rgba(40,48,64,.12)}
+.lists-overview .themed-list-card:focus-visible {outline: 3px solid var(--lists-accent);outline-offset: 3px}
+.themed-list-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  border-radius: 17px;
+  background: var(--list-icon-tone);
+  color: #fff;
+  box-shadow: inset 0 1px 2px #ffffff2e;
+}
+.themed-list-card-icon.themed-list-icon-neutral {background: #e9eef6;color: #76879e}
+.themed-list-card-copy {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 6px;
+}
+.themed-list-card-name {
+  font-size: clamp(16px, 2.5vw, 20px);
+  font-weight: 750;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.themed-list-card-count {
+  color: #535e73;
+  background: rgba(232,237,247,.78);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 9px;
+}
+.themed-list-card-chevron {flex: 0 0 auto;font-size: 30px;font-weight: 300;color: #77859e;line-height: 1}
+
+/* Create List is the first sheet, while the icon chooser is a second,
+   higher sheet. Do not reposition the fixed blue plus when either opens. */
+.list-create-form {gap: 18px}
+.list-create-icon-chooser {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 10px;
+  background: #fafbfe;
+  border: 1px solid #e6e9f2;
+  border-radius: 14px;
+  text-align: left;
+  color: #5b6374;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+.list-create-icon-spot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 60px;
+  width: 60px;
+  height: 60px;
+  border: 2px dashed #aab3c2;
+  border-radius: 18px;
+  background: #f0f2f6;
+  font-size: 25px;
+  color: #6f7c91;
+}
+.list-create-icon-spot.selected {border: 0;color: white}
+.list-create-icon-arrow {margin-left: auto;color: #73809a;font-size: 29px}
+.list-detail-icon-edit {
+  display: inline-flex;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 13px;
+  color: #fff;
+  background: var(--list-icon-tone, #8795a8);
+  cursor: pointer;
+}
+.list-icon-picker-overlay {
+  position: fixed;
+  z-index: 24100;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(21,29,43,.54);
+  backdrop-filter: blur(6px);
+}
+.list-icon-picker-modal {
+  width: min(600px, 100%);
+  max-height: min(83dvh, 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+  padding: 16px 18px calc(22px + env(safe-area-inset-bottom));
+  border-radius: 22px 22px 18px 18px;
+  background: #fff;
+  box-shadow: 0 -8px 35px #0002;
+  color: #1d2638;
+}
+.list-icon-picker-handle {
+  width: 44px;
+  height: 5px;
+  border-radius: 10px;
+  background: #c5c9d1;
+  margin: 0 auto 10px;
+}
+.list-icon-picker-heading {display: flex;justify-content: space-between;align-items: center;gap: 10px}
+.list-icon-picker-heading h2 {margin: 0;font-size: 22px}
+.list-icon-picker-close {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border: 0;
+  border-radius: 50%;
+  color: #293345;
+  background: #f1f2f5;
+  font-size: 25px;
+  cursor: pointer;
+}
+.list-icon-picker-modal > p {font-size: 14px;color: #647186;margin: 6px 0 16px}
+.list-icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0,1fr));
+  gap: 10px 7px;
+}
+.list-icon-picker-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 2px;
+  border: 2px solid transparent;
+  background: transparent;
+  border-radius: 14px;
+  font-size: 11px;
+  color: #4c5361;
+  cursor: pointer;
+}
+.list-icon-picker-choice[aria-pressed="true"] {border-color: #2d70df;background: #ebf2ff}
+.list-icon-choice-art {
+  width: 50px;
+  height: 50px;
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.list-icon-picker-choice > span:last-child {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list-icon-clear-choice {
+  display: block;
+  min-height: 44px;
+  border: 1px solid #d6dce7;
+  border-radius: 12px;
+  margin: 16px 0 0;
+  padding: 8px 16px;
+  color: #45526a;
+  background: #f5f7fa;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+body:has(.list-create-modal) .lists-overview > .calendar-floating-add,
+body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
+  /* Fixed at its original bottom-right position, simply beneath modal scrims. */
+  z-index: 200 !important;
+  pointer-events: none !important;
+  transform: none !important;
+}
+@media (max-width: 760px) {
+  .lists-overview {padding-top: 8px;min-height: calc(100dvh - 150px)}
+  .lists-overview::before,.lists-overview::after {left:-16px;right:-16px}
+  .lists-overview .list-page-grid {grid-template-columns: minmax(0,1fr);gap:12px}
+  .lists-overview .themed-list-card {min-height: 88px;padding: 12px 13px;gap:12px;border-radius:18px}
+  .themed-list-card-icon {width:53px;height:53px;flex-basis:53px}
+  .themed-list-card-name {font-size: 17px}
+  .list-icon-picker-overlay {padding: 0}
+  .list-icon-picker-modal {width:100%;max-height: 82dvh;border-radius:24px 24px 0 0}
+  .list-icon-picker-grid {grid-template-columns: repeat(4,minmax(0,1fr));gap: 9px 4px}
+  .list-icon-choice-art {width:54px;height:54px}
+}
+@media (prefers-reduced-motion: reduce) {
+  .lists-overview .themed-list-card {transition:none}
+}
+
+
+/* PR 53 refinements: keep the existing icon art/grid, remove only the
+   visible descriptions. Accessible names remain on icon choice buttons. */
+.list-icon-picker-choice { justify-content: center; gap: 0; padding: 5px 2px; }
+.list-icon-picker-choice .list-icon-choice-art { flex: 0 0 auto; }
+.list-icon-picker-heading + .list-icon-picker-grid { margin-top: 12px; }
+
+/* iPhone-style Create List sheet: anchored to the bottom; Cancel / title /
+   Create in its top bar. No autofocus keyboard when opening the sheet. */
+.list-create-sheet-overlay {
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: rgba(33, 33, 35, .34);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.list-create-bottom-sheet.list-modal {
+  position: relative;
+  width: min(580px, 100%);
+  max-height: min(90dvh, 740px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  margin: 0;
+  padding: 10px 18px calc(22px + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, .98);
+  border: 1px solid rgba(255,255,255,.92);
+  border-radius: 26px 26px 0 0;
+  box-shadow: 0 -16px 50px rgba(39, 35, 31, .17);
+}
+.list-create-sheet-handle {
+  width: 40px;
+  height: 5px;
+  background: #c5c7ca;
+  border-radius: 10px;
+  margin: 1px auto 13px;
+}
+.list-create-sheet-toolbar {
+  display: grid;
+  grid-template-columns: minmax(75px,1fr) minmax(130px,2fr) minmax(75px,1fr);
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 18px;
+}
+.list-create-sheet-toolbar h2 {
+  font-size: 20px;
+  line-height: 1.3;
+  color: #18181b;
+  font-weight: 750;
+  text-align: center;
+  margin: 0;
+  white-space: nowrap;
+}
+.list-create-sheet-cancel, .list-create-sheet-submit {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 650;
+  min-height: 44px;
+  padding: 8px 2px;
+  cursor: pointer;
+}
+.list-create-sheet-cancel { color: #2563eb; text-align: left; }
+.list-create-sheet-submit { color: #1555ce; text-align: right; }
+.list-create-sheet-submit:disabled { color: #b1b2b6; cursor: default; }
+.list-create-form.people-form { gap: 0; }
+.list-create-fields {
+  padding: 12px 16px 16px;
+  border-radius: 18px;
+  background: rgba(251,249,247,.93);
+  border: 1px solid rgba(231,224,215,.66);
+}
+.list-create-icon-setting {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  margin-bottom: 23px;
+}
+.list-create-field-heading {
+  display: block;
+  color: #25282e;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+.list-create-icon-chooser {
+  width: 100%;
+  min-height: 73px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 7px 4px 7px 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #79808b;
+  font-weight: 500;
+  text-align: left;
+}
+.list-create-icon-spot {
+  width: 63px;
+  height: 63px;
+  min-width: 63px;
+  flex-basis: 63px;
+  border: 2px dashed #acb4c0;
+  border-radius: 50%;
+  background: #f1f2f3;
+  color: transparent;
+}
+.list-create-icon-spot.selected { color: white; border: none; }
+.list-create-icon-name {
+  display: block;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #858c98;
+  font-size: 15px;
+  font-weight: 500;
+}
+.list-create-icon-arrow {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 25px;
+  color: #6c7382;
+}
+.list-create-name-field { display: flex; flex-direction: column; gap: 11px; }
+.list-create-name-input.event-input {
+  display: block;
+  width: 100%;
+  min-height: 53px;
+  margin: 0;
+  padding: 12px 14px;
+  font: inherit;
+  font-size: 16px;
+  color: #20252b;
+  border: 1px solid #cfd2d8;
+  border-radius: 12px;
+  background: white;
+  box-shadow: none;
+}
+.list-create-name-input.event-input:focus-visible,
+.list-create-icon-chooser:focus-visible {
+  outline: 2px solid #7baeff;
+  outline-offset: 2px;
+}
+@media (min-width: 761px) {
+  .list-create-sheet-overlay { align-items: center; padding: 22px; }
+  .list-create-bottom-sheet.list-modal { border-radius: 24px; padding-bottom: 25px; }
+}
+@media (max-width: 760px) {
+  .list-create-sheet-overlay { padding: 0; }
+  .list-create-bottom-sheet.list-modal {
+    width: 100%;
+    max-height: calc(100dvh - env(safe-area-inset-top) - 24px);
+    border-radius: 27px 27px 0 0;
+    padding: 11px 17px calc(22px + env(safe-area-inset-bottom));
+  }
+  .list-create-fields {padding: 9px 12px 14px;}
+  .list-create-icon-setting {grid-template-columns: 68px minmax(0, 1fr);}
+  .list-create-icon-chooser {gap: 12px;}
+}
+
+/* Keep the floating + in its original bottom-right location beneath both
+   modal overlays rather than moving it when an iOS sheet is opened. */
+body:has(.list-create-sheet-overlay) .lists-overview > .calendar-floating-add,
+body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
+  position: fixed !important;
+  transform: none !important;
+  z-index: 200 !important;
+  pointer-events: none !important;
+}
+
+
+/* Closer to the original soft, flowing Lists mockup. The accents deliberately
+   inherit the calendar theme; list icons retain their own optional colors. */
+.lists-overview {
+  --lists-accent: var(--calendar-theme-color, #bea992);
+  --lists-wave-one: color-mix(in srgb, var(--lists-accent) 22%, #ffffff);
+  --lists-wave-two: color-mix(in srgb, var(--lists-accent) 13%, #ffffff);
+}
+.lists-overview::before,
+.lists-overview::after {
+  clip-path: none;
+  pointer-events: none;
+  width: auto;
+  top: -116px;
+  left: -28px;
+  right: -28px;
+  height: 340px;
+  opacity: 1;
+  border-radius: 0 0 48% 45% / 0 0 37% 35%;
+}
+.lists-overview::before {
+  background: linear-gradient(120deg,
+      color-mix(in srgb, var(--lists-accent) 13%, #faf6f1),
+      color-mix(in srgb, var(--lists-accent) 23%, #fdfbf9) 53%,
+      color-mix(in srgb, var(--lists-accent) 8%, #ffffff));
+  transform: rotate(-5deg) translateY(15px);
+}
+.lists-overview::after {
+  height: 298px;
+  top: -111px;
+  opacity: .65;
+  border-radius: 0 0 60% 40% / 0 0 39% 30%;
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--lists-accent) 9%, #fff),
+    color-mix(in srgb, var(--lists-accent) 20%, #fff) 65%,
+    transparent);
+  transform: rotate(7deg) translateY(-13px);
+}
+.lists-overview .lists-overview-heading {
+  margin-bottom: 30px;
+  padding-top: 16px;
+}
+.lists-overview .list-page-grid {gap: 14px}
+.lists-overview .themed-list-card {
+  min-height: 108px;
+  gap: 14px;
+  padding: 16px 19px;
+  background: linear-gradient(108deg, rgba(255,255,255,.96),
+    color-mix(in srgb, var(--lists-accent) 3%, #fff));
+  border: 1px solid rgba(255,255,255,.94);
+  border-radius: 22px;
+  box-shadow:
+    0 14px 25px rgba(73,61,48,.08),
+    0 2px 5px rgba(73,61,48,.045);
+}
+.lists-overview .themed-list-card::after {
+  inset: auto -5% -7% 34%;
+  height: 81%;
+  opacity: .8;
+  border-radius: 82% 0 0 0 / 92% 0 0 0;
+  background: linear-gradient(118deg, transparent 6%,
+    color-mix(in srgb, var(--lists-accent) 6%, #fff) 48%,
+    color-mix(in srgb, var(--lists-accent) 17%, #fff) 98%);
+  transform: rotate(-8deg);
+}
+.lists-overview .themed-list-card-icon {
+  flex-basis: 64px;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--list-icon-tone, #8795a8);
+  box-shadow: inset 0 2px 4px #ffffff32;
+}
+.lists-overview .themed-list-card-icon.themed-list-icon-neutral {
+  background: #e9edf4;
+  color: #78889e;
+}
+.themed-list-card-divider {
+  display: block;
+  flex: 0 0 1px;
+  width: 1px;
+  height: 52px;
+  background: color-mix(in srgb, var(--lists-accent) 25%, #d9dbe0);
+  opacity: .8;
+}
+.lists-overview .themed-list-card-name {
+  font-weight: 750;
+  font-size: clamp(17px, 2.6vw, 21px);
+  letter-spacing: -.02em;
+}
+.lists-overview .themed-list-card-count {
+  background: #e8edf7;
+  color: #46566d;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+.lists-overview .themed-list-card-chevron {
+  color: #58657b;
+  font-weight: 400;
+}
+@media(max-width: 760px) {
+  .lists-overview::before, .lists-overview::after {left:-20px;right:-20px;}
+  .lists-overview::before {top:-94px;height:280px;}
+  .lists-overview::after {top:-97px;height:266px;}
+  .lists-overview .lists-overview-heading {margin-bottom:25px;padding-top:12px}
+  .lists-overview .themed-list-card {
+    min-height: 94px;
+    border-radius: 18px;
+    padding: 13px 14px;
+    gap: 11px;
+  }
+  .lists-overview .themed-list-card-icon {flex-basis:56px;width:56px;height:56px}
+  .themed-list-card-divider {height:44px}
+  .lists-overview .themed-list-card-name {font-size:17px}
+}
+
+/* PR #53: real flowing Bézier waves rather than rotated, rounded polygons.
+   The backgrounds inherit the future global --calendar-theme-color. */
+.lists-overview {
+  --lists-accent: var(--calendar-theme-color, #bba58c);
+  --lists-wave-one: color-mix(in srgb, var(--lists-accent) 24%, #ffffff);
+  --lists-wave-two: color-mix(in srgb, var(--lists-accent) 13%, #ffffff);
+}
+.lists-overview::before,
+.lists-overview::after {
+  width: auto;
+  left: -24px;
+  right: -24px;
+  border-radius: 0;
+  transform: none;
+  clip-path: none;
+  background-clip: border-box;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+.lists-overview::before {
+  top: -95px;
+  height: 360px;
+  opacity: 1;
+  background: linear-gradient(115deg,
+    color-mix(in srgb, var(--lists-accent) 13%, #fff),
+    color-mix(in srgb, var(--lists-accent) 27%, #fff) 50%,
+    color-mix(in srgb, var(--lists-accent) 11%, #fff));
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20360%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%200H1000V230C875%20160%20775%20305%20620%20241S405%20310%20250%20243S85%20220%200%20265Z%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20360%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%200H1000V230C875%20160%20775%20305%20620%20241S405%20310%20250%20243S85%20220%200%20265Z%22%2F%3E%3C%2Fsvg%3E");
+}
+.lists-overview::after {
+  top: -89px;
+  height: 358px;
+  opacity: .8;
+  background: linear-gradient(95deg,
+    color-mix(in srgb, var(--lists-accent) 21%, #fff),
+    color-mix(in srgb, var(--lists-accent) 9%, #fff) 58%,
+    color-mix(in srgb, var(--lists-accent) 19%, #fff));
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20360%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%200H1000V245C850%20312%20738%20175%20570%20244S300%20169%20176%20232S70%20276%200%20250Z%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20360%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%200H1000V245C850%20312%20738%20175%20570%20244S300%20169%20176%20232S70%20276%200%20250Z%22%2F%3E%3C%2Fsvg%3E");
+}
+.lists-overview .themed-list-card {
+  isolation: isolate;
+  background: rgba(255,255,255,.97);
+}
+.lists-overview .themed-list-card::before,
+.lists-overview .themed-list-card::after {
+  position: absolute;
+  content: '';
+  z-index: -1;
+  pointer-events: none;
+  width: 100%;
+  height: 100%;
+  inset: 0;
+  border-radius: 0;
+  opacity: 1;
+  transform: none;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+.lists-overview .themed-list-card::before {
+  background: linear-gradient(110deg,
+    transparent 25%, var(--lists-wave-two) 70%,
+    color-mix(in srgb, var(--lists-accent) 20%, #fff));
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20250%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%20250H1000V78C840%2030%20728%20178%20555%20122S264%20150%200%2055Z%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20250%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%20250H1000V78C840%2030%20728%20178%20555%20122S264%20150%200%2055Z%22%2F%3E%3C%2Fsvg%3E");
+}
+.lists-overview .themed-list-card::after {
+  background: linear-gradient(112deg,
+    transparent 35%,
+    color-mix(in srgb, var(--lists-accent) 12%, #fff) 65%,
+    color-mix(in srgb, var(--lists-accent) 24%, #fff));
+  opacity: .72;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20250%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%20250H1000V130C845%20185%20712%2045%20553%20118S245%2094%200%20174Z%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20250%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%20250H1000V130C845%20185%20712%2045%20553%20118S245%2094%200%20174Z%22%2F%3E%3C%2Fsvg%3E");
+}
+@media (max-width: 760px) {
+  .lists-overview::before,
+  .lists-overview::after {left: -16px; right: -16px;}
+  .lists-overview::before {top: -82px; height: 312px;}
+  .lists-overview::after {top: -78px; height: 304px;}
+}
+
+/* Single compact Create List row:
+   dashed plus icon to the left, List Name and input directly beside it. */
+.list-create-fields {padding: 15px 15px;}
+.list-create-main-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  min-width: 0;
+}
+.list-create-main-row > .list-create-icon-chooser {
+  flex: 0 0 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  min-height: 72px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+.list-create-main-row .list-create-icon-spot {
+  width: 70px;
+  height: 70px;
+  min-width: 70px;
+  flex: 0 0 70px;
+  border: 2px dashed #aeb6c2;
+  border-radius: 50%;
+  background: #f0f2f5;
+  color: #8995a4;
+}
+.list-create-main-row .list-create-icon-spot.selected {
+  border: 0;
+  color: #fff;
+}
+.list-create-icon-plus {
+  display: block;
+  font-size: 33px;
+  line-height: 1;
+  font-weight: 400;
+  color: #8995a4;
+  transform: translateY(-1px);
+}
+.list-create-main-row > .list-create-name-field {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  gap: 8px;
+  margin: 0;
+}
+.list-create-main-row .list-create-field-heading {
+  font-size: 16px;
+  font-weight: 700;
+  color: #242832;
+}
+.list-create-main-row .list-create-name-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 49px;
+  margin: 0;
+  padding: 9px 12px;
+  font-size: 16px;
+}
+@media (max-width: 760px) {
+  .list-create-fields {padding: 13px 11px;}
+  .list-create-main-row {gap: 13px;}
+  .list-create-main-row > .list-create-icon-chooser {
+    flex-basis: 65px;
+    width: 65px;
+    height: 65px;
+    min-height: 65px;
+  }
+  .list-create-main-row .list-create-icon-spot {
+    width: 64px;
+    height: 64px;
+    min-width: 64px;
+    flex-basis: 64px;
+  }
+  .list-create-main-row .list-create-name-input {font-size: 15px;}
+}
+
+/* PR 53 fidelity pass — reproduce the reference's full-width, layered,
+   organic cream/taupe waves behind the header (not masks or zigzag edges).
+   Only the hue is dynamic; the shapes and relative placement stay fixed. */
+.lists-overview {
+  --lists-accent: var(--calendar-theme-color, #bea78e);
+  --lists-header-base: color-mix(in srgb, var(--lists-accent) 9%, #f1e8db);
+  --lists-header-warm: color-mix(in srgb, var(--lists-accent) 20%, #f3e8db);
+  --lists-wave-ivory: color-mix(in srgb, var(--lists-accent) 5%, #faf7f1);
+  --lists-wave-mist: color-mix(in srgb, var(--lists-accent) 13%, #fdfaf6);
+  --lists-wave-shadow: color-mix(in srgb, var(--lists-accent) 24%, #ede0d0);
+}
+.lists-overview::before,
+.lists-overview::after { content: none !important; display: none !important; }
+.lists-reference-header-waves {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+  top: -116px;
+  left: -24px;
+  width: calc(100% + 48px);
+  height: 330px;
+  display: block;
+  overflow: hidden;
+  /* The mockup fades its final band seamlessly into the warm page. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 68%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 68%, transparent 100%);
+}
+.lists-overview .lists-overview-heading,
+.lists-overview .list-page-grid {position:relative;z-index:1;}
+.lists-overview .lists-overview-heading {
+  padding-top: 12px;
+  margin-bottom: 24px;
+}
+/* Keep cards like the mock: colored waves are only a whisper of the icon hue. */
+.lists-overview .themed-list-card::before {
+  background: linear-gradient(112deg,
+    transparent 30%,
+    color-mix(in srgb,var(--list-icon-tone) 3%, #fff) 63%,
+    color-mix(in srgb,var(--list-icon-tone) 10%, #fff) 100%);
+}
+.lists-overview .themed-list-card::after {
+  background: linear-gradient(116deg,
+    transparent 36%,
+    color-mix(in srgb,var(--list-icon-tone) 5%, #fff) 69%,
+    color-mix(in srgb,var(--list-icon-tone) 13%, #fff) 100%);
+  opacity: .8;
+}
+/* Create List and Add Item open centered on the phone, not anchored
+   to the bottom edge. Keep their icon picker on its higher overlay layer. */
+.list-create-sheet-overlay,
+.list-item-add-overlay {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: max(16px, env(safe-area-inset-top))
+           16px max(16px, env(safe-area-inset-bottom)) !important;
+  box-sizing: border-box;
+  overscroll-behavior: contain;
+}
+.list-create-bottom-sheet.list-modal,
+.list-item-add-sheet {
+  width: min(560px, 100%) !important;
+  max-height: calc(100dvh - 72px);
+  margin: 0 !important;
+  border-radius: 24px !important;
+  overflow-y: auto;
+}
+.list-item-add-sheet {
+  padding: 16px 20px 24px;
+  box-shadow: 0 20px 65px rgba(15,23,42,.22);
+}
+@media(max-width:760px) {
+  .lists-reference-header-waves {
+    top: -95px;
+    left: -16px;
+    width: calc(100% + 32px);
+    height: 310px;
+  }
+  .list-create-sheet-overlay,
+  .list-item-add-overlay {padding: 16px !important;}
+  .list-create-bottom-sheet.list-modal,
+  .list-item-add-sheet {
+    width: 100% !important;
+    max-height: calc(100dvh - 56px);
+    border-radius: 24px !important;
+  }
+  .list-item-add-sheet {padding: 14px 18px 20px;}
+}
