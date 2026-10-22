@@ -12,6 +12,7 @@ import {
   suggestListCategory,
   organizeExistingListItems,
 } from './list-features.mjs'
+import { ensureListIcons, normalizeListIcon } from './list-icons.mjs'
 import { ensureShoppingStores, getShoppingStores, looksLikeShoppingList, requireStoreId,
   suggestShoppingStoreId, organizeShoppingStores, saveShoppingStoreCorrection,
   sortUnknownStoresWithOllama } from './smart-stores.mjs'
@@ -449,6 +450,7 @@ if (!listItemColumns.includes('sort_order')) {
 }
 ensureListItemCategories(database)
 ensureShoppingStores(database)
+ensureListIcons(database)
 
 database.exec(`
   CREATE TABLE IF NOT EXISTS meal_plans (
@@ -6709,7 +6711,7 @@ return response.status(500).json({
 app.get('/api/lists', (request, response) => {
   const lists = database
     .prepare(`
-      SELECT id, name, created_at, store_enabled
+      SELECT id, name, created_at, store_enabled, icon
       FROM lists
       ORDER BY id
     `)
@@ -6735,7 +6737,7 @@ ORDER BY sort_order, id
 })
 
 app.post('/api/lists', (request, response) => {
-  const { name } = request.body
+  const { name, icon } = request.body ?? {}
 
   if (
     typeof name !== 'string' ||
@@ -6748,20 +6750,42 @@ app.post('/api/lists', (request, response) => {
   }
 
   const cleanName = name.trim()
+  let chosenIcon
+  try { chosenIcon = normalizeListIcon(icon) }
+  catch { return response.status(400).json({ error: 'Invalid list icon.' }) }
 
   const result = database
     .prepare(`
-      INSERT INTO lists (name, store_enabled)
-      VALUES (?, ?)
+      INSERT INTO lists (name, store_enabled, icon)
+      VALUES (?, ?, ?)
     `)
-    .run(cleanName, looksLikeShoppingList(cleanName) ? 1 : 0)
+    .run(cleanName, looksLikeShoppingList(cleanName) ? 1 : 0, chosenIcon)
 
   response.status(201).json({
     id: Number(result.lastInsertRowid),
     name: cleanName,
+    icon: chosenIcon,
     store_enabled: looksLikeShoppingList(cleanName),
     items: [],
   })
+})
+
+// Change a list's icon without changing its name, order, items or store rules.
+app.put('/api/lists/:id/icon', (request, response) => {
+  const id = Number(request.params.id)
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return response.status(400).json({ error: 'Invalid list ID.' })
+  }
+  let icon
+  try {
+    if (!Object.hasOwn(request.body ?? {}, 'icon')) throw new RangeError()
+    icon = normalizeListIcon(request.body.icon)
+  } catch {
+    return response.status(400).json({ error: 'Invalid list icon.' })
+  }
+  const result = database.prepare('UPDATE lists SET icon = ? WHERE id = ?').run(icon, id)
+  if (!result.changes) return response.status(404).json({ error: 'List not found.' })
+  return response.json({ id, icon })
 })
 
 // Store settings persist for the whole household. Disabling a store does not
