@@ -15480,6 +15480,17 @@ createPortal(
         type="button"
         onClick={() => {
           setMobileSettingsOpen(false)
+          window.dispatchEvent(new Event('family-calendar:open-arney-settings'))
+        }}
+      >
+        Arney Voice Settings
+        <span aria-hidden="true">›</span>
+      </button>
+      <button
+        className="mobile-settings-option"
+        type="button"
+        onClick={() => {
+          setMobileSettingsOpen(false)
           setPage('people')
         }}
       >
