@@ -6803,7 +6803,7 @@ app.put('/api/lists/:id/store-sorting', (request, response) => {
   }
   const result = database.prepare('UPDATE lists SET store_enabled = ? WHERE id = ?').run(Number(request.body.enabled), listId)
   if (!result.changes) return response.status(404).json({ error: 'List not found.' })
-  if (request.body.enabled) organizeShoppingStores(database, listId)
+  if (request.body.enabled) { organizeExistingListItems(database, listId); organizeShoppingStores(database, listId) }
   return response.json({ store_enabled: request.body.enabled })
 })
 app.post('/api/lists/:id/sort-stores', async (request, response) => {
@@ -6811,6 +6811,7 @@ app.post('/api/lists/:id/sort-stores', async (request, response) => {
   if (!Number.isSafeInteger(listId) || listId <= 0) return response.status(400).json({ error: 'Invalid list ID.' })
   // First use learned preferences and deterministic offline rules; AI is only
   // requested explicitly for the remaining ambiguous items.
+  organizeExistingListItems(database, listId)
   const baseline = organizeShoppingStores(database, listId)
   if (!baseline) return response.status(404).json({ error: 'List not found.' })
   if (baseline.disabled) return response.status(400).json({ error: 'Enable store sorting for this list first.' })
@@ -6992,6 +6993,12 @@ app.put('/api/list-items/:id', (request, response) => {
       WHERE id = ?
     `)
     .run(nextText, nextCompleted, nextCategory, id)
+
+  // A manual selection should be learned under the final edited item name.
+  if (Object.hasOwn(request.body, 'store_id') && nextText !== existingItem.text) {
+    const key = nextText.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ').slice(0, 200)
+    if (key) database.prepare('INSERT INTO shopping_store_preferences (item_key, store_id) VALUES (?, ?) ON CONFLICT(item_key) DO UPDATE SET store_id = excluded.store_id').run(key, nextStoreId)
+  }
 
   response.json({
     id,

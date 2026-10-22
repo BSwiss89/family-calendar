@@ -18879,3 +18879,44 @@ max-height:
     text-align: left;
   }
 }
+
+
+/* Smart shopping-store organization: mobile-first compact tabs and settings. */
+.shopping-store-tabs { display:flex;gap:6px;overflow-x:auto;overscroll-behavior-inline:contain;
+  padding:10px 2px 7px;scrollbar-width:thin;max-width:100%; }
+.shopping-store-tabs button { flex:0 0 auto;min-height:38px;padding:7px 13px;border-radius:999px;
+  border:1px solid #cdd0d7;background:#f2f2f5;color:#303744;font:inherit;font-size:13px;font-weight:650; }
+.shopping-store-tabs button.selected { background:#303b60;color:#fff;border-color:#303b60; }
+.list-store-edit-label {display:grid;gap:5px;color:#454545;font-size:13px;font-weight:600}
+.list-store-edit-label select {min-height:44px}
+.list-category-pill {margin-left:auto;flex-shrink:0;max-width:44%;text-align:right}
+.list-item-complete-text {min-width:0}
+.list-store-enable {background:#e6efe8;border-color:#a4c7aa;color:#285a37}
+.shopping-store-settings-overlay {position:fixed;inset:0;z-index:13000;display:flex;justify-content:center;
+  align-items:center;padding:16px;background:rgba(15,20,30,.55)}
+.shopping-store-settings-panel {width:min(450px,100%);max-height:90dvh;overflow:auto;background:#faf9f6;
+  color:#242830;border-radius:16px;padding:20px;box-shadow:0 16px 60px #0004;}
+.shopping-store-settings-header {display:flex;align-items:center;justify-content:space-between;gap:12px}
+.shopping-store-settings-header h2 {margin:0;font-size:22px}
+.shopping-store-settings-close {border:0;background:#e7e7e7;border-radius:9px;min-width:44px;min-height:44px;font-size:22px}
+.shopping-store-settings-panel p {color:#61666e;font-size:13px;line-height:1.45}
+.shopping-store-settings-list {display:grid;gap:7px;margin:16px 0}
+.shopping-store-settings-row {display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:7px 8px;border:1px solid #ddd;border-radius:9px;background:#fff}
+.shopping-store-settings-row label {display:flex;align-items:center;gap:10px;min-width:0;cursor:pointer;font-weight:600}
+.shopping-store-settings-row input {width:20px;height:20px;accent-color:#46559b}
+.shopping-store-move-buttons {display:flex;gap:5px}
+.shopping-store-move-buttons button {width:36px;height:36px;border:1px solid #ddd;border-radius:8px;background:#f5f5f6;font-size:18px}
+.shopping-store-move-buttons button:disabled {opacity:.3}
+.shopping-store-add {display:grid;gap:8px}
+.shopping-store-add > div {display:flex;gap:8px}
+.shopping-store-add input {flex:1;min-width:0}
+.shopping-store-add button {padding:8px 16px;border:0;border-radius:9px;background:#303b60;color:#fff;font-weight:700}
+.shopping-store-add button:disabled {opacity:.5}
+@media (max-width:600px) {
+ .shopping-store-settings-overlay {align-items:flex-end;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+ .shopping-store-settings-panel {max-height:calc(100dvh - 35px);border-radius:18px}
+ .list-modal-actions {gap:8px}
+ .list-modal-actions .list-store-enable {min-width:100%}
+ .shopping-store-tabs {margin-inline:-4px}
+}

@@ -1241,12 +1241,22 @@ type ListItem = {
   text: string
   completed: boolean
   category?: string
+  store_id?: number | null
+  store_manual?: boolean
   created_at?: string
+}
+
+type ShoppingStore = {
+  id: number
+  name: string
+  enabled: boolean
+  sort_order: number
 }
 
 type CalendarList = {
   id: number
   name: string
+  store_enabled?: boolean
   created_at?: string
   items: ListItem[]
 }
@@ -1597,9 +1607,13 @@ type SortableListItemProps = {
   isEditing: boolean
   editingText: string
   editingCategory?: string
+  editingStoreId?: number | null
+  showStore?: boolean
+  stores?: ShoppingStore[]
   canDrag?: boolean
   onEditingTextChange: (text: string) => void
   onEditingCategoryChange?: (category: string) => void
+  onEditingStoreChange?: (storeId: number | null) => void
   onStartEdit: (item: ListItem) => void
   onSaveEdit: (itemId: number) => void
   onCancelEdit: () => void
@@ -1670,9 +1684,13 @@ function SortableListItem({
   isEditing,
   editingText,
   editingCategory = 'General',
+  editingStoreId = null,
+  showStore = false,
+  stores = [],
   canDrag = true,
   onEditingTextChange,
   onEditingCategoryChange = () => {},
+  onEditingStoreChange = () => {},
   onStartEdit,
   onSaveEdit,
   onCancelEdit,
@@ -1727,6 +1745,15 @@ function SortableListItem({
               value={editingCategory}
               onChange={(event) => onEditingCategoryChange(event.target.value)}
             />
+            {showStore && (
+              <label className="list-store-edit-label">Store
+                <select className="event-input" value={editingStoreId ?? ''}
+                  onChange={event => onEditingStoreChange(event.target.value ? Number(event.target.value) : null)}>
+                  <option value="">Unsorted</option>
+                  {stores.map(store => <option key={store.id} value={store.id}>{store.name}{!store.enabled ? ' (hidden)' : ''}</option>)}
+                </select>
+              </label>
+            )}
           </div>
           <button type="button" onClick={() => onSaveEdit(item.id)}>Save</button>
           <button type="button" onClick={onCancelEdit}>Cancel</button>
@@ -3388,6 +3415,11 @@ function positionMobileScheduleTimeline(
 const [calendarPersonFilterId, setCalendarPersonFilterId] =
   useState<number | null>(null)
 const [lists, setLists] = useState<CalendarList[]>([])
+const [shoppingStores, setShoppingStores] = useState<ShoppingStore[]>([])
+const [storeFilter, setStoreFilter] = useState('all')
+const [shoppingStoreSettingsOpen, setShoppingStoreSettingsOpen] = useState(false)
+const [newShoppingStoreName, setNewShoppingStoreName] = useState('')
+const [storeSortBusy, setStoreSortBusy] = useState(false)
 const [captureInbox, setCaptureInbox] =
   useState<CaptureInboxItem[]>([])
 const [dayTimelineNow, setDayTimelineNow] =
@@ -3419,11 +3451,13 @@ const [newListItemText, setNewListItemText] = useState('')
 const [newListItemCategory, setNewListItemCategory] = useState('General')
 const [newListCategoryManuallySet, setNewListCategoryManuallySet] = useState(false)
 const [listCategoryFilter, setListCategoryFilter] = useState('All')
-const [listSortMode, setListSortMode] = useState<'category' | 'custom'>('category')
+const [listSortMode, setListSortMode] = useState<'store' | 'category' | 'custom'>('category')
 const [isOrganizingList, setIsOrganizingList] = useState(false)
 const [editingListItemId, setEditingListItemId] = useState<number | null>(null)
 const [editingListItemText, setEditingListItemText] = useState('')
 const [editingListItemCategory, setEditingListItemCategory] = useState('General')
+const [editingListItemStoreId, setEditingListItemStoreId] = useState<number | null>(null)
+const [editingListItemStoreChanged, setEditingListItemStoreChanged] = useState(false)
 const listToggleInFlightRef = useRef(new Set<number>())
 const [editingListName, setEditingListName] = useState('')
 const [mealPlans, setMealPlans] = useState<MealPlan[]>([])
@@ -5238,6 +5272,7 @@ useEffect(() => {
   loadEvents()
   loadPeople()
   loadLists()
+  void loadShoppingStores()
   loadCaptureInbox()
   loadMealPlans()
   loadMealPlanItems()
@@ -5339,6 +5374,83 @@ async function savePeopleOrder() {
   const data = await response.json()
 
   setLists(data)
+}
+
+async function loadShoppingStores() {
+  const response = await fetch('/api/shopping-stores')
+  if (!response.ok) return
+  const data: ShoppingStore[] = await response.json()
+  setShoppingStores(data)
+}
+async function updateShoppingStore(id: number, change: {enabled?: boolean; sort_order?: number}) {
+  const response = await fetch('/api/shopping-stores/' + id, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(change),
+  })
+  if (!response.ok) {
+    showAppNotification('Could not update store settings.')
+    return false
+  }
+  await loadShoppingStores()
+  return true
+}
+async function addShoppingStore(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault()
+  const name = newShoppingStoreName.trim()
+  if (!name) return
+  const response = await fetch('/api/shopping-stores', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name}),
+  })
+  if (!response.ok) {
+    showAppNotification('Could not add store. Check for a duplicate name.')
+    return
+  }
+  setNewShoppingStoreName('')
+  await loadShoppingStores()
+}
+async function moveShoppingStore(storeId: number, direction: number) {
+  const index = shoppingStores.findIndex(store => store.id === storeId)
+  const neighbor = shoppingStores[index + direction]
+  if (index < 0 || !neighbor) return
+  const first = shoppingStores[index]
+  const firstOrder = first.sort_order
+  const secondOrder = neighbor.sort_order
+  const temp = Math.max(...shoppingStores.map(store => store.sort_order), 0) + 10
+  if (!await updateShoppingStore(first.id,{sort_order: temp})) return
+  if (!await updateShoppingStore(neighbor.id,{sort_order: firstOrder})) return
+  await updateShoppingStore(first.id,{sort_order: secondOrder})
+}
+async function enableStoreSorting(listId: number, enabled: boolean) {
+  const response = await fetch('/api/lists/' + listId + '/store-sorting', {
+    method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({enabled}),
+  })
+  if (!response.ok) { showAppNotification('Could not update store sorting.'); return }
+  setListSortMode(enabled ? 'store' : 'category')
+  setStoreFilter('all')
+  await loadLists()
+}
+async function sortListByStores(listId: number, askArney: boolean) {
+  if (storeSortBusy) return
+  setStoreSortBusy(true)
+  try {
+    const response = await fetch('/api/lists/' + listId + '/sort-stores', {
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({askArney}),
+    })
+    if (!response.ok) throw new Error('Store organizer failed')
+    const result: {sorted:number; aiSorted:number; remaining:number; aiAvailable:boolean|null} = await response.json()
+    await loadLists()
+    if (askArney || result.sorted > 0) {
+      const count = result.sorted + result.aiSorted
+      showAppNotification(askArney && result.aiAvailable === false
+        ? 'Local Arney is unavailable. Offline sorting still works.'
+        : count ? 'Sorted ' + count + ' items by store.'
+          : 'No further store suggestions. Unsorted items stay visible.')
+    }
+  } catch { showAppNotification('Could not organize stores.') }
+  finally { setStoreSortBusy(false) }
 }
 
 async function loadCaptureInbox() {
@@ -10249,12 +10361,16 @@ function startEditingListItem(item: ListItem) {
   setEditingListItemId(item.id)
   setEditingListItemText(item.text)
   setEditingListItemCategory(item.category || 'General')
+  setEditingListItemStoreId(item.store_id ?? null)
+  setEditingListItemStoreChanged(false)
 }
 
 function cancelEditingListItem() {
   setEditingListItemId(null)
   setEditingListItemText('')
   setEditingListItemCategory('General')
+  setEditingListItemStoreId(null)
+  setEditingListItemStoreChanged(false)
 }
 
 async function saveListItemEdit(itemId: number) {
@@ -10274,6 +10390,7 @@ async function saveListItemEdit(itemId: number) {
       body: JSON.stringify({
         text: cleanText,
         category: editingListItemCategory.trim() || 'General',
+        ...(editingListItemStoreChanged ? { store_id: editingListItemStoreId } : {}),
       }),
     }
   )
@@ -15486,6 +15603,11 @@ createPortal(
         Arney Voice Settings
         <span aria-hidden="true">›</span>
       </button>
+      <button className="mobile-settings-option" type="button" onClick={() => {
+        setMobileSettingsOpen(false)
+        setShoppingStoreSettingsOpen(true)
+        void loadShoppingStores()
+      }}>Shopping Stores <span aria-hidden="true">›</span></button>
       <button
         className="mobile-settings-option"
         type="button"
@@ -22932,8 +23054,10 @@ capture.captureType !== 'other' && (
   setNewListItemCategory('General')
   setNewListCategoryManuallySet(false)
   setListCategoryFilter('All')
-  setListSortMode('category')
+  setListSortMode(list.store_enabled ? 'store' : 'category')
+  setStoreFilter('all')
   setEditingListName(list.name)
+  if (list.store_enabled) void sortListByStores(list.id, false)
   setListNameEditing(false)
 }}
           >
@@ -23087,6 +23211,15 @@ capture.captureType !== 'other' && (
                       || categoryA.localeCompare(categoryB)
                   })
                 : filteredItems
+              const storeOrderedItems = listSortMode === 'store' && selectedList.store_enabled
+                ? [...visibleItems].sort((a, b) => {
+                    const order = (item: ListItem) => shoppingStores.find(store => store.id === item.store_id)?.sort_order ?? Number.MAX_SAFE_INTEGER
+                    return order(a) - order(b) || (a.category || 'General').localeCompare(b.category || 'General') || a.id - b.id
+                  }) : visibleItems
+              const storeVisibleItems = selectedList.store_enabled && storeFilter !== 'all'
+                ? storeOrderedItems.filter(item => storeFilter === 'unsorted' ? item.store_id == null : item.store_id === Number(storeFilter))
+                : storeOrderedItems
+              const visibleStores = shoppingStores.filter(store => store.enabled || selectedList.items.some(item => item.store_id === store.id))
               const canReorderList = listSortMode === 'custom'
                 && listCategoryFilter === 'All'
               const canOrganizeExisting = selectedList.items.some(
@@ -23195,6 +23328,21 @@ capture.captureType !== 'other' && (
                   </div>
 
                   <div className="list-modal-actions">
+  <button className="list-organize-button list-store-enable" type="button"
+    onClick={() => void enableStoreSorting(selectedList.id, !selectedList.store_enabled)}>
+    {selectedList.store_enabled ? 'Store sorting: On' : 'Enable store sorting'}
+  </button>
+  {selectedList.store_enabled && <>
+    <button className="list-organize-button" type="button" disabled={storeSortBusy}
+      onClick={() => void sortListByStores(selectedList.id, false)}>Sort by store</button>
+    <button className="list-organize-button" type="button" disabled={storeSortBusy}
+      onClick={() => void sortListByStores(selectedList.id, true)}>
+      {storeSortBusy ? 'Sorting…' : 'Ask Arney (unknown items)'}
+    </button>
+  </>}
+  <button className="list-organize-button" type="button" onClick={() => {setShoppingStoreSettingsOpen(true);void loadShoppingStores()}}>
+    Manage stores
+  </button>
   <button
     className="list-organize-button"
     type="button"
@@ -23279,6 +23427,16 @@ capture.captureType !== 'other' && (
                     </button>
                   </form>
 
+                  {selectedList.store_enabled && <div className="shopping-store-tabs" role="group" aria-label="Filter shopping items by store">
+                    <button type="button" className={storeFilter === 'all' ? 'selected' : ''}
+                      aria-pressed={storeFilter === 'all'} onClick={() => setStoreFilter('all')}>All</button>
+                    {visibleStores.map(store => <button type="button" key={store.id}
+                      className={storeFilter === String(store.id) ? 'selected' : ''}
+                      aria-pressed={storeFilter === String(store.id)}
+                      onClick={() => setStoreFilter(String(store.id))}>{store.name}{!store.enabled ? ' (hidden)' : ''}</button>)}
+                    <button type="button" className={storeFilter === 'unsorted' ? 'selected' : ''}
+                      aria-pressed={storeFilter === 'unsorted'} onClick={() => setStoreFilter('unsorted')}>Unsorted</button>
+                  </div>}
                   <div className="list-category-toolbar">
                     <label htmlFor="list-category-filter">Show category</label>
                     <select
@@ -23298,9 +23456,10 @@ capture.captureType !== 'other' && (
                       className="event-input"
                       value={listSortMode}
                       onChange={(event) => setListSortMode(
-                        event.target.value === 'custom' ? 'custom' : 'category'
+                        event.target.value === 'custom' ? 'custom' : event.target.value === 'store' ? 'store' : 'category'
                       )}
                     >
+                      {selectedList.store_enabled && <option value="store">Store, then category</option>}
                       <option value="category">Category (automatic)</option>
                       <option value="custom">Custom order (drag)</option>
                     </select>
@@ -23308,7 +23467,7 @@ capture.captureType !== 'other' && (
                   <div className="list-items">
                     {selectedList.items.length === 0 ? (
                       <p>No items yet.</p>
-                    ) : visibleItems.length === 0 ? (
+                    ) : storeVisibleItems.length === 0 ? (
                       <p>No items in this category.</p>
                     ) : (
                       <DndContext
@@ -23321,7 +23480,7 @@ capture.captureType !== 'other' && (
                         }
                       >
                         <SortableContext
-                          items={visibleItems.map(
+                          items={storeVisibleItems.map(
                             (item) =>
                               item.id
                           )}
@@ -23329,7 +23488,7 @@ capture.captureType !== 'other' && (
                             verticalListSortingStrategy
                           }
                         >
-                          {visibleItems.map(
+                          {storeVisibleItems.map(
                             (item) => (
                               <SortableListItem
                                 key={
@@ -23344,11 +23503,15 @@ capture.captureType !== 'other' && (
                                   editingListItemText
                                 }
                                 editingCategory={editingListItemCategory}
+                                editingStoreId={editingListItemStoreId}
+                                showStore={Boolean(selectedList.store_enabled)}
+                                stores={shoppingStores}
                                 canDrag={canReorderList}
                                 onEditingTextChange={
                                   setEditingListItemText
                                 }
                                 onEditingCategoryChange={setEditingListItemCategory}
+                                onEditingStoreChange={id => {setEditingListItemStoreId(id); setEditingListItemStoreChanged(true)}}
                                 onStartEdit={
                                   startEditingListItem
                                 }
@@ -23404,6 +23567,45 @@ capture.captureType !== 'other' && (
         document.body
       )}
   </section>
+)}
+{shoppingStoreSettingsOpen && createPortal(
+  <div className="shopping-store-settings-overlay" onClick={() => setShoppingStoreSettingsOpen(false)}>
+    <section className="shopping-store-settings-panel" role="dialog" aria-modal="true"
+      aria-labelledby="shopping-stores-heading" onClick={event => event.stopPropagation()}>
+      <div className="shopping-store-settings-header">
+        <h2 id="shopping-stores-heading">Shopping Stores</h2>
+        <button className="shopping-store-settings-close" type="button" aria-label="Close shopping store settings"
+          onClick={() => setShoppingStoreSettingsOpen(false)}>×</button>
+      </div>
+      <p>Choose stores for automatic sorting. Hidden stores keep their items and saved preferences.</p>
+      <div className="shopping-store-settings-list">
+        {shoppingStores.map((store, index) => (
+          <div className="shopping-store-settings-row" key={store.id}>
+            <label><input type="checkbox" checked={store.enabled}
+              onChange={event => void updateShoppingStore(store.id,{enabled:event.target.checked})} />
+              <span>{store.name}</span></label>
+            <div className="shopping-store-move-buttons">
+              <button type="button" disabled={index === 0} aria-label={'Move ' + store.name + ' earlier'}
+                onClick={() => void moveShoppingStore(store.id, -1)}>↑</button>
+              <button type="button" disabled={index === shoppingStores.length - 1}
+                aria-label={'Move ' + store.name + ' later'}
+                onClick={() => void moveShoppingStore(store.id, 1)}>↓</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <form className="shopping-store-add" onSubmit={addShoppingStore}>
+        <label htmlFor="shopping-store-new">Add custom store</label>
+        <div><input className="event-input" type="text" id="shopping-store-new"
+          maxLength={50} value={newShoppingStoreName}
+          onChange={event => setNewShoppingStoreName(event.target.value)}
+          placeholder="Store name" />
+          <button type="submit" disabled={!newShoppingStoreName.trim()}>Add</button>
+        </div>
+      </form>
+      <p className="shopping-stores-footnote">Suggestions are preferences, not live inventory or pricing. Arney runs locally only when you request it.</p>
+    </section>
+  </div>, document.body
 )}
     </main>
   )
