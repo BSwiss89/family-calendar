@@ -13772,17 +13772,6 @@ return (
 
   <div className="sidebar-nav-spacer" />
 
-  {familyAuthEnabled && (
-    <button
-      type="button"
-      className="sidebar-nav-button"
-      onClick={() => window.location.assign('/account')}
-    >
-      <span className="sidebar-nav-icon">👤</span>
-      <span>Family Account</span>
-    </button>
-  )}
-
   <button
     type="button"
     className={`sidebar-nav-button ${
@@ -13794,6 +13783,15 @@ return (
   >
     <span className="sidebar-nav-icon">👥</span>
     <span>People</span>
+  </button>
+
+  <button
+    type="button"
+    className="sidebar-nav-button"
+    onClick={() => setMobileSettingsOpen(true)}
+  >
+    <span className="sidebar-nav-icon">⚙</span>
+    <span>Settings</span>
   </button>
 </nav>
       </header>
@@ -15727,7 +15725,7 @@ createPortal(
           type="button"
           onClick={() => window.location.assign('/account')}
         >
-          Family Account &amp; Sign Out
+          Family Account
           <span aria-hidden="true">›</span>
         </button>
       )}
