@@ -23375,14 +23375,18 @@ capture.captureType !== 'other' && (
                         aria-haspopup="menu" aria-expanded={listMoreOpen}
                         onClick={() => setListMoreOpen(open => !open)}>••• More</button>
                       {listMoreOpen && <div className="list-more-menu" role="menu">
-                        {selectedList.store_enabled && <>
-                          <button role="menuitem" type="button" disabled={storeSortBusy}
-                            onClick={() => {setListMoreOpen(false);void sortListByStores(selectedList.id, false)}}>
-                            Sort stores again</button>
-                          <button role="menuitem" type="button"
-                            onClick={() => {setListMoreOpen(false);setStoreFilter('all');setListCategoryFilter('All');setListSortMode(customSorting ? 'store' : 'custom')}}>
-                            {customSorting ? 'Use automatic sorting' : 'Custom order (drag)'}</button>
-                        </>}
+                        {selectedList.store_enabled && <button role="menuitem" type="button"
+                          disabled={storeSortBusy}
+                          onClick={() => {setListMoreOpen(false);void sortListByStores(selectedList.id, false)}}>
+                          Sort stores again</button>}
+                        <button role="menuitem" type="button"
+                          onClick={() => {
+                            setListMoreOpen(false)
+                            setStoreFilter('all')
+                            setListCategoryFilter('All')
+                            setListSortMode(customSorting ? (selectedList.store_enabled ? 'store' : 'category') : 'custom')
+                          }}>
+                          {customSorting ? 'Use automatic sorting' : 'Custom order (drag)'}</button>
                         <button role="menuitem" type="button" disabled={isOrganizingList || !canOrganizeExisting}
                           onClick={() => {setListMoreOpen(false);void organizeExistingList(selectedList.id)}}>
                           Organize existing categories</button>
