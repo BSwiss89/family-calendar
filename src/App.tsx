@@ -23153,6 +23153,39 @@ capture.captureType !== 'other' && (
 
       {page === 'lists' && (
   <section className="people-page lists-overview">
+    {/* Reference-matched layered scallop/sweep artwork behind the Lists heading.
+        Kept as live vector paths so future theme colors can recolor every band. */}
+    <svg className="lists-reference-header-waves" viewBox="0 0 864 320"
+      preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="lists-wave-field" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="var(--lists-header-base)" />
+          <stop offset="60%" stopColor="var(--lists-header-warm)" />
+          <stop offset="100%" stopColor="var(--lists-header-base)" />
+        </linearGradient>
+        <linearGradient id="lists-wave-light" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="var(--lists-wave-ivory)" />
+          <stop offset="60%" stopColor="var(--lists-wave-mist)" />
+          <stop offset="100%" stopColor="var(--lists-wave-ivory)" />
+        </linearGradient>
+        <linearGradient id="lists-wave-depth" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="var(--lists-wave-shadow)" />
+          <stop offset="58%" stopColor="var(--lists-header-warm)" />
+          <stop offset="100%" stopColor="var(--lists-wave-mist)" />
+        </linearGradient>
+      </defs>
+      <rect width="864" height="320" fill="url(#lists-wave-field)" />
+      <path d="M0 0H864V110C757 47 700 39 575 80C449 121 389 172 272 135C159 100 69 111 0 82Z"
+        fill="url(#lists-wave-light)" opacity=".65" />
+      <path d="M0 0H864V31C761 18 671 84 568 109C433 145 369 81 266 67C166 53 91 102 0 78Z"
+        fill="var(--lists-wave-ivory)" opacity=".55" />
+      <path d="M0 130C130 84 219 88 324 143C443 205 528 146 653 106C746 75 816 86 864 99V320H0Z"
+        fill="url(#lists-wave-depth)" opacity=".5" />
+      <path d="M0 177C144 137 195 126 305 163C435 210 514 176 643 130C729 100 814 91 864 113V320H0Z"
+        fill="var(--lists-header-warm)" opacity=".47" />
+      <path d="M0 241C131 223 249 249 368 268C492 288 581 237 688 235C763 234 815 256 864 247V320H0Z"
+        fill="var(--lists-header-base)" opacity=".6" />
+    </svg>
     <div className="people-page-heading lists-overview-heading">
       <div>
         <h2>Lists</h2>
@@ -23714,7 +23747,7 @@ capture.captureType !== 'other' && (
                   setNewListItemText(next)
                   if (!newListCategoryManuallySet) setNewListItemCategory(suggestListCategory(next) || 'General')
                 }}
-                autoFocus />
+              />
             </label>
             <label className="event-field">Category
               <input className="event-input" type="text" maxLength={40}
