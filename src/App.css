@@ -18497,6 +18497,10 @@ max-height:
 }
 
 
+/* Mobile-only Home Settings entry. Hidden on the desktop dashboard. */
+.home-mobile-settings-button { display: none; }
+.mobile-settings-overlay { display: none; }
+
 /* Desktop Settings opens the same preferences dialog as mobile.
    Mobile retains the bottom-sheet layout at 760px and below. */
 @media (min-width: 761px) {
@@ -18567,10 +18571,6 @@ max-height:
     color: #858585;
   }
 }
-
-/* Mobile-only Home Settings entry. Hidden on the desktop dashboard. */
-.home-mobile-settings-button { display: none; }
-.mobile-settings-overlay { display: none; }
 
 @media (max-width: 760px) {
   .top-bar-lists { display: none; }
