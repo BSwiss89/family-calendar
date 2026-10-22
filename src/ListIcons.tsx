@@ -35,7 +35,7 @@ export function getListIconOption(value: string | null | undefined) {
   return LIST_ICON_OPTIONS.find(option => option.id === value) ?? null
 }
 
-export function ListIcon({ id, ...props }: SVGProps<SVGSVGElement> & { id: string | null | undefined }) {
+export function ListIcon({ id, ...props }: Omit<SVGProps<SVGSVGElement>, 'id'> & { id: string | null | undefined }) {
   let drawing
   switch (id) {
     case 'shopping-cart':
