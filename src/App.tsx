@@ -5,11 +5,13 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type CSSProperties,
   type FormEvent,
   type PointerEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
 import {
   suggestListCategory,
@@ -1258,6 +1260,7 @@ type ShoppingStore = {
 type CalendarList = {
   id: number
   name: string
+  icon?: string | null
   store_enabled?: boolean
   created_at?: string
   items: ListItem[]
@@ -3243,6 +3246,8 @@ const [capturePreviewUrl, setCapturePreviewUrl] = useState('')
 const [captureNote, setCaptureNote] = useState('')
 const [captureSaving, setCaptureSaving] = useState(false)
 const [listCreateOpen, setListCreateOpen] = useState(false)
+const [newListIcon, setNewListIcon] = useState<string | null>(null)
+const [listIconPickerTarget, setListIconPickerTarget] = useState<'create' | number | null>(null)
 const [listNameEditing, setListNameEditing] = useState(false)
   const [sidebarContentChanging, setSidebarContentChanging] = useState(false)
   const [calendarViewChanging, setCalendarViewChanging] = useState(false)
@@ -10252,6 +10257,7 @@ async function createList(event: FormEvent<HTMLFormElement>) {
     },
     body: JSON.stringify({
       name: cleanName,
+      icon: newListIcon,
     }),
   })
 
@@ -10261,9 +10267,25 @@ async function createList(event: FormEvent<HTMLFormElement>) {
   }
 
   setNewListName('')
-setListCreateOpen(false)
-await loadLists()
+  setNewListIcon(null)
+  setListIconPickerTarget(null)
+  setListCreateOpen(false)
+  await loadLists()
 }
+
+async function changeExistingListIcon(listId: number, icon: string | null) {
+  const response = await fetch(`/api/lists/${listId}/icon`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ icon }),
+  })
+  if (!response.ok) {
+    showAppNotification('Could not save the list icon.')
+    return
+  }
+  await loadLists()
+}
+
 async function addListItem(event: FormEvent<HTMLFormElement>) {
   event.preventDefault()
 
@@ -23130,8 +23152,8 @@ capture.captureType !== 'other' && (
 )}
 
       {page === 'lists' && (
-  <section className="people-page">
-    <div className="people-page-heading">
+  <section className="people-page lists-overview">
+    <div className="people-page-heading lists-overview-heading">
       <div>
         <h2>Lists</h2>
         <p>
@@ -23149,8 +23171,11 @@ capture.captureType !== 'other' && (
       ) : (
         lists.map((list) => (
           <button
-            className="person-card list-card-button"
+            className="person-card list-card-button themed-list-card"
             key={list.id}
+            style={{
+              '--list-icon-tone': getListIconOption(list.icon)?.tone ?? '#8795a8',
+            } as CSSProperties}
             type="button"
            onClick={() => {
   setSelectedListId(list.id)
@@ -23168,14 +23193,16 @@ capture.captureType !== 'other' && (
   setListNameEditing(false)
 }}
           >
-            <h3>{list.name}</h3>
-
-            <p>
-              {list.items.length}{' '}
-              {list.items.length === 1
-                ? 'item'
-                : 'items'}
-            </p>
+            <span className={`themed-list-card-icon ${list.icon ? '' : 'themed-list-icon-neutral'}`}>
+              <ListIcon id={list.icon} width={26} height={26} />
+            </span>
+            <span className="themed-list-card-copy">
+              <span className="themed-list-card-name">{list.name}</span>
+              <span className="themed-list-card-count">
+                {list.items.length} {list.items.length === 1 ? 'item' : 'items'}
+              </span>
+            </span>
+            <span className="themed-list-card-chevron" aria-hidden="true">›</span>
           </button>
         ))
       )}
@@ -23187,6 +23214,8 @@ capture.captureType !== 'other' && (
       aria-label="Create list"
       onClick={() => {
         setNewListName('')
+        setNewListIcon(null)
+        setListIconPickerTarget(null)
         setListCreateOpen(true)
       }}
     >
@@ -23202,6 +23231,8 @@ capture.captureType !== 'other' && (
           onClick={() => {
             setListCreateOpen(false)
             setNewListName('')
+            setNewListIcon(null)
+            setListIconPickerTarget(null)
           }}
         >
           <div
@@ -23226,6 +23257,8 @@ capture.captureType !== 'other' && (
                 onClick={() => {
                   setListCreateOpen(false)
                   setNewListName('')
+                  setNewListIcon(null)
+                  setListIconPickerTarget(null)
                 }}
               >
                 ×
@@ -23233,9 +23266,19 @@ capture.captureType !== 'other' && (
             </div>
 
             <form
-              className="people-form"
+              className="people-form list-create-form"
               onSubmit={createList}
             >
+              <button className="list-create-icon-chooser" type="button"
+                onClick={() => setListIconPickerTarget('create')}
+                aria-label="Choose an icon for this list">
+                <span className={`list-create-icon-spot ${newListIcon ? 'selected' : ''}`}
+                  style={newListIcon ? { backgroundColor: getListIconOption(newListIcon)?.tone } : undefined}>
+                  {newListIcon ? <ListIcon id={newListIcon} width={29} height={29}/> : <span aria-hidden="true">+</span>}
+                </span>
+                <span>{newListIcon ? getListIconOption(newListIcon)?.label : 'Choose an icon'}</span>
+                <span className="list-create-icon-arrow" aria-hidden="true">›</span>
+              </button>
               <label className="event-field">
                 List Name
 
@@ -23267,6 +23310,49 @@ capture.captureType !== 'other' && (
         </div>,
         document.body
       )}
+
+    {listIconPickerTarget !== null && createPortal(
+      <div className="list-icon-picker-overlay"
+        onClick={() => setListIconPickerTarget(null)}>
+        <section className="list-icon-picker-modal" role="dialog" aria-modal="true"
+          aria-labelledby="list-icon-picker-title" onClick={event => event.stopPropagation()}>
+          <div className="list-icon-picker-handle" aria-hidden="true"/>
+          <div className="list-icon-picker-heading">
+            <h2 id="list-icon-picker-title">Choose an icon</h2>
+            <button type="button" className="list-icon-picker-close"
+              aria-label="Close icon picker" onClick={() => setListIconPickerTarget(null)}>×</button>
+          </div>
+          <p>Pick an icon for this list. You can change it later.</p>
+          <div className="list-icon-picker-grid">
+            {LIST_ICON_OPTIONS.map(option => (
+              <button type="button" key={option.id}
+                aria-label={option.label}
+                aria-pressed={listIconPickerTarget === 'create'
+                  ? newListIcon === option.id
+                  : lists.find(list => list.id === listIconPickerTarget)?.icon === option.id}
+                className="list-icon-picker-choice"
+                onClick={() => {
+                  const target = listIconPickerTarget
+                  if (target === 'create') setNewListIcon(option.id)
+                  else if (typeof target === 'number') void changeExistingListIcon(target, option.id)
+                  setListIconPickerTarget(null)
+                }}>
+                <span className="list-icon-choice-art" style={{backgroundColor: option.tone}}>
+                  <ListIcon id={option.id} width={25} height={25}/>
+                </span>
+                <span>{option.label}</span>
+              </button>
+            ))}
+          </div>
+          <button type="button" className="list-icon-clear-choice" onClick={() => {
+            const target = listIconPickerTarget
+            if (target === 'create') setNewListIcon(null)
+            else if (typeof target === 'number') void changeExistingListIcon(target, null)
+            setListIconPickerTarget(null)
+          }}>No icon</button>
+        </section>
+      </div>, document.body
+    )}
 
     {selectedListId !== null &&
       createPortal(
@@ -23394,6 +23480,14 @@ capture.captureType !== 'other' && (
     </form>
   ) : (
     <div className="list-title-row">
+      <button type="button" className="list-detail-icon-edit"
+        aria-label="Change list icon" title="Change list icon"
+        style={{
+          '--list-icon-tone': getListIconOption(selectedList.icon)?.tone ?? '#8795a8',
+        } as CSSProperties}
+        onClick={() => setListIconPickerTarget(selectedList.id)}>
+        <ListIcon id={selectedList.icon} width={22} height={22} />
+      </button>
       <h2>
         {selectedList.name}
       </h2>
