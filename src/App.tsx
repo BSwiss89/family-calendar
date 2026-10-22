@@ -1620,6 +1620,8 @@ type SortableListItemProps = {
   onCancelEdit: () => void
   onToggle: (item: ListItem) => void
   onDelete: (itemId: number) => void
+  swipeSide: 'edit' | 'delete' | null
+  onSwipeChange: (side: 'edit' | 'delete' | null) => void
 }
 
 type HomeWidgetId =
@@ -1697,11 +1699,13 @@ function SortableListItem({
   onCancelEdit,
   onToggle,
   onDelete,
+  swipeSide,
+  onSwipeChange,
 }: SortableListItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.id, disabled: !canDrag })
 
-  // Swipe only reveals Delete; an intentional tap on the red action deletes.
+  // Signed offset: positive = Edit on the left, negative = Delete on the right.
   const [swipeOffset, setSwipeOffset] = useState(0)
   const offsetRef = useRef(0)
   const suppressClickRef = useRef(0)
@@ -1712,10 +1716,14 @@ function SortableListItem({
     offsetRef.current = next
     setSwipeOffset(next)
   }
+  useEffect(() => {
+    if (gestureRef.current.pointerId !== -1) return
+    setOffset(swipeSide === 'edit' ? 94 : swipeSide === 'delete' ? -94 : 0)
+  }, [swipeSide])
   function swipeStart(event: PointerEvent<HTMLDivElement>) {
     if (window.innerWidth > 760 || event.pointerType === 'mouse' || isEditing || isDragging) return
     const target = event.target as HTMLElement
-    if (target.closest('input, textarea, select, .list-item-grip, .list-item-swipe-delete')) return
+    if (target.closest('input, textarea, select, .list-item-grip, .list-item-swipe-action')) return
     gestureRef.current = {
       pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
       originalOffset: offsetRef.current, dragging: false,
@@ -1736,7 +1744,7 @@ function SortableListItem({
       gesture.dragging = true
       event.currentTarget.setPointerCapture(event.pointerId)
     }
-    setOffset(Math.max(0, Math.min(94, gesture.originalOffset - dx)))
+    setOffset(Math.max(-94, Math.min(94, gesture.originalOffset + dx)))
   }
   function swipeEnd(event: PointerEvent<HTMLDivElement>, cancelled = false) {
     const gesture = gestureRef.current
@@ -1744,32 +1752,47 @@ function SortableListItem({
     gesture.pointerId = -1
     if (!gesture.dragging) return
     suppressClickRef.current = performance.now() + 450
-    setOffset(cancelled ? gesture.originalOffset : offsetRef.current >= 44 ? 94 : 0)
+    const next = cancelled ? gesture.originalOffset : offsetRef.current
+    const side = next >= 44 ? 'edit' : next <= -44 ? 'delete' : null
+    onSwipeChange(side)
+    setOffset(side === 'edit' ? 94 : side === 'delete' ? -94 : 0)
   }
 
   return (
     <div ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? .6 : 1 }}
+      style={{ transform: transform ? CSS.Transform.toString(transform) : undefined, transition, opacity: isDragging ? .6 : 1 }}
       className="list-item-swipe-shell"
+      data-list-item-id={item.id}
       onPointerDown={swipeStart}
       onPointerMove={swipeMove}
       onPointerUp={swipeEnd}
       onPointerCancel={event => swipeEnd(event, true)}
       onClickCapture={event => {
-        if ((event.target as HTMLElement).closest('.list-item-swipe-delete')) return
-        if (performance.now() < suppressClickRef.current || offsetRef.current > 0) {
+        if ((event.target as HTMLElement).closest('.list-item-swipe-action')) return
+        if (performance.now() < suppressClickRef.current) {
           event.preventDefault()
           event.stopPropagation()
-          if (offsetRef.current > 0) setOffset(0)
+        } else if (swipeSide !== null) {
+          onSwipeChange(null)
+          if (!(event.target as HTMLElement).closest('input[type="checkbox"]')) {
+            event.preventDefault()
+            event.stopPropagation()
+          }
         }
       }}>
-      <button type="button" className="list-item-swipe-delete"
+      <button type="button" className="list-item-swipe-action list-item-swipe-edit"
+        style={{opacity: swipeOffset > 0 ? 1 : 0, pointerEvents: swipeOffset > 0 ? 'auto' : 'none'}}
+        aria-label={`Edit ${item.text}`}
+        onFocus={() => { if (window.innerWidth <= 760) onSwipeChange('edit') }}
+        onClick={() => {onSwipeChange(null);onStartEdit(item)}}>Edit</button>
+      <button type="button" className="list-item-swipe-action list-item-swipe-delete"
+        style={{opacity: swipeOffset < 0 ? 1 : 0, pointerEvents: swipeOffset < 0 ? 'auto' : 'none'}}
         aria-label={`Delete ${item.text}`}
-        onFocus={() => { if (window.innerWidth <= 760) setOffset(94) }}
-        onClick={() => onDelete(item.id)}>Delete</button>
+        onFocus={() => { if (window.innerWidth <= 760) onSwipeChange('delete') }}
+        onClick={() => {onSwipeChange(null);onDelete(item.id)}}>Delete</button>
       <div className={`list-item-row list-item-swipe-foreground ${item.completed ? 'list-item-completed' : ''}`}
-        style={{ transform: `translateX(-${swipeOffset}px)`,
-          transition: gestureRef.current.dragging ? 'none' : 'transform 180ms ease' }}>
+        style={{ left: swipeOffset === 0 ? undefined : `${swipeOffset}px`,
+          transition: gestureRef.current.dragging ? 'none' : 'left 175ms ease-out' }}>
         <label className="list-item-checkbox-zone">
           <input type="checkbox" checked={item.completed}
             onChange={() => onToggle(item)}
@@ -1800,7 +1823,8 @@ function SortableListItem({
           </div>
         ) : <>
           <button className="list-item-complete-text" type="button"
-            aria-label={`Edit ${item.text}`} onClick={() => onStartEdit(item)}>
+            aria-label={`${item.completed ? 'Uncheck' : 'Check off'} ${item.text}`}
+            onClick={() => onToggle(item)}>
             <span className="list-item-name">{item.text}</span>
             {item.category && item.category !== 'General' &&
               <span className="list-category-pill">{item.category}</span>}
@@ -3448,6 +3472,7 @@ const [newShoppingStoreName, setNewShoppingStoreName] = useState('')
 const [storeSortBusy, setStoreSortBusy] = useState(false)
 const [listItemAddOpen, setListItemAddOpen] = useState(false)
 const [listMoreOpen, setListMoreOpen] = useState(false)
+const [openListSwipe, setOpenListSwipe] = useState<{itemId: number; side: 'edit' | 'delete'} | null>(null)
 const [captureInbox, setCaptureInbox] =
   useState<CaptureInboxItem[]>([])
 const [dayTimelineNow, setDayTimelineNow] =
@@ -10303,6 +10328,7 @@ async function toggleListItem(item: ListItem) {
   }
 }
 async function deleteListItem(itemId: number) {
+  setOpenListSwipe(null)
   const response = await fetch(
     `/api/list-items/${itemId}`,
     {
@@ -10387,6 +10413,7 @@ async function clearCompletedItems() {
   await loadLists()
 }
 function startEditingListItem(item: ListItem) {
+  setOpenListSwipe(null)
   setEditingListItemId(item.id)
   setEditingListItemText(item.text)
   setEditingListItemCategory(item.category || 'General')
@@ -23087,6 +23114,7 @@ capture.captureType !== 'other' && (
   setStoreFilter('all')
   setListItemAddOpen(false)
   setListMoreOpen(false)
+  setOpenListSwipe(null)
   setEditingListName(list.name)
   if (list.store_enabled) void sortListByStores(list.id, false)
   setListNameEditing(false)
@@ -23200,6 +23228,7 @@ capture.captureType !== 'other' && (
             setSelectedListId(null)
             setListItemAddOpen(false)
             setListMoreOpen(false)
+            setOpenListSwipe(null)
             setNewListItemText('')
             setEditingListItemId(null)
             setEditingListItemText('')
@@ -23207,6 +23236,13 @@ capture.captureType !== 'other' && (
         >
           <div
             className="list-modal list-detail-modal"
+            onClickCapture={event => {
+              if (!openListSwipe) return
+              const row = (event.target as HTMLElement).closest<HTMLElement>('.list-item-swipe-shell')
+              if (!row || row.dataset.listItemId !== String(openListSwipe.itemId)) {
+                setOpenListSwipe(null)
+              }
+            }}
             onClick={(event) => {
               event.stopPropagation()
             }}
@@ -23344,6 +23380,7 @@ capture.captureType !== 'other' && (
                         setSelectedListId(null)
                         setListItemAddOpen(false)
                         setListMoreOpen(false)
+                        setOpenListSwipe(null)
                         setNewListItemText('')
                         setEditingListItemId(
                           null
@@ -23500,6 +23537,10 @@ capture.captureType !== 'other' && (
                                 onDelete={
                                   deleteListItem
                                 }
+                                swipeSide={openListSwipe?.itemId === item.id ? openListSwipe.side : null}
+                                onSwipeChange={side => setOpenListSwipe(
+                                  side === null ? null : { itemId: item.id, side }
+                                )}
                               />
                             </Fragment>
                           ))}

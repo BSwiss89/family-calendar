@@ -18971,16 +18971,45 @@ max-height:
  .list-item-add-sheet {width:100%;padding:14px 18px calc(18px + env(safe-area-inset-bottom))}
 }
 
-/* Row swipe actions. Preserve vertical scrolling and drag handles. */
-.list-item-swipe-shell {position:relative;overflow:hidden;margin-bottom:8px;border-radius:12px;min-width:0}
-.list-item-swipe-shell .list-item-row {margin:0;min-height:58px}
-.list-item-swipe-foreground {position:relative;z-index:1;background:#fff}
-.list-item-swipe-delete {display:none}
+/* Mobile item swipes. Use positional movement rather than a permanent GPU
+   transform to prevent duplicated category pills on Safari/iPhone. */
+.list-item-swipe-shell {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-width: 0;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  background: white;
+}
+.list-item-swipe-shell .list-item-row { margin: 0; min-height: 58px; }
+.list-item-swipe-foreground {
+  position: relative;
+  left: 0;
+  z-index: 1;
+  width: 100%;
+  min-width: 0;
+  background: #fff;
+}
+.list-item-swipe-action {display: none}
+.list-item-complete-text .list-category-pill {
+  display: block;
+  flex: 0 1 auto;
+  max-width: 46%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 @media (max-width:760px) {
-  .list-item-swipe-shell {touch-action:pan-y}
-  .list-item-swipe-delete {display:flex;align-items:center;justify-content:center;position:absolute;
-    right:0;top:0;bottom:0;width:94px;background:#c91f33;color:#fff;border:0;font-weight:750;font-size:15px}
-  .list-item-swipe-foreground {touch-action:pan-y}
+  .list-item-swipe-shell,.list-item-swipe-foreground {touch-action:pan-y}
+  .list-item-swipe-action {
+    display:flex;align-items:center;justify-content:center;
+    position:absolute;top:0;bottom:0;width:94px;
+    color:#fff;border:0;font-size:15px;font-weight:750
+  }
+  .list-item-swipe-edit {left:0;background:#355bb5}
+  .list-item-swipe-delete {right:0;background:#c91f33}
   .list-item-edit-button,.list-item-delete {display:none}
   .list-item-complete-text {flex:1 1 auto}
 }
