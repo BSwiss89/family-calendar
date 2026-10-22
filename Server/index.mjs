@@ -6,6 +6,7 @@ import multer from 'multer'
 import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
+import { installFamilyAuth } from './family-auth.mjs'
 import {
   normalizeListCategory,
   ensureListItemCategories,
@@ -606,6 +607,9 @@ database.exec(`
 `)
 
 app.use(express.json())
+// Required mode protects all subsequent calendar APIs, uploads and pages.
+// Disabled by default; never enable public Funnel before a tested rollout.
+installFamilyAuth(app, database, __dirname)
 
 function isValidDate(date) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date)
