@@ -18970,3 +18970,17 @@ max-height:
  .list-more-button {padding:8px 10px}
  .list-item-add-sheet {width:100%;padding:14px 18px calc(18px + env(safe-area-inset-bottom))}
 }
+
+/* Row swipe actions. Preserve vertical scrolling and drag handles. */
+.list-item-swipe-shell {position:relative;overflow:hidden;margin-bottom:8px;border-radius:12px;min-width:0}
+.list-item-swipe-shell .list-item-row {margin:0;min-height:58px}
+.list-item-swipe-foreground {position:relative;z-index:1;background:#fff}
+.list-item-swipe-delete {display:none}
+@media (max-width:760px) {
+  .list-item-swipe-shell {touch-action:pan-y}
+  .list-item-swipe-delete {display:flex;align-items:center;justify-content:center;position:absolute;
+    right:0;top:0;bottom:0;width:94px;background:#c91f33;color:#fff;border:0;font-weight:750;font-size:15px}
+  .list-item-swipe-foreground {touch-action:pan-y}
+  .list-item-edit-button,.list-item-delete {display:none}
+  .list-item-complete-text {flex:1 1 auto}
+}

@@ -1698,97 +1698,122 @@ function SortableListItem({
   onToggle,
   onDelete,
 }: SortableListItemProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: item.id, disabled: !canDrag })
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: item.id, disabled: !canDrag })
+
+  // Swipe only reveals Delete; an intentional tap on the red action deletes.
+  const [swipeOffset, setSwipeOffset] = useState(0)
+  const offsetRef = useRef(0)
+  const suppressClickRef = useRef(0)
+  const gestureRef = useRef({
+    pointerId: -1, startX: 0, startY: 0, originalOffset: 0, dragging: false,
+  })
+  function setOffset(next: number) {
+    offsetRef.current = next
+    setSwipeOffset(next)
+  }
+  function swipeStart(event: PointerEvent<HTMLDivElement>) {
+    if (window.innerWidth > 760 || event.pointerType === 'mouse' || isEditing || isDragging) return
+    const target = event.target as HTMLElement
+    if (target.closest('input, textarea, select, .list-item-grip, .list-item-swipe-delete')) return
+    gestureRef.current = {
+      pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+      originalOffset: offsetRef.current, dragging: false,
+    }
+  }
+  function swipeMove(event: PointerEvent<HTMLDivElement>) {
+    const gesture = gestureRef.current
+    if (gesture.pointerId !== event.pointerId) return
+    const dx = event.clientX - gesture.startX
+    const dy = event.clientY - gesture.startY
+    if (!gesture.dragging) {
+      // Vertical scroll always wins; never hijack a normal scroll gesture.
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) {
+        gesture.pointerId = -1
+        return
+      }
+      if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy) * 1.2) return
+      gesture.dragging = true
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+    setOffset(Math.max(0, Math.min(94, gesture.originalOffset - dx)))
+  }
+  function swipeEnd(event: PointerEvent<HTMLDivElement>, cancelled = false) {
+    const gesture = gestureRef.current
+    if (gesture.pointerId !== event.pointerId) return
+    gesture.pointerId = -1
+    if (!gesture.dragging) return
+    suppressClickRef.current = performance.now() + 450
+    setOffset(cancelled ? gesture.originalOffset : offsetRef.current >= 44 ? 94 : 0)
+  }
 
   return (
-    <div
-      ref={setNodeRef}
-      style={{
-        transform: CSS.Transform.toString(transform),
-        transition,
-        opacity: isDragging ? 0.6 : 1,
-      }}
-      className={`list-item-row ${item.completed ? 'list-item-completed' : ''}`}
-    >
-      <label className="list-item-checkbox-zone">
-        <input
-          type="checkbox"
-          checked={item.completed}
-          onChange={() => onToggle(item)}
-          aria-label={`${item.completed ? 'Uncheck' : 'Check off'} ${item.text}`}
-        />
-      </label>
-      {isEditing ? (
-        <div className="list-item-edit-area">
-          <div className="list-item-edit-fields">
-            <input
-              className="event-input"
-              type="text"
-              aria-label="Item name"
-              maxLength={200}
-              value={editingText}
-              onChange={(event) => onEditingTextChange(event.target.value)}
-            />
-            <input
-              className="event-input"
-              type="text"
-              aria-label="Item category"
-              list="list-category-suggestions"
-              maxLength={40}
-              placeholder="Category (e.g. Produce)"
-              value={editingCategory}
-              onChange={(event) => onEditingCategoryChange(event.target.value)}
-            />
-            {showStore && (
-              <label className="list-store-edit-label">Store
+    <div ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? .6 : 1 }}
+      className="list-item-swipe-shell"
+      onPointerDown={swipeStart}
+      onPointerMove={swipeMove}
+      onPointerUp={swipeEnd}
+      onPointerCancel={event => swipeEnd(event, true)}
+      onClickCapture={event => {
+        if ((event.target as HTMLElement).closest('.list-item-swipe-delete')) return
+        if (performance.now() < suppressClickRef.current || offsetRef.current > 0) {
+          event.preventDefault()
+          event.stopPropagation()
+          if (offsetRef.current > 0) setOffset(0)
+        }
+      }}>
+      <button type="button" className="list-item-swipe-delete"
+        aria-label={`Delete ${item.text}`}
+        onFocus={() => { if (window.innerWidth <= 760) setOffset(94) }}
+        onClick={() => onDelete(item.id)}>Delete</button>
+      <div className={`list-item-row list-item-swipe-foreground ${item.completed ? 'list-item-completed' : ''}`}
+        style={{ transform: `translateX(-${swipeOffset}px)`,
+          transition: gestureRef.current.dragging ? 'none' : 'transform 180ms ease' }}>
+        <label className="list-item-checkbox-zone">
+          <input type="checkbox" checked={item.completed}
+            onChange={() => onToggle(item)}
+            aria-label={`${item.completed ? 'Uncheck' : 'Check off'} ${item.text}`} />
+        </label>
+        {isEditing ? (
+          <div className="list-item-edit-area">
+            <div className="list-item-edit-fields">
+              <input className="event-input" type="text" aria-label="Item name"
+                maxLength={200} value={editingText}
+                onChange={event => onEditingTextChange(event.target.value)} />
+              <input className="event-input" type="text" aria-label="Item category"
+                list="list-category-suggestions" maxLength={40}
+                placeholder="Category (e.g. Produce)" value={editingCategory}
+                onChange={event => onEditingCategoryChange(event.target.value)} />
+              {showStore && <label className="list-store-edit-label">Store
                 <select className="event-input" value={editingStoreId ?? ''}
                   onChange={event => onEditingStoreChange(event.target.value ? Number(event.target.value) : null)}>
                   <option value="">Unsorted</option>
-                  {stores.map(store => <option key={store.id} value={store.id}>{store.name}{!store.enabled ? ' (hidden)' : ''}</option>)}
+                  {stores.map(store => <option key={store.id} value={store.id}>
+                    {store.name}{!store.enabled ? ' (hidden)' : ''}
+                  </option>)}
                 </select>
-              </label>
-            )}
+              </label>}
+            </div>
+            <button type="button" onClick={() => onSaveEdit(item.id)}>Save</button>
+            <button type="button" onClick={onCancelEdit}>Cancel</button>
           </div>
-          <button type="button" onClick={() => onSaveEdit(item.id)}>Save</button>
-          <button type="button" onClick={onCancelEdit}>Cancel</button>
-        </div>
-      ) : (
-        <>
-          <button
-            className="list-item-complete-text"
-            type="button"
-            aria-label={`${item.completed ? 'Uncheck' : 'Check off'} ${item.text}`}
-            onClick={() => onToggle(item)}
-          >
+        ) : <>
+          <button className="list-item-complete-text" type="button"
+            aria-label={`Edit ${item.text}`} onClick={() => onStartEdit(item)}>
             <span className="list-item-name">{item.text}</span>
-            {item.category && item.category !== 'General' && (
-              <span className="list-category-pill">{item.category}</span>
-            )}
+            {item.category && item.category !== 'General' &&
+              <span className="list-category-pill">{item.category}</span>}
           </button>
-          <button
-            className="list-item-grip"
-            type="button"
-            aria-label={`Reorder ${item.text}`}
-            title={canDrag ? 'Drag to reorder' : 'Show all categories to reorder'}
-            disabled={!canDrag}
-            {...attributes}
-            {...listeners}
-          >☰</button>
-          <button className="list-item-edit-button" type="button" onClick={() => onStartEdit(item)}>
-            Edit
-          </button>
-          <button className="list-item-delete" type="button" onClick={() => onDelete(item.id)}>
-            Delete
-          </button>
-        </>
-      )}
+          {canDrag && <button className="list-item-grip" type="button"
+            aria-label={`Reorder ${item.text}`} title="Drag to reorder"
+            {...attributes} {...listeners}>☰</button>}
+          <button className="list-item-edit-button" type="button"
+            onClick={() => onStartEdit(item)}>Edit</button>
+          <button className="list-item-delete" type="button"
+            onClick={() => onDelete(item.id)}>Delete</button>
+        </>}
+      </div>
     </div>
   )
 }
