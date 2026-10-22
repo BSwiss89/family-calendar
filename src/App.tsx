@@ -21,6 +21,7 @@ import {
   closestCenter,
   DndContext,
   KeyboardSensor,
+  useDndContext,
   PointerSensor,
   useSensor,
   useSensors,
@@ -1702,8 +1703,16 @@ function SortableListItem({
   swipeSide,
   onSwipeChange,
 }: SortableListItemProps) {
+  const { active } = useDndContext()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: item.id, disabled: !canDrag })
+    useSortable({
+      id: item.id,
+      disabled: !canDrag,
+      // Reordering should only move rows during a gesture. Layout animations
+      // on first render can leave stale dnd-kit offsets in iPhone Safari.
+      animateLayoutChanges: () => false,
+    })
+  const moveDuringDrag = canDrag && active !== null
 
   // Signed offset: positive = Edit on the left, negative = Delete on the right.
   const [swipeOffset, setSwipeOffset] = useState(0)
@@ -1764,7 +1773,13 @@ function SortableListItem({
 
   return (
     <div ref={setNodeRef}
-      style={{ transform: transform ? CSS.Transform.toString(transform) : undefined, transition, opacity: isDragging ? .6 : 1 }}
+      style={{
+        // dnd-kit must not transform rows when no drag is active.
+        // This avoids clipping the first grips until the initial drag remeasures them.
+        transform: moveDuringDrag && transform ? CSS.Transform.toString(transform) : undefined,
+        transition: moveDuringDrag ? transition : undefined,
+        opacity: isDragging ? .6 : 1,
+      }}
       className="list-item-swipe-shell"
       data-list-item-id={item.id}
       onPointerDown={swipeStart}
