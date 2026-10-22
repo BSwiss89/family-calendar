@@ -19715,3 +19715,173 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   .themed-list-card-divider {height:44px}
   .lists-overview .themed-list-card-name {font-size:17px}
 }
+
+/* PR #53: real flowing Bézier waves rather than rotated, rounded polygons.
+   The backgrounds inherit the future global --calendar-theme-color. */
+.lists-overview {
+  --lists-accent: var(--calendar-theme-color, #bba58c);
+  --lists-wave-one: color-mix(in srgb, var(--lists-accent) 24%, #ffffff);
+  --lists-wave-two: color-mix(in srgb, var(--lists-accent) 13%, #ffffff);
+}
+.lists-overview::before,
+.lists-overview::after {
+  width: auto;
+  left: -24px;
+  right: -24px;
+  border-radius: 0;
+  transform: none;
+  clip-path: none;
+  background-clip: border-box;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+.lists-overview::before {
+  top: -95px;
+  height: 360px;
+  opacity: 1;
+  background: linear-gradient(115deg,
+    color-mix(in srgb, var(--lists-accent) 13%, #fff),
+    color-mix(in srgb, var(--lists-accent) 27%, #fff) 50%,
+    color-mix(in srgb, var(--lists-accent) 11%, #fff));
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20360%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%200H1000V230C875%20160%20775%20305%20620%20241S405%20310%20250%20243S85%20220%200%20265Z%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20360%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%200H1000V230C875%20160%20775%20305%20620%20241S405%20310%20250%20243S85%20220%200%20265Z%22%2F%3E%3C%2Fsvg%3E");
+}
+.lists-overview::after {
+  top: -89px;
+  height: 358px;
+  opacity: .8;
+  background: linear-gradient(95deg,
+    color-mix(in srgb, var(--lists-accent) 21%, #fff),
+    color-mix(in srgb, var(--lists-accent) 9%, #fff) 58%,
+    color-mix(in srgb, var(--lists-accent) 19%, #fff));
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20360%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%200H1000V245C850%20312%20738%20175%20570%20244S300%20169%20176%20232S70%20276%200%20250Z%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20360%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%200H1000V245C850%20312%20738%20175%20570%20244S300%20169%20176%20232S70%20276%200%20250Z%22%2F%3E%3C%2Fsvg%3E");
+}
+.lists-overview .themed-list-card {
+  isolation: isolate;
+  background: rgba(255,255,255,.97);
+}
+.lists-overview .themed-list-card::before,
+.lists-overview .themed-list-card::after {
+  position: absolute;
+  content: '';
+  z-index: -1;
+  pointer-events: none;
+  width: 100%;
+  height: 100%;
+  inset: 0;
+  border-radius: 0;
+  opacity: 1;
+  transform: none;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+.lists-overview .themed-list-card::before {
+  background: linear-gradient(110deg,
+    transparent 25%, var(--lists-wave-two) 70%,
+    color-mix(in srgb, var(--lists-accent) 20%, #fff));
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20250%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%20250H1000V78C840%2030%20728%20178%20555%20122S264%20150%200%2055Z%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20250%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%20250H1000V78C840%2030%20728%20178%20555%20122S264%20150%200%2055Z%22%2F%3E%3C%2Fsvg%3E");
+}
+.lists-overview .themed-list-card::after {
+  background: linear-gradient(112deg,
+    transparent 35%,
+    color-mix(in srgb, var(--lists-accent) 12%, #fff) 65%,
+    color-mix(in srgb, var(--lists-accent) 24%, #fff));
+  opacity: .72;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20250%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%20250H1000V130C845%20185%20712%2045%20553%20118S245%2094%200%20174Z%22%2F%3E%3C%2Fsvg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20250%22%20preserveAspectRatio%3D%22none%22%3E%3Cpath%20fill%3D%22white%22%20d%3D%22M0%20250H1000V130C845%20185%20712%2045%20553%20118S245%2094%200%20174Z%22%2F%3E%3C%2Fsvg%3E");
+}
+@media (max-width: 760px) {
+  .lists-overview::before,
+  .lists-overview::after {left: -16px; right: -16px;}
+  .lists-overview::before {top: -82px; height: 312px;}
+  .lists-overview::after {top: -78px; height: 304px;}
+}
+
+/* Single compact Create List row:
+   dashed plus icon to the left, List Name and input directly beside it. */
+.list-create-fields {padding: 15px 15px;}
+.list-create-main-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  min-width: 0;
+}
+.list-create-main-row > .list-create-icon-chooser {
+  flex: 0 0 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  min-height: 72px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+.list-create-main-row .list-create-icon-spot {
+  width: 70px;
+  height: 70px;
+  min-width: 70px;
+  flex: 0 0 70px;
+  border: 2px dashed #aeb6c2;
+  border-radius: 50%;
+  background: #f0f2f5;
+  color: #8995a4;
+}
+.list-create-main-row .list-create-icon-spot.selected {
+  border: 0;
+  color: #fff;
+}
+.list-create-icon-plus {
+  display: block;
+  font-size: 33px;
+  line-height: 1;
+  font-weight: 400;
+  color: #8995a4;
+  transform: translateY(-1px);
+}
+.list-create-main-row > .list-create-name-field {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  gap: 8px;
+  margin: 0;
+}
+.list-create-main-row .list-create-field-heading {
+  font-size: 16px;
+  font-weight: 700;
+  color: #242832;
+}
+.list-create-main-row .list-create-name-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 49px;
+  margin: 0;
+  padding: 9px 12px;
+  font-size: 16px;
+}
+@media (max-width: 760px) {
+  .list-create-fields {padding: 13px 11px;}
+  .list-create-main-row {gap: 13px;}
+  .list-create-main-row > .list-create-icon-chooser {
+    flex-basis: 65px;
+    width: 65px;
+    height: 65px;
+    min-height: 65px;
+  }
+  .list-create-main-row .list-create-icon-spot {
+    width: 64px;
+    height: 64px;
+    min-width: 64px;
+    flex-basis: 64px;
+  }
+  .list-create-main-row .list-create-name-input {font-size: 15px;}
+}

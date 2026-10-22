@@ -23256,33 +23256,29 @@ capture.captureType !== 'other' && (
               className="people-form list-create-form"
               onSubmit={createList}>
               <div className="list-create-fields">
-                <div className="list-create-icon-setting">
-                  <span className="list-create-field-heading">Icon</span>
+                <div className="list-create-main-row">
                   <button className="list-create-icon-chooser" type="button"
                     onClick={() => setListIconPickerTarget('create')}
-                    aria-label="Choose an icon for this list">
+                    aria-label={newListIcon ? 'Change list icon' : 'Add a list icon'}
+                    title={newListIcon ? 'Change icon' : 'Add icon'}>
                     <span className={newListIcon ? 'list-create-icon-spot selected' : 'list-create-icon-spot'}
                       style={newListIcon
                         ? { backgroundColor: getListIconOption(newListIcon)?.tone }
                         : undefined}>
                       {newListIcon
                         ? <ListIcon id={newListIcon} width={30} height={30}/>
-                        : null}
+                        : <span className="list-create-icon-plus" aria-hidden="true">+</span>}
                     </span>
-                    <span className="list-create-icon-name">
-                      {newListIcon ? getListIconOption(newListIcon)?.label : 'Choose an icon'}
-                    </span>
-                    <span className="list-create-icon-arrow" aria-hidden="true">›</span>
                   </button>
+                  <label className="list-create-name-field">
+                    <span className="list-create-field-heading">List Name</span>
+                    <input className="event-input list-create-name-input"
+                      type="text" placeholder="e.g. Groceries, Work, Travel..."
+                      maxLength={100} value={newListName}
+                      onChange={event => setNewListName(event.target.value)}
+                    />
+                  </label>
                 </div>
-                <label className="list-create-name-field">
-                  <span className="list-create-field-heading">List Name</span>
-                  <input className="event-input list-create-name-input"
-                    type="text" placeholder="e.g. Groceries, Work, Travel..."
-                    maxLength={100} value={newListName}
-                    onChange={event => setNewListName(event.target.value)}
-                  />
-                </label>
               </div>
             </form>
           </section>
