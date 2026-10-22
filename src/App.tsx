@@ -1707,6 +1707,8 @@ function SortableListItem({
 
   // Signed offset: positive = Edit on the left, negative = Delete on the right.
   const [swipeOffset, setSwipeOffset] = useState(0)
+  // A new badge node after a swipe prevents stale iOS Safari text layers.
+  const [badgeRevision, setBadgeRevision] = useState(0)
   const offsetRef = useRef(0)
   const suppressClickRef = useRef(0)
   const gestureRef = useRef({
@@ -1719,6 +1721,7 @@ function SortableListItem({
   useEffect(() => {
     if (gestureRef.current.pointerId !== -1) return
     setOffset(swipeSide === 'edit' ? 94 : swipeSide === 'delete' ? -94 : 0)
+    setBadgeRevision(value => value + 1)
   }, [swipeSide])
   function swipeStart(event: PointerEvent<HTMLDivElement>) {
     if (window.innerWidth > 760 || event.pointerType === 'mouse' || isEditing || isDragging) return
@@ -1756,6 +1759,7 @@ function SortableListItem({
     const side = next >= 44 ? 'edit' : next <= -44 ? 'delete' : null
     onSwipeChange(side)
     setOffset(side === 'edit' ? 94 : side === 'delete' ? -94 : 0)
+    setBadgeRevision(value => value + 1)
   }
 
   return (
@@ -1826,9 +1830,15 @@ function SortableListItem({
             aria-label={`${item.completed ? 'Uncheck' : 'Check off'} ${item.text}`}
             onClick={() => onToggle(item)}>
             <span className="list-item-name">{item.text}</span>
-            {item.category && item.category !== 'General' &&
-              <span className="list-category-pill">{item.category}</span>}
           </button>
+          {item.category && item.category !== 'General' && (
+            <span
+              key={`${item.id}-${badgeRevision}`}
+              className="list-category-pill list-item-category-tag"
+              title={item.category}
+              aria-label={`Category: ${item.category}`}
+            >{item.category}</span>
+          )}
           {canDrag && <button className="list-item-grip" type="button"
             aria-label={`Reorder ${item.text}`} title="Drag to reorder"
             {...attributes} {...listeners}>☰</button>}
