@@ -183,6 +183,59 @@ test('password reset revokes remembered devices and no periodic login is require
   }
 })
 
+test('account login throttling is independent behind one reverse proxy', async () => {
+  const db = new DatabaseSync(':memory:')
+  setFamilyAccount(db, 'accountalpha', 'Alpha Household', password)
+  setFamilyAccount(db, 'accountbeta', 'Beta Household', password)
+
+  const site = await startServer(db)
+  try {
+    const login = (username, suppliedPassword, forwardedIp) => fetch(
+      site.base + '/api/auth/login',
+      {
+        method: 'POST',
+        headers: {
+          Origin: site.origin,
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': forwardedIp,
+        },
+        body: JSON.stringify({ username, password: suppliedPassword }),
+      }
+    )
+
+    for (let i = 0; i < 10; i++) {
+      const response = await login(
+        'accountalpha', 'wrong-password', `198.51.100.${i + 1}`
+      )
+      assert.equal(response.status, 401)
+    }
+
+    // Changing a forwarded IP cannot bypass this account's limit.
+    const blocked = await login('accountalpha', password, '203.0.113.50')
+    assert.equal(blocked.status, 429)
+    assert.ok(Number(blocked.headers.get('retry-after')) > 0)
+
+    // A second account behind the same proxy can still log in.
+    const separate = await login('accountbeta', password, '203.0.113.50')
+    assert.equal(separate.status, 200)
+    assert.match(separate.headers.get('set-cookie'), /__Host-fc_live_session=/)
+
+    // Unknown account names follow the same identity-based rule.
+    for (let i = 0; i < 10; i++) {
+      const response = await login('unknownfamily', 'wrong-password', '127.0.0.1')
+      assert.equal(response.status, 401)
+    }
+
+    const unknownBlocked = await login('unknownfamily', password, '198.51.100.5')
+    assert.equal(unknownBlocked.status, 429)
+
+    const otherUnknown = await login('anotherunknown', 'wrong-password', '198.51.100.5')
+    assert.equal(otherUnknown.status, 401)
+  } finally {
+    await site.close()
+    db.close()
+  }
+})
 test('legacy private deployments stay unchanged until auth is explicitly enabled', async () => {
   const db = new DatabaseSync(':memory:')
   const site = await startServer(db, 'disabled')
