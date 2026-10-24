@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import HouseholdMembersSettings from './HouseholdMembersSettings'
 import SharedEventDetails from './SharedEventDetails'
 import './SharedEventsOverlay.css'
 import FamilyEventSharing from './FamilyEventSharing'
@@ -1875,7 +1876,8 @@ const [page, setPage] =
     'people' |
     'lists' |
     'invitations' |
-    'capture'
+    'capture' |
+    'settings'
   >('home')
 
 const [isEditingHome, setIsEditingHome] =
@@ -14198,6 +14200,15 @@ return (
     <span>AI</span>
   </button>
 
+  <button
+    type="button"
+    className={`sidebar-nav-button ${page === 'settings' ? 'active-sidebar-nav' : ''}`}
+    onClick={() => setPage('settings')}
+  >
+    <span className="sidebar-nav-icon">⚙</span>
+    <span>Settings</span>
+  </button>
+
   <div className="sidebar-nav-spacer" />
 
   {signedInAccount && (
@@ -16202,12 +16213,17 @@ createPortal(
       className="home-ai-buddy-zone"
       aria-hidden="true"
     />
+    <button type="button" className="home-household-settings-shortcut"
+      onClick={() => setPage('settings')}>
+      Settings
+    </button>
   </section>
 )}
 
       {page === 'invitations' && (
         <DesktopInvitations {...invitationInbox} />
       )}
+      {page === 'settings' && <HouseholdMembersSettings />}
 
       {page === 'calendar' && (
        <section
