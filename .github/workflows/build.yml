@@ -26,6 +26,8 @@ jobs:
         run: npm run build
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
+      - name: Verify one-use household member invitations and tenant boundaries
+        run: node --test scripts/test-household-member-invitations.mjs
       - name: Test private Arney event selection and confirmation in synthetic households
         run: |
           node --test scripts/test-arney-event-selection.mjs scripts/test-arney-private-event-candidate.mjs scripts/test-private-arney-event-language.mjs scripts/test-private-arney-confirmed-actions.mjs
