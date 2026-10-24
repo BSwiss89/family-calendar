@@ -140,3 +140,33 @@ test('trusted provisioning does not overwrite household/account grants or accept
     serverVerifiedUserId: b, householdId: 'family-a', role: 'member',
   }), /disabled/)
 })
+
+
+test('one account cannot belong to two households, even through direct SQL', t => {
+  const { db, shared } = fixture(t)
+  grantHouseholdMembership(db, {
+    serverVerifiedUserId: shared, householdId: 'family-a', role: 'member',
+  })
+  assert.throws(() => grantHouseholdMembership(db, {
+    serverVerifiedUserId: shared, householdId: 'family-b', role: 'member',
+  }), /UNIQUE/)
+  const other = db.prepare('SELECT id FROM household_registry WHERE storage_id = ?').get('family-b')
+  assert.throws(() => db.prepare(
+    'INSERT INTO household_memberships(user_id, household_id, role) VALUES (?, ?, ?)'
+  ).run(shared, other.id, 'member'), /UNIQUE/)
+  assert.deepEqual(listGrantedHouseholdsForSessionUser(db, { serverVerifiedUserId: shared }), [
+    { householdId: 'family-a', displayName: 'Family A', role: 'member' },
+  ])
+})
+
+test('conflicting legacy memberships block migration without deleting records', t => {
+  const { db, shared } = fixture(t)
+  db.exec('DROP INDEX household_memberships_one_household_per_user')
+  const a = db.prepare('SELECT id FROM household_registry WHERE storage_id = ?').get('family-a')
+  const b = db.prepare('SELECT id FROM household_registry WHERE storage_id = ?').get('family-b')
+  const insert = db.prepare('INSERT INTO household_memberships(user_id, household_id, role) VALUES (?, ?, ?)')
+  insert.run(shared, a.id, 'member')
+  insert.run(shared, b.id, 'member')
+  assert.throws(() => createHouseholdMembershipTables(db), /UNIQUE/)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM household_memberships WHERE user_id = ?').get(shared).n, 2)
+})
