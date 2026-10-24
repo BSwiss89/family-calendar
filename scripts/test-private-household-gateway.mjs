@@ -1128,113 +1128,80 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieA })).response.status, 403)
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 200)
 
-    // Multi-membership accounts must make an explicit, authorized choice.
-    // Session selections must be scoped to the current device, never the user
-    // or a manipulable tenant selector in the URL or browser header.
-    grantHouseholdMembership(central, {
+    // One login belongs to precisely one household. A second grant is
+    // blocked by SQLite rather than silently authorizing a family switch.
+    assert.throws(() => grantHouseholdMembership(central, {
       serverVerifiedUserId: idB, householdId: 'family-a', role: 'member',
-    })
-    assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 409)
-    assert.equal((await json(gateway.base, '/api/events?household=family-a', {
-      cookie: cookieB,
-      headers: { 'X-Household-Id': 'family-a' },
-    })).response.status, 409)
+    }), /UNIQUE constraint failed/)
+    const membershipsB = central.prepare(
+      'SELECT COUNT(*) AS n FROM household_memberships WHERE user_id = ?'
+    ).get(idB).n
+    assert.equal(membershipsB, 1)
 
     const availableB = await json(gateway.base, '/api/households', { cookie: cookieB })
-    assert.deepEqual(
-      availableB.value.households.map(h => h.householdId),
-      ['family-a', 'family-b'],
-    )
-    assert.equal(availableB.value.selectedHouseholdId, null)
+    assert.equal(availableB.response.status, 200)
+    assert.deepEqual(availableB.value.households.map(h => h.householdId), ['family-b'])
+    assert.equal(availableB.value.selectedHouseholdId, 'family-b')
 
-    const deniedSelection = await json(gateway.base, '/api/households/select', {
-      cookie: cookieB, body: { householdId: 'nonexistent-family' },
-    })
-    assert.equal(deniedSelection.response.status, 403)
-    assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 409)
-
-    const csrfSelection = await json(gateway.base, '/api/households/select', {
-      cookie: cookieB,
-      body: { householdId: 'family-a' },
-      headers: { Origin: 'https://evil.example' },
-    })
-    assert.equal(csrfSelection.response.status, 403)
-    assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 409)
-
-    const chosenA = await json(gateway.base, '/api/households/select', {
-      cookie: cookieB,
-      body: { householdId: 'family-a' },
-    })
-    assert.equal(chosenA.response.status, 200)
-    assert.equal(chosenA.value.selectedHouseholdId, 'family-a')
-    assert.deepEqual(
-      (await json(gateway.base, '/api/events?household=family-b', {
-        cookie: cookieB, headers: { 'X-Household-Id': 'family-b' },
-      })).value.map(e => e.title),
-      ['A SECRET APPOINTMENT', 'Family A BBQ time changed'],
-    )
+    // URL, header and browser-side household selection cannot cross tenants.
+    assert.deepEqual((await json(gateway.base,
+      '/api/events?household=family-a', {
+        cookie: cookieB,
+        headers: { 'X-Household-Id': 'family-a' },
+      })).value.map(e => e.title), ['Family B private calendar'])
     assert.equal((await json(gateway.base, '/api/lists', {
-      cookie: cookieB,
-    })).value[0].name, 'Family A list')
-    assert.equal((await json(gateway.base, '/uploads/private-shared-name.jpg', {
-      cookie: cookieB,
-    })).value, 'ONLY family A photo bytes')
+      cookie: cookieB, headers: { 'X-Household-Id': 'family-a' },
+    })).value[0].name, 'Family B list')
 
-    // Separate browser sessions for the *same* account cannot inherit each
-    // other's household selection or change it without their own request.
+    assert.equal((await json(gateway.base, '/api/households/select', {
+      cookie: cookieB, body: { householdId: 'nonexistent-family' },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, '/api/households/select', {
+      cookie: cookieB, body: { householdId: 'family-a' },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, '/api/households/select', {
+      cookie: cookieB, body: { householdId: 'family-b' },
+      headers: { Origin: 'https://evil.example' },
+    })).response.status, 403)
+    const selectOwn = await json(gateway.base, '/api/households/select', {
+      cookie: cookieB, body: { householdId: 'family-b' },
+    })
+    assert.equal(selectOwn.response.status, 200)
+    assert.equal(selectOwn.value.selectedHouseholdId, 'family-b')
+    assert.deepEqual((await json(gateway.base, '/api/events', {
+      cookie: cookieB,
+    })).value.map(e => e.title), ['Family B private calendar'])
+
+    // Two sessions for one account both stay in its sole authorized family.
     const cookieB2 = await login(gateway.base, 'familyadminb')
-    assert.equal((await json(gateway.base, '/api/events', {
-      cookie: cookieB2,
-    })).response.status, 409)
-    assert.equal((await json(gateway.base, '/api/households', {
-      cookie: cookieB2,
-    })).value.selectedHouseholdId, null)
-
-    const chooseB2 = await json(gateway.base, '/api/households/select', {
-      cookie: cookieB2,
-      body: { householdId: 'family-b' },
-    })
-    assert.equal(chooseB2.response.status, 200)
     assert.deepEqual((await json(gateway.base, '/api/events', {
       cookie: cookieB2,
     })).value.map(e => e.title), ['Family B private calendar'])
-    assert.deepEqual((await json(gateway.base, '/api/events', {
-      cookie: cookieB,
-    })).value.map(e => e.title), ['A SECRET APPOINTMENT', 'Family A BBQ time changed'])
-
-    const chooseB = await json(gateway.base, '/api/households/select', {
-      cookie: cookieB,
-      body: { householdId: 'family-b' },
-    })
-    assert.equal(chooseB.response.status, 200)
-    assert.deepEqual((await json(gateway.base, '/api/events', {
-      cookie: cookieB,
-    })).value.map(e => e.title), ['Family B private calendar'])
     assert.equal((await json(gateway.base, '/api/households', {
-      cookie: cookieB,
+      cookie: cookieB2,
     })).value.selectedHouseholdId, 'family-b')
+    assert.equal((await json(gateway.base, '/api/households/select', {
+      cookie: cookieB2, body: { householdId: 'family-a' },
+    })).response.status, 403)
 
-    // A deliberately revoked membership ceases to grant access even when
-    // its previously selected household was stored in the central DB.
-    await json(gateway.base, '/api/households/select', {
-      cookie: cookieB,
-      body: { householdId: 'family-a' },
-    })
+    // Revoking that single grant immediately blocks both browser sessions.
     central.prepare([
       'UPDATE household_memberships SET disabled = 1',
       'WHERE user_id = ? AND household_id =',
       '(SELECT id FROM household_registry WHERE storage_id = ?)',
-    ].join(' ')).run(idB, 'family-a')
-    assert.equal((await json(gateway.base, '/api/households/select', {
+    ].join(' ')).run(idB, 'family-b')
+    assert.equal((await json(gateway.base, '/api/events', {
       cookie: cookieB,
-      body: { householdId: 'family-a' },
     })).response.status, 403)
-    assert.equal((await json(gateway.base, '/api/households', {
-      cookie: cookieB,
-    })).value.selectedHouseholdId, 'family-b')
-    assert.deepEqual((await json(gateway.base, '/api/events', {
-      cookie: cookieB,
-    })).value.map(e => e.title), ['Family B private calendar'])
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: cookieB2,
+    })).response.status, 403)
+    const revokedList = await json(gateway.base, '/api/households', { cookie: cookieB })
+    assert.deepEqual(revokedList.value.households, [])
+    assert.equal(revokedList.value.selectedHouseholdId, null)
+    assert.equal((await json(gateway.base, '/api/households/select', {
+      cookie: cookieB, body: { householdId: 'family-b' },
+    })).response.status, 403)
 
     central.prepare('UPDATE family_users SET disabled = 1 WHERE id = ?').run(idB)
     assert.equal((await json(gateway.base, '/api/events', { cookie: cookieB })).response.status, 401)
