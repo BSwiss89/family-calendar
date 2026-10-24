@@ -314,6 +314,45 @@ test('central authenticated gateway denies one family access to another family b
     assert.deepEqual(rosterA.value.members.map(m => m.role), ['owner', 'member'])
     assert.equal(/password|token|session/i.test(JSON.stringify(rosterA.value)), false)
 
+    // Revocation only disables the selected member grant. Other households,
+    // the owner, and the underlying personal login remain untouched.
+    const removeMemberPath = '/api/households/members/' + memberId + '/remove'
+    assert.equal((await json(gateway.base, removeMemberPath, {
+      method: 'POST',
+    })).response.status, 401)
+    assert.equal((await json(gateway.base, removeMemberPath, {
+      cookie: cookieMember, method: 'POST',
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, removeMemberPath, {
+      cookie: cookieB, method: 'POST',
+    })).response.status, 404)
+    assert.equal((await json(gateway.base, removeMemberPath, {
+      cookie: cookieA, method: 'POST', headers: { Origin: 'https://evil.example' },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, '/api/households/members/' + idA + '/remove', {
+      cookie: cookieA, method: 'POST',
+    })).response.status, 404)
+    assert.equal((await json(gateway.base, '/api/households/members/00/remove', {
+      cookie: cookieA, method: 'POST',
+    })).response.status, 400)
+    assert.equal((await json(gateway.base, removeMemberPath, {
+      cookie: cookieA, method: 'POST',
+    })).response.status, 200)
+    assert.equal((await json(gateway.base, removeMemberPath, {
+      cookie: cookieA, method: 'POST',
+    })).response.status, 404)
+    assert.deepEqual((await json(gateway.base, rosterPath, {
+      cookie: cookieA,
+    })).value.members.map(m => m.username), ['familyadmina'])
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: cookieMember,
+    })).response.status, 403, 'removed member cannot access household calendar')
+    assert.equal(central.prepare('SELECT disabled FROM family_users WHERE id = ?')
+      .get(memberId).disabled, 0, 'member account remains active')
+    // Restore the disposable test fixture, not an actual household.
+    central.prepare('UPDATE household_memberships SET disabled = 0 WHERE user_id = ?')
+      .run(memberId)
+
     // The Account UI switches by username, not by bypassing membership checks.
     // Switching to a different account requires a fresh password login.
     const accountPage = await fetch(gateway.base + '/account', {
