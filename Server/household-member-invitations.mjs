@@ -147,6 +147,25 @@ export function listHouseholdMembers(identityDatabase, {
   `).all(owner.householdKey)
 }
 
+/**
+ * Owner-only removal of an existing MEMBER's access to this one household.
+ * Never disable their identity or their sessions in other households.
+ * Owners cannot remove other owners or themselves through this helper.
+ */
+export function removeHouseholdMember(identityDatabase, {
+  householdId, serverVerifiedOwnerUserId, targetUserId,
+}) {
+  const target = requireId(targetUserId, 'target account')
+  return transaction(identityDatabase, () => {
+    const owner = ownerOrThrow(identityDatabase, householdId, serverVerifiedOwnerUserId)
+    return identityDatabase.prepare(`
+      UPDATE household_memberships SET disabled = 1
+      WHERE household_id = ? AND user_id = ?
+        AND role = 'member' AND disabled = 0
+    `).run(owner.householdKey, target).changes === 1
+  })
+}
+
 /** Revoke a pending invitation only in the verified owner's household. */
 export function revokeHouseholdMemberInvitation(identityDatabase, {
   householdId, serverVerifiedOwnerUserId, invitationId, now = Date.now(),
