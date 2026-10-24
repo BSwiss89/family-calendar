@@ -519,12 +519,13 @@ export async function startPrivateHouseholdGateway({
   }
 
   app.get('/api/households/member-invitations', (request, response) =>
-    ownerOnlyMembershipAction(request, response, householdId =>
+    ownerOnlyMembershipAction(request, response, householdId => {
       response.set('Cache-Control', 'no-store')
       response.json({ invitations: listHouseholdMemberInvitations(identityDatabase, {
         householdId,
         serverVerifiedOwnerUserId: request.familyAccount.user_id,
-      }) })))
+      }) })
+    }))
 
   app.post('/api/households/member-invitations', (request, response) =>
     ownerOnlyMembershipAction(request, response, householdId => {
