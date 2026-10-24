@@ -19,7 +19,11 @@ const fileHash = file => createHash('sha256').update(fs.readFileSync(file)).dige
 
 function fixture(t, { modernSource = false } = {}) {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-account-import-rehearsal-'))
-  t.after(() => fs.rmSync(folder, { recursive: true, force: true }))
+  let central = null
+  t.after(() => {
+    central?.close()
+    fs.rmSync(folder, { recursive: true, force: true })
+  })
   const sourcePath = path.join(folder, 'legacy-calendar.db')
   const destinationPath = path.join(folder, 'central-identity.db')
   const uploads = path.join(folder, 'legacy-uploads')
@@ -79,8 +83,7 @@ function fixture(t, { modernSource = false } = {}) {
   }
   source.close()
 
-  const central = new DatabaseSync(destinationPath)
-  t.after(() => central.close())
+  central = new DatabaseSync(destinationPath)
   createHouseholdMembershipTables(central)
   registerHousehold(central, { householdId: 'test-family', displayName: 'Test Family' })
   const args = { sourcePath, identityDatabase: central,
