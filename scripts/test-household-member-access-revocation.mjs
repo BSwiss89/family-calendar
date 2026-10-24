@@ -38,7 +38,7 @@ test('revoke one member grant only, preserve identity and other households', t =
       targetUserId: target,
     })
 
-  assert.equal(remove(ownerB, member), false, 'B owner cannot remove member from A')
+  assert.throws(() => remove(ownerB, member), /owner permission/, 'B owner cannot remove member from A')
   assert.equal(remove(ownerA, ownerA), false, 'Owner cannot remove self')
   assert.equal(remove(ownerA, hub), false, 'Hub cannot be removed through member API')
   assert.equal(remove(ownerA, ownerB), false, 'Owner B is not member in A')
