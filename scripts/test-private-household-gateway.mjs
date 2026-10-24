@@ -139,7 +139,7 @@ async function login(base, username) {
   })
   assert.equal(result.response.status, 200, 'Login for ' + username)
   const cookie = result.response.headers.get('set-cookie')
-  assert.match(cookie, /__Host-fc_session=[a-f0-9]{64}/)
+  assert.match(cookie, /__Host-fc_gateway_session=[a-f0-9]{64}/)
   assert.match(cookie, /Secure/)
   assert.match(cookie, /HttpOnly/)
   assert.match(cookie, /SameSite=Strict/)
@@ -243,6 +243,17 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal(fakeOrigin.response.status, 403)
 
     const cookieA = await login(gateway.base, 'familyadmina')
+    // These are the actual LIVE and TEST cookie names on the same hostname.
+    // Neither must authenticate a private gateway request, even if supplied.
+    for (const name of ['__Host-fc_live_session', '__Host-fc_test_session',
+      '__Host-fc_session']) {
+      const liveOrTestCookie = cookieA.replace('__Host-fc_gateway_session', name)
+      const result = await json(gateway.base, '/api/households', {
+        cookie: liveOrTestCookie,
+      })
+      assert.equal(result.response.status, 401, name + ' must not be accepted')
+    }
+
     const cookieB = await login(gateway.base, 'familyadminb')
     assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieA })).value.authenticated, true)
     assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieB })).value.authenticated, true)
