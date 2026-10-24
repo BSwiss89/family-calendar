@@ -54,6 +54,9 @@ export function createHouseholdMembershipTables(identityDatabase) {
     'selected_at INTEGER NOT NULL',
     ') STRICT;',
   ].join('\n'))
+  // A login belongs to exactly one household, including disabled memberships.
+  // Index creation fails closed on legacy conflicts without deleting records.
+  identityDatabase.exec('CREATE UNIQUE INDEX IF NOT EXISTS household_memberships_one_household_per_user ON household_memberships(user_id)')
 }
 
 /**
