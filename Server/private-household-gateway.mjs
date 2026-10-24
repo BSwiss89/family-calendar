@@ -445,7 +445,9 @@ export async function startPrivateHouseholdGateway({
   // Login is the only endpoint that needs parsed JSON. All calendar request
   // bodies, including multipart uploads, must stream through unchanged.
   app.use('/api/auth/login', express.json({ limit: '32kb' }))
-  installFamilyAuth(app, identityDatabase, serverDirectory, 'required')
+  installFamilyAuth(app, identityDatabase, serverDirectory, 'required', {
+    cookieName: '__Host-fc_gateway_session',
+  })
   createEventCreatorAuditTables(identityDatabase)
 
   app.get('/api/health', (_request, response) => {
