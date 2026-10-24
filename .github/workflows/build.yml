@@ -164,6 +164,9 @@ jobs:
         run: node --check scripts/verify-commit-dependencies.mjs
       - name: Exercise preserved candidate metadata and tamper protection
         run: node scripts/verify-commit-dependencies.mjs --self-test
+      - name: Exercise isolated secure TEST supervisor pin and rollback fixtures
+        shell: powershell
+        run: .\scripts\test-secure-test-source-pins.ps1
       - name: Validate PowerShell script syntax
         shell: powershell
         run: |
