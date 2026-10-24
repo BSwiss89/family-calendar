@@ -34,6 +34,7 @@ import {
   createHouseholdInvitationTables, issueHouseholdMemberInvitation,
   listHouseholdMemberInvitations, revokeHouseholdMemberInvitation,
 } from './household-member-invitations.mjs'
+import { installPrivateHouseholdSignup } from './private-household-signup.mjs'
 import { listHouseholdMembers } from './household-member-directory.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
@@ -445,6 +446,8 @@ export async function startPrivateHouseholdGateway({
   // Login is the only endpoint that needs parsed JSON. All calendar request
   // bodies, including multipart uploads, must stream through unchanged.
   app.use('/api/auth/login', express.json({ limit: '32kb' }))
+  // Only this exact anonymous join flow precedes required session protection.
+  installPrivateHouseholdSignup(app, identityDatabase, serverDirectory)
   installFamilyAuth(app, identityDatabase, serverDirectory, 'required', {
     cookieName: '__Host-fc_gateway_session',
   })
@@ -550,7 +553,11 @@ export async function startPrivateHouseholdGateway({
       // The one-time bearer secret is returned only to the issuing owner.
       // No secret is persisted in plaintext, returned by GET or logged.
       response.set('Cache-Control', 'no-store')
-      response.status(201).json(invitation)
+      response.status(201).json({
+        ...invitation,
+        // The bearer secret stays in the URL fragment, never the HTTP query.
+        joinUrl: 'https://' + request.get('host') + '/join#token=' + invitation.token,
+      })
     }))
 
   app.post('/api/households/member-invitations/:id/revoke', (request, response) => {

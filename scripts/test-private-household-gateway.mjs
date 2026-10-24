@@ -325,6 +325,66 @@ test('central authenticated gateway denies one family access to another family b
     assert.deepEqual(rosterA.value.members.map(m => m.role), ['owner', 'member'])
     assert.equal(/password|token|session/i.test(JSON.stringify(rosterA.value)), false)
 
+    // Only the one-time invite authorizes anonymous signup, not the supplied
+    // URL, a forged tenant header, cookie or self-selected owner role.
+    const joinPage = await fetch(gateway.base + '/join')
+    assert.equal(joinPage.status, 200)
+    assert.match(await joinPage.text(), /Join a family calendar/)
+    assert.equal(joinPage.headers.get('cache-control'), 'no-store')
+    const joinScript = await fetch(gateway.base + '/auth/join.js')
+    assert.equal(joinScript.status, 200)
+    assert.equal((await joinScript.text()).includes('history.replaceState'), true)
+    const signupIssued = await json(gateway.base, invitePath, {
+      cookie: cookieA, method: 'POST',
+    })
+    assert.equal(signupIssued.response.status, 201)
+    const invitationLink = new URL(signupIssued.value.joinUrl)
+    assert.equal(invitationLink.pathname, '/join')
+    assert.equal(invitationLink.search, '')
+    assert.equal(invitationLink.hash, '#token=' + signupIssued.value.token)
+    assert.equal(invitationLink.origin,
+      'https://' + new URL(gateway.base).host)
+    const signupPath = '/api/households/join'
+    const registration = {
+      token: signupIssued.value.token, username: 'newjoina',
+      displayName: 'New Family A Member', password: testPassword,
+    }
+    assert.equal((await json(gateway.base, signupPath, {
+      body: registration, headers: { Origin: 'https://evil.example' },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, signupPath, {
+      body: { ...registration, householdId: 'family-b' },
+    })).response.status, 400)
+    assert.equal((await json(gateway.base, signupPath, {
+      body: { ...registration, role: 'owner' },
+    })).response.status, 400)
+    assert.equal((await json(gateway.base, signupPath, {
+      body: { ...registration, username: 'familyadminb' },
+    })).response.status, 400)
+    const successfulSignup = await json(gateway.base, signupPath, {
+      body: registration,
+    })
+    assert.equal(successfulSignup.response.status, 201)
+    assert.deepEqual(successfulSignup.value, { ok: true, next: '/login' })
+    assert.equal(successfulSignup.response.headers.get('set-cookie'), null)
+    assert.equal((await json(gateway.base, signupPath, {
+      body: { ...registration, username: 'replayedinvite' },
+    })).response.status, 400)
+    const cookieNewMember = await login(gateway.base, 'newjoina')
+    const newHouseholds = await json(gateway.base, '/api/households', {
+      cookie: cookieNewMember,
+    })
+    assert.deepEqual(newHouseholds.value.households.map(h => h.householdId),
+      ['family-a'])
+    assert.deepEqual(newHouseholds.value.households.map(h => h.role),
+      ['member'])
+    assert.equal((await json(gateway.base, '/api/households/select', {
+      cookie: cookieNewMember, body: { householdId: 'family-b' },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, invitePath, {
+      cookie: cookieNewMember, method: 'POST',
+    })).response.status, 403)
+
     // Revocation only disables the selected member grant. Other households,
     // the owner, and the underlying personal login remain untouched.
     const removeMemberPath = '/api/households/members/' + memberId + '/remove'
@@ -354,7 +414,7 @@ test('central authenticated gateway denies one family access to another family b
     })).response.status, 404)
     assert.deepEqual((await json(gateway.base, rosterPath, {
       cookie: cookieA,
-    })).value.members.map(m => m.username), ['familyadmina'])
+    })).value.members.map(m => m.username), ['familyadmina', 'newjoina'])
     assert.equal((await json(gateway.base, '/api/events', {
       cookie: cookieMember,
     })).response.status, 403, 'removed member cannot access household calendar')
