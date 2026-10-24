@@ -33,6 +33,7 @@ import {
 import {
   createHouseholdInvitationTables, issueHouseholdMemberInvitation,
   listHouseholdMemberInvitations, revokeHouseholdMemberInvitation,
+  redeemHouseholdMemberInvitation,
 } from './household-member-invitations.mjs'
 import { listHouseholdMembers } from './household-member-directory.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
@@ -444,6 +445,60 @@ export async function startPrivateHouseholdGateway({
   app.disable('x-powered-by')
   // Login is the only endpoint that needs parsed JSON. All calendar request
   // bodies, including multipart uploads, must stream through unchanged.
+  // Invite redemption is the sole unauthenticated account-creation route.
+  // Register before the central authentication gate, with strict same-origin
+  // protection and no caller-selected household or role.
+  let activeRedemptions = 0
+  const redemptionAttempts = new Map()
+  app.post('/api/households/member-invitations/redeem',
+    express.json({ limit: '4kb', strict: true }), (request, response) => {
+      response.set('Cache-Control', 'no-store')
+      response.set('X-Content-Type-Options', 'nosniff')
+      const origin = request.get('origin')
+      const host = request.get('host')
+      let sameOrigin = false
+      try {
+        const parsed = new URL(origin)
+        sameOrigin = parsed.protocol === 'https:' && parsed.host.toLowerCase() === host?.toLowerCase()
+          && !parsed.username && !parsed.password
+      } catch { /* fail closed */ }
+      if (!sameOrigin) return response.status(403).json({ error: 'Secure same-origin request required.' })
+      if (!request.is('application/json') || !request.body || Array.isArray(request.body)
+          || typeof request.body !== 'object') {
+        return response.status(400).json({ error: 'Invalid signup request.' })
+      }
+      const now = Date.now()
+      for (const [key, entry] of redemptionAttempts) {
+        if (now - entry.started > 15 * 60 * 1000) redemptionAttempts.delete(key)
+      }
+      // Bound the number of expensive scrypt operations and the number of
+      // attempts per token; no untrusted IP or forwarded header is trusted.
+      const token = request.body.token
+      const bucket = typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)
+        ? token : '#invalid'
+      const attempt = redemptionAttempts.get(bucket) ?? { started: now, count: 0 }
+      if (!redemptionAttempts.has(bucket) && redemptionAttempts.size >= 512) {
+        return response.status(429).json({ error: 'Signup temporarily unavailable.' })
+      }
+      redemptionAttempts.set(bucket, attempt)
+      if (attempt.count >= 5) return response.status(429).json({ error: 'Too many attempts. Try later.' })
+      if (activeRedemptions >= 2) return response.status(503).json({ error: 'Signup temporarily busy.' })
+      attempt.count++
+      activeRedemptions++
+      try {
+        const result = redeemHouseholdMemberInvitation(identityDatabase, {
+          token, username: request.body.username,
+          displayName: request.body.displayName, password: request.body.password,
+        })
+        redemptionAttempts.delete(bucket)
+        return response.status(201).json({ ok: true, householdId: result.householdId })
+      } catch (error) {
+        // Do not reveal whether an invitation token or username exists.
+        return response.status(400).json({ error: 'Invitation unavailable or signup details invalid.' })
+      } finally {
+        activeRedemptions--
+      }
+    })
   app.use('/api/auth/login', express.json({ limit: '32kb' }))
   installFamilyAuth(app, identityDatabase, serverDirectory, 'required', {
     cookieName: '__Host-fc_gateway_session',
