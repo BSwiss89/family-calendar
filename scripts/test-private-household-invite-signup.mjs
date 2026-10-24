@@ -171,7 +171,7 @@ test('malformed and oversized JSON never echoes tokens or parsing details', asyn
   const malformed = await f.request('/api/households/join',
     '{"token":"' + token + '",bad-json')
   assert.equal(malformed.status, 400)
-  assert.match(malformed.headers.get('content-type'), /application\\/json/)
+  assert.equal(malformed.headers.get('content-type').includes('application/json'), true)
   const errorBody = await malformed.text()
   assert.equal(errorBody.includes(token), false)
   assert.doesNotMatch(errorBody, /SyntaxError|body-parser|express|unexpected token/i)
