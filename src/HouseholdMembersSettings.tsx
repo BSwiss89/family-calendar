@@ -23,8 +23,10 @@ type HouseholdResponse = {
 }
 
 class HouseholdRequestError extends Error {
-  constructor(message: string, readonly status: number) {
+  readonly status: number
+  constructor(message: string, status: number) {
     super(message)
+    this.status = status
   }
 }
 
