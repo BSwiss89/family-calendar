@@ -151,8 +151,8 @@ test('expired or revoked invitation, duplicate username, weak password and repla
   })).status, 400)
   assert.equal(f.db.prepare('SELECT redeemed_at FROM household_member_invitations WHERE id = ?')
     .get(invite.invitationId).redeemed_at, null)
-  f.db.prepare('UPDATE household_member_invitations SET expires_at = ? WHERE id = ?')
-    .run(Date.now() - 1, invite.invitationId)
+  f.db.prepare('UPDATE household_member_invitations SET created_at = created_at - ?, expires_at = ? WHERE id = ?')
+    .run(5 * 24 * 60 * 60 * 1000, Date.now() - 1, invite.invitationId)
   assert.equal((await f.request('/api/households/join',
     f.signup(invite.token, 'lateuser'))).status, 400)
   const revoked = f.invite(f.b, 'family-b')
