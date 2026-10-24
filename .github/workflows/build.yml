@@ -40,6 +40,8 @@ jobs:
         run: node --test scripts/test-household-members-settings.mjs
       - name: Verify private gateway invitation routes with two isolated families
         run: node --test scripts/test-private-household-gateway.mjs
+      - name: Verify complete disposable two-household browser demo lifecycle
+        run: node --test scripts/test-household-browser-demo.mjs
       - name: Test private Arney event selection and confirmation in synthetic households
         run: |
           node --test scripts/test-arney-event-selection.mjs scripts/test-arney-private-event-candidate.mjs scripts/test-private-arney-event-language.mjs scripts/test-private-arney-confirmed-actions.mjs
