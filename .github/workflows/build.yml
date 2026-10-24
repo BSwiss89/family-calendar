@@ -32,6 +32,8 @@ jobs:
         run: node --test scripts/test-household-member-directory.mjs
       - name: Verify household member access revocation with isolated families
         run: node --test scripts/test-household-member-access-revocation.mjs
+      - name: Rehearse legacy account import using disposable SQLite snapshots
+        run: node --test scripts/test-legacy-household-account-rehearsal.mjs
       - name: Verify private gateway invitation routes with two isolated families
         run: node --test scripts/test-private-household-gateway.mjs
       - name: Test private Arney event selection and confirmation in synthetic households
