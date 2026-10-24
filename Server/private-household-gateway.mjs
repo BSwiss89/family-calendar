@@ -35,6 +35,7 @@ import {
   listHouseholdMemberInvitations, revokeHouseholdMemberInvitation,
 } from './household-member-invitations.mjs'
 import { listHouseholdMembers } from './household-member-directory.mjs'
+import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { installPrivateEventSourceOutbox, drainPrivateSourceOutbox } from './private-event-source-outbox.mjs'
 import { PRIVATE_UPSTREAM_HEADER, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
@@ -561,6 +562,21 @@ export async function startPrivateHouseholdGateway({
       })
       response.status(revoked ? 200 : 404).json(revoked
         ? { ok: true } : { error: 'Pending invitation not found.' })
+    })
+  })
+
+  // Disable one verified member's access, without modifying their account or data.
+  app.post('/api/households/members/:id/remove', (request, response) => {
+    const targetUserId = decimalPathId(request.params.id)
+    if (!targetUserId) return response.status(400).json({ error: 'Invalid member.' })
+    return ownerOnlyMembershipAction(request, response, householdId => {
+      const removed = revokeHouseholdMemberAccess(identityDatabase, {
+        householdId,
+        serverVerifiedOwnerUserId: request.familyAccount.user_id,
+        targetUserId,
+      })
+      response.status(removed ? 200 : 404).json(removed
+        ? { ok: true } : { error: 'Active member not found.' })
     })
   })
 
