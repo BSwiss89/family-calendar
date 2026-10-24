@@ -36,6 +36,8 @@ jobs:
         run: node --test scripts/test-legacy-household-account-rehearsal.mjs
       - name: Verify private invite signup and one-time token security
         run: node --test scripts/test-private-household-invite-signup.mjs
+      - name: Verify Household & Members Settings access and navigation contracts
+        run: node --test scripts/test-household-members-settings.mjs
       - name: Verify private gateway invitation routes with two isolated families
         run: node --test scripts/test-private-household-gateway.mjs
       - name: Test private Arney event selection and confirmation in synthetic households
