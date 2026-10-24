@@ -165,6 +165,22 @@ test('expired or revoked invitation, duplicate username, weak password and repla
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM family_users').get().n, 2)
 })
 
+test('malformed and oversized JSON never echoes tokens or parsing details', async t => {
+  const f = await fixture(t)
+  const token = f.invite(f.a, 'family-a').token
+  const malformed = await f.request('/api/households/join',
+    '{"token":"' + token + '",bad-json')
+  assert.equal(malformed.status, 400)
+  assert.match(malformed.headers.get('content-type'), /application\\/json/)
+  const errorBody = await malformed.text()
+  assert.equal(errorBody.includes(token), false)
+  assert.doesNotMatch(errorBody, /SyntaxError|body-parser|express|unexpected token/i)
+  const oversized = await f.request('/api/households/join',
+    '{"junk":"' + 'x'.repeat(6000) + '"}')
+  assert.equal(oversized.status, 413)
+  assert.equal(JSON.stringify(await oversized.json()).includes(token), false)
+})
+
 test('bound repeated token failures and never leak household existence or raw token in HTTP errors', async t => {
   const f = await fixture(t)
   const token = f.invite(f.a, 'family-a').token
