@@ -59,7 +59,7 @@ test('owner issues 256-bit token stored only as hash; pending metadata hides sec
   assert.notEqual(saved.token_hash, created.token)
   assert.match(saved.token_hash, /^[a-f0-9]{64}$/)
   assert.equal(saved.role, 'member')
-  assert.deepEqual(listA(db, ownerA), [{
+  assert.deepEqual(listA(db, ownerA).map(row => ({ ...row })), [{
     id: created.invitationId, createdAt: NOW, expiresAt: NOW + INVITATION_TTL_MS,
   }])
   assert.equal(JSON.stringify(listA(db, ownerA)).includes(created.token), false)
