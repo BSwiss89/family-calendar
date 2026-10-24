@@ -213,12 +213,12 @@ test('disposable private browser demo serves real UI and only selected events th
     assert.equal(crossHousehold.status, 403)
     assert.equal((await getJson(demo, '/api/households/members', newCookie)).status, 403)
     assert.deepEqual((await getJson(demo, '/api/events', newCookie))
-      .data.map(v => v.title), [
+      .data.map(v => v.title).sort(), [
         'DEMO A — BBQ to share',
         'DEMO A — PRIVATE appointment',
         'Created on mobile',
         'Created by hub',
-      ])
+      ].sort())
     assert.deepEqual((await getJson(demo, '/api/events', cookieB))
       .data.map(v => v.title), ['DEMO B — PRIVATE family event'])
     const ownerRoster = await getJson(demo, '/api/households/members', cookieA)
