@@ -9,15 +9,16 @@ import {
   installFamilyAuth,
   setFamilyAccount,
   verifyFamilyPassword,
+  familySessionCookieNameForPort,
 } from '../Server/family-auth.mjs'
 
 const serverFolder = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../Server')
 const password = 'Really-Long-Unique-Family-Passphrase-For-Tests'
 
-async function startServer(database, mode = 'required') {
+async function startServer(database, mode = 'required', options = {}) {
   const app = express()
   app.use(express.json())
-  installFamilyAuth(app, database, serverFolder, mode)
+  installFamilyAuth(app, database, serverFolder, mode, options)
   app.get('/api/health', (_request, response) => response.json({ status: 'ok' }))
   app.get('/api/events', (_request, response) => response.json({ events: ['PRIVATE'] }))
   app.post('/api/events', (_request, response) => response.json({ created: true }))
@@ -193,6 +194,62 @@ test('legacy private deployments stay unchanged until auth is explicitly enabled
     assert.deepEqual(await status.json(), { enabled: false })
   } finally {
     await site.close()
+    db.close()
+  }
+})
+
+test('shared hostname cookie identities match LIVE and TEST and isolate private gateway login', async () => {
+  assert.equal(familySessionCookieNameForPort('3001'), '__Host-fc_live_session')
+  assert.equal(familySessionCookieNameForPort('13002'), '__Host-fc_test_session')
+  assert.equal(familySessionCookieNameForPort(undefined), '__Host-fc_session')
+  assert.throws(() => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      installFamilyAuth(express(), db, serverFolder, 'required', {
+        cookieName: '__Host-fc_live_session',
+      })
+    } finally { db.close() }
+  }, /Unapproved session cookie name/)
+
+  const db = new DatabaseSync(':memory:')
+  setFamilyAccount(db, 'familyadmin', 'Family Admin', password)
+  const gateway = await startServer(db, 'required', {
+    cookieName: '__Host-fc_gateway_session',
+  })
+  try {
+    const login = await fetch(gateway.base + '/api/auth/login', {
+      method: 'POST',
+      headers: { Origin: gateway.origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'familyadmin', password }),
+    })
+    assert.equal(login.status, 200)
+    const signed = login.headers.get('set-cookie')
+    assert.match(signed, /^__Host-fc_gateway_session=[a-f0-9]{64};/)
+    assert.match(signed, /Secure/)
+    assert.match(signed, /HttpOnly/)
+    assert.match(signed, /SameSite=Strict/)
+    const cookie = signed.split(';')[0]
+    assert.equal((await fetch(gateway.base + '/api/events', {
+      headers: { Cookie: cookie },
+    })).status, 200)
+    for (const other of ['__Host-fc_live_session', '__Host-fc_test_session',
+      '__Host-fc_session']) {
+      const wrong = cookie.replace('__Host-fc_gateway_session', other)
+      assert.equal((await fetch(gateway.base + '/api/events', {
+        headers: { Cookie: wrong },
+      })).status, 401)
+    }
+    const logout = await fetch(gateway.base + '/api/auth/logout', {
+      method: 'POST',
+      headers: { Cookie: cookie, Origin: gateway.origin },
+    })
+    assert.equal(logout.status, 200)
+    assert.match(logout.headers.get('set-cookie'), /^__Host-fc_gateway_session=/)
+    assert.equal((await fetch(gateway.base + '/api/events', {
+      headers: { Cookie: cookie },
+    })).status, 401)
+  } finally {
+    await gateway.close()
     db.close()
   }
 })
