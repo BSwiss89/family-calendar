@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   createHouseholdInvitationTables, issueHouseholdMemberInvitation,
   listHouseholdMemberInvitations, revokeHouseholdMemberInvitation,
+  listHouseholdMembers, removeHouseholdMember,
   redeemHouseholdMemberInvitation, INVITATION_TTL_MS,
 } from '../Server/household-member-invitations.mjs'
 import {
@@ -184,4 +185,49 @@ test('invalid/unknown household or server-verified actor never creates new recor
     assert.throws(() => issueA(db, uid), /Invalid verified owner/)
   }
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM household_member_invitations').get().n, 0)
+})
+
+test('owner member roster is household-scoped; removal revokes just a member grant', t => {
+  const { db, ownerA, ownerB, memberA, hubA } = fixture(t)
+  const original = listHouseholdMembers(db, {
+    householdId: 'household-a', serverVerifiedOwnerUserId: ownerA,
+  })
+  assert.equal(original.length, 3)
+  assert.equal(original.some(member => member.username === 'bowner'), false)
+  assert.equal(original.some(member => 'passwordHash' in member || 'token' in member), false)
+  assert.throws(() => listHouseholdMembers(db, {
+    householdId: 'household-a', serverVerifiedOwnerUserId: memberA,
+  }), /owner permission/)
+  assert.equal(removeHouseholdMember(db, {
+    householdId: 'household-a', serverVerifiedOwnerUserId: ownerA,
+    targetUserId: ownerB,
+  }), false)
+  assert.equal(removeHouseholdMember(db, {
+    householdId: 'household-a', serverVerifiedOwnerUserId: ownerA,
+    targetUserId: ownerA,
+  }), false)
+  assert.equal(removeHouseholdMember(db, {
+    householdId: 'household-a', serverVerifiedOwnerUserId: ownerA,
+    targetUserId: hubA,
+  }), false, 'cannot remove any owner including a hub owner')
+  assert.throws(() => removeHouseholdMember(db, {
+    householdId: 'household-a', serverVerifiedOwnerUserId: memberA,
+    targetUserId: memberA,
+  }), /owner permission/)
+  assert.equal(removeHouseholdMember(db, {
+    householdId: 'household-a', serverVerifiedOwnerUserId: ownerA,
+    targetUserId: memberA,
+  }), true)
+  assert.equal(removeHouseholdMember(db, {
+    householdId: 'household-a', serverVerifiedOwnerUserId: ownerA,
+    targetUserId: memberA,
+  }), false)
+  assert.deepEqual(listGrantedHouseholdsForSessionUser(db, {
+    serverVerifiedUserId: memberA,
+  }), [])
+  assert.equal(listGrantedHouseholdsForSessionUser(db, {
+    serverVerifiedUserId: ownerB,
+  }).length, 1)
+  assert.equal(db.prepare('SELECT disabled FROM family_users WHERE id = ?')
+    .get(memberA).disabled, 0, 'member identity preserved for other households')
 })
