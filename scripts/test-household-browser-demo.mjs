@@ -25,7 +25,7 @@ async function login(demo, account) {
   })
   assert.equal(response.status, 200)
   const cookie = response.headers.get('set-cookie')?.split(';')[0]
-  assert.match(cookie, /^__Host-fc_session=[a-f0-9]{64}$/)
+  assert.match(cookie, /^__Host-fc_gateway_session=[a-f0-9]{64}$/)
   return cookie
 }
 
@@ -36,7 +36,7 @@ async function getJson(demo, path, cookie) {
 }
 
 test('disposable private browser demo serves real UI and only selected events through one secure-login gateway', {
-  timeout: 60000,
+  timeout: 90000,
 }, async () => {
   const demo = await startHouseholdBrowserDemo()
   try {
@@ -156,6 +156,92 @@ test('disposable private browser demo serves real UI and only selected events th
         .map(v => v.title),
       ['Created on mobile', 'Created by hub'],
     )
+    // Complete integration: owner invites, recipient registers, signs in,
+    // remains in Family A, and loses ONLY that membership when revoked.
+    // None of these operations mutate Family B or existing accounts.
+    const issued = await request(demo.base, '/api/households/member-invitations', {
+      cookie: cookieA, body: {},
+    })
+    assert.equal(issued.status, 201)
+    const invited = await issued.json()
+    assert.match(invited.token, /^[a-f0-9]{64}$/)
+    const shareLink = new URL(invited.joinUrl)
+    assert.equal(shareLink.origin, 'https://' + new URL(demo.base).host)
+    assert.equal(shareLink.pathname, '/join')
+    assert.equal(shareLink.search, '')
+    assert.equal(shareLink.hash, '#token=' + invited.token)
+    assert.equal((await request(demo.base, '/join')).status, 200)
+    const memberBefore = await getJson(demo, '/api/households/members', cookieA)
+    assert.equal(memberBefore.status, 200)
+    const memberB = await getJson(demo, '/api/households/members', cookieB)
+    assert.equal(memberB.status, 200)
+    assert.deepEqual(memberB.data.members.map(v => v.username), ['demo-family-b'])
+    assert.equal((await request(demo.base, '/api/households/members', {
+      cookie: cookieAMember,
+    })).status, 403)
+    assert.equal((await request(demo.base, '/api/households/member-invitations', {
+      cookie: cookieAMember, body: {},
+    })).status, 403)
+    const newPassword = 'Synthetic-Invitation-Test-Password-2026!'
+    const newUsername = 'new-integration-member'
+    const registration = {
+      token: invited.token,
+      username: newUsername, displayName: 'New Demo Member',
+      password: newPassword,
+    }
+    const forged = await request(demo.base, '/api/households/join', {
+      body: { ...registration, householdId: 'family-b' },
+    })
+    assert.equal(forged.status, 400)
+    const joined = await request(demo.base, '/api/households/join', {
+      body: registration,
+    })
+    assert.equal(joined.status, 201)
+    assert.equal(joined.headers.get('set-cookie'), null)
+    assert.deepEqual(await joined.json(), { ok: true, next: '/login' })
+    assert.equal((await request(demo.base, '/api/households/join', {
+      body: { ...registration, username: 'replay-account' },
+    })).status, 400)
+    const newCookie = await login(demo, { username: newUsername, password: newPassword })
+    const assigned = await getJson(demo, '/api/households', newCookie)
+    assert.deepEqual(assigned.data.households.map(v => [v.householdId, v.role]),
+      [['family-a', 'member']])
+    assert.equal((await getJson(demo, '/api/households/select', newCookie)).status, 404)
+    const crossHousehold = await request(demo.base, '/api/households/select', {
+      cookie: newCookie, body: { householdId: 'family-b' },
+    })
+    assert.equal(crossHousehold.status, 403)
+    assert.equal((await getJson(demo, '/api/households/members', newCookie)).status, 403)
+    assert.deepEqual((await getJson(demo, '/api/events', newCookie))
+      .data.map(v => v.title), [
+        'DEMO A — BBQ to share',
+        'DEMO A — PRIVATE appointment',
+        'Created on mobile',
+        'Created by hub',
+      ])
+    assert.deepEqual((await getJson(demo, '/api/events', cookieB))
+      .data.map(v => v.title), ['DEMO B — PRIVATE family event'])
+    const ownerRoster = await getJson(demo, '/api/households/members', cookieA)
+    assert.equal(ownerRoster.data.members.length, memberBefore.data.members.length + 1)
+    const newMember = ownerRoster.data.members.find(v => v.username === newUsername)
+    assert.equal(newMember?.role, 'member')
+    const remove = await request(demo.base,
+      '/api/households/members/' + newMember.userId + '/remove', {
+        cookie: cookieA, body: {},
+      })
+    assert.equal(remove.status, 200)
+    assert.equal((await getJson(demo, '/api/events', newCookie)).status, 403)
+    assert.equal((await request(demo.base, '/api/households/member-invitations', {
+      cookie: newCookie, body: {},
+    })).status, 403)
+    assert.equal((await getJson(demo, '/api/events', cookieA)).status, 200)
+    assert.equal((await getJson(demo, '/api/events', cookieB)).status, 200)
+    assert.equal((await getJson(demo, '/api/households/members', cookieB))
+      .data.members.length, memberB.data.members.length)
+    console.log('[PASS] Owner -> invite -> signup -> member login -> isolation -> removal.')
+    console.log('[PASS] Settings member directory and one-time invitation endpoints are owner-only.')
+    console.log('[PASS] Household removal revokes access without affecting the other household.')
+
     console.log('[PASS] Mobile member and hub accounts have distinct session identities and audit authors.')
     console.log('[PASS] Forged createdBy fields cannot impersonate another family member or hub.')
     console.log('[PASS] Creator identities are accessible only within the verified household.')
