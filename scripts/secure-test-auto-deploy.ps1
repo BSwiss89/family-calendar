@@ -9,10 +9,14 @@ $repo = 'https://github.com/BSwiss89/family-calendar.git'
 $branch = 'test-release'
 $node = 'C:\ProgramData\FamilyCalendar\Runtime\node-v24.22.1\node.exe'
 $taskName = 'Family Calendar Secure TEST'
+$supervisor = 'C:\ProgramData\FamilyCalendar\SecureTest\start-secure-test-patched.ps1'
 $state = 'C:\ProgramData\FamilyCalendar\SecureTestAutoDeploy'
 $holdFile = Join-Path $state 'REQUIRES-REVIEW.txt'
 $journal = Join-Path $state 'IN-PROGRESS.txt'
 $logFile = Join-Path $state 'auto-test-deploy.log'
+$sourcePinHelper = Join-Path $state 'secure-test-source-pins.ps1'
+if (!(Test-Path -LiteralPath $sourcePinHelper)) { throw 'Trusted supervisor source-pin helper missing.' }
+. $sourcePinHelper
 $env:GIT_TERMINAL_PROMPT = '0'
 $env:GCM_INTERACTIVE = 'Never'
 $env:PATH = (Split-Path $node) + ';' + $env:PATH
@@ -105,6 +109,7 @@ function Test-PinnedFiles {
         }
     }
     Assert-Junctions
+    Assert-SecureTestSourcePins $supervisor $test
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
     if ($task.State -ne 'Running' -or
         @($task.Actions | Where-Object { $_.Arguments -like '*start-secure-test-patched.ps1*' }).Count -ne 1) {
@@ -225,10 +230,13 @@ try {
     if (Test-Path $backup) { throw 'Backup path already exists.' }
     New-Item -ItemType Directory -Path $backup -Force | Out-Null
     Copy-Tree (Join-Path $test 'dist') (Join-Path $backup 'dist')
+    $supervisorBackup = Join-Path $backup 'start-secure-test-patched.ps1'
+    Copy-Item -LiteralPath $supervisor -Destination $supervisorBackup -ErrorAction Stop
+    Assert-SecureTestSourcePins $supervisor $test
     Set-Content -LiteralPath $journal -Value "Started $(Get-Date -Format o) from $oldSha to $targetSha backup $backup" -Encoding UTF8
     $taskDisabled = $false
     $codeChanged = $false
-    $backupReady = $false
+    $pinChanged = $false
     try {
         Disable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
         $taskDisabled = $true
@@ -245,10 +253,20 @@ try {
         Remove-Item -LiteralPath (Join-Path $test 'dist') -Recurse -Force
         Copy-Tree (Join-Path $candidate 'dist') (Join-Path $test 'dist')
         Assert-Junctions
+        $candidateIndex = (Get-FileHash -LiteralPath (Join-Path $candidate 'Server\index.mjs') -Algorithm SHA256).Hash
+        $candidateAuth = (Get-FileHash -LiteralPath (Join-Path $candidate 'Server\family-auth.mjs') -Algorithm SHA256).Hash
+        if ($candidateIndex -ne (Get-FileHash -LiteralPath (Join-Path $test 'Server\index.mjs') -Algorithm SHA256).Hash -or
+            $candidateAuth -ne (Get-FileHash -LiteralPath (Join-Path $test 'Server\family-auth.mjs') -Algorithm SHA256).Hash) {
+            throw 'TEST backend files differ from the tested GitHub source.'
+        }
+        $pinChanged = $true
+        $null = Set-SecureTestSourcePins $supervisor $supervisorBackup $candidateIndex $candidateAuth
+        Assert-SecureTestSourcePins $supervisor $test
         Enable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
         $taskDisabled = $false
         Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
         Wait-Healthy
+        Assert-SecureTestSourcePins $supervisor $test
         if ((Sha $test) -ne $targetSha -or (Sha $live) -ne $liveSha) {
             throw 'Post-deployment revision mismatch.'
         }
@@ -273,6 +291,8 @@ try {
                 }
                 Copy-Tree (Join-Path $backup 'dist') (Join-Path $test 'dist')
             }
+            if ($pinChanged) { Restore-SecureTestSupervisor $supervisor $supervisorBackup }
+            Assert-SecureTestSourcePins $supervisor $test
             Enable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
             $taskDisabled = $false
             Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
