@@ -163,13 +163,13 @@ test('disposable private browser demo serves real UI and only selected events th
       cookie: cookieA, body: {},
     })
     assert.equal(issued.status, 201)
-    const invited = await issued.json()
-    assert.match(invited.token, /^[a-f0-9]{64}$/)
-    const shareLink = new URL(invited.joinUrl)
+    const membershipInvite = await issued.json()
+    assert.match(membershipInvite.token, /^[a-f0-9]{64}$/)
+    const shareLink = new URL(membershipInvite.joinUrl)
     assert.equal(shareLink.origin, 'https://' + new URL(demo.base).host)
     assert.equal(shareLink.pathname, '/join')
     assert.equal(shareLink.search, '')
-    assert.equal(shareLink.hash, '#token=' + invited.token)
+    assert.equal(shareLink.hash, '#token=' + membershipInvite.token)
     assert.equal((await request(demo.base, '/join')).status, 200)
     const memberBefore = await getJson(demo, '/api/households/members', cookieA)
     assert.equal(memberBefore.status, 200)
@@ -185,7 +185,7 @@ test('disposable private browser demo serves real UI and only selected events th
     const newPassword = 'Synthetic-Invitation-Test-Password-2026!'
     const newUsername = 'new-integration-member'
     const registration = {
-      token: invited.token,
+      token: membershipInvite.token,
       username: newUsername, displayName: 'New Demo Member',
       password: newPassword,
     }
