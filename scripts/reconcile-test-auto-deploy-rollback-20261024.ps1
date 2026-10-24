@@ -91,6 +91,7 @@ $autoTask=Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
 if (@($autoTask.Actions | Where-Object { $_.Arguments -like '*SecureTestAutoDeploy\auto-test-deploy.ps1*' }).Count -ne 1) {
     throw 'Existing auto-deployer task points to an unexpected script.'
 }
+if ($autoTask.State -eq 'Running') { throw 'Automatic deploy check is still running; retry when it finishes.' }
 foreach ($name in @('Family Calendar Auto Preview','Family Calendar Auto Deploy')) {
     $oldTask=Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
     if ($oldTask -and $oldTask.State -ne 'Disabled') { throw "Legacy automation task $name unexpectedly active." }
