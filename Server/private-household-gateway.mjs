@@ -30,6 +30,11 @@ import {
   getSelectedHouseholdForVerifiedSession,
   selectHouseholdForVerifiedSession,
 } from './household-memberships.mjs'
+import {
+  createHouseholdInvitationTables, issueHouseholdMemberInvitation,
+  listHouseholdMemberInvitations, revokeHouseholdMemberInvitation,
+  listHouseholdMembers, removeHouseholdMember,
+} from './household-member-invitations.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { installPrivateEventSourceOutbox, drainPrivateSourceOutbox } from './private-event-source-outbox.mjs'
 import { PRIVATE_UPSTREAM_HEADER, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
@@ -288,6 +293,7 @@ export async function startPrivateHouseholdGateway({
   }
   // Central share records are separate from either family's calendar DB.
   // No migrations to live/preview data occur; this gateway is test-only.
+  createHouseholdInvitationTables(identityDatabase)
   createEventShareTables(identityDatabase)
   createEventShareSyncJournal(identityDatabase)
   createPrivateLocalAiBudgetTables(identityDatabase)
@@ -483,6 +489,87 @@ export async function startPrivateHouseholdGateway({
     response.json({
       selectedHouseholdId: selected.householdId,
       displayName: selected.displayName,
+    })
+  })
+
+  // Draft-only Settings -> Household & Members API. These routes run ONLY in
+  // the private, loopback-bound gateway, after required central authentication
+  // and secure same-origin checks. No household ID/role may be supplied by
+  // a browser to select the target household.
+  function ownerOnlyMembershipAction(request, response, action) {
+    const selected = trustedHousehold(request, response)
+    if (!selected) return
+    try {
+      return action(selected.householdId)
+    } catch (error) {
+      if (error?.message === 'Active household owner permission required.') {
+        response.status(403).json({ error: 'Household owner permission required.' })
+      } else if (typeof error?.message === 'string'
+        && error.message.startsWith('Too many invitations')) {
+        response.status(429).json({ error: 'Invitation limit reached. Try later.' })
+      } else {
+        console.error('Household member operation unavailable:', error?.message)
+        response.status(503).json({ error: 'Household membership service unavailable.' })
+      }
+    }
+  }
+
+  function decimalPathId(raw) {
+    if (typeof raw !== 'string' || !/^[1-9][0-9]{0,14}$/.test(raw)) return null
+    const id = Number(raw)
+    return Number.isSafeInteger(id) ? id : null
+  }
+
+  app.get('/api/households/members', (request, response) =>
+    ownerOnlyMembershipAction(request, response, householdId =>
+      response.json({ members: listHouseholdMembers(identityDatabase, {
+        householdId,
+        serverVerifiedOwnerUserId: request.familyAccount.user_id,
+      }) })))
+
+  app.get('/api/households/member-invitations', (request, response) =>
+    ownerOnlyMembershipAction(request, response, householdId =>
+      response.json({ invitations: listHouseholdMemberInvitations(identityDatabase, {
+        householdId,
+        serverVerifiedOwnerUserId: request.familyAccount.user_id,
+      }) })))
+
+  app.post('/api/households/member-invitations', (request, response) =>
+    ownerOnlyMembershipAction(request, response, householdId => {
+      const invitation = issueHouseholdMemberInvitation(identityDatabase, {
+        householdId,
+        serverVerifiedIssuerUserId: request.familyAccount.user_id,
+      })
+      // The one-time bearer secret is returned only to the issuing owner.
+      // No secret is persisted in plaintext, returned by GET or logged.
+      response.status(201).json(invitation)
+    }))
+
+  app.post('/api/households/member-invitations/:id/revoke', (request, response) => {
+    const invitationId = decimalPathId(request.params.id)
+    if (!invitationId) return response.status(400).json({ error: 'Invalid invitation.' })
+    return ownerOnlyMembershipAction(request, response, householdId => {
+      const revoked = revokeHouseholdMemberInvitation(identityDatabase, {
+        householdId,
+        serverVerifiedOwnerUserId: request.familyAccount.user_id,
+        invitationId,
+      })
+      response.status(revoked ? 200 : 404).json(revoked
+        ? { ok: true } : { error: 'Pending invitation not found.' })
+    })
+  })
+
+  app.post('/api/households/members/:id/remove', (request, response) => {
+    const targetUserId = decimalPathId(request.params.id)
+    if (!targetUserId) return response.status(400).json({ error: 'Invalid member.' })
+    return ownerOnlyMembershipAction(request, response, householdId => {
+      const removed = removeHouseholdMember(identityDatabase, {
+        householdId,
+        serverVerifiedOwnerUserId: request.familyAccount.user_id,
+        targetUserId,
+      })
+      response.status(removed ? 200 : 404).json(removed
+        ? { ok: true } : { error: 'Active member not found.' })
     })
   })
 
