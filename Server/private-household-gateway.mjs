@@ -34,6 +34,7 @@ import {
   createHouseholdInvitationTables, issueHouseholdMemberInvitation,
   listHouseholdMemberInvitations, revokeHouseholdMemberInvitation,
 } from './household-member-invitations.mjs'
+import { listHouseholdMembers } from './household-member-directory.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { installPrivateEventSourceOutbox, drainPrivateSourceOutbox } from './private-event-source-outbox.mjs'
 import { PRIVATE_UPSTREAM_HEADER, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
@@ -517,6 +518,16 @@ export async function startPrivateHouseholdGateway({
     const id = Number(raw)
     return Number.isSafeInteger(id) ? id : null
   }
+
+  // Active human accounts in this one verified household; owner access only.
+  app.get('/api/households/members', (request, response) =>
+    ownerOnlyMembershipAction(request, response, householdId => {
+      response.set('Cache-Control', 'no-store')
+      response.json({ members: listHouseholdMembers(identityDatabase, {
+        householdId,
+        serverVerifiedOwnerUserId: request.familyAccount.user_id,
+      }) })
+    }))
 
   app.get('/api/households/member-invitations', (request, response) =>
     ownerOnlyMembershipAction(request, response, householdId => {

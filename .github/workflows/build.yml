@@ -28,6 +28,8 @@ jobs:
         run: node --check Server/index.mjs
       - name: Verify one-use household member invitations and tenant boundaries
         run: node --test scripts/test-household-member-invitations.mjs
+      - name: Verify owner-only household member directory
+        run: node --test scripts/test-household-member-directory.mjs
       - name: Verify private gateway invitation routes with two isolated families
         run: node --test scripts/test-private-household-gateway.mjs
       - name: Test private Arney event selection and confirmation in synthetic households

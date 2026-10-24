@@ -296,6 +296,24 @@ test('central authenticated gateway denies one family access to another family b
       cookie: cookieA, method: 'POST',
     })).response.status, 404)
 
+    // A roster is scoped to the verified owner and omits secret fields.
+    const rosterPath = '/api/households/members'
+    assert.equal((await json(gateway.base, rosterPath)).response.status, 401)
+    assert.equal((await json(gateway.base, rosterPath, {
+      cookie: cookieMember,
+    })).response.status, 403)
+    const rosterA = await json(gateway.base, rosterPath, {
+      cookie: cookieA, headers: { 'x-household-id': 'family-b' },
+    })
+    const rosterB = await json(gateway.base, rosterPath, { cookie: cookieB })
+    assert.equal(rosterA.response.status, 200)
+    assert.equal(rosterA.response.headers.get('cache-control'), 'no-store')
+    assert.deepEqual(rosterA.value.members.map(m => m.username),
+      ['familyadmina', 'familymembera'])
+    assert.deepEqual(rosterB.value.members.map(m => m.username), ['familyadminb'])
+    assert.deepEqual(rosterA.value.members.map(m => m.role), ['owner', 'member'])
+    assert.equal(/password|token|session/i.test(JSON.stringify(rosterA.value)), false)
+
     // The Account UI switches by username, not by bypassing membership checks.
     // Switching to a different account requires a fresh password login.
     const accountPage = await fetch(gateway.base + '/account', {
