@@ -132,6 +132,21 @@ export function listHouseholdMemberInvitations(identityDatabase, {
   `).all(owner.householdKey, now)
 }
 
+/** Owner-only roster for Settings; never returns password/session/token data. */
+export function listHouseholdMembers(identityDatabase, {
+  householdId, serverVerifiedOwnerUserId,
+}) {
+  const owner = ownerOrThrow(identityDatabase, householdId, serverVerifiedOwnerUserId)
+  return identityDatabase.prepare(`
+    SELECT u.id AS userId, u.username, u.display_name AS displayName,
+      u.account_kind AS accountKind, m.role, m.disabled AS membershipDisabled,
+      u.disabled AS accountDisabled
+    FROM household_memberships m JOIN family_users u ON u.id = m.user_id
+    WHERE m.household_id = ?
+    ORDER BY m.role DESC, u.display_name COLLATE NOCASE, u.id
+  `).all(owner.householdKey)
+}
+
 /** Revoke a pending invitation only in the verified owner's household. */
 export function revokeHouseholdMemberInvitation(identityDatabase, {
   householdId, serverVerifiedOwnerUserId, invitationId, now = Date.now(),
