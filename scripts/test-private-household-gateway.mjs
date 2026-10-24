@@ -246,6 +246,50 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieA })).value.username, 'familyadmina')
     assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieB })).value.username, 'familyadminb')
 
+    // The central private gateway owns Household & Members management; no
+    // calendar backend or untrusted household header can bypass owner scope.
+    assert.equal((await json(gateway.base, '/api/households/members')).response.status, 401)
+    assert.equal((await json(gateway.base, '/api/households/member-invitations', {
+      method: 'POST',
+    })).response.status, 401)
+    const rosterA = await json(gateway.base, '/api/households/members', {
+      cookie: cookieA, headers: { 'x-household-id': 'family-b' },
+    })
+    assert.equal(rosterA.response.status, 200)
+    assert.deepEqual(rosterA.value.members.map(m => m.username), ['familyadmina'])
+    const rosterB = await json(gateway.base, '/api/households/members', { cookie: cookieB })
+    assert.equal(rosterB.response.status, 200)
+    assert.deepEqual(rosterB.value.members.map(m => m.username), ['familyadminb'])
+    const newMemberInvitation = await json(gateway.base,
+      '/api/households/member-invitations', {
+        cookie: cookieA, method: 'POST',
+      })
+    assert.equal(newMemberInvitation.response.status, 201)
+    assert.match(newMemberInvitation.value.token, /^[a-f0-9]{64}$/)
+    assert.equal((await json(gateway.base,
+      '/api/households/member-invitations', { cookie: cookieB })).value.invitations.length, 0)
+    const pending = await json(gateway.base,
+      '/api/households/member-invitations', { cookie: cookieA })
+    assert.equal(pending.value.invitations.length, 1)
+    assert.equal(JSON.stringify(pending.value).includes(newMemberInvitation.value.token), false)
+    const inviteId = newMemberInvitation.value.invitationId
+    assert.equal((await json(gateway.base,
+      '/api/households/member-invitations/' + inviteId + '/revoke', {
+        cookie: cookieB, method: 'POST',
+      })).response.status, 404)
+    assert.equal((await json(gateway.base,
+      '/api/households/member-invitations/' + inviteId + '/revoke', {
+        cookie: cookieA, method: 'POST',
+      })).response.status, 200)
+    assert.equal((await json(gateway.base,
+      '/api/households/member-invitations', { cookie: cookieA })).value.invitations.length, 0)
+    assert.equal((await json(gateway.base, '/api/households/members/' + idA + '/remove', {
+      cookie: cookieA, method: 'POST',
+    })).response.status, 404, 'owner cannot be removed')
+    assert.equal((await json(gateway.base, '/api/households/member-invitations', {
+      cookie: cookieA, method: 'POST', headers: { Origin: 'https://other.example' },
+    })).response.status, 403, 'cross-origin invitation attempt refused')
+
     // The Account UI switches by username, not by bypassing membership checks.
     // Switching to a different account requires a fresh password login.
     const accountPage = await fetch(gateway.base + '/account', {
