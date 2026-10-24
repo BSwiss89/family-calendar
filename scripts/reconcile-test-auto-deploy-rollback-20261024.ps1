@@ -3,9 +3,9 @@
 # It does not restart either application or clear unverified recovery state.
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$home='C:\Users\bobby'
-$test=Join-Path $home 'Projects\family-calendar-test-security-stage'
-$live=Join-Path $home 'Projects\family-calendar-live-auth-candidate'
+$homePath='C:\Users\bobby'
+$test=Join-Path $homePath 'Projects\family-calendar-test-security-stage'
+$live=Join-Path $homePath 'Projects\family-calendar-live-auth-candidate'
 $expected='5b25639ece34c4ec706ea35822877c5300c1ea0b'
 $failed='0f55d51666c12eeed1bb8646b53b6bf843146df0'
 $supervisor='C:\ProgramData\FamilyCalendar\SecureTest\start-secure-test-patched.ps1'
@@ -21,7 +21,7 @@ $newHelper=Join-Path $PSScriptRoot 'secure-test-source-pins.ps1'
 $backup=Join-Path $state 'backups\20261024-112903-5b25639'
 $id=[Security.Principal.WindowsIdentity]::GetCurrent()
 if ($id.Name -eq 'NT AUTHORITY\SYSTEM' -or
-    -not [string]::Equals($env:USERPROFILE,$home,[StringComparison]::OrdinalIgnoreCase) -or
+    -not [string]::Equals($env:USERPROFILE,$homePath,[StringComparison]::OrdinalIgnoreCase) -or
     -not ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Run as the elevated laptop user, not SYSTEM.'
 }
@@ -36,8 +36,8 @@ foreach ($p in @($test,$live)) {
     }
 }
 foreach ($item in @(
-    @{name='data'; expected=(Join-Path $home 'Projects\family-calendar-preview\Server\data')},
-    @{name='uploads'; expected=(Join-Path $home 'Projects\family-calendar-preview\Server\uploads')}
+    @{name='data'; expected=(Join-Path $homePath 'Projects\family-calendar-preview\Server\data')},
+    @{name='uploads'; expected=(Join-Path $homePath 'Projects\family-calendar-preview\Server\uploads')}
 )) {
     $actual=Get-Item -LiteralPath (Join-Path $test "Server\$($item.name)") -Force
     if ($actual.LinkType -ne 'Junction' -or
