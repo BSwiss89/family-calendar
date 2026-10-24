@@ -68,7 +68,8 @@ function Set-SecureTestSourcePins(
             $temp,[ref]$tokens,[ref]$errors
         ) | Out-Null
         if ($errors -and $errors.Count -gt 0) { throw 'Updated TEST supervisor contains a PowerShell syntax error.' }
-        [System.IO.File]::Replace($temp,$supervisorFile,$null)
+        $replaceBackup = $supervisorFile + '.swap-' + [guid]::NewGuid().ToString('N') + '.bak'
+        [System.IO.File]::Replace($temp,$supervisorFile,$replaceBackup)
         $installed = Get-SecureTestSourcePins $supervisorFile
         if ($installed.Index -cne $indexHash -or $installed.Auth -cne $authHash) {
             throw 'Verified source hashes were not installed correctly.'
@@ -83,7 +84,8 @@ function Restore-SecureTestSupervisor([string]$supervisorFile,[string]$backupFil
     $temp = $supervisorFile + '.rollback-' + [guid]::NewGuid().ToString('N') + '.tmp'
     try {
         Copy-Item -LiteralPath $backupFile -Destination $temp -ErrorAction Stop
-        [System.IO.File]::Replace($temp,$supervisorFile,$null)
+        $replaceBackup = $supervisorFile + '.swap-' + [guid]::NewGuid().ToString('N') + '.bak'
+        [System.IO.File]::Replace($temp,$supervisorFile,$replaceBackup)
         if ((Get-FileHash -LiteralPath $supervisorFile -Algorithm SHA256).Hash -ne
             (Get-FileHash -LiteralPath $backupFile -Algorithm SHA256).Hash) {
             throw 'Restored supervisor differs from the verified backup.'
