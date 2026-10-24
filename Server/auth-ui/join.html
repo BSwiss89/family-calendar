@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#4f46e5">
+  <title>Join a household — Family Calendar</title>
+  <link rel="stylesheet" href="/auth/styles.css">
+  <script src="/auth/join.js" defer></script>
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card" aria-labelledby="join-title">
+      <div class="auth-mark" aria-hidden="true">▦</div>
+      <h1 id="join-title">Join a family calendar</h1>
+      <p class="auth-intro">Use the invitation you received to create your own account. Invitations expire after 72 hours and can only be used once.</p>
+      <form id="join-form">
+        <label for="invite-token">Invitation code</label>
+        <input id="invite-token" type="password" autocomplete="off" required minlength="64" maxlength="64" spellcheck="false" placeholder="Paste your invitation code">
+        <label for="join-username">Your username</label>
+        <input id="join-username" type="text" autocomplete="username" minlength="3" maxlength="40" required pattern="[a-zA-Z0-9._-]{3,40}">
+        <label for="join-display-name">Your name</label>
+        <input id="join-display-name" type="text" autocomplete="name" maxlength="80" required>
+        <label for="join-password">Create a password</label>
+        <input id="join-password" type="password" autocomplete="new-password" minlength="14" maxlength="200" required>
+        <p class="muted small">Use a password of at least 14 characters. Your invitation only grants regular member access to the household that invited you.</p>
+        <p id="join-message" class="error" role="alert" aria-live="polite"></p>
+        <button id="join-submit" type="submit">Create account</button>
+      </form>
+      <p id="join-success" hidden role="status" aria-live="polite">Your account has been created. <a href="/login">Sign in to your family calendar</a>.</p>
+      <p class="auth-footnote"><a href="/login">Already have an account? Sign in</a></p>
+      <noscript>JavaScript is required to accept a family invitation.</noscript>
+    </section>
+  </main>
+</body>
+</html>
