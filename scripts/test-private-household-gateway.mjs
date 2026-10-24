@@ -161,6 +161,7 @@ test('central authenticated gateway denies one family access to another family b
     createHouseholdMembershipTables(central)
     setFamilyAccount(central, 'familyadmina', 'Family A admin', testPassword)
     setFamilyAccount(central, 'familyadminb', 'Family B admin', testPassword)
+    setFamilyAccount(central, 'familymembera', 'Family A member', testPassword)
     registerHousehold(central, { householdId: 'family-a', displayName: 'Family A' })
     registerHousehold(central, { householdId: 'family-b', displayName: 'Family B' })
     createEventShareTables(central)
@@ -169,8 +170,10 @@ test('central authenticated gateway denies one family access to another family b
     })
     const idA = central.prepare('SELECT id FROM family_users WHERE username = ?').get('familyadmina').id
     const idB = central.prepare('SELECT id FROM family_users WHERE username = ?').get('familyadminb').id
+    const memberId = central.prepare('SELECT id FROM family_users WHERE username = ?').get('familymembera').id
     grantHouseholdMembership(central, { serverVerifiedUserId: idA, householdId: 'family-a', role: 'owner' })
     grantHouseholdMembership(central, { serverVerifiedUserId: idB, householdId: 'family-b', role: 'owner' })
+    grantHouseholdMembership(central, { serverVerifiedUserId: memberId, householdId: 'family-a', role: 'member' })
 
     const backendTokens = {
       'family-a': randomBytes(32).toString('hex'),
@@ -245,6 +248,53 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieB })).value.authenticated, true)
     assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieA })).value.username, 'familyadmina')
     assert.equal((await json(gateway.base, '/api/auth/status', { cookie: cookieB })).value.username, 'familyadminb')
+
+    // Invitation gateway security, scoped to the verified account's household.
+    // Member removal and member directory are deliberately separate tasks.
+    const invitePath = '/api/households/member-invitations'
+    const cookieMember = await login(gateway.base, 'familymembera')
+    assert.equal((await json(gateway.base, invitePath)).response.status, 401)
+    assert.equal((await json(gateway.base, invitePath, { method: 'POST' })).response.status, 401)
+    assert.equal((await json(gateway.base, invitePath, { cookie: cookieMember })).response.status, 403)
+    assert.equal((await json(gateway.base, invitePath, {
+      cookie: cookieMember, method: 'POST',
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, invitePath, {
+      cookie: cookieA, method: 'POST', headers: { Origin: 'https://evil.example' },
+    })).response.status, 403)
+    const issued = await json(gateway.base, invitePath, {
+      cookie: cookieA, method: 'POST',
+      headers: { 'x-household-id': 'family-b' },
+    })
+    assert.equal(issued.response.status, 201)
+    assert.equal(issued.response.headers.get('cache-control'), 'no-store')
+    assert.match(issued.value.token, /^[a-f0-9]{64}$/)
+    const pendingA = await json(gateway.base, invitePath, { cookie: cookieA })
+    const pendingB = await json(gateway.base, invitePath, { cookie: cookieB })
+    assert.equal(pendingA.response.status, 200)
+    assert.equal(pendingA.response.headers.get('cache-control'), 'no-store')
+    assert.deepEqual(pendingA.value.invitations.map(i => i.id), [issued.value.invitationId])
+    assert.equal(JSON.stringify(pendingA.value).includes(issued.value.token), false)
+    assert.equal(pendingB.response.status, 200)
+    assert.deepEqual(pendingB.value.invitations, [])
+    assert.equal((await json(gateway.base, invitePath + '/abc/revoke', {
+      cookie: cookieA, method: 'POST',
+    })).response.status, 400)
+    assert.equal((await json(gateway.base, invitePath + '/' + issued.value.invitationId + '/revoke', {
+      cookie: cookieMember, method: 'POST',
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, invitePath + '/' + issued.value.invitationId + '/revoke', {
+      cookie: cookieB, method: 'POST',
+    })).response.status, 404)
+    assert.equal((await json(gateway.base, invitePath + '/' + issued.value.invitationId + '/revoke', {
+      cookie: cookieA, method: 'POST',
+    })).response.status, 200)
+    assert.deepEqual((await json(gateway.base, invitePath, {
+      cookie: cookieA,
+    })).value.invitations, [])
+    assert.equal((await json(gateway.base, invitePath + '/' + issued.value.invitationId + '/revoke', {
+      cookie: cookieA, method: 'POST',
+    })).response.status, 404)
 
     // The Account UI switches by username, not by bypassing membership checks.
     // Switching to a different account requires a fresh password login.
