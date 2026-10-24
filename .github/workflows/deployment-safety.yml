@@ -66,6 +66,8 @@ jobs:
         run: node --test scripts/test-household-memberships.mjs
       - name: Verify household personal identity links and assignment notification boundaries
         run: node --test scripts/test-household-person-links.mjs
+      - name: Verify owner-issued expiring household member invitations
+        run: node --test scripts/test-household-member-invitations.mjs
       - name: Verify private household upstream service credentials
         run: node --test scripts/test-private-upstream-access.mjs
       - name: Validate per-household hard monthly local AI allowance
