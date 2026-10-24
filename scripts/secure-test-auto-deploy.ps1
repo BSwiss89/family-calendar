@@ -148,12 +148,156 @@ try {
 
     # Query the dedicated branch only, never draft PR heads, main or "latest" PR.
     $remoteText = @(& git -c credential.helper= ls-remote $repo "refs/heads/$branch")
-    if ($LASTEXITCODE -ne 0 -or $remoteText.Count -ne 1 -or
-        $remoteText[0] -notmatch '^([a-f0-9]{40})\s+refs/heads/test-release$') {
-        Write-Warning 'Cannot verify dedicated GitHub test-release ref. No deployment.'
+    if ($LASTEXITCODE -ne 0 -or $remoteText.Count -ne 1) {
+        Write-Warning 'Cannot read dedicated GitHub test-release ref. No deployment.'
         return
     }
-    $targetSha = $Matches[1]
+    $matchRef = [regex]::Match($remoteText[0],'^([a-f0-9]{40})\s+refs/heads/test-release
+    if ($targetSha -eq $oldSha) {
+        Write-Host "TEST already at approved SHA $($oldSha.Substring(0,7))."
+        return
+    }
+
+    # Require completed, successful PUSH workflow on the exact branch and commit.
+    # A failed or unavailable check never authorizes deployment.
+    $uri = "https://api.github.com/repos/BSwiss89/family-calendar/actions/runs?branch=test-release&event=push&head_sha=$targetSha&per_page=30"
+    try {
+        $runs = Invoke-RestMethod -Uri $uri -Headers @{ 'User-Agent'='FamilyCalendar-SecureTest-Updater'; 'Accept'='application/vnd.github+json' } -TimeoutSec 15
+    } catch {
+        Write-Warning 'GitHub CI verification unavailable; retry next check without deploying.'
+        return
+    }
+    $matching = @($runs.workflow_runs | Where-Object {
+        $_.name -eq 'Build Family Calendar' -and $_.head_sha -eq $targetSha -and
+        $_.head_branch -eq $branch -and $_.event -eq 'push'
+    } | Sort-Object id -Descending)
+    if ($matching.Count -eq 0 -or $matching[0].status -ne 'completed' -or
+        $matching[0].conclusion -ne 'success') {
+        Write-Host 'Exact commit has no successful completed TEST push build yet; no deployment.'
+        return
+    }
+    Write-Host "Approved GitHub test-release commit: $targetSha"
+
+    # The candidate is a separate, short-lived clone; never build over a running server.
+    $candidate = Join-Path $state ("candidate-" + $targetSha.Substring(0,12))
+    if (Test-Path $candidate) { throw 'Candidate folder unexpectedly already exists; manual review required.' }
+    & git -c credential.helper= clone --quiet --single-branch --depth 1 --branch $branch $repo $candidate
+    if ($LASTEXITCODE -ne 0 -or (Sha $candidate) -ne $targetSha) {
+        throw 'Candidate clone SHA mismatch.'
+    }
+    & git -C $test -c credential.helper= fetch --no-tags $repo "refs/heads/$branch"
+    if ($LASTEXITCODE -ne 0 -or (& git -C $test rev-parse FETCH_HEAD).Trim() -ne $targetSha) {
+        throw 'TEST fetch SHA mismatch.'
+    }
+    & git -C $test merge-base --is-ancestor $oldSha $targetSha
+    if ($LASTEXITCODE -ne 0) { throw 'TEST release is not a fast-forward from the installed revision.' }
+    foreach ($file in @('package.json','package-lock.json')) {
+        if ((Get-FileHash (Join-Path $test $file)).Hash -ne (Get-FileHash (Join-Path $candidate $file)).Hash) {
+            throw "Dependency changes need a separate reviewed installation: $file"
+        }
+    }
+    Push-Location $candidate
+    try {
+        & npm.cmd ci --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw 'Candidate npm ci failed.' }
+        & $node --test scripts/test-family-auth.mjs scripts/test-list-features.mjs scripts/test-shopping-stores.mjs scripts/test-list-icons.mjs
+        if ($LASTEXITCODE -ne 0) { throw 'Candidate safety tests failed.' }
+        & $node --check Server/index.mjs
+        if ($LASTEXITCODE -ne 0) { throw 'Candidate backend syntax failed.' }
+        & npm.cmd run build
+        if ($LASTEXITCODE -ne 0) { throw 'Candidate build failed.' }
+    } finally { Pop-Location }
+    if (!(Test-Path (Join-Path $candidate 'dist\index.html'))) { throw 'Candidate dist missing.' }
+    Assert-Junctions
+    Test-PinnedFiles
+    if ((Sha $test) -ne $oldSha -or (Sha $live) -ne $liveSha) { throw 'A checkout moved during staging.' }
+    $latestRef = @(& git -c credential.helper= ls-remote $repo "refs/heads/$branch")
+    if ($LASTEXITCODE -ne 0 -or $latestRef.Count -ne 1 -or
+        !$latestRef[0].StartsWith($targetSha + [char]9)) {
+        throw 'GitHub TEST branch changed during staging; no deployment.'
+    }
+    $backup = Join-Path $state ("backups\" + (Get-Date -Format 'yyyyMMdd-HHmmss') + "-" + $oldSha.Substring(0,7))
+    if (Test-Path $backup) { throw 'Backup path already exists.' }
+    New-Item -ItemType Directory -Path $backup -Force | Out-Null
+    Copy-Tree (Join-Path $test 'dist') (Join-Path $backup 'dist')
+    Set-Content -LiteralPath $journal -Value "Started $(Get-Date -Format o) from $oldSha to $targetSha backup $backup" -Encoding UTF8
+    $taskDisabled = $false
+    $codeChanged = $false
+    $backupReady = $false
+    try {
+        Disable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+        $taskDisabled = $true
+        Stop-Only-Test
+        Assert-Junctions
+        Copy-Tree (Join-Path $test 'Server\data') (Join-Path $backup 'data')
+        Copy-Tree (Join-Path $test 'Server\uploads') (Join-Path $backup 'uploads')
+        if (!(Test-Path (Join-Path $backup 'data\calendar.db'))) { throw 'TEST database backup missing.' }
+        & $node -e 'const {DatabaseSync}=require("node:sqlite");const d=new DatabaseSync(process.argv[1],{readOnly:true});const r=d.prepare("PRAGMA quick_check").get();d.close();if(r.quick_check!=="ok")process.exit(2)' (Join-Path $backup 'data\calendar.db')
+        if ($LASTEXITCODE -ne 0) { throw 'TEST database backup integrity check failed.' }
+        $codeChanged = $true
+        & git -C $test checkout --detach --force $targetSha
+        if ($LASTEXITCODE -ne 0) { throw 'TEST Git switch failed.' }
+        Remove-Item -LiteralPath (Join-Path $test 'dist') -Recurse -Force
+        Copy-Tree (Join-Path $candidate 'dist') (Join-Path $test 'dist')
+        Assert-Junctions
+        Enable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+        $taskDisabled = $false
+        Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+        Wait-Healthy
+        if ((Sha $test) -ne $targetSha -or (Sha $live) -ne $liveSha) {
+            throw 'Post-deployment revision mismatch.'
+        }
+        Remove-Item -LiteralPath $journal -Force
+        Remove-Item -LiteralPath $candidate -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "TEST AUTO DEPLOY SUCCESS $targetSha. Backup: $backup"
+    } catch {
+        $message = $_.Exception.Message
+        Write-Warning "TEST update failed: $message"
+        $rollbackOk = $false
+        try {
+            if (!$taskDisabled) {
+                Disable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+                $taskDisabled = $true
+            }
+            Stop-Only-Test
+            if ($codeChanged) {
+                & git -C $test checkout --detach --force $oldSha
+                if ($LASTEXITCODE -ne 0) { throw 'Previous code checkout failed.' }
+                if (Test-Path (Join-Path $test 'dist')) {
+                    Remove-Item -LiteralPath (Join-Path $test 'dist') -Recurse -Force
+                }
+                Copy-Tree (Join-Path $backup 'dist') (Join-Path $test 'dist')
+            }
+            Enable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+            $taskDisabled = $false
+            Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+            Wait-Healthy
+            $rollbackOk = $true
+        } catch {
+            Write-Warning ("Rollback needs manual recovery: " + $_.Exception.Message)
+        }
+        $notice = "Automatic TEST update failed at $(Get-Date -Format o). $message. Old=$oldSha target=$targetSha backup=$backup rollbackHealthy=$rollbackOk. Do not delete journal or hold until recovery review. Logs=$logFile"
+        Set-Content -LiteralPath $holdFile -Value $notice -Encoding UTF8
+        throw 'TEST deployment failed; automatic retries blocked. Inspect review hold and backup.'
+    }
+} catch {
+    Write-Warning ("TEST AUTO DEPLOY ERROR: " + $_.Exception.Message)
+    # Stage/test failures also need a manual hold to avoid repeated unsafe builds.
+    if (!(Test-Path $holdFile)) {
+        Set-Content -LiteralPath $holdFile -Value ("Failure $(Get-Date -Format o): " + $_.Exception.Message) -Encoding UTF8
+    }
+    throw
+} finally {
+    if ($transcribing) { Stop-Transcript | Out-Null }
+    if ($locked) { $mutex.ReleaseMutex() }
+    $mutex.Dispose()
+}
+)
+    if (!$matchRef.Success) {
+        Write-Warning 'Unexpected GitHub TEST ref; no deployment.'
+        return
+    }
+    $targetSha = $matchRef.Groups[1].Value
     if ($targetSha -eq $oldSha) {
         Write-Host "TEST already at approved SHA $($oldSha.Substring(0,7))."
         return
