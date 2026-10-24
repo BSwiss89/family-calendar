@@ -232,7 +232,7 @@ try {
         Copy-Tree (Join-Path $test 'Server\data') (Join-Path $backup 'data')
         Copy-Tree (Join-Path $test 'Server\uploads') (Join-Path $backup 'uploads')
         if (!(Test-Path (Join-Path $backup 'data\calendar.db'))) { throw 'TEST database backup missing.' }
-        & $node -e 'const {DatabaseSync}=require("node:sqlite");const d=new DatabaseSync(process.argv[1],{readOnly:true});const r=d.prepare("PRAGMA quick_check").get();d.close();if(r.quick_check!=="ok")process.exit(2)' (Join-Path $backup 'data\calendar.db')
+        & $node -e "const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(process.argv[1],{readOnly:true});const r=d.prepare('PRAGMA quick_check').get();d.close();if(r.quick_check!=='ok')process.exit(2)" (Join-Path $backup 'data\calendar.db')
         if ($LASTEXITCODE -ne 0) { throw 'TEST database backup integrity check failed.' }
         $codeChanged = $true
         & git -C $test checkout --detach --force $targetSha
