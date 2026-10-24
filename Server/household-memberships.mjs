@@ -46,7 +46,7 @@ export function createHouseholdMembershipTables(identityDatabase) {
     'disabled INTEGER NOT NULL DEFAULT 0 CHECK(disabled IN (0, 1)),',
     'PRIMARY KEY (user_id, household_id)',
     ') STRICT;',
-    'CREATE INDEX IF NOT EXISTS household_memberships_household_idx',
+    // A login belongs to exactly one household, including disabled memberships.\n    // Creating this index fails closed if legacy identity data has conflicts.\n    // Never delete or reassign memberships as part of schema setup.\n    'CREATE UNIQUE INDEX IF NOT EXISTS household_memberships_one_household_per_user',\n    'ON household_memberships(user_id);',\n    'CREATE INDEX IF NOT EXISTS household_memberships_household_idx',
     'ON household_memberships(household_id);',
     'CREATE TABLE IF NOT EXISTS household_session_selections (',
     'session_id INTEGER PRIMARY KEY REFERENCES family_sessions(id) ON DELETE CASCADE,',
