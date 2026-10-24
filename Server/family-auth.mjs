@@ -16,7 +16,10 @@ const SESSION_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000
 const TOUCH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const LOGIN_WINDOW_MS = 15 * 60 * 1000
 const LOGIN_MAX_FAILURES = 10
+const LOGIN_MAX_IDENTITIES = 512
+const LOGIN_MAX_ACTIVE_CHECKS = 4
 const loginFailures = new Map()
+let activeLoginChecks = 0
 const DUMMY_SALT = Buffer.from('2397717ca3b79d96e021601c529470bd', 'hex')
 const SCRYPT_OPTIONS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
 
@@ -183,13 +186,36 @@ function getSession(database, request, response, touch = true, cookieName = COOK
   return session
 }
 
-function failuresFor(key, now) {
-  const record = loginFailures.get(key)
-  if (!record || now - record.started > LOGIN_WINDOW_MS) {
-    loginFailures.set(key, { started: now, count: 0 })
-    return loginFailures.get(key)
+function failuresFor(identity, now) {
+  const existing = loginFailures.get(identity)
+  if (existing && now - existing.started <= LOGIN_WINDOW_MS) {
+    return { key: identity, record: existing }
   }
-  return record
+
+  loginFailures.delete(identity)
+
+  // Keep arbitrary usernames from growing the in-memory map forever.
+  if (loginFailures.size >= LOGIN_MAX_IDENTITIES) {
+    for (const [key, record] of loginFailures) {
+      if (now - record.started > LOGIN_WINDOW_MS) {
+        loginFailures.delete(key)
+      }
+    }
+  }
+
+  // Under a large flood, new identities share a bounded overflow bucket.
+  // Established identities retain their independent limits.
+  const key = loginFailures.size >= LOGIN_MAX_IDENTITIES
+    ? 'overflow'
+    : identity
+
+  let record = loginFailures.get(key)
+  if (!record || now - record.started > LOGIN_WINDOW_MS) {
+    record = { started: now, count: 0 }
+    loginFailures.set(key, record)
+  }
+
+  return { key, record }
 }
 
 function safeDeviceLabel(value) {
@@ -246,40 +272,72 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   })
 
   app.post('/api/auth/login', async (request, response) => {
-    if (!isSameSecureOrigin(request)) return response.status(403).json({ error: 'Secure same-origin login required.' })
-    const key = String(request.socket.remoteAddress || 'unknown')
-    const now = Date.now()
-    const failures = failuresFor(key, now)
-    if (failures.count >= LOGIN_MAX_FAILURES) {
-      response.set('Retry-After', String(Math.max(1, Math.ceil((LOGIN_WINDOW_MS - (now - failures.started)) / 1000))))
-      return response.status(429).json({ error: 'Too many attempts. Try again later.' })
+    if (!isSameSecureOrigin(request)) {
+      return response.status(403).json({ error: 'Secure same-origin login required.' })
     }
-    // Count each attempt before awaiting scrypt, so parallel guesses cannot
-    // bypass the limit and overwhelm the laptop with password hashing.
-    failures.count++
+
     const username = normalizedUsername(request.body?.username)
     const password = request.body?.password
-    if (!username || typeof password !== 'string' || password.length < 1 || password.length > 200) {
+    // Never trust user-supplied forwarded-IP headers for login throttling.
+    // Use the same identity bucket regardless of whether the account exists.
+    const identity = 'login:' + sha256(username ?? '#invalid')
+    const now = Date.now()
+    const { key, record: failures } = failuresFor(identity, now)
+
+    if (failures.count >= LOGIN_MAX_FAILURES) {
+      response.set('Retry-After', String(Math.max(
+        1, Math.ceil((LOGIN_WINDOW_MS - (now - failures.started)) / 1000)
+      )))
+      return response.status(429).json({ error: 'Too many attempts. Try again later.' })
+    }
+
+    if (activeLoginChecks >= LOGIN_MAX_ACTIVE_CHECKS) {
+      response.set('Retry-After', '1')
+      return response.status(503).json({ error: 'Login is temporarily busy.' })
+    }
+
+    // Count before awaiting password hashing to prevent parallel bypasses.
+    failures.count++
+
+    if (!username || typeof password !== 'string' ||
+        password.length < 1 || password.length > 200) {
       return response.status(401).json({ error: 'Incorrect username or password.' })
     }
+
+    activeLoginChecks++
     try {
-      const user = database.prepare('SELECT id, username, display_name, password_hash FROM family_users WHERE username = ? AND disabled = 0').get(username)
+      const user = database.prepare(
+        'SELECT id, username, display_name, password_hash FROM family_users WHERE username = ? AND disabled = 0'
+      ).get(username)
+
       const valid = await verifyFamilyPassword(password, user?.password_hash)
       if (!user || !valid) {
         return response.status(401).json({ error: 'Incorrect username or password.' })
       }
+
       loginFailures.delete(key)
+
       const token = randomBytes(32).toString('hex')
       const expires = Date.now() + SESSION_MAX_AGE_MS
+
       database.prepare([
         'INSERT INTO family_sessions(user_id, token_hash, device_label, created_at, last_seen_at, expires_at)',
         'VALUES (?, ?, ?, ?, ?, ?)',
-      ].join(' ')).run(user.id, sha256(token), safeDeviceLabel(request.body?.deviceLabel), now, now, expires)
+      ].join(' ')).run(
+        user.id, sha256(token), safeDeviceLabel(request.body?.deviceLabel),
+        now, now, expires
+      )
+
       secureCookie(response, token, cookieName)
       response.json({ ok: true, displayName: user.display_name })
     } catch (error) {
-      console.error('Family authentication unavailable:', error instanceof Error ? error.message : 'unknown error')
+      console.error(
+        'Family authentication unavailable:',
+        error instanceof Error ? error.message : 'unknown error'
+      )
       response.status(503).json({ error: 'Login is temporarily unavailable.' })
+    } finally {
+      activeLoginChecks--
     }
   })
 
