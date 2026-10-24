@@ -29,6 +29,8 @@ async function fixture(t) {
   grantHouseholdMembership(db, { serverVerifiedUserId: a, householdId: 'family-a', role: 'owner' })
   grantHouseholdMembership(db, { serverVerifiedUserId: b, householdId: 'family-b', role: 'owner' })
   const app = express()
+  // Match the real gateway's login JSON parser before the auth middleware.
+  app.use('/api/auth/login', express.json({ limit: '32kb' }))
   installPrivateHouseholdSignup(app, db, directory)
   installFamilyAuth(app, db, directory, 'required', {
     cookieName: '__Host-fc_gateway_session',
