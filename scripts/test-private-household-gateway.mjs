@@ -333,7 +333,7 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal(joinPage.headers.get('cache-control'), 'no-store')
     const joinScript = await fetch(gateway.base + '/auth/join.js')
     assert.equal(joinScript.status, 200)
-    assert.match(await joinScript.text(), /history\\.replaceState/)
+    assert.equal((await joinScript.text()).includes('history.replaceState'), true)
     const signupIssued = await json(gateway.base, invitePath, {
       cookie: cookieA, method: 'POST',
     })
