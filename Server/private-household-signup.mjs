@@ -114,4 +114,14 @@ export function installPrivateHouseholdSignup(app, identityDatabase, serverDirec
         response.status(400).json({ error: GENERIC_ERROR })
       }
     })
+
+  // JSON parser errors must never reflect malformed invitation URLs, raw
+  // bearer secrets or passwords through Express's default HTML error page.
+  app.use('/api/households/join', (error, _request, response, next) => {
+    if (!error) return next()
+    response.set('Cache-Control', 'no-store')
+    response.set('Referrer-Policy', 'no-referrer')
+    const oversized = error.type === 'entity.too.large'
+    response.status(oversized ? 413 : 400).json({ error: GENERIC_ERROR })
+  })
 }
