@@ -3,7 +3,15 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 
 const derive = promisify(scrypt)
-const COOKIE_NAME = '__Host-fc_session'
+// Match the secure production two-site cookie names. The localhost-only
+// draft gateway uses a separate explicit cookie identity so its future
+// HTTPS origin cannot overwrite either LIVE or TEST browser sessions.
+export function familySessionCookieNameForPort(port) {
+  return String(port) === '13002' ? '__Host-fc_test_session'
+    : String(port) === '3001' ? '__Host-fc_live_session'
+      : '__Host-fc_session'
+}
+const COOKIE_NAME = familySessionCookieNameForPort(process.env.FAMILY_CALENDAR_PORT)
 const SESSION_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000
 const TOUCH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const LOGIN_WINDOW_MS = 15 * 60 * 1000
@@ -104,20 +112,20 @@ export function setFamilyAccount(database, username, displayName, password, { ac
   }
 }
 
-function cookieValue(request) {
+function cookieValue(request, cookieName = COOKIE_NAME) {
   const raw = request.headers.cookie
   if (typeof raw !== 'string') return null
   for (const part of raw.split(';')) {
     const split = part.indexOf('=')
-    if (split === -1 || part.slice(0, split).trim() !== COOKIE_NAME) continue
+    if (split === -1 || part.slice(0, split).trim() !== cookieName) continue
     const token = part.slice(split + 1).trim()
     return /^[a-f0-9]{64}$/.test(token) ? token : null
   }
   return null
 }
 
-function secureCookie(response, token) {
-  response.cookie(COOKIE_NAME, token, {
+function secureCookie(response, token, cookieName = COOKIE_NAME) {
+  response.cookie(cookieName, token, {
     httpOnly: true,
     secure: true,
     sameSite: 'strict',
@@ -126,8 +134,8 @@ function secureCookie(response, token) {
   })
 }
 
-function clearCookie(response) {
-  response.clearCookie(COOKIE_NAME, {
+function clearCookie(response, cookieName = COOKIE_NAME) {
+  response.clearCookie(cookieName, {
     httpOnly: true,
     secure: true,
     sameSite: 'strict',
@@ -157,8 +165,8 @@ function securityHeaders(response) {
   response.set('X-Frame-Options', 'DENY')
 }
 
-function getSession(database, request, response, touch = true) {
-  const token = cookieValue(request)
+function getSession(database, request, response, touch = true, cookieName = COOKIE_NAME) {
+  const token = cookieValue(request, cookieName)
   if (!token) return null
   const now = Date.now()
   const session = database.prepare([
@@ -170,7 +178,7 @@ function getSession(database, request, response, touch = true) {
   if (touch && now - session.last_seen_at > TOUCH_INTERVAL_MS) {
     database.prepare('UPDATE family_sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?')
       .run(now, now + SESSION_MAX_AGE_MS, session.id)
-    secureCookie(response, token)
+    secureCookie(response, token, cookieName)
   }
   return session
 }
@@ -190,7 +198,13 @@ function safeDeviceLabel(value) {
   return label.slice(0, 60) || 'Family device'
 }
 
-export function installFamilyAuth(app, database, directory, mode = process.env.FAMILY_CALENDAR_AUTH_MODE ?? 'disabled') {
+export function installFamilyAuth(app, database, directory, mode = process.env.FAMILY_CALENDAR_AUTH_MODE ?? 'disabled',
+  { cookieName = COOKIE_NAME } = {}) {
+  // Deliberately restrict the override to the private authenticated gateway.
+  // Other sites always use their own port-specific secure cookie name.
+  if (cookieName !== COOKIE_NAME && cookieName !== '__Host-fc_gateway_session') {
+    throw new Error('Unapproved session cookie name.')
+  }
   if (!['required', 'disabled'].includes(mode)) {
     throw new Error('FAMILY_CALENDAR_AUTH_MODE must be required or disabled.')
   }
@@ -199,6 +213,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
     return
   }
   createFamilyAuthTables(database)
+  const privateSession = (request, response) => getSession(database, request, response, true, cookieName)
   const uiFolder = path.join(directory, 'auth-ui')
 
   app.use((_request, response, next) => {
@@ -211,7 +226,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
     response.sendFile(path.join(uiFolder, file))
   }
   app.get('/login', (request, response) => {
-    if (getSession(database, request, response)) return response.redirect(303, '/')
+    if (privateSession(request, response)) return response.redirect(303, '/')
     sendUi('login.html')(request, response)
   })
   app.get('/auth/login.js', sendUi('login.js'))
@@ -219,7 +234,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   app.get('/auth/styles.css', sendUi('styles.css'))
 
   app.get('/api/auth/status', (request, response) => {
-    const session = getSession(database, request, response)
+    const session = privateSession(request, response)
     response.json({
       enabled: true,
       authenticated: Boolean(session),
@@ -260,7 +275,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
         'INSERT INTO family_sessions(user_id, token_hash, device_label, created_at, last_seen_at, expires_at)',
         'VALUES (?, ?, ?, ?, ?, ?)',
       ].join(' ')).run(user.id, sha256(token), safeDeviceLabel(request.body?.deviceLabel), now, now, expires)
-      secureCookie(response, token)
+      secureCookie(response, token, cookieName)
       response.json({ ok: true, displayName: user.display_name })
     } catch (error) {
       console.error('Family authentication unavailable:', error instanceof Error ? error.message : 'unknown error')
@@ -271,7 +286,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   app.use((request, response, next) => {
     // Health returns only generic process status. No other route is exempt.
     if (request.path === '/api/health' && (request.method === 'GET' || request.method === 'HEAD')) return next()
-    const session = getSession(database, request, response)
+    const session = privateSession(request, response)
     if (!session) {
       if (request.path.startsWith('/api/')) return response.status(401).json({ error: 'Sign in required.' })
       if (request.method === 'GET' || request.method === 'HEAD') return response.redirect(303, '/login')
@@ -289,7 +304,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   app.post('/api/auth/logout', (request, response) => {
     database.prepare('UPDATE family_sessions SET revoked_at = ? WHERE id = ?')
       .run(Date.now(), request.familyAccount.id)
-    clearCookie(response)
+    clearCookie(response, cookieName)
     response.json({ ok: true })
   })
 
@@ -318,7 +333,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
       'WHERE id = ? AND user_id = ? AND revoked_at IS NULL',
     ].join(' ')).run(Date.now(), id, request.familyAccount.user_id)
     if (result.changes !== 1) return response.status(404).json({ error: 'Device not found.' })
-    if (id === request.familyAccount.id) clearCookie(response)
+    if (id === request.familyAccount.id) clearCookie(response, cookieName)
     response.json({ ok: true })
   })
 }
