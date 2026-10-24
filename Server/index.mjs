@@ -6,12 +6,14 @@ import multer from 'multer'
 import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
+import { installFamilyAuth } from './family-auth.mjs'
 import {
   normalizeListCategory,
   ensureListItemCategories,
   suggestListCategory,
   organizeExistingListItems,
 } from './list-features.mjs'
+import { ensureListIcons, normalizeListIcon } from './list-icons.mjs'
 import { ensureShoppingStores, getShoppingStores, looksLikeShoppingList, requireStoreId,
   suggestShoppingStoreId, organizeShoppingStores, saveShoppingStoreCorrection,
   sortUnknownStoresWithOllama } from './smart-stores.mjs'
@@ -449,6 +451,7 @@ if (!listItemColumns.includes('sort_order')) {
 }
 ensureListItemCategories(database)
 ensureShoppingStores(database)
+ensureListIcons(database)
 
 database.exec(`
   CREATE TABLE IF NOT EXISTS meal_plans (
@@ -606,6 +609,9 @@ database.exec(`
 `)
 
 app.use(express.json())
+// Required mode protects all subsequent calendar APIs, uploads and pages.
+// Disabled by default; never enable public Funnel before a tested rollout.
+installFamilyAuth(app, database, __dirname)
 
 function isValidDate(date) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date)
@@ -6709,7 +6715,7 @@ return response.status(500).json({
 app.get('/api/lists', (request, response) => {
   const lists = database
     .prepare(`
-      SELECT id, name, created_at, store_enabled
+      SELECT id, name, created_at, store_enabled, icon
       FROM lists
       ORDER BY id
     `)
@@ -6735,7 +6741,7 @@ ORDER BY sort_order, id
 })
 
 app.post('/api/lists', (request, response) => {
-  const { name } = request.body
+  const { name, icon } = request.body ?? {}
 
   if (
     typeof name !== 'string' ||
@@ -6748,20 +6754,42 @@ app.post('/api/lists', (request, response) => {
   }
 
   const cleanName = name.trim()
+  let chosenIcon
+  try { chosenIcon = normalizeListIcon(icon) }
+  catch { return response.status(400).json({ error: 'Invalid list icon.' }) }
 
   const result = database
     .prepare(`
-      INSERT INTO lists (name, store_enabled)
-      VALUES (?, ?)
+      INSERT INTO lists (name, store_enabled, icon)
+      VALUES (?, ?, ?)
     `)
-    .run(cleanName, looksLikeShoppingList(cleanName) ? 1 : 0)
+    .run(cleanName, looksLikeShoppingList(cleanName) ? 1 : 0, chosenIcon)
 
   response.status(201).json({
     id: Number(result.lastInsertRowid),
     name: cleanName,
+    icon: chosenIcon,
     store_enabled: looksLikeShoppingList(cleanName),
     items: [],
   })
+})
+
+// Change a list's icon without changing its name, order, items or store rules.
+app.put('/api/lists/:id/icon', (request, response) => {
+  const id = Number(request.params.id)
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return response.status(400).json({ error: 'Invalid list ID.' })
+  }
+  let icon
+  try {
+    if (!Object.hasOwn(request.body ?? {}, 'icon')) throw new RangeError()
+    icon = normalizeListIcon(request.body.icon)
+  } catch {
+    return response.status(400).json({ error: 'Invalid list icon.' })
+  }
+  const result = database.prepare('UPDATE lists SET icon = ? WHERE id = ?').run(icon, id)
+  if (!result.changes) return response.status(404).json({ error: 'List not found.' })
+  return response.json({ id, icon })
 })
 
 // Store settings persist for the whole household. Disabling a store does not
