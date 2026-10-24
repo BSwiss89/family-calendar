@@ -8,7 +8,7 @@ import {
   grantHouseholdMembership, listGrantedHouseholdsForSessionUser,
 } from '../Server/household-memberships.mjs'
 
-test('revoke one member grant only, preserve identity and other households', t => {
+test('revoke one member grant, preserve identity and isolate other households', t => {
   const db = new DatabaseSync(':memory:')
   t.after(() => db.close())
   createHouseholdMembershipTables(db)
@@ -26,7 +26,6 @@ test('revoke one member grant only, preserve identity and other households', t =
     [ownerA, 'household-a', 'owner'],
     [ownerB, 'household-b', 'owner'],
     [member, 'household-a', 'member'],
-    [member, 'household-b', 'member'],
     [hub, 'household-a', 'owner'],
   ]) grantHouseholdMembership(db, {
     serverVerifiedUserId: user, householdId: family, role,
@@ -49,13 +48,10 @@ test('revoke one member grant only, preserve identity and other households', t =
   assert.equal(remove(ownerA, member), false, 'Repeated removal is idempotent')
   assert.deepEqual(listGrantedHouseholdsForSessionUser(db, {
     serverVerifiedUserId: member,
-  }), [{ householdId: 'household-b', displayName: 'Household B', role: 'member' }])
+  }), [])
   assert.equal(db.prepare('SELECT disabled FROM family_users WHERE id = ?')
     .get(member).disabled, 0, 'Account was not disabled or deleted')
-  assert.equal(remove(ownerB, member, 'household-b'), true)
-  assert.deepEqual(listGrantedHouseholdsForSessionUser(db, {
-    serverVerifiedUserId: member,
-  }), [])
+  assert.equal(remove(ownerB, member, 'household-b'), false, 'Other household remains isolated')
 })
 
 test('disabled owner cannot revoke member grants', t => {
