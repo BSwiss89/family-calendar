@@ -217,6 +217,13 @@ test('central authenticated gateway denies one family access to another family b
       backendPorts: { 'family-a': portA, 'family-b': portB },
       backendTokens,
     })
+    // A second gateway (same central and household DBs) must not open a
+    // listener, even with valid credentials and correct backend bindings.
+    await assert.rejects(startPrivateHouseholdGateway({
+      identityDatabase: central, serverDirectory, storageRoot,
+      backendPorts: { 'family-a': portA, 'family-b': portB },
+      backendTokens,
+    }), /writer lock already exists/)
     assert.equal(new URL(gateway.base).hostname, '127.0.0.1')
     assert.equal(forbiddenPorts.has(gateway.port), false)
 
