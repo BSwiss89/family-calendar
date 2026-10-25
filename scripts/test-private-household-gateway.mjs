@@ -1374,6 +1374,7 @@ test('client disconnect cannot clear a share update while backend is still commi
       'family-a': randomBytes(32).toString('hex'),
       'family-b': randomBytes(32).toString('hex'),
     }
+    let activeBackendHouseholdA = 'family-a'
     fakeBackend = createHttpServer((request, response) => {
       if (request.method === 'GET' &&
           request.url === '/api/internal/household-binding') {
@@ -1383,7 +1384,7 @@ test('client disconnect cannot clear a share update while backend is still commi
           return
         }
         response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
-        response.end(JSON.stringify({ mode: 'household', householdId: 'family-a' }))
+        response.end(JSON.stringify({ mode: 'household', householdId: activeBackendHouseholdA }))
         return
       }
       if (request.method !== 'PUT' || request.url !== '/api/events/1') {
@@ -1436,6 +1437,24 @@ test('client disconnect cannot clear a share update while backend is still commi
     })
     const cookieA = await login(gateway.base, 'disconnect-a')
     const cookieB = await login(gateway.base, 'disconnect-b')
+
+    // Backend binding was correct at startup, then the service began
+    // reporting a different family's identity on the SAME port/token.
+    // Every forwarded operation must refuse that change while the gateway
+    // stays running, before any source mutation or tenant data can be sent.
+    assert.equal((await fetch(gateway.base + '/api/internal/household-binding', {
+      headers: { Cookie: cookieA },
+    })).status, 404)
+    activeBackendHouseholdA = 'family-b'
+    const switched = await fetch(gateway.base + '/api/events', {
+      headers: { Cookie: cookieA },
+    })
+    assert.equal(switched.status, 503)
+    assert.equal(switched.headers.get('cache-control'), 'no-store')
+    activeBackendHouseholdA = 'family-a'
+    assert.equal((await fetch(gateway.base + '/api/events', {
+      headers: { Cookie: cookieA },
+    })).status, 404) // test backend has no GET /api/events route
 
     let signalDisconnected
     const disconnected = new Promise(resolve => { signalDisconnected = resolve })
