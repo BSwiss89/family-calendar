@@ -53,6 +53,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Private household offline restore test failure.' }
       - name: Refuse concurrent private gateways and unreviewed stale writer locks
         run: node --test scripts/test-private-gateway-writer-lock.mjs
+      - name: Inspect abandoned private gateway locks without clearing them
+        run: node --test scripts/test-private-gateway-recovery-audit.mjs
       - name: Test real two-household private gateway with LIVE Lists preserved
         run: |
           node --test scripts/test-private-household-gateway.mjs
