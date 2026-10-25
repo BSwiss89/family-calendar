@@ -135,3 +135,45 @@ test('orphaned lock is never self-healed by a later independent startup', async 
   assert.equal(report.canAutomaticallyReclaim, false)
   assert.equal(report.lockPresent, true)
 })
+
+
+test('orphaned SQLite shared-memory sidecars are flagged in central and household recovery audits', async t => {
+  const f = makeFixture(t)
+  const holder = startHolder(f.storageRoot)
+  t.after(async () => { await forceStop(holder) })
+  await waitReady(holder)
+  await forceStop(holder)
+
+  const ownerPath = path.join(f.storageRoot,
+    '.family-calendar-private-gateway-writer.lock', 'owner.json')
+  const originalOwner = fs.readFileSync(ownerPath, 'utf8')
+  const databases = [
+    f.centralDatabasePath,
+    path.join(f.storageRoot, 'households', 'family-a', 'data', 'calendar.db'),
+    path.join(f.storageRoot, 'households', 'family-b', 'data', 'calendar.db'),
+  ]
+
+  for (const databaseFile of databases) {
+    const sidecar = databaseFile + '-shm'
+    assert.equal(fs.existsSync(sidecar), false,
+      'Disposable fixture should start without a SQLite shared-memory sidecar.')
+    fs.writeFileSync(sidecar, 'SYNTHETIC ORPHANED SQLITE SHARED MEMORY')
+    try {
+      const report = auditPrivateGatewayAbandonedLock(f)
+      assert.equal(report.lockPresent, true)
+      assert.equal(report.requiresOperatorFencing, true)
+      assert.equal(report.canAutomaticallyReclaim, false)
+      assert.ok(report.issues.some(item =>
+        item.includes('SQLite recovery sidecar requires offline operator review.')),
+      'Expected an explicit sidecar warning for ' + path.basename(databaseFile))
+      assert.equal(fs.readFileSync(ownerPath, 'utf8'), originalOwner,
+        'Recovery inspection must never rewrite the orphaned lock.')
+    } finally {
+      fs.rmSync(sidecar, { force: true })
+    }
+  }
+
+  assert.equal(fs.readFileSync(ownerPath, 'utf8'), originalOwner)
+  assert.throws(() => acquirePrivateGatewayWriterLock(f.storageRoot),
+    /writer lock already exists/)
+})
