@@ -12,6 +12,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { startPrivateHouseholdGateway } from '../Server/private-household-gateway.mjs'
+import { assertDisposableSupervisedWritersStopped } from '../Server/private-supervised-writer-quiescence.mjs'
 import { provisionEmptyHousehold } from '../Server/household-storage.mjs'
 import {
   createHouseholdMembershipTables,
@@ -168,6 +169,21 @@ export async function startHouseholdBrowserDemo() {
       try { await stopBackend(backend) } catch (error) { errors.push(error) }
     }
     try { central.close() } catch (error) { errors.push(error) }
+    // Before deleting disposable SQLite and uploads, ensure BOTH captured
+    // child handles have exited and no gateway/backend loopback port remains
+    // occupied. A different process that reused a port also blocks cleanup.
+    if (errors.length === 0 && gateway && backends.length === 2) {
+      try {
+        await assertDisposableSupervisedWritersStopped({
+          backends,
+          backendPorts: Object.fromEntries(backends.map(b => [
+            b.householdId, Number(new URL(b.base).port),
+          ])),
+          gatewayPort: gateway.port,
+          gatewayClosed: true,
+        })
+      } catch (error) { errors.push(error) }
+    }
     if (errors.length === 0) {
       fs.rmSync(root, { recursive: true, force: true })
     } else {
