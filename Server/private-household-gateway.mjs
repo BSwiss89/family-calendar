@@ -13,6 +13,7 @@
 import express from 'express'
 import http from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
+import { acquirePrivateGatewayWriterLock } from './private-gateway-writer-lock.mjs'
 import { randomBytes } from 'node:crypto'
 import {
   createEventShareTables, inviteSelectedEvents,
@@ -103,6 +104,52 @@ function validateUpstreams({ identityDatabase, serverDirectory, storageRoot, bac
     ports.set(householdId, port)
   }
   return ports
+}
+
+// Fail closed before installing any login gateway routes or serving tenant data.
+// This detects wiring a trusted token+port to the wrong household, but does NOT
+// attest OS process identity or make the test gateway production-ready.
+async function verifyPrivateBackendBindings(portByHousehold, tokensByHousehold) {
+  for (const [householdId, port] of portByHousehold) {
+    try {
+      const response = await fetch('http://127.0.0.1:' + port +
+        '/api/internal/household-binding', {
+        method: 'GET', redirect: 'manual', cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          [PRIVATE_UPSTREAM_HEADER]: tokensByHousehold.get(householdId),
+        },
+        signal: AbortSignal.timeout(2500),
+      })
+      if (response.status !== 200 ||
+          !(response.headers.get('content-type') ?? '').toLowerCase()
+            .includes('application/json')) {
+        throw new Error('Private backend did not return a trusted identity response.')
+      }
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('Missing backend identity response.')
+      const chunks = []
+      let total = 0
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          total += value.byteLength
+          if (total > 1024) throw new Error('Oversized backend identity response.')
+          chunks.push(Buffer.from(value))
+        }
+      } finally {
+        reader.releaseLock()
+      }
+      const data = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      if (data === null || typeof data !== 'object' ||
+          data.mode !== 'household' || data.householdId !== householdId) {
+        throw new Error('Household backend identity mismatch.')
+      }
+    } catch {
+      throw new Error('Private gateway refused unverified household backend: ' + householdId)
+    }
+  }
 }
 
 function safeRequestHeaders(headers, upstreamPort, upstreamToken) {
@@ -293,6 +340,13 @@ export async function startPrivateHouseholdGateway({
     usedTokens.add(token)
     tokensByHousehold.set(householdId, token)
   }
+  // Verify the binding to the actual loopback service BEFORE mutating
+  // central identity/share tables or opening a client listener.
+  await verifyPrivateBackendBindings(portByHousehold, tokensByHousehold)
+  // Only one private test gateway may mutate central/share SQLite and read
+  // household source outboxes at a time. Acquire BEFORE creating any tables.
+  const writerLock = acquirePrivateGatewayWriterLock(storageRoot)
+  try {
   // Invitation state is central-only, never stored in household calendars.
   createHouseholdInvitationTables(identityDatabase)
   // Central share records are separate from either family's calendar DB.
@@ -975,7 +1029,13 @@ export async function startPrivateHouseholdGateway({
     response.status(404).json({ error: 'Not found.' })
   })
 
-  app.use((request, response) => {
+  // Never let a browser proxy to the test-only backend identity endpoint.
+  // Its credential comes only from server-side trusted gateway configuration.
+  app.use('/api/internal', (_request, response) => {
+    response.status(404).json({ error: 'Not found.' })
+  })
+
+  app.use(async (request, response) => {
     // installFamilyAuth has already validated the central session and CSRF.
     const household = trustedHousehold(request, response)
     if (!household) return
@@ -986,6 +1046,19 @@ export async function startPrivateHouseholdGateway({
       return response.status(409).json({
         error: 'This event operation is not yet supported in the private family-sharing preview.',
       })
+    }
+    // A gateway can remain up while a backend process restarts on the same
+    // port. Startup-only binding checks are not enough: fail closed BEFORE
+    // forwarding a request, charging AI quota or journaling a calendar edit.
+    // This tests accidental tenant/port misbinding, not OS process attestation.
+    try {
+      await verifyPrivateBackendBindings(
+        new Map([[household.householdId, portByHousehold.get(household.householdId)]]),
+        tokensByHousehold,
+      )
+    } catch {
+      response.set('Cache-Control', 'no-store')
+      return response.status(503).json({ error: 'Household service temporarily unavailable.' })
     }
     // Use exactly the same policy decision as the write-ahead journal. A
     // different route regex could let a backend mutation bypass sharing sync.
@@ -1120,7 +1193,23 @@ export async function startPrivateHouseholdGateway({
   return {
     base: 'http://127.0.0.1:' + address.port,
     port: address.port,
-    close: () => new Promise((resolve, reject) =>
-      server.close(error => error ? reject(error) : resolve())),
+    close: () => new Promise((resolve, reject) => {
+      server.close(error => {
+        if (error) return reject(error)
+        try {
+          writerLock.release()
+          resolve()
+        } catch (releaseError) { reject(releaseError) }
+      })
+    }),
+  }
+  } catch (error) {
+    // Startup failure cannot strand a healthy writer lock. If ownership
+    // changed, keep the lock quarantined rather than deleting it by force.
+    try { writerLock.release() } catch (releaseError) {
+      throw new AggregateError([error, releaseError],
+        'Private gateway startup and writer-lock cleanup both failed.')
+    }
+    throw error
   }
 }

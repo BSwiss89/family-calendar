@@ -186,6 +186,17 @@ test('central authenticated gateway denies one family access to another family b
     backends.push(startBackend(storageRoot, 'family-b', portB, backendTokens['family-b']))
     await Promise.all(backends.map(waitForBackend))
 
+    // Wrong-but-valid tokens combined with swapped backend ports must NOT
+    // route Family A through Family B's service, even on localhost.
+    await assert.rejects(startPrivateHouseholdGateway({
+      identityDatabase: central, serverDirectory, storageRoot,
+      backendPorts: { 'family-a': portB, 'family-b': portA },
+      backendTokens: {
+        'family-a': backendTokens['family-b'],
+        'family-b': backendTokens['family-a'],
+      },
+    }), /Private gateway refused unverified household backend: family-a/)
+
     // Even a process on localhost must not bypass the central gateway or
     // reuse the other household's private service credential.
     for (const backend of backends) {
@@ -206,6 +217,13 @@ test('central authenticated gateway denies one family access to another family b
       backendPorts: { 'family-a': portA, 'family-b': portB },
       backendTokens,
     })
+    // A second gateway (same central and household DBs) must not open a
+    // listener, even with valid credentials and correct backend bindings.
+    await assert.rejects(startPrivateHouseholdGateway({
+      identityDatabase: central, serverDirectory, storageRoot,
+      backendPorts: { 'family-a': portA, 'family-b': portB },
+      backendTokens,
+    }), /writer lock already exists/)
     assert.equal(new URL(gateway.base).hostname, '127.0.0.1')
     assert.equal(forbiddenPorts.has(gateway.port), false)
 
@@ -431,12 +449,15 @@ test('central authenticated gateway denies one family access to another family b
     })
     assert.equal(accountPage.status, 200)
     const accountHtml = await accountPage.text()
-    assert.match(accountHtml, /id="profile-username"/)
-    assert.match(accountHtml, /id="switch-profile"/)
+    assert.match(accountHtml, /id="whoami"/)
+    assert.match(accountHtml, /id="logout"/)
     assert.doesNotMatch(accountHtml, /id="household-switch-form"/)
     const accountJavaScript = await fetch(gateway.base + '/auth/account.js')
     assert.equal(accountJavaScript.status, 200)
-    assert.match(await accountJavaScript.text(), /switchProfile\.addEventListener\('click', signOutToLogin\)/)
+    const accountScript = await accountJavaScript.text()
+    assert.match(accountScript, /whoami\.textContent = 'Signed in as '/)
+    assert.match(accountScript, /logout\.addEventListener\('click', async \(\) =>/)
+    assert.match(accountScript, /location\.replace\('\/login'\)/)
     const householdsA = await json(gateway.base, '/api/households', { cookie: cookieA })
     const householdsB = await json(gateway.base, '/api/households', { cookie: cookieB })
     assert.deepEqual(householdsA.value.households.map(h => h.householdId), ['family-a'])
@@ -882,7 +903,14 @@ test('central authenticated gateway denies one family access to another family b
       'SELECT title FROM event_share_grants WHERE id=?'
     ).get(sharedId).title, 'Family A private calendar')
 
-    await gateway.close()
+    {
+      const closingGateway = gateway
+      gateway = null // Preserve the first failure; avoid a second close in finally.
+      await closingGateway.close()
+    }
+    assert.equal(fs.existsSync(path.join(storageRoot,
+      '.family-calendar-private-gateway-writer.lock')), false,
+    'cleanly stopped gateway must release its exclusive lock')
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory, storageRoot,
       backendPorts: { 'family-a': portA, 'family-b': portB },
@@ -940,7 +968,14 @@ test('central authenticated gateway denies one family access to another family b
       })
     }
     assert.equal(countPendingEventShareSync(central), 205)
-    await gateway.close()
+    {
+      const closingGateway = gateway
+      gateway = null // Preserve the first failure; avoid a second close in finally.
+      await closingGateway.close()
+    }
+    assert.equal(fs.existsSync(path.join(storageRoot,
+      '.family-calendar-private-gateway-writer.lock')), false,
+    'cleanly stopped gateway must release its exclusive lock')
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory, storageRoot,
       backendPorts: { 'family-a': portA, 'family-b': portB },
@@ -1307,6 +1342,7 @@ test('client disconnect cannot clear a share update while backend is still commi
   const central = new DatabaseSync(path.join(work, 'identity.db'))
   let gateway = null
   let fakeBackend = null
+  let fakeBackendB = null
   let releaseBackend = null
   let editor = null
   try {
@@ -1358,7 +1394,23 @@ test('client disconnect cannot clear a share update while backend is still commi
     let signalRequest
     const received = new Promise(resolve => { signalRequest = resolve })
     const release = new Promise(resolve => { releaseBackend = resolve })
+    const backendTokens = {
+      'family-a': randomBytes(32).toString('hex'),
+      'family-b': randomBytes(32).toString('hex'),
+    }
+    let activeBackendHouseholdA = 'family-a'
     fakeBackend = createHttpServer((request, response) => {
+      if (request.method === 'GET' &&
+          request.url === '/api/internal/household-binding') {
+        if (request.headers['x-family-calendar-upstream-token'] !== backendTokens['family-a']) {
+          response.writeHead(403)
+          response.end()
+          return
+        }
+        response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+        response.end(JSON.stringify({ mode: 'household', householdId: activeBackendHouseholdA }))
+        return
+      }
       if (request.method !== 'PUT' || request.url !== '/api/events/1') {
         response.writeHead(404)
         response.end()
@@ -1385,11 +1437,22 @@ test('client disconnect cannot clear a share update while backend is still commi
       fakeBackend.listen(0, '127.0.0.1', resolve)
     })
     const portA = fakeBackend.address().port
-    const portB = await randomPort(new Set([portA]))
-    const backendTokens = {
-      'family-a': randomBytes(32).toString('hex'),
-      'family-b': randomBytes(32).toString('hex'),
-    }
+    fakeBackendB = createHttpServer((request, response) => {
+      if (request.method !== 'GET' ||
+          request.url !== '/api/internal/household-binding' ||
+          request.headers['x-family-calendar-upstream-token'] !== backendTokens['family-b']) {
+        response.writeHead(403)
+        response.end()
+        return
+      }
+      response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+      response.end(JSON.stringify({ mode: 'household', householdId: 'family-b' }))
+    })
+    await new Promise((resolve, reject) => {
+      fakeBackendB.once('error', reject)
+      fakeBackendB.listen(0, '127.0.0.1', resolve)
+    })
+    const portB = fakeBackendB.address().port
     assert.equal(forbiddenPorts.has(portA), false)
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory, storageRoot,
@@ -1398,6 +1461,24 @@ test('client disconnect cannot clear a share update while backend is still commi
     })
     const cookieA = await login(gateway.base, 'disconnect-a')
     const cookieB = await login(gateway.base, 'disconnect-b')
+
+    // Backend binding was correct at startup, then the service began
+    // reporting a different family's identity on the SAME port/token.
+    // Every forwarded operation must refuse that change while the gateway
+    // stays running, before any source mutation or tenant data can be sent.
+    assert.equal((await fetch(gateway.base + '/api/internal/household-binding', {
+      headers: { Cookie: cookieA },
+    })).status, 404)
+    activeBackendHouseholdA = 'family-b'
+    const switched = await fetch(gateway.base + '/api/events', {
+      headers: { Cookie: cookieA },
+    })
+    assert.equal(switched.status, 503)
+    assert.equal(switched.headers.get('cache-control'), 'no-store')
+    activeBackendHouseholdA = 'family-a'
+    assert.equal((await fetch(gateway.base + '/api/events', {
+      headers: { Cookie: cookieA },
+    })).status, 404) // test backend has no GET /api/events route
 
     let signalDisconnected
     const disconnected = new Promise(resolve => { signalDisconnected = resolve })
@@ -1452,6 +1533,10 @@ test('client disconnect cannot clear a share update while backend is still commi
     if (fakeBackend) {
       fakeBackend.closeAllConnections()
       await new Promise(resolve => fakeBackend.close(resolve))
+    }
+    if (fakeBackendB) {
+      fakeBackendB.closeAllConnections()
+      await new Promise(resolve => fakeBackendB.close(resolve))
     }
     central.close()
     fs.rmSync(work, { recursive: true, force: true })
