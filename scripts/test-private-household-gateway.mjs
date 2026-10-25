@@ -67,7 +67,7 @@ function startBackend(storageRoot, id, port, serviceToken) {
       FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN: serviceToken,
     },
     windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   })
   let recent = ''
   for (const stream of [child.stdout, child.stderr]) {
@@ -75,7 +75,8 @@ function startBackend(storageRoot, id, port, serviceToken) {
       recent = (recent + bytes.toString('utf8')).slice(-3500)
     })
   }
-  return { child, base: 'http://127.0.0.1:' + port, serviceToken, logs: () => recent }
+  return { child, householdId: id, base: 'http://127.0.0.1:' + port,
+    serviceToken, logs: () => recent }
 }
 
 async function waitForBackend(backend) {
@@ -97,7 +98,11 @@ async function stopBackend(backend) {
   if (!backend || backend.child.exitCode !== null || backend.child.signalCode !== null) return
   const child = backend.child
   const exited = new Promise(resolve => child.once('exit', resolve))
-  child.kill()
+  // Parent-child IPC is the only reliable graceful shutdown mechanism on
+  // Windows; child.kill('SIGTERM') can be an unconditional hard termination.
+  if (!child.connected) throw new Error('Missing supervised household shutdown channel.')
+  child.send({ type: 'private-household-test-shutdown',
+    householdId: backend.householdId })
   const clean = await Promise.race([
     exited.then(() => true),
     new Promise(resolve => setTimeout(() => resolve(false), 6000)),
@@ -185,6 +190,31 @@ test('central authenticated gateway denies one family access to another family b
     backends.push(startBackend(storageRoot, 'family-a', portA, backendTokens['family-a']))
     backends.push(startBackend(storageRoot, 'family-b', portB, backendTokens['family-b']))
     await Promise.all(backends.map(waitForBackend))
+
+    // Starting an additional backend for the SAME household on a different
+    // port with its own valid token must fail BEFORE opening that SQLite DB.
+    const duplicatePort = await randomPort(usedPorts)
+    const duplicate = startBackend(storageRoot, 'family-a', duplicatePort,
+      randomBytes(32).toString('hex'))
+    try {
+      const duplicateExit = await Promise.race([
+        new Promise((resolve, reject) => {
+          duplicate.child.once('error', reject)
+          duplicate.child.once('exit', code => resolve(code))
+        }),
+        new Promise((_, reject) => setTimeout(() =>
+          reject(new Error('Duplicate family backend unexpectedly remained running.')), 12000)),
+      ])
+      assert.notEqual(duplicateExit, 0)
+      assert.match(duplicate.logs(), /Private household backend writer lock already exists/)
+      assert.equal((await fetch(backends[0].base + '/api/health', {
+        headers: { 'x-family-calendar-upstream-token': backendTokens['family-a'] },
+      })).status, 200)
+    } finally {
+      if (duplicate.child.exitCode === null && duplicate.child.signalCode === null) {
+        duplicate.child.kill('SIGKILL') // Only the disposable duplicate fixture.
+      }
+    }
 
     // Wrong-but-valid tokens combined with swapped backend ports must NOT
     // route Family A through Family B's service, even on localhost.
@@ -1325,6 +1355,12 @@ test('central authenticated gateway denies one family access to another family b
     }
     try { central.close() } catch (error) { failures.push(error) }
     if (failures.length === 0) {
+      for (const id of ['family-a', 'family-b']) {
+        const lock = path.join(storageRoot, 'households', id,
+          '.family-calendar-private-backend-writer.lock')
+        assert.equal(fs.existsSync(lock), false,
+          'Graceful private backend shutdown must release its own writer lock.')
+      }
       fs.rmSync(work, { recursive: true, force: true })
     } else {
       console.error('Disposable test data kept for safe inspection: ' + work)
