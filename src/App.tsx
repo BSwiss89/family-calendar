@@ -15826,6 +15826,23 @@ createPortal(
         type="button"
         onClick={() => {
           setMobileSettingsOpen(false)
+          setPage('invitations')
+          void invitationInbox.refresh()
+        }}
+      >
+        Invitations
+        {invitationInbox.available && invitationInbox.invitations.length > 0 && (
+          <span className="mobile-settings-invitation-count">
+            {invitationInbox.invitations.length} pending
+          </span>
+        )}
+        <span aria-hidden="true">›</span>
+      </button>
+      <button
+        className="mobile-settings-option"
+        type="button"
+        onClick={() => {
+          setMobileSettingsOpen(false)
           setPage('householdMembers')
         }}
       >
@@ -15877,6 +15894,13 @@ createPortal(
 )}
 
       {page === 'householdMembers' && <HouseholdMembersSettings />}
+      {page === 'invitations' && (
+        <div className="mobile-invitation-back">
+          <button type="button" onClick={() => setPage('home')}>
+            ← Back to Home
+          </button>
+        </div>
+      )}
       {page === 'invitations' && <DesktopInvitations {...invitationInbox} />}
 
       {page === 'calendar' && (
@@ -23978,7 +24002,7 @@ capture.captureType !== 'other' && (
     </section>
   </div>, document.body
 )}
-      <MobileInvitationReminder {...invitationInbox} />
+      <MobileInvitationReminder {...invitationInbox} suppress={page === 'invitations'} />
     </main>
   )
 }
