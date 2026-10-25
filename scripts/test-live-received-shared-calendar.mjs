@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const source = path => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')
+  .replaceAll(String.fromCharCode(13, 10), String.fromCharCode(10))
 const app = source('../src/App.tsx')
 const feed = source('../src/useSharedEventFeed.ts')
 const detail = source('../src/SharedEventDetails.tsx')
