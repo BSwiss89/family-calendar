@@ -61,6 +61,8 @@ jobs:
         run: node --test scripts/test-private-gateway-process-crash.mjs
       - name: Crash actual Family A backend and prove Family B data remains independent
         run: node --test scripts/test-private-backend-process-crash.mjs
+      - name: Verify private gateway restart binding retries transport only
+        run: node --test scripts/test-private-gateway-binding-retry.mjs
       - name: Test real two-household private gateway with LIVE Lists preserved
         run: |
           node --test scripts/test-private-household-gateway.mjs
