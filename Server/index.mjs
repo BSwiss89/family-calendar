@@ -55,6 +55,12 @@ if (householdStorage.mode === 'household') {
   installPrivateUpstreamGuard(app, {
     expectedToken: process.env.FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN,
   })
+  // Test-only, service-authenticated metadata. The regular LIVE and TEST
+  // calendar never expose this route. No user or calendar fields are returned.
+  app.get('/api/internal/household-binding', (_request, response) => {
+    response.set('Cache-Control', 'no-store')
+    response.json({ mode: 'household', householdId: householdStorage.householdId })
+  })
 }
 const { dataFolder, uploadFolder, databasePath } = householdStorage
 const OLLAMA_URL =

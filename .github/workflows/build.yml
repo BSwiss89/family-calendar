@@ -36,10 +36,29 @@ jobs:
       - name: Test household settings, registration and migration on disposable databases
         run: |
           node --test scripts/test-household-members-settings.mjs scripts/test-private-household-invite-signup.mjs scripts/test-legacy-household-account-rehearsal.mjs
+      - name: Verify accepted shared event overlays and parsing
+        run: node --test scripts/test-live-received-shared-calendar.mjs scripts/test-shared-event-overlay.mjs
+      - name: Verify LIVE desktop and mobile household invitation inbox
+        run: node --test scripts/test-live-invitation-inbox.mjs
+      - name: Verify LIVE event detail single-share entry point
+        run: node --test scripts/test-live-single-event-share-action.mjs
+      - name: Verify private upstream authentication and household mutation boundaries
+        run: |
+          node --test scripts/test-private-upstream-access.mjs scripts/test-private-gateway-mutation-policy.mjs scripts/test-private-event-source-outbox.mjs
+      - name: Verify synthetic household AI budgets and offline backup restore safety
+        run: |
+          node --test scripts/test-private-local-ai-budget.mjs scripts/test-private-paid-api-budget.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Private household AI budget test failure.' }
+          node --test scripts/test-private-restore-preflight.mjs scripts/test-private-offline-restore-rehearsal.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Private household offline restore test failure.' }
+      - name: Refuse concurrent private gateways and unreviewed stale writer locks
+        run: node --test scripts/test-private-gateway-writer-lock.mjs
       - name: Test real two-household private gateway with LIVE Lists preserved
         run: |
           node --test scripts/test-private-household-gateway.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Two-household private gateway tests failed.' }
           node --test scripts/test-household-browser-demo.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Two-household browser demo tests failed.' }
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax

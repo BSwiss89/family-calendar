@@ -1,6 +1,7 @@
 import {
   Fragment,
   useEffect,
+  useCallback,
   useLayoutEffect,
   useRef,
   useState,
@@ -12,6 +13,13 @@ import {
 import { createPortal } from 'react-dom'
 import './App.css'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
+import SharedEventDetails from './SharedEventDetails'
+import './SharedEventsOverlay.css'
+import { useSharedEventFeed } from './useSharedEventFeed'
+import { sharedEventsInRange, formatSharedTime, type AcceptedSharedEvent } from './sharedEventOverlay'
+import FamilyEventSharing from './FamilyEventSharing'
+import { DesktopInvitations, MobileInvitationReminder } from './InvitationCenter'
+import { useInvitationInbox } from './useInvitationInbox'
 import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
 import {
@@ -1980,13 +1988,15 @@ const [page, setPage] =
     'people' |
     'lists' |
     'capture' |
-    'householdMembers'
+    'householdMembers' |
+    'invitations'
   >('home')
 
 const [isEditingHome, setIsEditingHome] =
   useState(false)
 const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
 const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
+const invitationInbox = useInvitationInbox()
 
 useEffect(() => {
   let cancelled = false
@@ -3460,6 +3470,10 @@ const [
   () => window.innerWidth <= 1200
 )
   const [events, setEvents] = useState<CalendarEvent[]>([])
+  // Accepted snapshots have separate IDs and never become editable local events.
+  const receivedSharedEvents = useSharedEventFeed(page === 'calendar')
+  const [selectedReceivedEvent, setSelectedReceivedEvent] = useState<AcceptedSharedEvent | null>(null)
+  const closeReceivedDetails = useCallback(() => setSelectedReceivedEvent(null), [])
 
 function positionMobileScheduleTimeline(
   targetDate: Date
@@ -11447,7 +11461,8 @@ function handleScheduleScroll() {
 }
 
 function getScheduleTimedEventLayouts(
-  scheduleDay: Date
+  scheduleDay: Date,
+  includeReceivedShares = false
 ) {
   const dateKey =
     getDateKeyFromDate(scheduleDay)
@@ -11456,7 +11471,8 @@ function getScheduleTimedEventLayouts(
     scheduleDayWidth - 10
 
   const timedEventLayouts: Array<{
-    calendarEvent: (typeof events)[number]
+    calendarEvent: CalendarEvent | null
+    sharedEvent: AcceptedSharedEvent | null
     dateKey: string
     visibleStart: number
     visibleEnd: number
@@ -11532,6 +11548,7 @@ function getScheduleTimedEventLayouts(
 
     timedEventLayouts.push({
       calendarEvent,
+      sharedEvent: null,
       dateKey,
       visibleStart,
       visibleEnd,
@@ -11543,6 +11560,29 @@ function getScheduleTimedEventLayouts(
     })
   }
 
+  if (includeReceivedShares) {
+    // Accepted event snapshots participate in the SAME collision layout.
+    // Never use their share IDs as local event IDs.
+    for (const sharedEvent of sharedEventsInRange(receivedSharedEvents, dateKey, dateKey)) {
+      if (sharedEvent.time === null) continue
+      const [hour, minute] = sharedEvent.time.split(':').map(Number)
+      const startMinutes = hour * 60 + minute
+      let endMinutes = startMinutes + 60
+      if (sharedEvent.endTime) {
+        const [endHour, endMinute] = sharedEvent.endTime.split(':').map(Number)
+        endMinutes = endHour * 60 + endMinute
+        if (endMinutes <= startMinutes) endMinutes += 1440
+      }
+      const visibleStart = Math.max(0, startMinutes)
+      const visibleEnd = Math.min(1440, endMinutes)
+      if (visibleEnd <= visibleStart) continue
+      timedEventLayouts.push({
+        calendarEvent: null, sharedEvent, dateKey, visibleStart, visibleEnd,
+        durationMinutes: visibleEnd - visibleStart, leftPx: 5,
+        widthPx: scheduleEventUsableWidth,
+      })
+    }
+  }
   timedEventLayouts.sort(
     (eventA, eventB) => {
       if (
@@ -11565,8 +11605,8 @@ function getScheduleTimedEventLayouts(
         )
       }
 
-      return eventA.calendarEvent.title.localeCompare(
-        eventB.calendarEvent.title
+      return (eventA.calendarEvent?.title ?? eventA.sharedEvent?.title ?? '').localeCompare(
+        (eventB.calendarEvent?.title ?? eventB.sharedEvent?.title ?? '')
       )
     }
   )
@@ -11647,8 +11687,8 @@ function getScheduleTimedEventLayouts(
           )
         }
 
-        return eventA.calendarEvent.title.localeCompare(
-          eventB.calendarEvent.title
+        return (eventA.calendarEvent?.title ?? eventA.sharedEvent?.title ?? '').localeCompare(
+          (eventB.calendarEvent?.title ?? eventB.sharedEvent?.title ?? '')
         )
       }
     )
@@ -11769,8 +11809,8 @@ function getScheduleTimedEventLayouts(
         )
       }
 
-      return eventA.calendarEvent.title.localeCompare(
-        eventB.calendarEvent.title
+      return (eventA.calendarEvent?.title ?? eventA.sharedEvent?.title ?? '').localeCompare(
+        (eventB.calendarEvent?.title ?? eventB.sharedEvent?.title ?? '')
       )
     }
   )
@@ -11865,7 +11905,7 @@ const mobileHiddenAllDayEventCount =
   mobileVisibleAllDayEvents.length
   const timedLayouts =
   getScheduleTimedEventLayouts(
-    targetDate
+    targetDate, true
   )
 
   return (
@@ -12074,6 +12114,20 @@ positionMobileScheduleTimeline(
         </div>
       )}
 
+      {sharedEventsInRange(receivedSharedEvents, targetDateKey, targetDateKey).some(shared => shared.time === null) && (
+        <div className="mobile-schedule-all-day shared-mobile-event-group">
+          <span className="mobile-schedule-all-day-label">Shared</span>
+          <div className="mobile-schedule-all-day-events">
+            {sharedEventsInRange(receivedSharedEvents, targetDateKey, targetDateKey).filter(shared => shared.time === null).map(shared => (
+              <button type="button" className="mobile-schedule-all-day-event shared-schedule-event"
+                key={`mobile-shared-${shared.shareId}-${targetDateKey}`}
+                onClick={() => setSelectedReceivedEvent(shared)}>
+                ↗ {shared.title} · {formatSharedTime(shared.time)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div
   className="mobile-schedule-timeline-scroll"
  
@@ -12241,6 +12295,7 @@ positionMobileScheduleTimeline(
               (timedLayout) => {
                 const calendarEvent =
                   timedLayout.calendarEvent
+                const sharedEvent = timedLayout.sharedEvent
 
                 const top =
                   (timedLayout.visibleStart /
@@ -12277,47 +12332,34 @@ const widthPercent =
                 return (
                   <button
                     type="button"
-                    className="mobile-schedule-event"
-                    key={`${targetDateKey}-${calendarEvent.id}`}
+                    className={`mobile-schedule-event${sharedEvent ? " shared-schedule-timed-event" : ""}`}
+                    key={sharedEvent ? `shared-${targetDateKey}-${sharedEvent.shareId}` : `${targetDateKey}-${calendarEvent!.id}`}
                     style={{
                       top: `${top}px`,
                       height: `${height}px`,
                       left: `calc(${leftPercent}% + 3px)`,
 width: `calc(${widthPercent}% - 6px)`,
-                      background:
-                        getEventBackground(
-                          calendarEvent.people
-                        ),
+                      background: sharedEvent ? '#e7f0ff' : getEventBackground(calendarEvent!.people),
                     }}
-                    onClick={() =>
-                      openEventDetails(
-                        calendarEvent,
-                        targetDateKey
-                      )
-                    }
+                    onClick={() => {
+                      if (sharedEvent) setSelectedReceivedEvent(sharedEvent)
+                      else openEventDetails(calendarEvent!, targetDateKey)
+                    }}
                   >
                     <strong>
-                      {calendarEvent.title}
+                      {sharedEvent ? `↗ ${sharedEvent.title}` : calendarEvent!.title}
                     </strong>
 
                     <span>
-                      {formatTime(
-                        calendarEvent.time!
-                      )}
-
-                      {calendarEvent.endTime &&
-                        ` – ${formatTime(
-                          calendarEvent.endTime
-                        )}`}
+                      {sharedEvent ? formatSharedTime(sharedEvent.time) : formatTime(calendarEvent!.time!)}
+                      {sharedEvent
+                        ? sharedEvent.endTime && ` – ${formatSharedTime(sharedEvent.endTime)}`
+                        : calendarEvent!.endTime && ` – ${formatTime(calendarEvent!.endTime)}`}
                     </span>
 
-                    {calendarEvent.location && (
-                      <small>
-                        {
-                          calendarEvent.location
-                        }
-                      </small>
-                    )}
+                    {sharedEvent
+                      ? <small>Shared by {sharedEvent.sharedBy} · Read only</small>
+                      : calendarEvent!.location && <small>{calendarEvent!.location}</small>}
                   </button>
                 )
               }
@@ -12619,6 +12661,19 @@ setIsAddingEvent(true)
 )}
             
               <div className="event-list">
+                {sharedEventsInRange(receivedSharedEvents, dateKey, dateKey).map(shared => (
+                  <button type="button" className="event shared-week-event"
+                    key={`shared-week-${shared.shareId}-${dateKey}`}
+                    onClick={(click) => {
+                      click.stopPropagation()
+                      if (!suppressWeekPagerClick()) setSelectedReceivedEvent(shared)
+                    }}>
+                    <div className="event-title">↗ {shared.title}</div>
+                    <div className="event-bottom-row">
+                      <span className="event-time">{formatSharedTime(shared.time)} · {shared.sharedBy}</span>
+                    </div>
+                  </button>
+                ))}
                 {dayEvents.map(
                   (calendarEvent) => {
                     const background =
@@ -13075,14 +13130,13 @@ const targetMiniMonthDays =
 )
   .filter(
     (timedEventLayout) =>
-      !isMultiDayEvent(
-        timedEventLayout.calendarEvent
-      )
+      timedEventLayout.calendarEvent !== null &&
+      !isMultiDayEvent(timedEventLayout.calendarEvent)
   )
   .map(
     (timedEventLayout) => {
       const calendarEvent =
-        timedEventLayout.calendarEvent
+        timedEventLayout.calendarEvent!
 
       const eventTop =
         (timedEventLayout.visibleStart /
@@ -13765,6 +13819,20 @@ return (
   >
     <span className="sidebar-nav-icon">✓</span>
     <span>Lists</span>
+  </button>
+
+  <button
+    type="button"
+    className={`sidebar-nav-button ${page === 'invitations' ? 'active-sidebar-nav' : ''}`}
+    onClick={() => setPage('invitations')}
+  >
+    <span className="sidebar-nav-icon" aria-hidden="true">✉</span>
+    <span>Invitations</span>
+    {invitationInbox.available && invitationInbox.invitations.length > 0 && (
+      <span aria-label={invitationInbox.invitations.length + ' pending invitations'}>
+        {invitationInbox.invitations.length}
+      </span>
+    )}
   </button>
 
   <button
@@ -15809,6 +15877,7 @@ createPortal(
 )}
 
       {page === 'householdMembers' && <HouseholdMembersSettings />}
+      {page === 'invitations' && <DesktopInvitations {...invitationInbox} />}
 
       {page === 'calendar' && (
        <section
@@ -16093,6 +16162,8 @@ createPortal(
 </div>
 </div>
 
+<SharedEventDetails event={selectedReceivedEvent} onClose={closeReceivedDetails} />
+
 {calendarView === 'month' && (
   <div
     className="calendar-swipe-surface month-swipe-surface"
@@ -16216,6 +16287,18 @@ const dayMultiDayLaneCount =
     },
     0
   )
+const daySharedEventKey =
+  getDateKeyForMonth(
+    targetYear,
+    targetMonth,
+    day
+  )
+const sharedEventsForDay =
+  sharedEventsInRange(
+    receivedSharedEvents,
+    daySharedEventKey,
+    daySharedEventKey
+  )
 const maximumVisibleDayEventCount =
   Math.max(
     0,
@@ -16223,7 +16306,8 @@ const maximumVisibleDayEventCount =
       isCompactMonthLayout
         ? 3
         : 4
-    ) - dayMultiDayLaneCount
+    ) - dayMultiDayLaneCount -
+      (sharedEventsForDay.length > 0 ? 1 : 0)
   )
            const dayEvents = events
   .filter(
@@ -16385,6 +16469,26 @@ const visibleDayEventCount =
                         </button>
                       )
                     })}
+
+                  {sharedEventsForDay.slice(0, 1).map((sharedEvent) => (
+                    <button
+                      type="button"
+                      className="month-shared-event-chip"
+                      key={`shared-${sharedEvent.shareId}`}
+                      title={`${sharedEvent.title} — shared by ${sharedEvent.sharedBy}; read only`}
+                      aria-label={`View shared event ${sharedEvent.title} from ${sharedEvent.sharedBy}`}
+                      onClick={(event) => { event.stopPropagation(); setSelectedReceivedEvent(sharedEvent) }}
+                    >
+                      <span aria-hidden="true">↗ </span>
+                      <span>{sharedEvent.title}</span>
+                      <span className="month-shared-event-source">
+                        · {sharedEvent.sharedBy}
+                        {sharedEventsForDay.length > 1
+                          ? ` +${sharedEventsForDay.length - 1}`
+                          : ''}
+                      </span>
+                    </button>
+                  ))}
 
                  {dayEvents.length > visibleDayEventCount && (
   <button
@@ -16954,6 +17058,14 @@ const visibleMultiDayLaneCount =
   </div>
 )}
                 <div className="schedule-all-day-events">
+                  {sharedEventsInRange(receivedSharedEvents, dateKey, dateKey).filter(shared => shared.time === null).map(shared => (
+                    <button type="button" className="schedule-all-day-event shared-schedule-event"
+                      key={`schedule-shared-${shared.shareId}-${dateKey}`}
+                      title={`Shared by ${shared.sharedBy} · ${formatSharedTime(shared.time)}`}
+                      onClick={() => setSelectedReceivedEvent(shared)}>
+                      ↗ {shared.title} · {formatSharedTime(shared.time)}
+                    </button>
+                  ))}
                   {visibleAllDayEvents
                     .map(
                       (calendarEvent) => (
@@ -17084,7 +17196,7 @@ const visibleMultiDayLaneCount =
 
            const timedEventLayouts =
   getScheduleTimedEventLayouts(
-    scheduleDay
+    scheduleDay, true
   )
 
             return (
@@ -17202,42 +17314,37 @@ const visibleMultiDayLaneCount =
     return (
       <button
         type="button"
-        className="schedule-event"
-        key={`${timedEventLayout.calendarEvent.id}-${timedEventLayout.dateKey}`}
+        className={`schedule-event${timedEventLayout.sharedEvent ? " shared-schedule-timed-event" : ""}`}
+        key={timedEventLayout.sharedEvent
+          ? `shared-${timedEventLayout.sharedEvent.shareId}-${timedEventLayout.dateKey}`
+          : `${timedEventLayout.calendarEvent!.id}-${timedEventLayout.dateKey}`}
         style={{
           top: `${top}px`,
           height: `${height}px`,
           left: `${timedEventLayout.leftPx}px`,
           width: `${timedEventLayout.widthPx}px`,
           right: 'auto',
-          background:
-            getEventBackground(
-              timedEventLayout.calendarEvent.people
-            ),
+          background: timedEventLayout.sharedEvent
+            ? '#e7f0ff'
+            : getEventBackground(timedEventLayout.calendarEvent!.people),
         }}
-        onClick={() =>
-          openEventDetails(
-            timedEventLayout.calendarEvent,
-            timedEventLayout.dateKey
-          )
-        }
+        onClick={() => {
+          if (timedEventLayout.sharedEvent) setSelectedReceivedEvent(timedEventLayout.sharedEvent)
+          else openEventDetails(timedEventLayout.calendarEvent!, timedEventLayout.dateKey)
+        }}
       >
-        <strong>
-  {
-    timedEventLayout.calendarEvent.title
-  }
-</strong>
-
-<span className="schedule-event-time">
-  {formatTime(
-    timedEventLayout.calendarEvent.time!
-  )}
-
-  {timedEventLayout.calendarEvent.endTime &&
-    ` – ${formatTime(
-      timedEventLayout.calendarEvent.endTime
-    )}`}
-</span>
+        <strong>{timedEventLayout.sharedEvent
+          ? `↗ ${timedEventLayout.sharedEvent.title}`
+          : timedEventLayout.calendarEvent!.title}</strong>
+        <span className="schedule-event-time">
+          {timedEventLayout.sharedEvent
+            ? formatSharedTime(timedEventLayout.sharedEvent.time)
+            : formatTime(timedEventLayout.calendarEvent!.time!)}
+          {timedEventLayout.sharedEvent
+            ? timedEventLayout.sharedEvent.endTime && ` – ${formatSharedTime(timedEventLayout.sharedEvent.endTime)}`
+            : timedEventLayout.calendarEvent!.endTime && ` – ${formatTime(timedEventLayout.calendarEvent!.endTime)}`}
+        </span>
+        {timedEventLayout.sharedEvent && <small>Shared by {timedEventLayout.sharedEvent.sharedBy}</small>}
       </button>
     )
   }
@@ -17510,7 +17617,8 @@ const visibleMultiDayLaneCount =
             <strong>Today's Events</strong>
 
             <span>
-              {dayViewEvents.length}
+              {dayViewEvents.length +
+                sharedEventsInRange(receivedSharedEvents, dayViewDateKey, dayViewDateKey).length}
             </span>
           </div>
 
@@ -17566,6 +17674,22 @@ const visibleMultiDayLaneCount =
                 )
               }
             )}
+            {sharedEventsInRange(
+              receivedSharedEvents, dayViewDateKey, dayViewDateKey
+            ).map(shared => (
+              <button type="button" className="day-summary-event day-summary-received-event"
+                key={`shared-event-${shared.shareId}`}
+                onClick={() => setSelectedReceivedEvent(shared)}
+                aria-label={`View shared event ${shared.title}, from ${shared.sharedBy}`}>
+                <span className="day-summary-event-color"
+                  style={{ background: '#5d8bbf' }} />
+                <span className="day-summary-event-text">
+                  <strong>{shared.title}</strong>
+                  <small>{formatSharedTime(shared.time)} · Shared by {shared.sharedBy}</small>
+                  <small>Read only</small>
+                </span>
+              </button>
+            ))}
           </div>
         </section>
       </aside>
@@ -17633,14 +17757,13 @@ const visibleMultiDayLaneCount =
 )
   .filter(
     (timedEventLayout) =>
-      !isMultiDayEvent(
-        timedEventLayout.calendarEvent
-      )
+      timedEventLayout.calendarEvent !== null &&
+      !isMultiDayEvent(timedEventLayout.calendarEvent)
   )
   .map(
     (timedEventLayout) => {
       const calendarEvent =
-        timedEventLayout.calendarEvent
+        timedEventLayout.calendarEvent!
 
       const eventTop =
         (timedEventLayout.visibleStart /
@@ -18177,6 +18300,8 @@ onClick={(event) => {
     Edit Event
   </button>
 </div>
+
+<FamilyEventSharing event={viewingCalendarEvent} />
 
 {detailsDeleteConfirmOpen && (
   <div className="event-details-delete-confirm">
@@ -23853,6 +23978,7 @@ capture.captureType !== 'other' && (
     </section>
   </div>, document.body
 )}
+      <MobileInvitationReminder {...invitationInbox} />
     </main>
   )
 }
