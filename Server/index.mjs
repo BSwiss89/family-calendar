@@ -7,6 +7,10 @@ import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
+import { resolveHouseholdStorage } from './household-storage.mjs'
+import { installPrivateEventIdentity } from './private-event-identity.mjs'
+import { installPrivateEventSourceOutbox } from './private-event-source-outbox.mjs'
+import { installPrivateUpstreamGuard, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
 import {
   normalizeListCategory,
   ensureListItemCategories,
@@ -35,8 +39,24 @@ const __dirname = path.dirname(__filename)
 // a future approved npm cutover must not boot against mixed package assets.
 assertCalendarReleaseBootSafe(path.resolve(__dirname, '..'))
 
-const dataFolder = path.join(__dirname, 'data')
-const uploadFolder = path.join(__dirname, 'uploads')
+// The LIVE/TEST legacy data paths and schemas remain unchanged by default.
+// Household storage is only enabled for explicitly isolated loopback testing.
+const householdStorage = resolveHouseholdStorage({
+  serverDirectory: __dirname,
+  storageRoot: process.env.FAMILY_CALENDAR_HOUSEHOLD_STORAGE_ROOT ?? null,
+  householdId: process.env.FAMILY_CALENDAR_HOUSEHOLD_ID ?? null,
+})
+if (householdStorage.mode === 'household') {
+  if (process.env.FAMILY_CALENDAR_HOUSEHOLD_TEST_ONLY !== 'YES' ||
+    HOST !== '127.0.0.1' || [3001, 13001, 13002, 13003, 11434, 443, 8443].includes(PORT)) {
+    throw new Error('Private household mode requires explicit non-production loopback test.')
+  }
+  requirePrivateUpstreamToken(process.env.FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN)
+  installPrivateUpstreamGuard(app, {
+    expectedToken: process.env.FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN,
+  })
+}
+const { dataFolder, uploadFolder, databasePath } = householdStorage
 const OLLAMA_URL =
   'http://127.0.0.1:11434/api/chat'
 
@@ -47,10 +67,10 @@ const CAPTURE_VISION_MODEL = LOCAL_AI_MODEL
 
 const distFolder = path.join(__dirname, '..', 'dist')
 
-fs.mkdirSync(dataFolder, { recursive: true })
-fs.mkdirSync(uploadFolder, { recursive: true })
-
-const databasePath = path.join(dataFolder, 'calendar.db')
+if (householdStorage.mode === 'legacy') {
+  fs.mkdirSync(dataFolder, { recursive: true })
+  fs.mkdirSync(uploadFolder, { recursive: true })
+}
 const database = new DatabaseSync(databasePath)
 
 database.exec(`PRAGMA foreign_keys = ON`)
@@ -356,6 +376,13 @@ if (!eventColumns.includes('location')) {
     ALTER TABLE events
     ADD COLUMN location TEXT
   `)
+}
+
+// Per-household event IDs are created only in disposable, explicitly opted-in
+// private backends. Legacy LIVE/TEST databases are not modified by this.
+if (householdStorage.mode === 'household') {
+  installPrivateEventIdentity(database)
+  installPrivateEventSourceOutbox(database)
 }
 
 database.exec(`
