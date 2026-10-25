@@ -13,6 +13,7 @@
 import express from 'express'
 import http from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
+import { acquirePrivateGatewayWriterLock } from './private-gateway-writer-lock.mjs'
 import { randomBytes } from 'node:crypto'
 import {
   createEventShareTables, inviteSelectedEvents,
@@ -342,6 +343,10 @@ export async function startPrivateHouseholdGateway({
   // Verify the binding to the actual loopback service BEFORE mutating
   // central identity/share tables or opening a client listener.
   await verifyPrivateBackendBindings(portByHousehold, tokensByHousehold)
+  // Only one private test gateway may mutate central/share SQLite and read
+  // household source outboxes at a time. Acquire BEFORE creating any tables.
+  const writerLock = acquirePrivateGatewayWriterLock(storageRoot)
+  try {
   // Invitation state is central-only, never stored in household calendars.
   createHouseholdInvitationTables(identityDatabase)
   // Central share records are separate from either family's calendar DB.
@@ -1188,7 +1193,23 @@ export async function startPrivateHouseholdGateway({
   return {
     base: 'http://127.0.0.1:' + address.port,
     port: address.port,
-    close: () => new Promise((resolve, reject) =>
-      server.close(error => error ? reject(error) : resolve())),
+    close: () => new Promise((resolve, reject) => {
+      server.close(error => {
+        if (error) return reject(error)
+        try {
+          writerLock.release()
+          resolve()
+        } catch (releaseError) { reject(releaseError) }
+      })
+    }),
+  }
+  } catch (error) {
+    // Startup failure cannot strand a healthy writer lock. If ownership
+    // changed, keep the lock quarantined rather than deleting it by force.
+    try { writerLock.release() } catch (releaseError) {
+      throw new AggregateError([error, releaseError],
+        'Private gateway startup and writer-lock cleanup both failed.')
+    }
+    throw error
   }
 }
