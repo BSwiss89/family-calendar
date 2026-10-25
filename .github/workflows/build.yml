@@ -59,6 +59,8 @@ jobs:
         run: node --test scripts/test-private-supervised-writer-quiescence.mjs
       - name: Rehearse actual orphaned gateway lock after a synthetic process crash
         run: node --test scripts/test-private-gateway-process-crash.mjs
+      - name: Crash actual Family A backend and prove Family B data remains independent
+        run: node --test scripts/test-private-backend-process-crash.mjs
       - name: Test real two-household private gateway with LIVE Lists preserved
         run: |
           node --test scripts/test-private-household-gateway.mjs

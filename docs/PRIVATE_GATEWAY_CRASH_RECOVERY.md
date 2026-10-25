@@ -84,3 +84,18 @@ This protection is **not** an OS lock, host-wide process fence or protection
 against a privileged process deleting lock files. A gateway or backend that
 fails while writing must still undergo approved operator fencing and
 coordinated offline backup/recovery before any abandoned marker is cleared.
+
+## Real backend process crash regression (disposable Windows CI)
+
+`node --test scripts/test-private-backend-process-crash.mjs` starts two
+**actual** Calendar Node backends against newly created Family A and Family B
+SQLite databases. Both create committed events. It forcibly terminates only
+Family A's spawned process, verifies A's data remains readable, confirms an
+independent new Family A backend cannot bypass its abandoned lock, and verifies
+Family B can continue writing, shut down cleanly, and restart using its own
+healthy storage. It never deletes Family A's stale lock as a recovery action.
+
+The fixture directories are removed only as disposable test cleanup after
+every spawned process has exited. This proves neither automatic restoration
+of Family A nor safe production cutover; it does not test a crash exactly
+during an uncommitted write, multi-process OS-wide fencing, or real backups.
