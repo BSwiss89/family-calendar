@@ -186,6 +186,17 @@ test('central authenticated gateway denies one family access to another family b
     backends.push(startBackend(storageRoot, 'family-b', portB, backendTokens['family-b']))
     await Promise.all(backends.map(waitForBackend))
 
+    // Wrong-but-valid tokens combined with swapped backend ports must NOT
+    // route Family A through Family B's service, even on localhost.
+    await assert.rejects(startPrivateHouseholdGateway({
+      identityDatabase: central, serverDirectory, storageRoot,
+      backendPorts: { 'family-a': portB, 'family-b': portA },
+      backendTokens: {
+        'family-a': backendTokens['family-b'],
+        'family-b': backendTokens['family-a'],
+      },
+    }), /Private gateway refused unverified household backend: family-a/)
+
     // Even a process on localhost must not bypass the central gateway or
     // reuse the other household's private service credential.
     for (const backend of backends) {
@@ -1307,6 +1318,7 @@ test('client disconnect cannot clear a share update while backend is still commi
   const central = new DatabaseSync(path.join(work, 'identity.db'))
   let gateway = null
   let fakeBackend = null
+  let fakeBackendB = null
   let releaseBackend = null
   let editor = null
   try {
@@ -1358,7 +1370,22 @@ test('client disconnect cannot clear a share update while backend is still commi
     let signalRequest
     const received = new Promise(resolve => { signalRequest = resolve })
     const release = new Promise(resolve => { releaseBackend = resolve })
+    const backendTokens = {
+      'family-a': randomBytes(32).toString('hex'),
+      'family-b': randomBytes(32).toString('hex'),
+    }
     fakeBackend = createHttpServer((request, response) => {
+      if (request.method === 'GET' &&
+          request.url === '/api/internal/household-binding') {
+        if (request.headers['x-family-calendar-upstream-token'] !== backendTokens['family-a']) {
+          response.writeHead(403)
+          response.end()
+          return
+        }
+        response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+        response.end(JSON.stringify({ mode: 'household', householdId: 'family-a' }))
+        return
+      }
       if (request.method !== 'PUT' || request.url !== '/api/events/1') {
         response.writeHead(404)
         response.end()
@@ -1385,11 +1412,22 @@ test('client disconnect cannot clear a share update while backend is still commi
       fakeBackend.listen(0, '127.0.0.1', resolve)
     })
     const portA = fakeBackend.address().port
-    const portB = await randomPort(new Set([portA]))
-    const backendTokens = {
-      'family-a': randomBytes(32).toString('hex'),
-      'family-b': randomBytes(32).toString('hex'),
-    }
+    fakeBackendB = createHttpServer((request, response) => {
+      if (request.method !== 'GET' ||
+          request.url !== '/api/internal/household-binding' ||
+          request.headers['x-family-calendar-upstream-token'] !== backendTokens['family-b']) {
+        response.writeHead(403)
+        response.end()
+        return
+      }
+      response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+      response.end(JSON.stringify({ mode: 'household', householdId: 'family-b' }))
+    })
+    await new Promise((resolve, reject) => {
+      fakeBackendB.once('error', reject)
+      fakeBackendB.listen(0, '127.0.0.1', resolve)
+    })
+    const portB = fakeBackendB.address().port
     assert.equal(forbiddenPorts.has(portA), false)
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory, storageRoot,
@@ -1452,6 +1490,10 @@ test('client disconnect cannot clear a share update while backend is still commi
     if (fakeBackend) {
       fakeBackend.closeAllConnections()
       await new Promise(resolve => fakeBackend.close(resolve))
+    }
+    if (fakeBackendB) {
+      fakeBackendB.closeAllConnections()
+      await new Promise(resolve => fakeBackendB.close(resolve))
     }
     central.close()
     fs.rmSync(work, { recursive: true, force: true })
