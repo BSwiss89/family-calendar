@@ -55,6 +55,8 @@ jobs:
         run: node --test scripts/test-private-gateway-writer-lock.mjs
       - name: Inspect abandoned private gateway locks without clearing them
         run: node --test scripts/test-private-gateway-recovery-audit.mjs
+      - name: Rehearse actual orphaned gateway lock after a synthetic process crash
+        run: node --test scripts/test-private-gateway-process-crash.mjs
       - name: Test real two-household private gateway with LIVE Lists preserved
         run: |
           node --test scripts/test-private-household-gateway.mjs
