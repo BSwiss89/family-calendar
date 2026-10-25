@@ -42,6 +42,13 @@ jobs:
         run: node --test scripts/test-live-invitation-inbox.mjs
       - name: Verify LIVE event detail single-share entry point
         run: node --test scripts/test-live-single-event-share-action.mjs
+      - name: Verify private upstream authentication and household mutation boundaries
+        run: |
+          node --test scripts/test-private-upstream-access.mjs scripts/test-private-gateway-mutation-policy.mjs scripts/test-private-event-source-outbox.mjs
+      - name: Verify synthetic household AI budgets and offline backup restore safety
+        run: |
+          node --test scripts/test-private-local-ai-budget.mjs scripts/test-private-paid-api-budget.mjs
+          node --test scripts/test-private-restore-preflight.mjs scripts/test-private-offline-restore-rehearsal.mjs
       - name: Test real two-household private gateway with LIVE Lists preserved
         run: |
           node --test scripts/test-private-household-gateway.mjs
