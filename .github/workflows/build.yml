@@ -20,6 +20,8 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Validate permanent CI attempt journal with mocked GitHub API
+        run: node --test scripts/test-ci-history-journal.mjs
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
       - name: Check TypeScript and build frontend
