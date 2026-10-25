@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const workflow = readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8');
+const workflow = readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const marker = '          script: |\n';
 const lastMarker = workflow.lastIndexOf(marker);
 assert.ok(lastMarker > workflow.indexOf('\n  ci-history:'), 'CI history script missing');
