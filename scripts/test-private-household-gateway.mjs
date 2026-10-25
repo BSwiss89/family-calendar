@@ -904,6 +904,10 @@ test('central authenticated gateway denies one family access to another family b
     ).get(sharedId).title, 'Family A private calendar')
 
     await gateway.close()
+    gateway = null // If restart fails, do not mask its error by closing an old listener again.
+    assert.equal(fs.existsSync(path.join(storageRoot,
+      '.family-calendar-private-gateway-writer.lock')), false,
+    'cleanly stopped gateway must release its exclusive lock')
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory, storageRoot,
       backendPorts: { 'family-a': portA, 'family-b': portB },
@@ -962,6 +966,10 @@ test('central authenticated gateway denies one family access to another family b
     }
     assert.equal(countPendingEventShareSync(central), 205)
     await gateway.close()
+    gateway = null // If restart fails, do not mask its error by closing an old listener again.
+    assert.equal(fs.existsSync(path.join(storageRoot,
+      '.family-calendar-private-gateway-writer.lock')), false,
+    'cleanly stopped gateway must release its exclusive lock')
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory, storageRoot,
       backendPorts: { 'family-a': portA, 'family-b': portB },
