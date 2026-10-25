@@ -236,7 +236,7 @@ jobs:
               const { owner, repo } = context.repo;
               const issue_number = 84;
               const run_id = Number(context.runId);
-              const currentAttempt = Number(context.runAttempt);
+              const currentAttempt = Number(context.runAttempt ?? process.env.GITHUB_RUN_ATTEMPT);
               if (!Number.isSafeInteger(run_id) || !Number.isSafeInteger(currentAttempt) || currentAttempt < 1) {
                 throw new Error('Untrusted or missing workflow run / attempt number');
               }
