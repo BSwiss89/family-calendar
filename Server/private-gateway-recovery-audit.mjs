@@ -150,7 +150,10 @@ export function auditPrivateGatewayAbandonedLock({
   }
   for (const filename of [centralPath, ...households.map(h =>
     path.join(root, 'households', h.householdId, 'data', 'calendar.db'))]) {
-    if (fs.existsSync(filename + '-wal') || fs.existsSync(filename + '-journal')) {
+    // The shared-memory sidecar can survive an interrupted WAL checkpoint.
+    // Even if a -wal file is missing, it still requires manual offline review.
+    if (fs.existsSync(filename + '-wal') || fs.existsSync(filename + '-shm')
+        || fs.existsSync(filename + '-journal')) {
       issues.push('SQLite recovery sidecar requires offline operator review.')
     }
   }
