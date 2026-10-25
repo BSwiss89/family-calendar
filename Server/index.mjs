@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
+import { acquirePrivateHouseholdBackendWriterLock } from './private-gateway-writer-lock.mjs'
 import { installPrivateEventIdentity } from './private-event-identity.mjs'
 import { installPrivateEventSourceOutbox } from './private-event-source-outbox.mjs'
 import { installPrivateUpstreamGuard, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
@@ -62,6 +63,11 @@ if (householdStorage.mode === 'household') {
     response.json({ mode: 'household', householdId: householdStorage.householdId })
   })
 }
+// Reserve the provisioned household before opening any SQLite connection.
+// An unexpectedly killed test backend leaves a lock for operator review.
+const privateBackendWriterLock = householdStorage.mode === 'household'
+  ? acquirePrivateHouseholdBackendWriterLock(householdStorage)
+  : null
 const { dataFolder, uploadFolder, databasePath } = householdStorage
 const OLLAMA_URL =
   'http://127.0.0.1:11434/api/chat'
@@ -7194,6 +7200,42 @@ app.get(/.*/, (request, response) => {
   response.sendFile(path.join(distFolder, 'index.html'))
 })
 
-app.listen(PORT, HOST, () => {
+const httpServer = app.listen(PORT, HOST, () => {
   console.log(`Family Calendar server running at http://127.0.0.1:${PORT}`)
 })
+// Explicit test-only graceful shutdown. Windows TerminateProcess may bypass
+// SIGTERM handlers, so only the parent that spawned this child may use the
+// private Node IPC command. A hard kill intentionally leaves a stale lock.
+if (privateBackendWriterLock) {
+  let closing = false
+  const closePrivateBackend = () => {
+    if (closing) return
+    closing = true
+    httpServer.close(error => {
+      if (error) {
+        console.error('Private household backend shutdown failed:', error)
+        process.exitCode = 1
+        return // Keep writer lock quarantined.
+      }
+      try {
+        database.close()
+        privateBackendWriterLock.release()
+        process.exitCode = 0
+        if (process.connected) process.disconnect()
+      } catch (cleanupError) {
+        console.error('Private household writer-lock cleanup failed:', cleanupError)
+        process.exitCode = 1
+      }
+    })
+  }
+  process.once('SIGTERM', closePrivateBackend)
+  process.once('SIGINT', closePrivateBackend)
+  if (typeof process.send === 'function') {
+    process.on('message', message => {
+      if (message?.type === 'private-household-test-shutdown' &&
+          message.householdId === householdStorage.householdId) {
+        closePrivateBackend()
+      }
+    })
+  }
+}

@@ -73,7 +73,7 @@ function startHouseholdBackend(storageRoot, householdId, port, serviceToken) {
       FAMILY_CALENDAR_HOUSEHOLD_TEST_ONLY: 'YES',
       FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN: serviceToken,
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   })
   let logs = ''
   for (const stream of [child.stdout, child.stderr]) {
@@ -112,7 +112,9 @@ async function stopBackend(backend) {
   if (backend.child.exitCode !== null || backend.child.signalCode !== null) return
   const child = backend.child
   const finished = new Promise(resolve => child.once('exit', resolve))
-  child.kill()
+  if (!child.connected) throw new Error('Disposable backend IPC shutdown channel unavailable.')
+  child.send({ type: 'private-household-test-shutdown',
+    householdId: backend.householdId })
   const stopped = await Promise.race([
     finished.then(() => true),
     new Promise(resolve => setTimeout(() => resolve(false), 6000)),
@@ -183,6 +185,16 @@ export async function startHouseholdBrowserDemo() {
           gatewayClosed: true,
         })
       } catch (error) { errors.push(error) }
+    }
+    if (errors.length === 0 && backends.length === 2) {
+      for (const backend of backends) {
+        const lock = path.join(storageRoot, 'households', backend.householdId,
+          '.family-calendar-private-backend-writer.lock')
+        if (fs.existsSync(lock)) {
+          errors.push(new Error('Disposable backend writer lock survived clean shutdown: ' +
+            backend.householdId))
+        }
+      }
     }
     if (errors.length === 0) {
       fs.rmSync(root, { recursive: true, force: true })

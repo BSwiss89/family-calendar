@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { acquirePrivateGatewayWriterLock } from '../Server/private-gateway-writer-lock.mjs'
+import { acquirePrivateGatewayWriterLock, acquirePrivateHouseholdBackendWriterLock } from '../Server/private-gateway-writer-lock.mjs'
+import { provisionEmptyHousehold } from '../Server/household-storage.mjs'
+import { fileURLToPath } from 'node:url'
 
 function temporaryRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'calendar-gateway-writer-test-'))
@@ -53,4 +55,56 @@ test('refuse invalid or missing roots without creating directories', t => {
   assert.throws(() => acquirePrivateGatewayWriterLock('relative-folder'), /absolute storage root/)
   assert.throws(() => acquirePrivateGatewayWriterLock(path.join(root, 'not-present')))
   assert.deepEqual(fs.readdirSync(root), [])
+})
+
+const serverDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../Server')
+function householdFixture(t) {
+  const root = temporaryRoot(t)
+  const a = provisionEmptyHousehold({ serverDirectory, storageRoot: root,
+    householdId: 'family-a' })
+  const b = provisionEmptyHousehold({ serverDirectory, storageRoot: root,
+    householdId: 'family-b' })
+  return { root, a, b }
+}
+
+test('a second backend for the same family is refused while another family is unaffected', t => {
+  const { root, a, b } = householdFixture(t)
+  const lockA = acquirePrivateHouseholdBackendWriterLock(a)
+  const lockB = acquirePrivateHouseholdBackendWriterLock(b)
+  assert.throws(() => acquirePrivateHouseholdBackendWriterLock(a),
+    /backend writer lock already exists/)
+  assert.ok(fs.existsSync(path.join(root, 'households', 'family-a',
+    '.family-calendar-private-backend-writer.lock', 'owner.json')))
+  lockB.release()
+  lockA.release()
+  const restart = acquirePrivateHouseholdBackendWriterLock(a)
+  restart.release()
+})
+
+test('an interrupted backend leaves a lock that refuses automatic restart', t => {
+  const { root, a } = householdFixture(t)
+  acquirePrivateHouseholdBackendWriterLock(a)
+  const marker = path.join(root, 'households', 'family-a',
+    '.family-calendar-private-backend-writer.lock', 'owner.json')
+  assert.throws(() => acquirePrivateHouseholdBackendWriterLock(a),
+    /backend writer lock already exists/)
+  assert.equal(fs.existsSync(marker), true)
+})
+
+test('invalid backend storage and modified lock markers never unlock a household', t => {
+  const { root, a } = householdFixture(t)
+  assert.throws(() => acquirePrivateHouseholdBackendWriterLock({
+    ...a, mode: 'legacy',
+  }), /provisioned household storage/)
+  assert.throws(() => acquirePrivateHouseholdBackendWriterLock({
+    ...a, householdId: 'family-b',
+  }), /mismatched storage boundary/)
+  const owned = acquirePrivateHouseholdBackendWriterLock(a)
+  const marker = path.join(root, 'households', 'family-a',
+    '.family-calendar-private-backend-writer.lock', 'owner.json')
+  const value = JSON.parse(fs.readFileSync(marker, 'utf8'))
+  fs.writeFileSync(marker, JSON.stringify({ ...value, token: 'a'.repeat(64) }))
+  assert.throws(() => owned.release(), /ownership mismatch/)
+  assert.throws(() => acquirePrivateHouseholdBackendWriterLock(a),
+    /backend writer lock already exists/)
 })
