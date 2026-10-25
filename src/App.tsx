@@ -12,6 +12,7 @@ import {
 import { createPortal } from 'react-dom'
 import './App.css'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
+import FamilyEventSharing from './FamilyEventSharing'
 import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
 import {
@@ -18177,6 +18178,8 @@ onClick={(event) => {
     Edit Event
   </button>
 </div>
+
+<FamilyEventSharing event={viewingCalendarEvent} />
 
 {detailsDeleteConfirmOpen && (
   <div className="event-details-delete-confirm">
