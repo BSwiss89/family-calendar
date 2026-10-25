@@ -13,6 +13,8 @@ import { createPortal } from 'react-dom'
 import './App.css'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
 import FamilyEventSharing from './FamilyEventSharing'
+import { DesktopInvitations, MobileInvitationReminder } from './InvitationCenter'
+import { useInvitationInbox } from './useInvitationInbox'
 import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
 import {
@@ -1981,13 +1983,15 @@ const [page, setPage] =
     'people' |
     'lists' |
     'capture' |
-    'householdMembers'
+    'householdMembers' |
+    'invitations'
   >('home')
 
 const [isEditingHome, setIsEditingHome] =
   useState(false)
 const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
 const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
+const invitationInbox = useInvitationInbox()
 
 useEffect(() => {
   let cancelled = false
@@ -13770,6 +13774,20 @@ return (
 
   <button
     type="button"
+    className={`sidebar-nav-button ${page === 'invitations' ? 'active-sidebar-nav' : ''}`}
+    onClick={() => setPage('invitations')}
+  >
+    <span className="sidebar-nav-icon" aria-hidden="true">✉</span>
+    <span>Invitations</span>
+    {invitationInbox.available && invitationInbox.invitations.length > 0 && (
+      <span aria-label={invitationInbox.invitations.length + ' pending invitations'}>
+        {invitationInbox.invitations.length}
+      </span>
+    )}
+  </button>
+
+  <button
+    type="button"
     className="sidebar-nav-button"
     disabled
   >
@@ -15810,6 +15828,7 @@ createPortal(
 )}
 
       {page === 'householdMembers' && <HouseholdMembersSettings />}
+      {page === 'invitations' && <DesktopInvitations {...invitationInbox} />}
 
       {page === 'calendar' && (
        <section
@@ -23856,6 +23875,7 @@ capture.captureType !== 'other' && (
     </section>
   </div>, document.body
 )}
+      <MobileInvitationReminder {...invitationInbox} />
     </main>
   )
 }
