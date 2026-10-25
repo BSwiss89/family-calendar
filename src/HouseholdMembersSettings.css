@@ -29,3 +29,21 @@
 .household-settings-message{max-width:850px;margin:12px auto 0;padding:12px 14px;border:1px solid #d4d9ed;border-radius:10px;background:#f4f6ff;font-size:14px}.household-settings-message.is-error{background:#fff3f5;border-color:#efd2d9;color:#9b214a}
 .home-household-settings-shortcut{display:block;margin:18px auto 0;border:1px solid #d4d9df;background:#f0f1f3;color:#4f5664;border-radius:9px;padding:10px 26px;font-weight:700;font-size:14px;cursor:pointer}
 @media(max-width:600px){.household-settings-page{padding:16px 14px 96px}.household-settings-card{padding:17px 15px;border-radius:14px}.household-settings-member,.household-settings-invite{gap:10px}.household-settings-avatar{width:35px;height:35px;font-size:16px}.household-settings-danger{padding:8px}.home-household-settings-shortcut{width:fit-content}}
+
+.household-settings-connections {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 17px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.household-settings-connections li {
+  border: 1px solid var(--border-color,#dce1eb);
+  background: var(--card-bg,#fff);
+  border-radius: 999px;
+  padding: 9px 13px;
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
