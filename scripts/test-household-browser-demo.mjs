@@ -1,6 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { startHouseholdBrowserDemo } from './run-household-browser-demo.mjs'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import {
+  startHouseholdBrowserDemo, stopDisposableHouseholdBackend,
+} from './run-household-browser-demo.mjs'
 
 function request(base, path, { cookie, body } = {}) {
   return fetch(base + path, {
@@ -252,4 +256,42 @@ test('disposable private browser demo serves real UI and only selected events th
   } finally {
     await demo.close()
   }
+})
+
+
+test('IPC disconnect is not a process exit: graceful child must actually exit before cleanup', async t => {
+  const child = spawn(process.execPath,
+    ['-e', 'process.disconnect(); setTimeout(() => process.exit(0), 500)'],
+    { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] })
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const finished = once(child, 'exit')
+      child.kill('SIGKILL')
+      await finished
+    }
+  })
+  await once(child, 'disconnect')
+  assert.equal(child.exitCode, null)
+  await stopDisposableHouseholdBackend({ child, householdId: 'family-a' })
+  assert.equal(child.exitCode, 0, 'Child actually exited; IPC disconnect alone is not enough.')
+})
+
+test('disconnected but still running disposable child refuses verified shutdown', async t => {
+  const child = spawn(process.execPath,
+    ['-e', 'process.disconnect(); setInterval(() => {}, 1000)'],
+    { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] })
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const finished = once(child, 'exit')
+      child.kill('SIGKILL')
+      await finished
+    }
+  })
+  await once(child, 'disconnect')
+  await assert.rejects(
+    stopDisposableHouseholdBackend({ child, householdId: 'family-b' }),
+    /shutdown unverified/,
+  )
+  assert.equal(child.exitCode, null, 'Unverified process must not be treated as stopped.')
+  assert.equal(child.signalCode, null, 'No automatic hard kill or unsafe cleanup.')
 })
