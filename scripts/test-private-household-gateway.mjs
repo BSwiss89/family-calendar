@@ -217,6 +217,13 @@ test('central authenticated gateway denies one family access to another family b
       backendPorts: { 'family-a': portA, 'family-b': portB },
       backendTokens,
     })
+    // A second gateway (same central and household DBs) must not open a
+    // listener, even with valid credentials and correct backend bindings.
+    await assert.rejects(startPrivateHouseholdGateway({
+      identityDatabase: central, serverDirectory, storageRoot,
+      backendPorts: { 'family-a': portA, 'family-b': portB },
+      backendTokens,
+    }), /writer lock already exists/)
     assert.equal(new URL(gateway.base).hostname, '127.0.0.1')
     assert.equal(forbiddenPorts.has(gateway.port), false)
 
@@ -896,7 +903,14 @@ test('central authenticated gateway denies one family access to another family b
       'SELECT title FROM event_share_grants WHERE id=?'
     ).get(sharedId).title, 'Family A private calendar')
 
-    await gateway.close()
+    {
+      const closingGateway = gateway
+      gateway = null // Preserve the first failure; avoid a second close in finally.
+      await closingGateway.close()
+    }
+    assert.equal(fs.existsSync(path.join(storageRoot,
+      '.family-calendar-private-gateway-writer.lock')), false,
+    'cleanly stopped gateway must release its exclusive lock')
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory, storageRoot,
       backendPorts: { 'family-a': portA, 'family-b': portB },
@@ -954,7 +968,14 @@ test('central authenticated gateway denies one family access to another family b
       })
     }
     assert.equal(countPendingEventShareSync(central), 205)
-    await gateway.close()
+    {
+      const closingGateway = gateway
+      gateway = null // Preserve the first failure; avoid a second close in finally.
+      await closingGateway.close()
+    }
+    assert.equal(fs.existsSync(path.join(storageRoot,
+      '.family-calendar-private-gateway-writer.lock')), false,
+    'cleanly stopped gateway must release its exclusive lock')
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory, storageRoot,
       backendPorts: { 'family-a': portA, 'family-b': portB },
