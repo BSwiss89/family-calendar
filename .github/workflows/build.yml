@@ -30,6 +30,16 @@ jobs:
         run: node --test scripts/test-list-features.mjs && node --test scripts/test-shopping-stores.mjs && node --test scripts/test-list-icons.mjs
       - name: Verify auth, remembered devices, and separate site cookies
         run: node --test scripts/test-family-auth.mjs
+      - name: Test isolated household storage, memberships and secure invitations
+        run: |
+          node --test scripts/test-household-storage.mjs scripts/test-household-memberships.mjs scripts/test-household-member-invitations.mjs scripts/test-household-member-directory.mjs scripts/test-household-member-access-revocation.mjs
+      - name: Test household settings, registration and migration on disposable databases
+        run: |
+          node --test scripts/test-household-members-settings.mjs scripts/test-private-household-invite-signup.mjs scripts/test-legacy-household-account-rehearsal.mjs
+      - name: Test real two-household private gateway with LIVE Lists preserved
+        run: |
+          node --test scripts/test-private-household-gateway.mjs
+          node --test scripts/test-household-browser-demo.mjs
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
