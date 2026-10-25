@@ -903,9 +903,11 @@ test('central authenticated gateway denies one family access to another family b
       'SELECT title FROM event_share_grants WHERE id=?'
     ).get(sharedId).title, 'Family A private calendar')
 
-    const closingGateway = gateway
-    gateway = null // Preserve the first close/restart error; do not double-close in finally.
-    await closingGateway.close()
+    {
+      const closingGateway = gateway
+      gateway = null // Preserve the first failure; avoid a second close in finally.
+      await closingGateway.close()
+    }
     assert.equal(fs.existsSync(path.join(storageRoot,
       '.family-calendar-private-gateway-writer.lock')), false,
     'cleanly stopped gateway must release its exclusive lock')
@@ -966,9 +968,11 @@ test('central authenticated gateway denies one family access to another family b
       })
     }
     assert.equal(countPendingEventShareSync(central), 205)
-    const closingGateway = gateway
-    gateway = null // Preserve the first close/restart error; do not double-close in finally.
-    await closingGateway.close()
+    {
+      const closingGateway = gateway
+      gateway = null // Preserve the first failure; avoid a second close in finally.
+      await closingGateway.close()
+    }
     assert.equal(fs.existsSync(path.join(storageRoot,
       '.family-calendar-private-gateway-writer.lock')), false,
     'cleanly stopped gateway must release its exclusive lock')
