@@ -105,29 +105,47 @@ function printReport(report) {
   }
 }
 
+// A missing baseline LIVE feature or household foundation file is a hard
+// regression. Overlapping files legitimately differ in the integrated draft;
+// those differences remain visible in the report but require human review.
+function preservedFeaturesMissing(report) {
+  return report.missingLiveFiles.length > 0 || report.missingHouseholdFiles.length > 0
+}
+
 function selfTest() {
-  const sample = {
-    missingLiveFiles: ['src/ListIcons.tsx'],
+  const common = {
+    missingLiveFiles: [],
     criticalDifferences: [{ file: 'Server/index.mjs', change: 'different content' }],
     missingHouseholdFiles: [],
   }
-  if (!sample.missingLiveFiles.length || sample.criticalDifferences[0].file !== 'Server/index.mjs') {
-    throw new Error('Audit fixture failed.')
+  // Changed integrated backend files are expected, not grounds for a false
+  // deployment approval or a CI failure on their own.
+  if (preservedFeaturesMissing(common) ||
+      !preservedFeaturesMissing({ ...common, missingLiveFiles: ['src/ListIcons.tsx'] }) ||
+      !preservedFeaturesMissing({ ...common, missingHouseholdFiles: ['Server/private-household-gateway.mjs'] })) {
+    throw new Error('Feature-preservation gate fixture failed.')
   }
-  console.log('Read-only audit fixture passed.')
+  console.log('Read-only LIVE feature-preservation gate fixtures passed.')
 }
 
 const mode = process.argv[2] ?? '--audit'
 if (mode === '--self-test') {
   selfTest()
-} else if (mode === '--audit' || mode === '--require-reconciled-files') {
+} else if (['--audit', '--require-preserved-features', '--require-reconciled-files'].includes(mode)) {
   const report = inspect()
   printReport(report)
-  // The stricter flag is an explicit manual gate, never the default CI check.
-  // Even a clean result doesn't prove semantics or justify deploying.
+  // In draft CI, fail for missing features but keep legitimate integrated
+  // code differences advisory until separate semantic review is complete.
+  if (mode === '--require-preserved-features' && preservedFeaturesMissing(report)) {
+    console.error('FAIL: LIVE or household feature files are missing from the isolated candidate.')
+    process.exitCode = 1
+  }
+  // The all-file exact-match gate is an explicit manual inspection option.
+  // Even a clean result never constitutes a production deployment approval.
   if (mode === '--require-reconciled-files' &&
-    (report.missingLiveFiles.length || report.criticalDifferences.length ||
-    report.missingHouseholdFiles.length)) process.exitCode = 1
+    (preservedFeaturesMissing(report) || report.criticalDifferences.length)) {
+    process.exitCode = 1
+  }
 } else {
-  throw new Error('Use --audit, --require-reconciled-files, or --self-test.')
+  throw new Error('Use --audit, --require-preserved-features, --require-reconciled-files, or --self-test.')
 }

@@ -20,6 +20,22 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Refuse missing LIVE features or household foundations in isolated candidate
+        if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.number == 70 || github.event.pull_request.base.ref == 'feature/live-preserving-household-integration-candidate') }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (!(Test-Path 'scripts/audit-household-live-parity.mjs')) {
+            throw 'Household/LIVE parity audit is missing; cannot approve candidate.'
+          }
+          node scripts/audit-household-live-parity.mjs --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'LIVE-preservation audit fixture failed.' }
+          # Fetch pinned working LIVE baseline for read-only Git object comparisons.
+          # No checkout, reset, merging, DB access, deployment or Tailscale change.
+          git fetch --no-tags --depth=1 origin feature/auth-current-calendar-two-sites
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned LIVE baseline fetch failed.' }
+          node scripts/audit-household-live-parity.mjs --require-preserved-features
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline LIVE feature or household foundation file missing.' }
       - name: Validate permanent CI attempt journal with mocked GitHub API
         run: node --test scripts/test-ci-history-journal.mjs
       - name: Install dependencies
