@@ -4,6 +4,7 @@
 // calendar, People, events, lists, uploads and LIVE/TEST cookies are untouched.
 // An actual cutover needs a separate reviewed quiescence/session-cookie plan.
 import fs from 'node:fs'
+import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -34,8 +35,17 @@ function validInteger(value) {
 }
 
 function readSourceSnapshot(sourcePath) {
-  assert(typeof sourcePath === 'string' && fs.existsSync(sourcePath)
-    && fs.statSync(sourcePath).isFile(), 'An existing source SQLite file is required.')
+  assert(typeof sourcePath === 'string' && path.isAbsolute(sourcePath)
+    && fs.existsSync(sourcePath) && fs.lstatSync(sourcePath).isFile(),
+  'An existing source SQLite file is required (absolute, regular file).')
+  // A hot WAL or rollback journal means this is not an independently
+  // checkpointed OFFLINE snapshot. Detect obvious incomplete staging before
+  // reading account credentials or opening the destination. This check does
+  // not prove writer quiescence: real cutover needs separate explicit fencing.
+  for (const suffix of ['-wal', '-shm', '-journal']) {
+    assert(!fs.existsSync(sourcePath + suffix),
+      'Source has SQLite journal sidecars; quiesced offline copy required.')
+  }
   const source = new DatabaseSync(sourcePath, { readOnly: true })
   try {
     // A consistent snapshot, even if another process writes during this read.
