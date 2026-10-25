@@ -146,7 +146,8 @@ function waitForConfirmedChildExit(child, timeoutMs) {
 export async function stopDisposableHouseholdBackend(backend) {
   const child = backend.child
   if (child.exitCode !== null || child.signalCode !== null) return
-  if (child.connected) {
+  const wasConnected = child.connected
+  if (wasConnected) {
     // send() can race against the child's voluntary IPC disconnect.
     // Its callback absorbs channel errors; exit confirmation is still required.
     try {
@@ -156,7 +157,7 @@ export async function stopDisposableHouseholdBackend(backend) {
       // Do not treat a failed IPC send as a successful process shutdown.
     }
   }
-  const stopped = await waitForConfirmedChildExit(child, child.connected ? 6000 : 1500)
+  const stopped = await waitForConfirmedChildExit(child, wasConnected ? 6000 : 1500)
   if (!stopped) {
     throw new Error('Disposable backend shutdown unverified (process still alive or exit unknown): ' +
       backend.householdId)
