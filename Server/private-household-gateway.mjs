@@ -109,45 +109,80 @@ function validateUpstreams({ identityDatabase, serverDirectory, storageRoot, bac
 // Fail closed before installing any login gateway routes or serving tenant data.
 // This detects wiring a trusted token+port to the wrong household, but does NOT
 // attest OS process identity or make the test gateway production-ready.
-async function verifyPrivateBackendBindings(portByHousehold, tokensByHousehold) {
+// An occasional abandoned keep-alive socket or brief Windows CI scheduling
+// stall must not strand a healthy private gateway during a restart. Only a
+// fetch-level transport failure is retryable; every HTTP/identity/protocol
+// failure immediately fails closed. No client listener exists during checks.
+async function verifyBindingOnce(householdId, port, upstreamToken) {
+  let response
+  try {
+    response = await fetch('http://127.0.0.1:' + port +
+      '/api/internal/household-binding', {
+      method: 'GET', redirect: 'manual', cache: 'no-store',
+      headers: {
+        Accept: 'application/json',
+        [PRIVATE_UPSTREAM_HEADER]: upstreamToken,
+      },
+      signal: AbortSignal.timeout(2500),
+    })
+  } catch (cause) {
+    // Only failures before receiving any HTTP response can be transient.
+    // Never retry authentication rejection or another household's identity.
+    const retryable = new Error('Private backend binding transport unavailable.', { cause })
+    retryable.retryableTransport = true
+    throw retryable
+  }
+  if (response.status !== 200 ||
+      !(response.headers.get('content-type') ?? '').toLowerCase()
+        .includes('application/json')) {
+    await response.body?.cancel()
+    throw new Error('Private backend did not return a trusted identity response.')
+  }
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('Missing backend identity response.')
+  const chunks = []
+  let total = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > 1024) throw new Error('Oversized backend identity response.')
+      chunks.push(Buffer.from(value))
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const data = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  if (data === null || typeof data !== 'object' ||
+      data.mode !== 'household' || data.householdId !== householdId) {
+    throw new Error('Household backend identity mismatch.')
+  }
+}
+
+// Exported for direct, disposable loopback-only regression testing; this does
+// not create an HTTP route or relax the gateway's normal authorization.
+export async function verifyPrivateBackendBindings(portByHousehold, tokensByHousehold) {
   for (const [householdId, port] of portByHousehold) {
-    try {
-      const response = await fetch('http://127.0.0.1:' + port +
-        '/api/internal/household-binding', {
-        method: 'GET', redirect: 'manual', cache: 'no-store',
-        headers: {
-          Accept: 'application/json',
-          [PRIVATE_UPSTREAM_HEADER]: tokensByHousehold.get(householdId),
-        },
-        signal: AbortSignal.timeout(2500),
-      })
-      if (response.status !== 200 ||
-          !(response.headers.get('content-type') ?? '').toLowerCase()
-            .includes('application/json')) {
-        throw new Error('Private backend did not return a trusted identity response.')
-      }
-      const reader = response.body?.getReader()
-      if (!reader) throw new Error('Missing backend identity response.')
-      const chunks = []
-      let total = 0
+    let verified = false
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          total += value.byteLength
-          if (total > 1024) throw new Error('Oversized backend identity response.')
-          chunks.push(Buffer.from(value))
+        await verifyBindingOnce(householdId, port, tokensByHousehold.get(householdId))
+        verified = true
+        break
+      } catch (error) {
+        // A wrong identity, auth rejection, bad JSON and broken stream are
+        // terminal, never retried. Exhausted transport attempts also reject.
+        if (error?.retryableTransport !== true || attempt === 2) {
+          throw new Error('Private gateway refused unverified household backend: ' +
+            householdId, { cause: error })
         }
-      } finally {
-        reader.releaseLock()
+        await new Promise(resolve => setTimeout(resolve, 125))
       }
-      const data = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-      if (data === null || typeof data !== 'object' ||
-          data.mode !== 'household' || data.householdId !== householdId) {
-        throw new Error('Household backend identity mismatch.')
-      }
-    } catch {
-      throw new Error('Private gateway refused unverified household backend: ' + householdId)
+    }
+    if (!verified) {
+      throw new Error('Private gateway refused unverified household backend: ' +
+        householdId)
     }
   }
 }
