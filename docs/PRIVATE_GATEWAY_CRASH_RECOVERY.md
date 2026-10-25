@@ -63,3 +63,24 @@ SQLite WAL consistency, or the correctness of any production gateway process.
 It returns `allSystemWritersFenced: false` and `recoveryApproved: false`
 even when the supervised disposable processes are quiet. A separate reviewed
 OS-level isolation and operator cutover mechanism is still required.
+
+## Per-household private backend writer locks
+
+Each explicitly test-only backend now acquires a second, **separate**
+exclusive writer-lock directory in its own pre-provisioned household storage
+home before any SQLite connection is opened. This prevents two ordinary
+cooperative backend processes from serving the same Family A SQLite at once
+while allowing Family B to run independently. There is no route or API
+for clearing a backend lock automatically.
+
+For a supervised clean shutdown, the demo/test launcher uses a **private
+parent-child Node IPC shutdown command**. This is required on Windows where
+`child.kill('SIGTERM')` may terminate a process without running a signal
+handler. The backend first closes its HTTP listener, then its SQLite handle,
+then releases only its own token-matched lock. If it crashes or is forcibly
+terminated, the lock stays quarantined.
+
+This protection is **not** an OS lock, host-wide process fence or protection
+against a privileged process deleting lock files. A gateway or backend that
+fails while writing must still undergo approved operator fencing and
+coordinated offline backup/recovery before any abandoned marker is cleared.
