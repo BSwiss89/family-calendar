@@ -42,6 +42,13 @@ jobs:
         run: node --test scripts/test-private-household-gateway.mjs
       - name: Verify complete disposable two-household browser demo lifecycle
         run: node --test scripts/test-household-browser-demo.mjs
+      - name: Audit pinned LIVE compatibility without changing either calendar
+        shell: pwsh
+        run: |
+          git fetch --no-tags --depth=1 origin refs/heads/feature/auth-current-calendar-two-sites
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to fetch approved LIVE code.' }
+          node scripts/audit-household-live-parity.mjs --audit
+          if ($LASTEXITCODE -ne 0) { throw 'LIVE compatibility audit failed.' }
       - name: Test private Arney event selection and confirmation in synthetic households
         run: |
           node --test scripts/test-arney-event-selection.mjs scripts/test-arney-private-event-candidate.mjs scripts/test-private-arney-event-language.mjs scripts/test-private-arney-confirmed-actions.mjs
