@@ -18,7 +18,7 @@ function job(result, at) {
     status: 'completed',
     conclusion: result,
     started_at: at,
-    completed_at: '2026-10-25T14:51:33Z',
+    completed_at: new Date(Date.parse(at) + 6000).toISOString(),
     steps: [
       { number: 1, name: 'Setup', conclusion: 'success', completed_at: at },
       { number: 2, name: 'Household A and B isolation', conclusion: result, completed_at: at }
@@ -40,6 +40,14 @@ function mock(attemptJobs, { comments = [], invalidRepository = false, failWrite
             event: 'pull_request',
             repository: { full_name: invalidRepository ? 'other/repo' : 'BSwiss89/family-calendar' },
             head_sha: 'ff18efc6601d7b296d7635c8e9cdb7ac5aa63492'
+          }
+        }),
+        getWorkflowRunAttempt: async ({ attempt_number }) => ({
+          data: {
+            run_attempt: attempt_number,
+            run_started_at: attempt_number === 1
+              ? '2026-10-25T14:46:25Z'
+              : '2026-10-25T14:52:14Z'
           }
         }),
         listJobsForWorkflowRunAttempt: jobsRoute
@@ -122,6 +130,36 @@ test('history-only rerun never gets an invented successful test result', async (
   await f.run(2);
   assert.match(f.persisted[1].body, /CI attempt 2 — NO TEST JOB RERUN/);
   assert.match(f.persisted[1].body, /no test job was executed/);
+});
+
+test('GitHub carries forward old completed tests on recorder-only rerun; never count them as newly passed', async () => {
+  const oldJob = job('success', '2026-10-25T14:46:28Z');
+  const f = mock({
+    1: oldJob,
+    // GitHub can return old job as attempt 2 with a NEW job ID and
+    // run_attempt=2, while started_at and completed_at stay in attempt 1.
+    2: oldJob.map(item => ({ ...item, run_attempt: 2, id: 121210845319 }))
+  });
+  await f.run(1);
+  const original = f.persisted[0].body;
+  await f.run(2);
+  assert.equal(f.persisted.length, 2);
+  assert.equal(f.persisted[0].body, original);
+  assert.match(f.persisted[1].body, /CI attempt 2 — NO TEST JOB RERUN/);
+  assert.match(f.persisted[1].body, /Earlier jobs carried forward by GitHub \(excluded\): 1/);
+  assert.doesNotMatch(f.persisted[1].body, /CI attempt 2 — PASS/);
+});
+
+test('only newly completed tests count when old jobs are carried into a full rerun', async () => {
+  const old = job('failure', '2026-10-25T14:46:28Z');
+  const fresh = job('success', '2026-10-25T14:52:18Z').map(j => ({ ...j, name: 'fresh-build' }));
+  const f = mock({ 1: old, 2: [...old, ...fresh] });
+  await f.run(2);
+  assert.match(f.persisted[0].body, /CI attempt 1 — FAIL/);
+  assert.match(f.persisted[1].body, /CI attempt 2 — PASS/);
+  assert.match(f.persisted[1].body, /Earlier jobs carried forward by GitHub \(excluded\): 1/);
+  assert.match(f.persisted[1].body, /### Job: fresh-build/);
+  assert.doesNotMatch(f.persisted[1].body, /### Job: frontend-build/);
 });
 
 test('user-posted forged marker cannot block trusted Actions history', async () => {
