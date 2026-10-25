@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import HouseholdMembersSettings from './HouseholdMembersSettings'
 import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
 import {
@@ -1978,7 +1979,8 @@ const [page, setPage] =
     'meals' |
     'people' |
     'lists' |
-    'capture'
+    'capture' |
+    'householdMembers'
   >('home')
 
 const [isEditingHome, setIsEditingHome] =
@@ -15756,6 +15758,17 @@ createPortal(
         type="button"
         onClick={() => {
           setMobileSettingsOpen(false)
+          setPage('householdMembers')
+        }}
+      >
+        Household &amp; Members
+        <span aria-hidden="true">›</span>
+      </button>
+      <button
+        className="mobile-settings-option"
+        type="button"
+        onClick={() => {
+          setMobileSettingsOpen(false)
           window.dispatchEvent(new Event('family-calendar:open-arney-settings'))
         }}
       >
@@ -15794,6 +15807,8 @@ createPortal(
   </div>,
   document.body
 )}
+
+      {page === 'householdMembers' && <HouseholdMembersSettings />}
 
       {page === 'calendar' && (
        <section
