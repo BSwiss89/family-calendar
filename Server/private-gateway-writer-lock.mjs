@@ -1,18 +1,59 @@
-// DISPOSABLE PRIVATE HOUSEHOLD TEST GATEWAY ONLY.
-// Atomic directory ownership serializes gateway instances that share the same
-// trusted household storage root. This is NOT OS process fencing: a privileged
-// or same-user attacker could remove the directory, and household backend
-// processes still require separate supervision.
+// DISPOSABLE PRIVATE HOUSEHOLD TEST SERVICES ONLY.
+// Atomic directory markers prevent accidentally starting multiple gateway
+// instances or multiple backend services for the SAME household data.
 //
-// An unclean termination intentionally leaves a persistent lock. Never
-// automatically steal a "stale" lock using a PID or timeout: a backend or
-// sibling process may still be completing a SQLite write. Manual operator
-// inspection and explicit cleanup are required before a safe restart.
+// These are cooperative same-host guards, NOT hostile-process/OS-level fencing.
+// An unclean exit quarantines the lock. A PID or timeout NEVER authorizes
+// automatic reclaim, even if the writer appears to have disappeared.
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 
-const LOCK_DIR = '.family-calendar-private-gateway-writer.lock'
+const GATEWAY_LOCK_DIR = '.family-calendar-private-gateway-writer.lock'
+const BACKEND_LOCK_DIR = '.family-calendar-private-backend-writer.lock'
+const HOUSEHOLD_ID = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/
+
+function acquireWriterDirectoryLock(root, directoryName, kind, collisionMessage) {
+  const directory = path.join(root, directoryName)
+  const token = randomBytes(32).toString('hex')
+  try {
+    fs.mkdirSync(directory, { mode: 0o700 })
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error(collisionMessage)
+    throw error
+  }
+  // If the writer crashes before owner.json is created, the empty directory
+  // remains quarantined. The original process must never steal an unknown lock.
+  const ownerPath = path.join(directory, 'owner.json')
+  fs.writeFileSync(ownerPath, JSON.stringify({
+    kind, pid: process.pid, acquiredAt: new Date().toISOString(), token,
+  }) + '\n', { flag: 'wx', mode: 0o600 })
+
+  let released = false
+  return {
+    release() {
+      if (released) return
+      if (!fs.lstatSync(directory).isDirectory() ||
+          fs.lstatSync(directory).isSymbolicLink() ||
+          fs.lstatSync(ownerPath).isSymbolicLink() ||
+          !fs.lstatSync(ownerPath).isFile()) {
+        throw new Error('Private writer ownership changed; lock needs manual review.')
+      }
+      let owner
+      try { owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8')) } catch {
+        throw new Error('Private writer marker unreadable; lock needs manual review.')
+      }
+      if (owner?.kind !== kind || owner?.token !== token ||
+          owner?.pid !== process.pid ||
+          fs.readdirSync(directory).join(',') !== 'owner.json') {
+        throw new Error('Private writer ownership mismatch; lock needs manual review.')
+      }
+      fs.unlinkSync(ownerPath)
+      fs.rmdirSync(directory)
+      released = true
+    },
+  }
+}
 
 export function acquirePrivateGatewayWriterLock(storageRoot) {
   if (typeof storageRoot !== 'string' || !path.isAbsolute(storageRoot)) {
@@ -22,47 +63,32 @@ export function acquirePrivateGatewayWriterLock(storageRoot) {
   if (!fs.statSync(root).isDirectory()) {
     throw new Error('Private gateway writer lock storage is not a directory.')
   }
-  const directory = path.join(root, LOCK_DIR)
-  const token = randomBytes(32).toString('hex')
-  try {
-    fs.mkdirSync(directory, { mode: 0o700 })
-  } catch (error) {
-    if (error?.code === 'EEXIST') {
-      throw new Error('Private gateway writer lock already exists; refuse concurrent startup or unreviewed crash recovery.')
-    }
-    throw error
-  }
-  // A crash before creating the owner marker leaves an intentionally
-  // quarantined directory instead of an automatically reusable lock.
-  const ownerPath = path.join(directory, 'owner.json')
-  fs.writeFileSync(ownerPath, JSON.stringify({
-    kind: 'private-household-gateway-writer',
-    pid: process.pid,
-    acquiredAt: new Date().toISOString(),
-    token,
-  }) + '\n', { flag: 'wx', mode: 0o600 })
+  return acquireWriterDirectoryLock(root, GATEWAY_LOCK_DIR,
+    'private-household-gateway-writer',
+    'Private gateway writer lock already exists; refuse concurrent startup or unreviewed crash recovery.')
+}
 
-  let released = false
-  return {
-    release() {
-      if (released) return
-      // Do not remove a replacement/tampered lock or any unknown directory.
-      if (!fs.lstatSync(directory).isDirectory() ||
-          fs.lstatSync(ownerPath).isSymbolicLink() ||
-          !fs.lstatSync(ownerPath).isFile()) {
-        throw new Error('Private gateway writer ownership changed; lock needs manual review.')
-      }
-      let owner
-      try { owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8')) } catch {
-        throw new Error('Private gateway writer marker unreadable; lock needs manual review.')
-      }
-      if (owner?.kind !== 'private-household-gateway-writer' || owner?.token !== token ||
-          owner?.pid !== process.pid || fs.readdirSync(directory).join(',') !== 'owner.json') {
-        throw new Error('Private gateway writer ownership mismatch; lock needs manual review.')
-      }
-      fs.unlinkSync(ownerPath)
-      fs.rmdirSync(directory)
-      released = true
-    },
+// This is called by the explicit test-only private household backend before
+// opening SQLite. Each household locks its own pre-provisioned storage home;
+// Family A and Family B may run concurrently but Family A cannot start twice.
+export function acquirePrivateHouseholdBackendWriterLock(storage) {
+  if (storage?.mode !== 'household' ||
+      typeof storage.householdId !== 'string' ||
+      !HOUSEHOLD_ID.test(storage.householdId) ||
+      typeof storage.dataFolder !== 'string' ||
+      typeof storage.databasePath !== 'string') {
+    throw new Error('Private backend lock requires provisioned household storage.')
   }
+  const data = fs.realpathSync(storage.dataFolder)
+  const home = path.dirname(data)
+  if (!fs.lstatSync(data).isDirectory() ||
+      fs.lstatSync(data).isSymbolicLink() ||
+      path.basename(data) !== 'data' ||
+      path.basename(home) !== storage.householdId ||
+      fs.realpathSync(storage.databasePath) !== path.join(data, 'calendar.db')) {
+    throw new Error('Private backend writer lock refused a mismatched storage boundary.')
+  }
+  return acquireWriterDirectoryLock(home, BACKEND_LOCK_DIR,
+    'private-household-backend-writer',
+    'Private household backend writer lock already exists; refuse duplicate backend startup or unreviewed crash recovery.')
 }
