@@ -267,13 +267,27 @@ jobs:
               );
               for (let attempt = 1; attempt <= currentAttempt; attempt++) {
                 if (known.has(`${run_id}:${attempt}`)) continue;
+                // GitHub may carry completed jobs from the previous attempt into a
+                // single-job rerun, re-labelling them with the new attempt number.
+                // Only count work actually completed after this attempt began.
+                const { data: attemptRun } = await github.rest.actions.getWorkflowRunAttempt({
+                  owner, repo, run_id, attempt_number: attempt
+                });
+                const beganAt = Date.parse(attemptRun.run_started_at);
+                if (attemptRun.run_attempt !== attempt || !Number.isFinite(beganAt)) {
+                  throw new Error(`Attempt ${attempt} has unverified start metadata`);
+                }
                 const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
                   owner, repo, run_id, attempt_number: attempt, per_page: 100
                 });
-                const tested = jobs.filter((job) => job.name !== 'ci-history');
-                if (tested.some((job) => job.status !== 'completed')) {
-                  throw new Error(`Attempt ${attempt} has unfinished test jobs; refusing incomplete archive`);
+                const candidateJobs = jobs.filter((job) => job.name !== 'ci-history');
+                if (candidateJobs.some((job) => job.status !== 'completed' ||
+                  !Number.isFinite(Date.parse(job.completed_at)))) {
+                  throw new Error(`Attempt ${attempt} has unfinished or undated test jobs; refusing incomplete archive`);
                 }
+                const tested = candidateJobs.filter((job) =>
+                  Date.parse(job.completed_at) >= beganAt);
+                const carriedForward = candidateJobs.length - tested.length;
                 const conclusions = tested.map((job) => job.conclusion || 'unknown');
                 const result = !tested.length
                   ? 'NO TEST JOB RERUN'
@@ -310,7 +324,9 @@ jobs:
                   `Head SHA: \`${run.head_sha || 'unknown'}\`  `,
                   `Run: https://github.com/${owner}/${repo}/actions/runs/${run_id}  `,
                   `Recorded: ${timestamp(new Date().toISOString())}  `,
-                  `Test jobs: ${tested.length}; successful steps: **${passedCount}/${stepCount}**`,
+                  `Attempt began: ${timestamp(attemptRun.run_started_at)}`,
+                  `Test jobs executed in this attempt: ${tested.length}; successful steps: **${passedCount}/${stepCount}**`,
+                  `Earlier jobs carried forward by GitHub (excluded): ${carriedForward}`,
                   '',
                   ...(tested.length ? rows : [
                     'This was a history-only rerun; no test job was executed in this attempt.',
