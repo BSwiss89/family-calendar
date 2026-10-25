@@ -91,6 +91,7 @@ function startHouseholdBackend(storageRoot, householdId, port, serviceToken) {
 }
 
 async function awaitHealthy(backend) {
+  let lastProbe = 'no HTTP response yet'
   for (let attempt = 0; attempt < 60; attempt++) {
     if (backend.child.exitCode !== null || backend.child.signalCode !== null) break
     try {
@@ -98,28 +99,69 @@ async function awaitHealthy(backend) {
         headers: { 'x-family-calendar-upstream-token': backend.serviceToken },
         signal: AbortSignal.timeout(1200),
       })
+      lastProbe = 'HTTP ' + response.status
       if (response.ok && (await response.json()).status === 'ok') return
-    } catch { /* startup, not yet listening */ }
+    } catch (error) {
+      // Only report the error TYPE, never capability tokens or request headers.
+      lastProbe = error?.name === 'TimeoutError' ? 'health timeout'
+        : error?.cause?.code === 'ECONNREFUSED' ? 'connection refused'
+          : 'health unavailable'
+    }
     await new Promise(resolve => setTimeout(resolve, 250))
   }
+  const child = backend.child
   throw new Error(
-    'Disposable ' + backend.householdId + ' backend failed to start: ' +
-    backend.logs(),
+    'Disposable ' + backend.householdId +
+    ' backend failed to start (exitCode=' + String(child.exitCode) +
+    ', signalCode=' + String(child.signalCode) +
+    ', ipcConnected=' + String(child.connected) +
+    ', lastHealth=' + lastProbe + '): ' + backend.logs(),
   )
 }
 
-async function stopBackend(backend) {
-  if (backend.child.exitCode !== null || backend.child.signalCode !== null) return
+// A disconnected IPC channel is NOT evidence that a process has exited.
+// Wait for the exact captured child handle; never kill or reclaim a writer
+// lock automatically, even when a disposable browser-demo startup fails.
+function waitForConfirmedChildExit(child, timeoutMs) {
+  return new Promise(resolve => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve(true)
+    let settled = false
+    let timeout
+    function finish(exited) {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      child.off('exit', onExit)
+      child.off('error', onError)
+      resolve(exited)
+    }
+    function onExit() { finish(true) }
+    function onError() { finish(false) }
+    child.once('exit', onExit)
+    child.once('error', onError)
+    timeout = setTimeout(() => finish(false), timeoutMs)
+  })
+}
+
+export async function stopDisposableHouseholdBackend(backend) {
   const child = backend.child
-  const finished = new Promise(resolve => child.once('exit', resolve))
-  if (!child.connected) throw new Error('Disposable backend IPC shutdown channel unavailable.')
-  child.send({ type: 'private-household-test-shutdown',
-    householdId: backend.householdId })
-  const stopped = await Promise.race([
-    finished.then(() => true),
-    new Promise(resolve => setTimeout(() => resolve(false), 6000)),
-  ])
-  if (!stopped) throw new Error('Disposable backend did not stop: ' + backend.householdId)
+  if (child.exitCode !== null || child.signalCode !== null) return
+  const wasConnected = child.connected
+  if (wasConnected) {
+    // send() can race against the child's voluntary IPC disconnect.
+    // Its callback absorbs channel errors; exit confirmation is still required.
+    try {
+      child.send({ type: 'private-household-test-shutdown',
+        householdId: backend.householdId }, () => {})
+    } catch {
+      // Do not treat a failed IPC send as a successful process shutdown.
+    }
+  }
+  const stopped = await waitForConfirmedChildExit(child, wasConnected ? 6000 : 1500)
+  if (!stopped) {
+    throw new Error('Disposable backend shutdown unverified (process still alive or exit unknown): ' +
+      backend.householdId)
+  }
 }
 
 async function seedEvent(base, event, serviceToken) {
@@ -168,7 +210,7 @@ export async function startHouseholdBrowserDemo() {
       try { await gateway.close() } catch (error) { errors.push(error) }
     }
     for (const backend of backends) {
-      try { await stopBackend(backend) } catch (error) { errors.push(error) }
+      try { await stopDisposableHouseholdBackend(backend) } catch (error) { errors.push(error) }
     }
     try { central.close() } catch (error) { errors.push(error) }
     // Before deleting disposable SQLite and uploads, ensure BOTH captured
