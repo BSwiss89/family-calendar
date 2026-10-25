@@ -1024,7 +1024,13 @@ export async function startPrivateHouseholdGateway({
     response.status(404).json({ error: 'Not found.' })
   })
 
-  app.use((request, response) => {
+  // Never let a browser proxy to the test-only backend identity endpoint.
+  // Its credential comes only from server-side trusted gateway configuration.
+  app.use('/api/internal', (_request, response) => {
+    response.status(404).json({ error: 'Not found.' })
+  })
+
+  app.use(async (request, response) => {
     // installFamilyAuth has already validated the central session and CSRF.
     const household = trustedHousehold(request, response)
     if (!household) return
@@ -1035,6 +1041,19 @@ export async function startPrivateHouseholdGateway({
       return response.status(409).json({
         error: 'This event operation is not yet supported in the private family-sharing preview.',
       })
+    }
+    // A gateway can remain up while a backend process restarts on the same
+    // port. Startup-only binding checks are not enough: fail closed BEFORE
+    // forwarding a request, charging AI quota or journaling a calendar edit.
+    // This tests accidental tenant/port misbinding, not OS process attestation.
+    try {
+      await verifyPrivateBackendBindings(
+        new Map([[household.householdId, portByHousehold.get(household.householdId)]]),
+        tokensByHousehold,
+      )
+    } catch {
+      response.set('Cache-Control', 'no-store')
+      return response.status(503).json({ error: 'Household service temporarily unavailable.' })
     }
     // Use exactly the same policy decision as the write-ahead journal. A
     // different route regex could let a backend mutation bypass sharing sync.
