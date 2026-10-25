@@ -212,3 +212,34 @@
     display: inline-flex;
   }
 }
+
+/* Mobile inbox stays reachable after a reminder is dismissed. */
+.mobile-invitation-back { display: none; }
+.mobile-settings-invitation-count {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 750;
+  background: #eef3ff;
+  color: #304b79;
+  padding: 4px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .mobile-invitation-back { display: flex; padding: 10px 16px 0; }
+  .mobile-invitation-back button {
+    background: #eef1f5;
+    color: #35465c;
+    border: 1px solid #cbd4df;
+    border-radius: 9px;
+    padding: 9px 14px;
+    min-height: 42px;
+    font: inherit;
+    font-weight: 650;
+  }
+  .invitation-center-page {
+    margin: 10px auto 24px;
+    max-height: calc(100dvh - 176px);
+    padding: 16px;
+  }
+}

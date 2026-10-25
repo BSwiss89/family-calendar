@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import {
+  parseTrustedShareRecipients, type TrustedShareRecipient,
+} from './eventSharingUiModel'
 import './HouseholdMembersSettings.css'
 
 type Household = {
@@ -95,6 +98,8 @@ export default function HouseholdMembersSettings() {
   const [household, setHousehold] = useState<Household | null>(null)
   const [members, setMembers] = useState<Member[]>([])
   const [invitations, setInvitations] = useState<PendingInvite[]>([])
+  const [connectedFamilies, setConnectedFamilies] = useState<TrustedShareRecipient[]>([])
+  const [connectionsAvailable, setConnectionsAvailable] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -127,6 +132,20 @@ export default function HouseholdMembersSettings() {
       // A member never receives private member-directory or invite metadata.
       setMembers([])
       setInvitations([])
+    }
+    // Optional, read-only connection discovery. A legacy calendar may not
+    // support this endpoint; it must not block normal household management.
+    const contacts: unknown = await getJson<unknown>(
+      '/api/shared-events/recipients', { signal }
+    ).catch(() => null)
+    if (signal?.aborted) return
+    if (contacts && typeof contacts === 'object' &&
+      'recipients' in contacts && Array.isArray(contacts.recipients)) {
+      setConnectedFamilies(parseTrustedShareRecipients(contacts))
+      setConnectionsAvailable(true)
+    } else {
+      setConnectedFamilies([])
+      setConnectionsAvailable(false)
     }
     setHousehold(selected)
   }, [])
@@ -249,6 +268,27 @@ export default function HouseholdMembersSettings() {
             <a href="/account" className="household-settings-account-link">
               Your account and trusted devices
             </a>
+          </div>
+
+          <div className="household-settings-card">
+            <h2>Connected families</h2>
+            <p>These are separate family calendars that your household is
+              connected to for individual event sharing. They cannot see
+              your calendar unless you invite them to a specific event.</p>
+            {!connectionsAvailable ? (
+              <p>Family connections are not available on this calendar yet.</p>
+            ) : connectedFamilies.length === 0 ? (
+              <p>No other families are connected yet.</p>
+            ) : (
+              <ul className="household-settings-connections">
+                {connectedFamilies.map(family => (
+                  <li key={family.householdId}>{family.displayName}</li>
+                ))}
+              </ul>
+            )}
+            <p>To share an event, open that event and choose Share Event.
+              An invitation to join your household is different: it grants
+              access to this family's calendar, not a separate one.</p>
           </div>
 
           {household.role === 'owner' ? (

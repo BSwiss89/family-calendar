@@ -51,3 +51,13 @@ test('does not expose privileged invitation actions to normal members', () => {
   assert.match(source, /setMembers\(\[\]\)/)
   assert.match(source, /setInvitations\(\[\]\)/)
 })
+
+test('connected families are read-only and distinct from household member invites', () => {
+  assert.match(source, /parseTrustedShareRecipients/)
+  assert.match(source, /'\/api\/shared-events\/recipients'/)
+  assert.match(source, /setConnectionsAvailable\(false\)/)
+  assert.match(source, /Connected families/)
+  assert.match(source, /family\.displayName/)
+  assert.match(source, /an invitation to join your household is different/i)
+  assert.doesNotMatch(source, /api\/households\/connections\/create/)
+})

@@ -9,6 +9,7 @@ type Props = {
   invitations: readonly IncomingEventInvitation[]
   respondingId: number | null
   error: string
+  suppress?: boolean
   respond: (shareId: number, decision: 'accepted' | 'declined') => Promise<boolean>
 }
 
@@ -73,7 +74,7 @@ export function DesktopInvitations({
  * Other browsers and devices retain their own independent reminder behavior.
  */
 export function MobileInvitationReminder({
-  available, invitations, respondingId, error, respond,
+  available, invitations, respondingId, error, respond, suppress = false,
 }: Props) {
   const [mobile, setMobile] = useState(() =>
     window.matchMedia('(max-width: 760px)').matches)
@@ -111,7 +112,9 @@ export function MobileInvitationReminder({
     if (hasNew) setRemindLater(false)
   }, [invitations])
 
-  const visible = mobile && available && invitations.length > 0 && !remindLater
+  // The full inbox must be accessible after Remind Later without a duplicate
+  // modal covering it. Pending invitations remain on the server until answered.
+  const visible = mobile && available && invitations.length > 0 && !remindLater && !suppress
 
   useEffect(() => {
     if (!visible) return
