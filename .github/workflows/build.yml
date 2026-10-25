@@ -36,6 +36,8 @@ jobs:
       - name: Test household settings, registration and migration on disposable databases
         run: |
           node --test scripts/test-household-members-settings.mjs scripts/test-private-household-invite-signup.mjs scripts/test-legacy-household-account-rehearsal.mjs
+      - name: Verify accepted shared event overlays and parsing
+        run: node --test scripts/test-live-received-shared-calendar.mjs scripts/test-shared-event-overlay.mjs
       - name: Verify LIVE desktop and mobile household invitation inbox
         run: node --test scripts/test-live-invitation-inbox.mjs
       - name: Verify LIVE event detail single-share entry point
