@@ -10,9 +10,11 @@ const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url
 
 test('Household & Members is a Settings destination with mobile home shortcut', () => {
   assert.match(app, /import HouseholdMembersSettings from '\.\/HouseholdMembersSettings'/)
-  assert.match(app, /page === 'settings' && <HouseholdMembersSettings/)
-  assert.match(app, /home-household-settings-shortcut/)
-  assert.match(app, /onClick=\{\(\) => setPage\('settings'\)\}/)
+  assert.match(app, /page === 'householdMembers' && <HouseholdMembersSettings/)
+  assert.match(app, /home-mobile-settings-button/)
+  assert.match(app, /mobile-settings-panel/)
+  assert.match(app, /Household &amp; Members/)
+  assert.match(app, /setPage\('householdMembers'\)/)
 })
 
 test('owner-only member list, one-use invitation and revocation endpoints are authenticated', () => {
