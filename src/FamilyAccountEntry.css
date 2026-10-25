@@ -1,0 +1,4 @@
+.family-account-nav{text-decoration:none;cursor:pointer;display:flex;align-items:center;gap:8px}
+.family-account-mobile{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);right:58px;z-index:1100;display:grid;place-items:center;border-radius:50%;width:38px;height:38px;background:#e0e7ff;color:#312e81;text-decoration:none;font-size:19px}
+.family-account-mobile:focus-visible,.family-account-nav:focus-visible{outline:3px solid #818cf8;outline-offset:3px}
+@media(min-width:701px){.family-account-mobile{display:none}}
