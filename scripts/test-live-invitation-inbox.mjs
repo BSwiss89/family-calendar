@@ -18,7 +18,7 @@ test('desktop invites have their own page without replacing LIVE navigation', ()
 })
 
 test('mobile invitation reminder is optional and remains isolated from editing events', () => {
-  assert.match(app, /<MobileInvitationReminder \{\.\.\.invitationInbox\} \/>/)
+  assert.match(app, /<MobileInvitationReminder \{\.\.\.invitationInbox\} suppress=\{page === 'invitations'\} \/>/)
   assert.match(ui, /mobile && available && invitations\.length > 0 && !remindLater/)
   assert.match(ui, /Remind Later/)
   assert.match(ui, /Accept/)
@@ -28,6 +28,15 @@ test('mobile invitation reminder is optional and remains isolated from editing e
   assert.match(inbox, /setInvitations\(\[\]\)/)
   assert.match(inbox, /\/api\/shared-events\/invitations/)
   assert.doesNotMatch(inbox, /\/api\/events/)
+})
+
+test('mobile Settings reopens pending invites after Remind Later without duplicate modal', () => {
+  assert.match(app, /className="mobile-settings-invitation-count"/)
+  assert.match(app, /setPage\('invitations'\)/)
+  assert.match(app, /void invitationInbox\.refresh\(\)/)
+  assert.match(app, /mobile-invitation-back/)
+  assert.match(ui, /!remindLater && !suppress/)
+  assert.match(app, /suppress=\{page === 'invitations'\}/)
 })
 
 test('pending invitations do not copy external events into the editable local calendar', () => {
