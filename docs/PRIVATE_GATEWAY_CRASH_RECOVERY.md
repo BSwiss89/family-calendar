@@ -47,3 +47,19 @@ not mutate or auto-reclaim the lock.
 All OS process termination is limited to processes spawned by this test.
 Temporary test files are deleted only after spawned processes exit. No
 production service, site, task, or database is targeted.
+
+## Supervised disposable shutdown check (test-only)
+
+The existing two-family demo launcher now confirms that its **captured**
+`family-a` and `family-b` Node child process handles have exited, that the
+private gateway listener has been closed, and that all three specific loopback
+ports refuse new TCP connections. An unexpectedly occupied port prevents it
+from erasing the disposable fixture. The helper never kills processes,
+removes writer locks or inspects real calendar services.
+
+This is stronger than checking PID absence alone, but it **cannot** prove
+unrelated writers, Windows scheduled-task restarts, descendants of a child,
+SQLite WAL consistency, or the correctness of any production gateway process.
+It returns `allSystemWritersFenced: false` and `recoveryApproved: false`
+even when the supervised disposable processes are quiet. A separate reviewed
+OS-level isolation and operator cutover mechanism is still required.
