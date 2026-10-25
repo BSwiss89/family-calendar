@@ -48,11 +48,15 @@ jobs:
       - name: Verify synthetic household AI budgets and offline backup restore safety
         run: |
           node --test scripts/test-private-local-ai-budget.mjs scripts/test-private-paid-api-budget.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Private household AI budget test failure.' }
           node --test scripts/test-private-restore-preflight.mjs scripts/test-private-offline-restore-rehearsal.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Private household offline restore test failure.' }
       - name: Test real two-household private gateway with LIVE Lists preserved
         run: |
           node --test scripts/test-private-household-gateway.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Two-household private gateway tests failed.' }
           node --test scripts/test-household-browser-demo.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Two-household browser demo tests failed.' }
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
