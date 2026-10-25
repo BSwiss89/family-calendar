@@ -217,3 +217,111 @@ jobs:
             }
           }
 
+  ci-history:
+    name: ci-history
+    needs: frontend-build
+    if: ${{ always() && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: Preserve CI initial attempt, failures and reruns in GitHub Issue #84
+        uses: actions/github-script@v7
+        with:
+          script: |
+            return await (async function recorder(github, context, core) {
+              const { owner, repo } = context.repo;
+              const issue_number = 84;
+              const run_id = Number(context.runId);
+              const currentAttempt = Number(context.runAttempt);
+              if (!Number.isSafeInteger(run_id) || !Number.isSafeInteger(currentAttempt) || currentAttempt < 1) {
+                throw new Error('Untrusted or missing workflow run / attempt number');
+              }
+              const timestamp = (value) => {
+                if (!value) return 'not reported';
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) return 'invalid timestamp';
+                const central = new Intl.DateTimeFormat('en-US', {
+                  timeZone: 'America/Chicago', year: 'numeric', month: '2-digit',
+                  day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+                  hour12: true, timeZoneName: 'short'
+                }).format(date);
+                return `${date.toISOString()} (UTC); ${central} (Central)`;
+              };
+              const marker = (attempt) => `<!-- fc-ci-attempt:v1:${run_id}:${attempt} -->`;
+              const { data: run } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id });
+              if (run.repository?.full_name !== `${owner}/${repo}`) {
+                throw new Error('Workflow run repository identity mismatch');
+              }
+              const previous = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number, per_page: 100
+              });
+              const known = new Set(
+                previous
+                  .filter((comment) => comment.user?.login === 'github-actions[bot]')
+                  .flatMap((comment) => [...(comment.body || '').matchAll(/<!-- fc-ci-attempt:v1:(\d+):(\d+) -->/g)]
+                    .map((match) => `${match[1]}:${match[2]}`))
+              );
+              for (let attempt = 1; attempt <= currentAttempt; attempt++) {
+                if (known.has(`${run_id}:${attempt}`)) continue;
+                const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
+                  owner, repo, run_id, attempt_number: attempt, per_page: 100
+                });
+                const tested = jobs.filter((job) => job.name !== 'ci-history');
+                if (tested.some((job) => job.status !== 'completed')) {
+                  throw new Error(`Attempt ${attempt} has unfinished test jobs; refusing incomplete archive`);
+                }
+                const conclusions = tested.map((job) => job.conclusion || 'unknown');
+                const result = !tested.length
+                  ? 'NO TEST JOB RERUN'
+                  : conclusions.every((status) => status === 'success')
+                    ? 'PASS'
+                    : conclusions.some((status) => ['failure', 'timed_out', 'cancelled', 'action_required'].includes(status))
+                      ? 'FAIL'
+                      : 'NOT PASSED';
+                const stepCount = tested.reduce((sum, job) => sum + (job.steps || []).length, 0);
+                const passedCount = tested.reduce((sum, job) =>
+                  sum + (job.steps || []).filter((step) => step.conclusion === 'success').length, 0);
+                const rows = [];
+                for (const job of tested) {
+                  rows.push(`### Job: ${job.name} — ${job.conclusion || 'no conclusion'}`);
+                  rows.push(`Started: ${timestamp(job.started_at)}`);
+                  rows.push(`Completed: ${timestamp(job.completed_at)}`);
+                  rows.push('');
+                  rows.push('| Step | Result | Finished (UTC and Central) |');
+                  rows.push('|---|---|---|');
+                  for (const step of job.steps || []) {
+                    const safeName = String(step.name || 'unnamed')
+                      .replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+                    rows.push(`| ${step.number}: ${safeName} | ${step.conclusion || step.status || 'unknown'} | ${timestamp(step.completed_at)} |`);
+                  }
+                  rows.push('');
+                }
+                const text = [
+                  marker(attempt),
+                  `## CI attempt ${attempt} — ${result}`,
+                  `Workflow: ${run.name || 'unknown'}  `,
+                  `Run ID: \`${run_id}\`  `,
+                  `Attempt: **${attempt} of ${currentAttempt} observed**  `,
+                  `Event: \`${run.event || 'unknown'}\`  `,
+                  `Head SHA: \`${run.head_sha || 'unknown'}\`  `,
+                  `Run: https://github.com/${owner}/${repo}/actions/runs/${run_id}  `,
+                  `Recorded: ${timestamp(new Date().toISOString())}  `,
+                  `Test jobs: ${tested.length}; successful steps: **${passedCount}/${stepCount}**`,
+                  '',
+                  ...(tested.length ? rows : [
+                    'This was a history-only rerun; no test job was executed in this attempt.',
+                    'The previous attempt records remain unchanged.'
+                  ]),
+                  '',
+                  '_This durable summary is independent of GitHub Actions log retention. It preserves step outcomes, not raw logs or secrets._'
+                ].join('\n');
+                if (text.length > 60000) {
+                  throw new Error(`Attempt ${attempt} summary is oversized; refusing to silently truncate it`);
+                }
+                await github.rest.issues.createComment({ owner, repo, issue_number, body: text });
+                core.info(`Permanently recorded CI run ${run_id} attempt ${attempt}: ${result}`);
+                known.add(`${run_id}:${attempt}`);
+              }
+            })(github, context, core)
