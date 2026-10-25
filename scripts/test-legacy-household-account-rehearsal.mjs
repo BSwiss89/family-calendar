@@ -97,6 +97,47 @@ function centralCounts(central) {
     central.prepare('SELECT COUNT(*) AS n FROM ' + table).get().n)
 }
 
+
+
+test('offline source with SQLite sidecars refuses preflight and import without writes', t => {
+  const { args, central, sourcePath, before, uploads } = fixture(t)
+  const approved = preflightLegacyHouseholdImport(args)
+  for (const suffix of ['-wal', '-shm', '-journal']) {
+    const sidecar = sourcePath + suffix
+    fs.writeFileSync(sidecar, 'SYNTHETIC HOT-SOURCE MARKER')
+    try {
+      assert.throws(() => preflightLegacyHouseholdImport(args),
+        /quiesced offline copy required/)
+      assert.throws(() => rehearseLegacyHouseholdImport({
+        ...args, expectedFingerprint: approved.fingerprint,
+      }), /quiesced offline copy required/)
+      assert.deepEqual(centralCounts(central), [0, 0, 0])
+    } finally {
+      fs.unlinkSync(sidecar)
+    }
+  }
+  assert.equal(fileHash(sourcePath), before)
+  assert.equal(fs.readFileSync(path.join(uploads, 'family-photo.jpg'), 'utf8'),
+    'KEEP EXISTING UPLOAD')
+  assert.deepEqual(centralCounts(central), [0, 0, 0])
+})
+
+test('relative source and a folder instead of a database fail before import', t => {
+  const { args, central, sourcePath } = fixture(t)
+  const approved = preflightLegacyHouseholdImport(args)
+  assert.throws(() => preflightLegacyHouseholdImport({
+    ...args, sourcePath: path.basename(sourcePath),
+  }), /existing source SQLite file/)
+  assert.throws(() => rehearseLegacyHouseholdImport({
+    ...args, sourcePath: path.basename(sourcePath),
+    expectedFingerprint: approved.fingerprint,
+  }), /existing source SQLite file/)
+  assert.throws(() => preflightLegacyHouseholdImport({
+    ...args, sourcePath: path.dirname(sourcePath),
+  }), /existing source SQLite file/)
+  assert.deepEqual(centralCounts(central), [0, 0, 0])
+})
+
 test('copy legacy usernames, IDs, working password hashes, disabled state and sessions without touching calendar data', async t => {
   const { args, central, sourcePath, before, uploads } = fixture(t)
   const dry = preflightLegacyHouseholdImport(args)
