@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer"><meta name="theme-color" content="#4f46e5">
+<title>Start your family calendar</title>
+<link rel="stylesheet" href="/auth/styles.css"><script src="/auth/start-family.js" defer></script>
+</head><body><main class="auth-shell"><section class="auth-card" aria-labelledby="start-title">
+<div class="auth-mark" aria-hidden="true">▦</div><h1 id="start-title">Start your own family calendar</h1>
+<p class="auth-intro">This invitation creates a new, private household, not membership in somebody else's household. Invitations can be used once and expire after 72 hours.</p>
+<form id="start-form">
+<label for="start-token">Invitation code</label>
+<input id="start-token" type="password" autocomplete="off" spellcheck="false" minlength="64" maxlength="64" required>
+<label for="start-household">Household name</label>
+<input id="start-household" type="text" maxlength="80" autocomplete="off" required>
+<label for="start-username">Your username</label>
+<input id="start-username" type="text" autocomplete="username" minlength="3" maxlength="40" pattern="[a-zA-Z0-9._-]{3,40}" required>
+<label for="start-name">Your name</label><input id="start-name" type="text" autocomplete="name" maxlength="80" required>
+<label for="start-password">Create a password</label>
+<input id="start-password" type="password" autocomplete="new-password" minlength="14" maxlength="200" required>
+<p class="muted small">Use at least 14 characters. The calendar administrator must activate your private calendar after registration.</p>
+<p id="start-message" class="error" role="alert" aria-live="polite"></p>
+<button id="start-submit" type="submit">Create my household</button></form>
+<p id="start-success" hidden role="status" aria-live="polite">Your private household and owner account are registered. The administrator must activate your calendar before it can be used. <a href="/login">Sign in</a>.</p>
+<p class="auth-footnote"><a href="/login">Already registered? Sign in</a></p>
+<noscript>JavaScript is required to accept an invitation.</noscript>
+</section></main></body></html>
