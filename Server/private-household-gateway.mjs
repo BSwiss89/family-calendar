@@ -36,6 +36,9 @@ import {
   listHouseholdMemberInvitations, revokeHouseholdMemberInvitation,
 } from './household-member-invitations.mjs'
 import { installPrivateHouseholdSignup } from './private-household-signup.mjs'
+import { installPrivateIndependentHouseholdSignup } from './private-independent-household-signup.mjs'
+import { createIndependentHouseholdInvitationTables, issueIndependentHouseholdInvitation,
+  revokeIndependentHouseholdInvitation } from './independent-household-invitations.mjs'
 import { listHouseholdMembers } from './household-member-directory.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
@@ -358,7 +361,13 @@ export async function startPrivateHouseholdGateway({
   storageRoot,
   backendPorts,
   backendTokens,
+  // Empty by default; only trusted server configuration can permit issuance.
+  independentHouseholdAdministratorUserIds = [],
 }) {
+  if (!Array.isArray(independentHouseholdAdministratorUserIds) ||
+      independentHouseholdAdministratorUserIds.some(id => !Number.isSafeInteger(id) || id < 1)) {
+    throw new Error('Invalid private administrator allowlist.')
+  }
   const portByHousehold = validateUpstreams({
     identityDatabase, serverDirectory, storageRoot, backendPorts,
   })
@@ -384,6 +393,7 @@ export async function startPrivateHouseholdGateway({
   try {
   // Invitation state is central-only, never stored in household calendars.
   createHouseholdInvitationTables(identityDatabase)
+  createIndependentHouseholdInvitationTables(identityDatabase)
   // Central share records are separate from either family's calendar DB.
   // No migrations to live/preview data occur; this gateway is test-only.
   createEventShareTables(identityDatabase)
@@ -537,6 +547,10 @@ export async function startPrivateHouseholdGateway({
   app.use('/api/auth/login', express.json({ limit: '32kb' }))
   // Only this exact anonymous join flow precedes required session protection.
   installPrivateHouseholdSignup(app, identityDatabase, serverDirectory)
+  installPrivateIndependentHouseholdSignup(app, {
+    identityDatabase, serverDirectory, storageRoot,
+    trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+  })
   installFamilyAuth(app, identityDatabase, serverDirectory, 'required', {
     cookieName: '__Host-fc_gateway_session',
   })
@@ -586,6 +600,42 @@ export async function startPrivateHouseholdGateway({
       selectedHouseholdId: selected.householdId,
       displayName: selected.displayName,
     })
+  })
+
+  // New-household invitation issuance is distinct from inviting a member into
+  // an existing household. A browser can never supply an administrator role.
+  app.post('/api/households/independent-invitations', (request, response) => {
+    try {
+      const invite = issueIndependentHouseholdInvitation(identityDatabase, {
+        serverVerifiedAdministratorUserId: request.familyAccount.user_id,
+        trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+      })
+      response.set('Cache-Control', 'no-store')
+      response.status(201).json({
+        ...invite,
+        startUrl: 'https://' + request.get('host') + '/start-family#token=' + invite.token,
+      })
+    } catch (error) {
+      response.status(error?.message === 'Trusted calendar administrator permission required.'
+        ? 403 : error?.message === 'Independent household invitation limit reached.'
+          ? 429 : 503).json({ error: 'Independent household invitation unavailable.' })
+    }
+  })
+  app.post('/api/households/independent-invitations/:id/revoke', (request, response) => {
+    const invitationId = decimalPathId(request.params.id)
+    if (!invitationId) return response.status(400).json({ error: 'Invalid invitation.' })
+    try {
+      const revoked = revokeIndependentHouseholdInvitation(identityDatabase, {
+        serverVerifiedAdministratorUserId: request.familyAccount.user_id,
+        trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+        invitationId,
+      })
+      response.status(revoked ? 200 : 404).json(revoked ? { ok: true }
+        : { error: 'Pending invitation not found.' })
+    } catch (error) {
+      response.status(error?.message === 'Trusted calendar administrator permission required.'
+        ? 403 : 503).json({ error: 'Independent household invitation unavailable.' })
+    }
   })
 
   // Private-only owner invitation endpoints. Tenant identity comes strictly
