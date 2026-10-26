@@ -190,7 +190,7 @@ async function seedEvent(base, event, serviceToken) {
  * Returns close() to stop the three servers and erase ONLY the unique temp
  * fixture created for this specific invocation.
  */
-export async function startHouseholdBrowserDemo() {
+export async function startHouseholdBrowserDemo({ enableIndependentHouseholdInvitations = false } = {}) {
   if (!fs.existsSync(path.join(checkout, 'dist', 'index.html'))) {
     throw new Error('Build this draft PR in the isolated preview checkout first.')
   }
@@ -216,7 +216,7 @@ export async function startHouseholdBrowserDemo() {
     // Before deleting disposable SQLite and uploads, ensure BOTH captured
     // child handles have exited and no gateway/backend loopback port remains
     // occupied. A different process that reused a port also blocks cleanup.
-    if (errors.length === 0 && gateway && backends.length === 2) {
+    if (errors.length === 0 && gateway && backends.length >= 2) {
       try {
         await assertDisposableSupervisedWritersStopped({
           backends,
@@ -225,10 +225,11 @@ export async function startHouseholdBrowserDemo() {
           ])),
           gatewayPort: gateway.port,
           gatewayClosed: true,
+          expectedHouseholdIds: backends.map(b => b.householdId),
         })
       } catch (error) { errors.push(error) }
     }
-    if (errors.length === 0 && backends.length === 2) {
+    if (errors.length === 0 && backends.length >= 2) {
       for (const backend of backends) {
         const lock = path.join(storageRoot, 'households', backend.householdId,
           '.family-calendar-private-backend-writer.lock')
@@ -341,6 +342,10 @@ export async function startHouseholdBrowserDemo() {
       storageRoot,
       backendPorts: ports,
       backendTokens,
+      independentHouseholdAdministratorUserIds: enableIndependentHouseholdInvitations
+        ? [central.prepare('SELECT id FROM family_users WHERE username = ?')
+          .get(accounts[0].username).id]
+        : [],
     })
     // The gateway itself must never be directly reachable on a Tailscale or
     // LAN adapter. HTTPS for browser auth will be Tailscale Serve only.
@@ -357,6 +362,27 @@ export async function startHouseholdBrowserDemo() {
     })
     assert.equal((await check.json()).status, 'ok')
 
+    // Test-only supervisor hook. Launches a brand-new pre-provisioned family
+    // backend but NEVER enrolls it automatically. No browser route for this.
+    async function startPendingHouseholdBackend(householdId) {
+      if (closed) throw new Error('Disposable demo is closed.')
+      if (backends.some(b => b.householdId === householdId)) {
+        throw new Error('Household backend is already started.')
+      }
+      const present = central.prepare([
+        'SELECT h.id FROM household_registry h',
+        'JOIN independent_household_invitations i ON i.household_id = h.id',
+        'WHERE h.storage_id = ? AND i.redeemed_at IS NOT NULL',
+      ].join(' ')).get(householdId)
+      if (!present) throw new Error('Unknown independent household.')
+      const port = await chooseFreeLoopbackPort(used)
+      const upstreamToken = randomBytes(32).toString('hex')
+      const backend = startHouseholdBackend(storageRoot, householdId, port, upstreamToken)
+      backends.push(backend)
+      await awaitHealthy(backend)
+      return { householdId, port, upstreamToken }
+    }
+
     return {
       base: gateway.base,
       gatewayPort: gateway.port,
@@ -365,6 +391,8 @@ export async function startHouseholdBrowserDemo() {
       close,
       // Only expose listener ports to integration tests, never user browsers.
       privateBackendPorts: ports,
+      startPendingHouseholdBackend,
+      enrollHouseholdBackend: gateway.enrollHouseholdBackend,
     }
   } catch (error) {
     try { await close() } catch (cleanupError) {
