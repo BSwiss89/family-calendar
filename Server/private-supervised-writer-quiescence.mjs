@@ -50,7 +50,7 @@ export async function assertDisposableSupervisedWritersStopped({
       backends.length !== expectedHouseholdIds.length ||
       !backendPorts || typeof backendPorts !== 'object' ||
       Object.keys(backendPorts).length !== expectedHouseholdIds.length) {
-    throw new Error('Disposable writer quiescence needs every expected supervised backend.')
+    throw new Error('Disposable writer quiescence needs a closed gateway and exactly two supervised household backends by default, or every explicitly expected backend.')
   }
   const seen = new Set()
   const ports = [checkedPort(gatewayPort)]

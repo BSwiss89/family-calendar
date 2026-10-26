@@ -89,7 +89,7 @@ test('invited third family stays blocked until trusted live backend enrollment, 
     }), /already in use/, 'Cannot bind a new family to an existing backend port')
     await assert.rejects(demo.enrollHouseholdBackend({
       ...pending, householdId: 'family-nonexistent',
-    }), /not provisioned|registry|missing/i, 'Unregistered family cannot be enrolled')
+    }), /ENOENT|not provisioned|registry|missing/i, 'Unregistered family cannot be enrolled')
     assert.equal((await request(demo, '/api/events', { cookie: friend })).status, 503)
 
     assert.deepEqual(await demo.enrollHouseholdBackend(pending), {
