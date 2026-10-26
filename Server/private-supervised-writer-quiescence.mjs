@@ -38,17 +38,24 @@ async function refusesTcpConnections(port) {
 
 export async function assertDisposableSupervisedWritersStopped({
   backends, backendPorts, gatewayPort, gatewayClosed,
+  // Optional for the disposable three-family enrollment fixture only.
+  expectedHouseholdIds = HOUSEHOLDS,
 }) {
   if (gatewayClosed !== true || !Array.isArray(backends) ||
-      backends.length !== 2 || !backendPorts ||
-      typeof backendPorts !== 'object' ||
-      Object.keys(backendPorts).length !== 2) {
-    throw new Error('Disposable writer quiescence needs a closed gateway and exactly two supervised household backends.')
+      !Array.isArray(expectedHouseholdIds) || expectedHouseholdIds.length < 2 ||
+      !HOUSEHOLDS.every(id => expectedHouseholdIds.includes(id)) ||
+      expectedHouseholdIds.some(id => typeof id !== 'string' ||
+        !/^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/.test(id)) ||
+      new Set(expectedHouseholdIds).size !== expectedHouseholdIds.length ||
+      backends.length !== expectedHouseholdIds.length ||
+      !backendPorts || typeof backendPorts !== 'object' ||
+      Object.keys(backendPorts).length !== expectedHouseholdIds.length) {
+    throw new Error('Disposable writer quiescence needs every expected supervised backend.')
   }
   const seen = new Set()
   const ports = [checkedPort(gatewayPort)]
   for (const backend of backends) {
-    if (!HOUSEHOLDS.includes(backend?.householdId) ||
+    if (!expectedHouseholdIds.includes(backend?.householdId) ||
         seen.has(backend.householdId) ||
         !(backend.child instanceof ChildProcess) ||
         !Number.isSafeInteger(backend.child.pid) || backend.child.pid < 1) {
@@ -60,7 +67,7 @@ export async function assertDisposableSupervisedWritersStopped({
     }
     ports.push(checkedPort(backendPorts[backend.householdId]))
   }
-  if (!HOUSEHOLDS.every(id => seen.has(id)) ||
+  if (!expectedHouseholdIds.every(id => seen.has(id)) ||
       new Set(ports).size !== ports.length) {
     throw new Error('Expected private household writer ports were not uniquely accounted for.')
   }

@@ -1258,6 +1258,92 @@ export async function startPrivateHouseholdGateway({
       tokensByHousehold.get(household.householdId))
   })
 
+  // Trusted server-side activation only: NO HTTP route invokes this operation.
+  // A newly registered family is not routable until its own separately started
+  // localhost backend proves the household identity and private service token.
+  // This is an IN-MEMORY enrollment; restarts require an explicitly reviewed
+  // backend configuration. Never auto-start a process from signup or a cookie.
+  let closing = false
+  let enrollmentInProgress = false
+  async function enrollHouseholdBackend({ householdId, port, upstreamToken }) {
+    if (closing || enrollmentInProgress) {
+      throw new Error('Private gateway is closing or already enrolling a household.')
+    }
+    enrollmentInProgress = true
+    try {
+      const candidate = validateUpstreams({
+        identityDatabase, serverDirectory, storageRoot,
+        backendPorts: Object.fromEntries([[householdId, port]]),
+      })
+      if (portByHousehold.has(householdId)) {
+        throw new Error('Household backend is already enrolled.')
+      }
+      if ([...portByHousehold.values(), server.address()?.port].includes(port)) {
+        throw new Error('Private service port is already in use.')
+      }
+      const token = requirePrivateUpstreamToken(upstreamToken)
+      if (usedTokens.has(token)) throw new Error('Household backend secret is already in use.')
+
+      // Restrict live enrollment to first owners created by the specific
+      // independent-household invitation flow, not arbitrary registry rows.
+      const eligible = identityDatabase.prepare([
+        'SELECT 1 AS allowed FROM independent_household_invitations i',
+        'JOIN household_registry h ON h.id = i.household_id',
+        'JOIN family_users u ON u.id = i.redeemed_user_id',
+        'JOIN household_memberships m ON m.user_id = u.id AND m.household_id = h.id',
+        'WHERE h.storage_id = ? AND h.disabled = 0 AND u.disabled = 0',
+        "AND m.role = 'owner' AND m.disabled = 0",
+        'AND i.redeemed_at IS NOT NULL AND i.revoked_at IS NULL LIMIT 1',
+      ].join(' ')).get(householdId)
+      if (!eligible) throw new Error('Household has no active invited owner.')
+
+      await verifyPrivateBackendBindings(candidate,
+        new Map([[householdId, token]]))
+      if (closing) throw new Error('Private gateway closed during enrollment.')
+      if (activeEventMutations.size !== 0 || activeLocalAi.size !== 0) {
+        throw new Error('Private gateway has active work; retry enrollment.')
+      }
+
+      // No tenant data is ever copied. Only an EMPTY new household can be
+      // enrolled via this live private-preview operation. A nonempty source
+      // requires a separate offline import/recovery review.
+      const storage = resolveHouseholdStorage({
+        serverDirectory, storageRoot, householdId,
+      })
+      const source = new DatabaseSync(storage.databasePath)
+      try {
+        const hasEvents = source.prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'events'"
+        ).get()
+        if (!hasEvents || source.prepare('SELECT COUNT(*) AS n FROM events').get().n !== 0) {
+          throw new Error('New household backend must have an empty initialized event table.')
+        }
+        const grants = identityDatabase.prepare([
+          'SELECT COUNT(*) AS n FROM event_share_grants g',
+          'JOIN household_registry h ON h.id = g.source_household_id',
+          'WHERE h.storage_id = ?',
+        ].join(' ')).get(householdId).n
+        if (grants !== 0 || countPendingEventShareSync(identityDatabase, {
+          sourceHouseholdId: householdId,
+        }) !== 0) {
+          throw new Error('Household has unresolved sharing activity.')
+        }
+        installPrivateEventSourceOutbox(source)
+      } finally {
+        source.close()
+      }
+
+      // Publish only after all filesystem, ownership, identity and recovery
+      // preconditions succeed. No partial route or token survives rejection.
+      portByHousehold.set(householdId, port)
+      tokensByHousehold.set(householdId, token)
+      usedTokens.add(token)
+      return { householdId, activation: 'active' }
+    } finally {
+      enrollmentInProgress = false
+    }
+  }
+
   const server = http.createServer(app)
   try {
     await new Promise((resolve, reject) => {
@@ -1278,7 +1364,12 @@ export async function startPrivateHouseholdGateway({
   return {
     base: 'http://127.0.0.1:' + address.port,
     port: address.port,
+    enrollHouseholdBackend,
     close: () => new Promise((resolve, reject) => {
+      if (closing || enrollmentInProgress) {
+        return reject(new Error('Gateway is closing or household enrollment is in progress.'))
+      }
+      closing = true
       server.close(error => {
         if (error) return reject(error)
         try {

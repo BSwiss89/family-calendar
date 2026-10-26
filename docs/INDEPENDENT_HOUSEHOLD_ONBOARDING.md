@@ -25,11 +25,9 @@ and its own first owner account.
   trusted map of prestarted household backend processes. This version lets
   invited owners register and then sign in; their event/Lists routes are not
   enabled until a separately reviewed backend enrollment and binding step.
-  No routes or processes are automatically opened for new signups.
+  A separately trusted in-process supervisor can now call the private\n  gateway's `enrollHouseholdBackend({householdId,port,upstreamToken})` only\n  AFTER it starts a unique pre-provisioned, loopback-only backend. The gateway\n  confirms the central invited owner, unique port and token, provisioned disk,\n  backend household identity, empty initial events and safe share state before\n  atomically publishing the runtime route. No browser route activates a family.\n  The returned route is in memory only; restarting requires explicitly approved\n  backend setup again. Service launch, persisted operator manifests and OS process\n  attestation are not yet provided. No routes or processes are automatically\n  opened for new signups.
 - Development-only. No LIVE, TEST, main, account credentials, real household
   databases, services, scheduled tasks, backups or HTTPS/Tailscale routing
   are touched. All tests use disposable SQLite and filesystem paths.
 
-Next stage: controlled server-side backend enrollment/activation and a full
-browser end-to-end test covering new owner login, lists/events, membership and
-optional trusted sharing, followed by separately approved TEST validation.
+Controlled server-side binding and a synthetic third-family owner -> login ->\npending -> verified backend -> private events and Lists integration test are now\nin the development branch. Next: authorized operator activation/configuration\nworkflow, persistent trusted backend startup supervision, full cross-household\nsharing pilot and separately approved TEST validation. Never deploy this fixture\nas a production multi-tenant gateway.

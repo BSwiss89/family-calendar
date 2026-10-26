@@ -56,6 +56,8 @@ jobs:
           node --test scripts/test-household-members-settings.mjs scripts/test-private-household-invite-signup.mjs scripts/test-legacy-household-account-rehearsal.mjs
       - name: Test invite-only independent household owner onboarding
         run: node --test scripts/test-independent-household-onboarding.mjs
+      - name: Activate a real third private household and verify event/List isolation
+        run: node --test scripts/test-independent-household-activation.mjs
       - name: Verify accepted shared event overlays and parsing
         run: node --test scripts/test-live-received-shared-calendar.mjs scripts/test-shared-event-overlay.mjs
       - name: Verify LIVE desktop and mobile household invitation inbox
