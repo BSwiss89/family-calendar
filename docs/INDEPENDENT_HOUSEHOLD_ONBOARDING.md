@@ -37,9 +37,18 @@ and its own first owner account.
   shuts down and restarts all real backends, rotates private upstream secrets
   and ports, verifies bindings and restores the same private calendar and Lists.
   Newly registered but never approved households remain offline after restart.
-  This is not yet a production service manager, and OS process attestation,
-  automated unattended Windows boot and real HTTPS TEST deployment remain open.
-  No routes or processes are automatically opened by signups.
+  A separate private supervisor startup module now validates the CENTRAL
+  approval set and provisioned storage before stopping a healthy gateway,
+  refuses unapproved or missing child handles, verifies the old listeners
+  and cooperative writer locks have actually closed, and launches exactly the
+  approved backends with new private secrets and ports. Failed launches stop
+  only captured child handles, never clean up unknown writers, and never
+  publish a partial gateway. Stale approvals (including disabled invited
+  owners) block unattended startup pending operator review.
+  This is still an ISOLATED, manually invoked synthetic supervisor, not an
+  installed OS service or automatic restart mechanism. OS process attestation,
+  a trusted Windows startup/recovery service and HTTPS TEST migration remain
+  open. No routes or processes are automatically opened by signups.
 - The Household & Members Settings screen includes **New family invitations**
   only when a centrally authenticated person is on the gateway's trusted
   administrator allowlist. The new operator-only
