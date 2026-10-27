@@ -42,6 +42,8 @@ import { createIndependentHouseholdInvitationTables, issueIndependentHouseholdIn
 import { listHouseholdMembers } from './household-member-directory.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
+import { createPrivateActivationRecords, approvePrivateHouseholdActivation,
+  assertApprovedPrivateHousehold } from './private-household-activation-records.mjs'
 import { installPrivateEventSourceOutbox, drainPrivateSourceOutbox } from './private-event-source-outbox.mjs'
 import { PRIVATE_UPSTREAM_HEADER, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
 import { inspectPrivateGatewayMutation } from './private-gateway-mutation-policy.mjs'
@@ -394,6 +396,13 @@ export async function startPrivateHouseholdGateway({
   // Invitation state is central-only, never stored in household calendars.
   createHouseholdInvitationTables(identityDatabase)
   createIndependentHouseholdInvitationTables(identityDatabase)
+  createPrivateActivationRecords(identityDatabase)
+  // The trusted host may only rebind a generated independent household that
+  // was explicitly approved after its previous identity-checked activation.
+  // Being in the registry or having a backend started is insufficient.
+  for (const householdId of portByHousehold.keys()) {
+    assertApprovedPrivateHousehold(identityDatabase, householdId)
+  }
   // Central share records are separate from either family's calendar DB.
   // No migrations to live/preview data occur; this gateway is test-only.
   createEventShareTables(identityDatabase)
@@ -1333,6 +1342,10 @@ export async function startPrivateHouseholdGateway({
         source.close()
       }
 
+      // Persist approval in CENTRAL SQLite, not a browser cookie or local
+      // port/secret file. Recovery must rotate a fresh secret and prove a
+      // newly started backend's identity on every private gateway boot.
+      approvePrivateHouseholdActivation(identityDatabase, { householdId })
       // Publish only after all filesystem, ownership, identity and recovery
       // preconditions succeed. No partial route or token survives rejection.
       portByHousehold.set(householdId, port)
