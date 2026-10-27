@@ -12,7 +12,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { startPrivateHouseholdGateway } from '../Server/private-household-gateway.mjs'
-import { listApprovedPrivateHouseholds } from '../Server/private-household-activation-records.mjs'
+import {
+  planApprovedPrivateHouseholdStartup, assertPrivateStartupLocksClear,
+  launchApprovedPrivateHouseholdBackends,
+} from '../Server/private-approved-household-startup.mjs'
 import { assertDisposableSupervisedWritersStopped } from '../Server/private-supervised-writer-quiescence.mjs'
 import { provisionEmptyHousehold } from '../Server/household-storage.mjs'
 import {
@@ -391,31 +394,67 @@ export async function startHouseholdBrowserDemo({ enableIndependentHouseholdInvi
     // reserved test ports are used. An unactivated signup is never started.
     async function restartApprovedBackendsAndGateway() {
       if (closed || !gateway) throw new Error('Disposable gateway is unavailable.')
-      const approved = listApprovedPrivateHouseholds(central)
-      const expected = ['family-a', 'family-b', ...approved]
+      // PREPARE: only the two explicit fixture baselines plus CENTRAL
+      // approved invited-family IDs may enter the supervisor restart plan.
+      // Complete all trust/disk checks before closing a healthy gateway.
+      const plan = planApprovedPrivateHouseholdStartup({
+        identityDatabase: central, serverDirectory, storageRoot,
+      })
+      const expected = [...plan.householdIds]
       assert.deepEqual(Object.keys(ports).sort(), [...expected].sort(),
         'Trusted restart refused unapproved or missing household backend.')
-      const prior = { ...backendTokens }
+      assert.deepEqual(backends.map(b => b.householdId).sort(), [...expected].sort(),
+        'Trusted restart refused untracked or pending backend process.')
+
+      const lastTokens = { ...backendTokens }
+      const oldGatewayPort = gateway.port
+      const oldBackendPorts = { ...ports }
+      const oldBackends = [...backends]
       await gateway.close()
       gateway = null
-      for (const backend of backends) {
+      for (const backend of oldBackends) {
         await stopDisposableHouseholdBackend(backend)
       }
-      backends.splice(0)
+      // Prove exactly the captured handles exited and every old service port
+      // is closed. No PID/time-based lock reclaim or guessed cleanup.
+      await assertDisposableSupervisedWritersStopped({
+        backends: oldBackends, backendPorts: oldBackendPorts,
+        gatewayPort: oldGatewayPort, gatewayClosed: true,
+        expectedHouseholdIds: expected,
+      })
+      assertPrivateStartupLocksClear({
+        serverDirectory, storageRoot, householdIds: expected,
+      })
+      // START: rotate secrets and ports; never start a gateway after a
+      // failed child/health check. Only our captured children may be stopped.
+      const replacement = await launchApprovedPrivateHouseholdBackends({
+        plan, usedPorts: used, allocateLoopbackPort: chooseFreeLoopbackPort,
+        launchBackend: ({ householdId, port, upstreamToken }) =>
+          startHouseholdBackend(storageRoot, householdId, port, upstreamToken),
+        awaitHealthyBackend: awaitHealthy,
+        stopBackend: stopDisposableHouseholdBackend,
+        previousTokens: lastTokens,
+      })
+      backends.splice(0, backends.length, ...replacement.backends)
       for (const id of Object.keys(ports)) delete ports[id]
       for (const id of Object.keys(backendTokens)) delete backendTokens[id]
-      for (const householdId of expected) {
-        const port = await chooseFreeLoopbackPort(used)
-        const serviceToken = randomBytes(32).toString('hex')
-        assert.notEqual(serviceToken, prior[householdId])
-        ports[householdId] = port
-        backendTokens[householdId] = serviceToken
-        backends.push(startHouseholdBackend(storageRoot, householdId,
-          port, serviceToken))
+      Object.assign(ports, replacement.backendPorts)
+      Object.assign(backendTokens, replacement.backendTokens)
+      try {
+        gateway = await launchTrustedGateway()
+      } catch (error) {
+        const failures = [error]
+        for (const backend of [...replacement.backends].reverse()) {
+          try { await stopDisposableHouseholdBackend(backend) }
+          catch (shutdownError) { failures.push(shutdownError) }
+        }
+        if (failures.length > 1) {
+          throw new AggregateError(failures,
+            'Private gateway failed to restart and child shutdown is unverified.')
+        }
+        throw error
       }
-      await Promise.all(backends.map(awaitHealthy))
-      gateway = await launchTrustedGateway()
-      return { activeHouseholdIds: [...expected], gatewayPort: gateway.port }
+      return { activeHouseholdIds: expected, gatewayPort: gateway.port }
     }
 
     return {
