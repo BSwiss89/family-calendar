@@ -62,6 +62,8 @@ jobs:
         run: node --test scripts/test-private-approved-household-startup.mjs
       - name: Verify private Windows supervisor crash hold and restart refusal
         run: node --test scripts/test-private-windows-supervisor-crash-hold.mjs
+      - name: Audit Windows TEST host readiness using safe synthetic inventories
+        run: node --test scripts/test-private-windows-test-readiness.mjs
       - name: Verify accepted shared event overlays and parsing
         run: node --test scripts/test-live-received-shared-calendar.mjs scripts/test-shared-event-overlay.mjs
       - name: Verify LIVE desktop and mobile household invitation inbox
