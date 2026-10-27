@@ -12,6 +12,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { startPrivateHouseholdGateway } from '../Server/private-household-gateway.mjs'
+import { createPrivateWindowsSupervisorCrashHold } from '../Server/private-windows-supervisor-crash-hold.mjs'
 import {
   planApprovedPrivateHouseholdStartup, assertPrivateStartupLocksClear,
   launchApprovedPrivateHouseholdBackends,
@@ -203,13 +204,20 @@ export async function startHouseholdBrowserDemo({ enableIndependentHouseholdInvi
   const storageRoot = path.join(root, 'storage')
   fs.mkdirSync(storageRoot, { mode: 0o700 })
   const central = new DatabaseSync(path.join(root, 'identity.db'))
+  const stateDirectory = path.join(root, 'private-supervisor-state')
+  fs.mkdirSync(stateDirectory, { mode: 0o700 })
   const backends = []
   let gateway = null
+  let restartedSupervisor = null
   let closed = false
   const close = async () => {
     if (closed) return
     closed = true
     const errors = []
+    if (restartedSupervisor?.snapshot().phase === 'running') {
+      try { restartedSupervisor.beginGracefulShutdown() }
+      catch (error) { errors.push(error) }
+    }
     if (gateway) {
       try { await gateway.close() } catch (error) { errors.push(error) }
     }
@@ -410,6 +418,12 @@ export async function startHouseholdBrowserDemo({ enableIndependentHouseholdInvi
       const oldGatewayPort = gateway.port
       const oldBackendPorts = { ...ports }
       const oldBackends = [...backends]
+      if (restartedSupervisor?.snapshot().held) {
+        throw new Error('Private supervisor crash hold blocks automatic restart.')
+      }
+      if (restartedSupervisor?.snapshot().phase === 'running') {
+        restartedSupervisor.beginGracefulShutdown()
+      }
       await gateway.close()
       gateway = null
       for (const backend of oldBackends) {
@@ -442,8 +456,22 @@ export async function startHouseholdBrowserDemo({ enableIndependentHouseholdInvi
       Object.assign(backendTokens, replacement.backendTokens)
       try {
         gateway = await launchTrustedGateway()
+        // Observe REAL captured Windows/Node child handles after verified
+        // restart. Unexpected exit or IPC loss creates a durable private
+        // fixture hold; a subsequent restart is never silently attempted.
+        restartedSupervisor = createPrivateWindowsSupervisorCrashHold({
+          stateDirectory, householdIds: expected,
+        })
+        for (const backend of replacement.backends) {
+          restartedSupervisor.attachCapturedBackend(backend)
+        }
+        restartedSupervisor.markHealthy()
       } catch (error) {
         const failures = [error]
+        if (gateway) {
+          try { await gateway.close(); gateway = null }
+          catch (closeError) { failures.push(closeError) }
+        }
         for (const backend of [...replacement.backends].reverse()) {
           try { await stopDisposableHouseholdBackend(backend) }
           catch (shutdownError) { failures.push(shutdownError) }
@@ -473,6 +501,9 @@ export async function startHouseholdBrowserDemo({ enableIndependentHouseholdInvi
         return outcome
       },
       restartApprovedBackendsAndGateway,
+      get restartedSupervisorStatus() {
+        return restartedSupervisor?.snapshot() ?? null
+      },
     }
   } catch (error) {
     try { await close() } catch (cleanupError) {
