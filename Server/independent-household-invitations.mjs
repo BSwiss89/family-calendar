@@ -42,6 +42,40 @@ export function createIndependentHouseholdInvitationTables(db) {
     'ON independent_household_invitations(issuer_user_id, created_at);',
   ].join('\n'))
 }
+/**
+ * Operator-only inventory for the PRIVATE gateway. Never return token hashes,
+ * bearer secrets, account passwords, private ports or backend service tokens.
+ * Invite results are scoped to the central administrator who issued them;
+ * household records are identified by a redeemed invitation from that admin.
+ * A configured route is not proof that a backend remains healthy; the gateway
+ * checks binding again before proxying each calendar request.
+ */
+export function listIndependentHouseholdAdministration(db, {
+  serverVerifiedAdministratorUserId, trustedAdministratorUserIds, now = Date.now(),
+}) {
+  validNow(now)
+  if (!trustedAdmin(db, serverVerifiedAdministratorUserId, trustedAdministratorUserIds)) {
+    throw new Error('Trusted calendar administrator permission required.')
+  }
+  const invitations = db.prepare([
+    'SELECT id, created_at AS createdAt, expires_at AS expiresAt',
+    'FROM independent_household_invitations',
+    'WHERE issuer_user_id = ? AND revoked_at IS NULL',
+    'AND redeemed_at IS NULL AND expires_at > ?',
+    'ORDER BY created_at DESC, id DESC LIMIT 10',
+  ].join(' ')).all(serverVerifiedAdministratorUserId, now)
+  const households = db.prepare([
+    'SELECT h.storage_id AS householdId, h.display_name AS displayName,',
+    'CASE WHEN a.household_id IS NULL THEN 0 ELSE 1 END AS approved',
+    'FROM independent_household_invitations i',
+    'JOIN household_registry h ON h.id = i.household_id',
+    'LEFT JOIN private_activated_households a ON a.household_id = h.id',
+    'WHERE i.issuer_user_id = ? AND i.redeemed_at IS NOT NULL',
+    'AND h.disabled = 0 ORDER BY i.redeemed_at DESC, i.id DESC LIMIT 100',
+  ].join(' ')).all(serverVerifiedAdministratorUserId)
+  return { invitations, households }
+}
+
 export function issueIndependentHouseholdInvitation(db, {
   serverVerifiedAdministratorUserId, trustedAdministratorUserIds, now = Date.now(),
 }) {

@@ -38,7 +38,8 @@ import {
 import { installPrivateHouseholdSignup } from './private-household-signup.mjs'
 import { installPrivateIndependentHouseholdSignup } from './private-independent-household-signup.mjs'
 import { createIndependentHouseholdInvitationTables, issueIndependentHouseholdInvitation,
-  revokeIndependentHouseholdInvitation } from './independent-household-invitations.mjs'
+  revokeIndependentHouseholdInvitation, listIndependentHouseholdAdministration,
+} from './independent-household-invitations.mjs'
 import { listHouseholdMembers } from './household-member-directory.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
@@ -609,6 +610,32 @@ export async function startPrivateHouseholdGateway({
       selectedHouseholdId: selected.householdId,
       displayName: selected.displayName,
     })
+  })
+
+  // Private operator inventory. An ordinary household owner is NOT an
+  // operator; permission is checked against server-trusted numeric IDs.
+  // Return only this operator's invitations / registered families; no secrets,
+  // raw invitation tokens, credential hashes or filesystem paths.
+  app.get('/api/households/independent-administration', (request, response) => {
+    response.set('Cache-Control', 'no-store')
+    try {
+      const state = listIndependentHouseholdAdministration(identityDatabase, {
+        serverVerifiedAdministratorUserId: request.familyAccount.user_id,
+        trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+      })
+      response.json({
+        invitations: state.invitations,
+        households: state.households.map(household => ({
+          householdId: household.householdId,
+          displayName: household.displayName,
+          state: !household.approved ? 'pending' :
+            portByHousehold.has(household.householdId) ? 'routed' : 'approved-unrouted',
+        })),
+      })
+    } catch (error) {
+      response.status(error?.message === 'Trusted calendar administrator permission required.'
+        ? 403 : 503).json({ error: 'Private household administration unavailable.' })
+    }
   })
 
   // New-household invitation issuance is distinct from inviting a member into

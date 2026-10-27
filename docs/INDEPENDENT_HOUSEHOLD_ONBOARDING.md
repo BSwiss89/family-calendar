@@ -40,6 +40,19 @@ and its own first owner account.
   This is not yet a production service manager, and OS process attestation,
   automated unattended Windows boot and real HTTPS TEST deployment remain open.
   No routes or processes are automatically opened by signups.
+- The Household & Members Settings screen includes **New family invitations**
+  only when a centrally authenticated person is on the gateway's trusted
+  administrator allowlist. The new operator-only
+  `GET /api/households/independent-administration` endpoint lists only the
+  issuer's unexpired, unredeemed invitation IDs and their independently
+  registered household names/states. It never returns stored token hashes,
+  service secrets, upstream ports or password data. Operators can issue and
+  revoke links from this screen; the raw one-time link appears only until
+  the screen is closed. Ordinary household owners receive HTTP 403, with
+  no operator panel, and legacy releases hide the panel on HTTP 404.
+  Status **routed** means configured in the private gateway, not a promise
+  of uninterrupted backend health. Starting/activating backend processes
+  remains an explicitly trusted host-side operation, never a browser action.
 - Development-only. No LIVE, TEST, main, account credentials, real household
   databases, services, scheduled tasks, backups or HTTPS/Tailscale routing
   are touched. All tests use disposable SQLite and filesystem paths.
