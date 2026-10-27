@@ -20,8 +20,9 @@ function fakeCentral({ pendingApprovals = 0, approved = [], activeOwners = true 
       if (sql.startsWith('SELECT h.storage_id AS householdId')) {
         return { all: () => approved.map(id => ({ householdId: id })) }
       }
-      if (sql.startsWith('SELECT 1 AS allowed')) {
-        return { get: () => activeOwners ? { allowed: 1 } : undefined }
+      if (sql.startsWith('SELECT h.id FROM household_registry h') &&
+          sql.includes('JOIN independent_household_invitations')) {
+        return { get: () => activeOwners ? { id: 1 } : undefined }
       }
       if (sql.startsWith('SELECT COUNT(*) AS n FROM private_activated_households')) {
         return { get: () => ({ n: pendingApprovals }) }
