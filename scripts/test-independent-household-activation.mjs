@@ -44,12 +44,25 @@ test('invited third family stays blocked until trusted live backend enrollment, 
       cookie: familyB, body: {},
     })
     assert.equal(notAdmin.status, 403, 'Existing household owner is not automatically gateway admin')
+    const administrationPath = '/api/households/independent-administration'
+    assert.equal((await request(demo, administrationPath)).status, 401)
+    assert.equal((await request(demo, administrationPath, { cookie: familyB })).status, 403)
+    const beforeAdmin = await json(await request(demo, administrationPath, { cookie: admin }))
+    assert.equal(beforeAdmin.status, 200)
+    assert.deepEqual(beforeAdmin.data, { invitations: [], households: [] })
+
     const issued = await request(demo, '/api/households/independent-invitations', {
       cookie: admin, body: {},
     })
     assert.equal(issued.status, 201)
     const invitation = await issued.json()
     assert.match(invitation.token, /^[a-f0-9]{64}$/)
+    const visibleInvites = await json(await request(demo, administrationPath, { cookie: admin }))
+    assert.deepEqual(visibleInvites.data.invitations.map(x => x.id), [invitation.invitationId])
+    assert.equal(visibleInvites.data.households.length, 0)
+    assert(!JSON.stringify(visibleInvites.data).includes(invitation.token))
+    assert(!JSON.stringify(visibleInvites.data).includes('token_hash'))
+
     const username = 'activation-test-friend'
     const password = 'Synthetic-Activation-Only-Password-2026!'
     const signup = await request(demo, '/api/households/create-from-invitation', {
@@ -68,6 +81,12 @@ test('invited third family stays blocked until trusted live backend enrollment, 
     const householdId = households.data.households[0].householdId
     assert.match(householdId, /^family-[a-f0-9]{24}$/)
     assert.equal(households.data.households[0].role, 'owner')
+    const pendingAdmin = await json(await request(demo, administrationPath, { cookie: admin }))
+    assert.equal(pendingAdmin.status, 200)
+    assert.deepEqual(pendingAdmin.data.invitations, [])
+    assert.deepEqual(pendingAdmin.data.households.map(h => h.state), ['pending'])
+    assert.equal(pendingAdmin.data.households[0].householdId, householdId)
+
     assert.equal((await request(demo, '/api/events', { cookie: friend })).status, 503,
       'A newly registered but unenrolled family remains unavailable')
     assert.equal((await request(demo, '/api/lists', { cookie: friend })).status, 503)
@@ -95,6 +114,9 @@ test('invited third family stays blocked until trusted live backend enrollment, 
     assert.deepEqual(await demo.enrollHouseholdBackend(pending), {
       householdId, activation: 'active',
     })
+    const routedAdmin = await json(await request(demo, administrationPath, { cookie: admin }))
+    assert.deepEqual(routedAdmin.data.households.map(h => h.state), ['routed'])
+
     await assert.rejects(demo.enrollHouseholdBackend(pending), /already enrolled/)
     const empty = await json(await request(demo, '/api/events', { cookie: friend }))
     assert.equal(empty.status, 200)
@@ -155,6 +177,11 @@ test('invited third family stays blocked until trusted live backend enrollment, 
       'Restart rotates private backend listeners')
     assert.equal((await request(demo, '/api/events', { cookie: waitCookie })).status, 503,
       'Registration without explicit operator activation must survive reboot as pending')
+    const restartAdmin = await json(await request(demo, administrationPath, { cookie: admin }))
+    assert.deepEqual(new Set(restartAdmin.data.households.map(h => h.state)),
+      new Set(['pending', 'routed']))
+    assert.deepEqual(restartAdmin.data.invitations, [])
+
     assert.equal((await request(demo, '/api/households/activate', {
       cookie: admin, body: { householdId },
     })).status, 404, 'Restart must not create a public activation endpoint')
@@ -169,6 +196,25 @@ test('invited third family stays blocked until trusted live backend enrollment, 
     assert.equal((await request(demo, '/api/events', { cookie: admin })).status, 200)
     assert.equal((await request(demo, '/api/events', { cookie: familyB })).status, 200)
 
+    // A third one-time invitation can be revoked by its issuing operator,
+    // without changing either enrolled or pending household records.
+    const third = await request(demo, '/api/households/independent-invitations', {
+      cookie: admin, body: {},
+    })
+    assert.equal(third.status, 201)
+    const thirdInvite = await third.json()
+    assert.deepEqual((await json(await request(demo, administrationPath, {
+      cookie: admin,
+    }))).data.invitations.map(x => x.id), [thirdInvite.invitationId])
+    const revoked = await request(demo,
+      '/api/households/independent-invitations/' + thirdInvite.invitationId + '/revoke',
+      { cookie: admin, body: {} })
+    assert.equal(revoked.status, 200)
+    assert.deepEqual((await json(await request(demo, administrationPath, {
+      cookie: admin,
+    }))).data.invitations, [])
+    console.log('[PASS] Independent-family administrator can list, issue, and revoke safely.')
+    console.log('[PASS] Ordinary owners cannot inspect private operator inventory.')
     console.log('[PASS] Approved family survives real private gateway/backend restart with events and Lists.')
     console.log('[PASS] Second registered-but-unapproved family stays offline after restart.')
     console.log('[PASS] Real third-family invite -> account -> 503 pending -> trusted backend -> events + Lists.')

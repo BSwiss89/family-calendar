@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   parseTrustedShareRecipients, type TrustedShareRecipient,
 } from './eventSharingUiModel'
+import HouseholdAdminSettings from './HouseholdAdminSettings'
 import './HouseholdMembersSettings.css'
 
 type Household = {
@@ -290,6 +291,8 @@ export default function HouseholdMembersSettings() {
               An invitation to join your household is different: it grants
               access to this family's calendar, not a separate one.</p>
           </div>
+
+          <HouseholdAdminSettings />
 
           {household.role === 'owner' ? (
             <>
