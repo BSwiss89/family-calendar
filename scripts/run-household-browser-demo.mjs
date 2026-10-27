@@ -12,6 +12,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { startPrivateHouseholdGateway } from '../Server/private-household-gateway.mjs'
+import { listApprovedPrivateHouseholds } from '../Server/private-household-activation-records.mjs'
 import { assertDisposableSupervisedWritersStopped } from '../Server/private-supervised-writer-quiescence.mjs'
 import { provisionEmptyHousehold } from '../Server/household-storage.mjs'
 import {
@@ -336,7 +337,7 @@ export async function startHouseholdBrowserDemo({ enableIndependentHouseholdInvi
       notes: 'Demo B confidential details.',
     }, backendTokens['family-b'])
 
-    gateway = await startPrivateHouseholdGateway({
+    const launchTrustedGateway = () => startPrivateHouseholdGateway({
       identityDatabase: central,
       serverDirectory,
       storageRoot,
@@ -347,6 +348,7 @@ export async function startHouseholdBrowserDemo({ enableIndependentHouseholdInvi
           .get(accounts[0].username).id]
         : [],
     })
+    gateway = await launchTrustedGateway()
     // The gateway itself must never be directly reachable on a Tailscale or
     // LAN adapter. HTTPS for browser auth will be Tailscale Serve only.
     const url = new URL(gateway.base)
@@ -383,16 +385,55 @@ export async function startHouseholdBrowserDemo({ enableIndependentHouseholdInvi
       return { householdId, port, upstreamToken }
     }
 
+    // Simulates an ENTIRE supervised backend + gateway restart while keeping
+    // synthetic SQLite and signed-in sessions. Only CENTRAL approved household
+    // IDs are restarted; fresh unguessable backend credentials and different
+    // reserved test ports are used. An unactivated signup is never started.
+    async function restartApprovedBackendsAndGateway() {
+      if (closed || !gateway) throw new Error('Disposable gateway is unavailable.')
+      const approved = listApprovedPrivateHouseholds(central)
+      const expected = ['family-a', 'family-b', ...approved]
+      assert.deepEqual(Object.keys(ports).sort(), [...expected].sort(),
+        'Trusted restart refused unapproved or missing household backend.')
+      const prior = { ...backendTokens }
+      await gateway.close()
+      gateway = null
+      for (const backend of backends) {
+        await stopDisposableHouseholdBackend(backend)
+      }
+      backends.splice(0)
+      for (const id of Object.keys(ports)) delete ports[id]
+      for (const id of Object.keys(backendTokens)) delete backendTokens[id]
+      for (const householdId of expected) {
+        const port = await chooseFreeLoopbackPort(used)
+        const serviceToken = randomBytes(32).toString('hex')
+        assert.notEqual(serviceToken, prior[householdId])
+        ports[householdId] = port
+        backendTokens[householdId] = serviceToken
+        backends.push(startHouseholdBackend(storageRoot, householdId,
+          port, serviceToken))
+      }
+      await Promise.all(backends.map(awaitHealthy))
+      gateway = await launchTrustedGateway()
+      return { activeHouseholdIds: [...expected], gatewayPort: gateway.port }
+    }
+
     return {
-      base: gateway.base,
-      gatewayPort: gateway.port,
+      get base() { return gateway?.base ?? null },
+      get gatewayPort() { return gateway?.port ?? null },
       accounts,
       sample: { sharedCandidateDate, privateEventDate, sourceId },
       close,
       // Only expose listener ports to integration tests, never user browsers.
       privateBackendPorts: ports,
       startPendingHouseholdBackend,
-      enrollHouseholdBackend: gateway.enrollHouseholdBackend,
+      async enrollHouseholdBackend(details) {
+        const outcome = await gateway.enrollHouseholdBackend(details)
+        ports[details.householdId] = details.port
+        backendTokens[details.householdId] = details.upstreamToken
+        return outcome
+      },
+      restartApprovedBackendsAndGateway,
     }
   } catch (error) {
     try { await close() } catch (cleanupError) {

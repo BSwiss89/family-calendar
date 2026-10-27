@@ -129,6 +129,48 @@ test('invited third family stays blocked until trusted live backend enrollment, 
     assert.equal((await request(demo, '/api/internal/household-binding', {
       cookie: friend,
     })).status, 404)
+    // A second, newly registered family must NEVER become active merely
+    // because its records exist when the server reboots.
+    const issuedPending = await request(demo, '/api/households/independent-invitations', {
+      cookie: admin, body: {},
+    })
+    assert.equal(issuedPending.status, 201)
+    const secondToken = (await issuedPending.json()).token
+    const waitUser = 'unactivated-friend'
+    const waitPassword = 'Synthetic-Pending-Friend-Password-2026!'
+    const waitSignup = await request(demo, '/api/households/create-from-invitation', {
+      body: {
+        token: secondToken, username: waitUser, password: waitPassword,
+        displayName: 'Waiting Owner', householdName: 'Waiting Independent Family',
+      },
+    })
+    assert.equal(waitSignup.status, 201)
+    const waitCookie = await login(demo, waitUser, waitPassword)
+    assert.equal((await request(demo, '/api/events', { cookie: waitCookie })).status, 503)
+
+    const restored = await demo.restartApprovedBackendsAndGateway()
+    assert.deepEqual(restored.activeHouseholdIds.slice(0, 2), ['family-a', 'family-b'])
+    assert.deepEqual(restored.activeHouseholdIds.slice(2), [householdId])
+    assert.notEqual(demo.privateBackendPorts[householdId], pending.port,
+      'Restart rotates private backend listeners')
+    assert.equal((await request(demo, '/api/events', { cookie: waitCookie })).status, 503,
+      'Registration without explicit operator activation must survive reboot as pending')
+    assert.equal((await request(demo, '/api/households/activate', {
+      cookie: admin, body: { householdId },
+    })).status, 404, 'Restart must not create a public activation endpoint')
+    assert.deepEqual((await json(await request(demo, '/api/events', {
+      cookie: friend,
+    }))).data.map(x => x.title), ['FRIEND ONLY PRIVATE EVENT'],
+    'Third household events survive actual backend and gateway restart')
+    assert.deepEqual((await json(await request(demo, '/api/lists', {
+      cookie: friend,
+    }))).data.map(x => x.name), ['Friend private list'],
+    'Third household Lists survive backend and gateway restart')
+    assert.equal((await request(demo, '/api/events', { cookie: admin })).status, 200)
+    assert.equal((await request(demo, '/api/events', { cookie: familyB })).status, 200)
+
+    console.log('[PASS] Approved family survives real private gateway/backend restart with events and Lists.')
+    console.log('[PASS] Second registered-but-unapproved family stays offline after restart.')
     console.log('[PASS] Real third-family invite -> account -> 503 pending -> trusted backend -> events + Lists.')
     console.log('[PASS] Wrong token, duplicate port, unregistered ID and browser activation blocked.')
     console.log('[PASS] Existing Family A and Family B remained private and functional.')
