@@ -171,6 +171,18 @@ test('invited third family stays blocked until trusted live backend enrollment, 
     assert.equal((await request(demo, '/api/events', { cookie: waitCookie })).status, 503)
 
     const restored = await demo.restartApprovedBackendsAndGateway()
+    // The restarted three-family process fixture is now watched by a private,
+    // fail-closed child lifecycle monitor. No Windows task/service is installed.
+    assert.deepEqual({
+      phase: demo.restartedSupervisorStatus.phase,
+      allCaptured: demo.restartedSupervisorStatus.allCaptured,
+      held: demo.restartedSupervisorStatus.held,
+      approvedForAutomaticRecovery:
+        demo.restartedSupervisorStatus.approvedForAutomaticRecovery,
+    }, {
+      phase: 'running', allCaptured: true, held: false,
+      approvedForAutomaticRecovery: false,
+    })
     assert.deepEqual(restored.activeHouseholdIds.slice(0, 2), ['family-a', 'family-b'])
     assert.deepEqual(restored.activeHouseholdIds.slice(2), [householdId])
     assert.notEqual(demo.privateBackendPorts[householdId], pending.port,
