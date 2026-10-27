@@ -48,11 +48,16 @@ test('unexpected backend exit creates a durable quarantine and prevents automati
     a.send('crash')
     await crashed
     assert.equal(a.exitCode, 29)
-    assert.deepEqual({ ...guard.snapshot() }, {
-      phase: 'held', held: true, reason: 'unexpected-exit',
-      allCaptured: true, capturedExited: false,
-      approvedForAutomaticRecovery: false, taskSchedulerInstalled: false,
-    })
+    // On Windows the IPC disconnect and child exit can arrive in either
+    // order. Both must create the SAME durable hold, without treating a
+    // disconnected handle as proof the process already exited.
+    const state = guard.snapshot()
+    assert.equal(state.phase, 'held')
+    assert.equal(state.held, true)
+    assert(['unexpected-exit', 'lost-control'].includes(state.reason))
+    assert.equal(state.allCaptured, true)
+    assert.equal(state.approvedForAutomaticRecovery, false)
+    assert.equal(state.taskSchedulerInstalled, false)
     const audit = inspectPrivateWindowsSupervisorHold(fixture.dir)
     assert.equal(audit.held, true)
     assert.equal(audit.automaticRestartAllowed, false)
@@ -67,6 +72,7 @@ test('unexpected backend exit creates a durable quarantine and prevents automati
     assert.deepEqual(Object.keys(metadata),
       ['schemaVersion', 'state', 'reason', 'householdId', 'occurredAt'])
     assert.equal(metadata.householdId, 'family-a')
+    assert.equal(metadata.reason, state.reason)
     assert(!saved.includes('token'))
     assert(!saved.includes('pid'))
     assert(!saved.includes('storage'))
