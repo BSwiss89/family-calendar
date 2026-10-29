@@ -54,6 +54,8 @@ jobs:
       - name: Test household settings, registration and migration on disposable databases
         run: |
           node --test scripts/test-household-members-settings.mjs scripts/test-private-household-invite-signup.mjs scripts/test-legacy-household-account-rehearsal.mjs
+      - name: Reconcile isolated migrated calendar rows and uploads against offline legacy backup
+        run: node --test scripts/test-private-legacy-household-reconciliation.mjs
       - name: Test invite-only independent household owner onboarding
         run: node --test scripts/test-independent-household-onboarding.mjs
       - name: Activate a real third private household and verify event/List isolation
