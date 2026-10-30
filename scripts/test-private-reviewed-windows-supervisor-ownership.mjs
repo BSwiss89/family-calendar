@@ -137,7 +137,10 @@ test('unexpected actual child exit writes durable hold and blocks new ownership'
   guard.markHealthy()
   await stop(child)
   assert.equal(guard.snapshot().phase, 'held')
-  assert.equal(guard.snapshot().failureReason, 'unexpected-child-exit')
+  // Windows can report IPC disconnect before the process exit event. Both
+  // are durable crash-hold reasons and must refuse another automatic owner.
+  assert.ok(['unexpected-child-exit', 'supervisor-ipc-disconnect']
+    .includes(guard.snapshot().failureReason))
   const inspect = inspectReviewedWindowsSupervisorOwnership(f.stateDirectory)
   assert.equal(inspect.instanceLockPresent, true)
   assert.equal(inspect.crashHoldPresent, true)
