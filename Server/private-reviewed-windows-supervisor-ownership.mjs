@@ -163,6 +163,42 @@ export function createReviewedWindowsSupervisorOwnership({ plan, stateDirectory 
     phase = 'stopping'
   }
 
+  // EXCLUSIVE OFFLINE CAPTURE WINDOW, disposable fixtures only.
+  // Keep this owner's durable instance lock in place across snapshot copy:
+  // no competing supervised start or graceful release can occur while copying.
+  // A failed/abandoned capture intentionally remains locked for manual review.
+  function beginDisposableOfflineCapture(householdIds) {
+    if (phase !== 'stopping' || fs.existsSync(marker) ||
+        !Array.isArray(householdIds) ||
+        JSON.stringify(householdIds) !== JSON.stringify(ids) ||
+        captured.size !== ids.length ||
+        ids.some(id => !captured.get(id)?.exited ||
+          !isExited(captured.get(id).child))) {
+      refuse('all reviewed child exits and exact household scope are required before offline capture.')
+    }
+    checkOwnership()
+    phase = 'capturing'
+    return Object.freeze({
+      exclusiveSupervisorInstanceHeld: true,
+      capturedChildrenExited: true,
+      osWideWriterFencingVerified: false,
+      productionBackupAuthorized: false,
+    })
+  }
+
+  function completeDisposableOfflineCapture() {
+    if (phase !== 'capturing' || fs.existsSync(marker)) {
+      refuse('only an active reviewed offline capture can be completed.')
+    }
+    checkOwnership()
+    phase = 'stopping'
+    return Object.freeze({
+      captureWindowClosed: true,
+      supervisorInstanceStillHeld: true,
+      productionBackupAuthorized: false,
+    })
+  }
+
   function finishGracefulShutdown() {
     if (phase !== 'stopping' || fs.existsSync(marker) ||
         captured.size !== ids.length ||
@@ -195,6 +231,7 @@ export function createReviewedWindowsSupervisorOwnership({ plan, stateDirectory 
   }
   return Object.freeze({
     captureBackend, markHealthy, beginGracefulShutdown,
+    beginDisposableOfflineCapture, completeDisposableOfflineCapture,
     finishGracefulShutdown, snapshot,
   })
 }
