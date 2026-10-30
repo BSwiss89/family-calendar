@@ -22,7 +22,6 @@ const passwd = 'Synthetic-Reviewed-Startup-Password-2026!'
 
 function fixture(t, { addFriend = false } = {}) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-reviewed-startup-'))
-  t.after(() => fs.rmSync(temp, { recursive: true, force: true }))
   const serverDirectory = path.join(temp, 'checkout', 'Server')
   const storageRoot = path.join(temp, 'private-households')
   const stateDirectory = path.join(temp, 'supervisor-state')
@@ -30,7 +29,10 @@ function fixture(t, { addFriend = false } = {}) {
   fs.mkdirSync(storageRoot)
   fs.mkdirSync(stateDirectory)
   const identityDatabase = new DatabaseSync(path.join(temp, 'identity.db'))
-  t.after(() => identityDatabase.close())
+  t.after(() => {
+    identityDatabase.close()
+    fs.rmSync(temp, { recursive: true, force: true })
+  })
   createHouseholdMembershipTables(identityDatabase)
   createIndependentHouseholdInvitationTables(identityDatabase)
   createPrivateActivationRecords(identityDatabase)
