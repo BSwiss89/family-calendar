@@ -236,3 +236,13 @@ test('mismatched family identity scope, reused port and incomplete gateway closu
   assert.equal(f.supervisor.snapshot().phase,'stopping')
   assert.equal(fs.existsSync(f.destinationRoot),false)
 })
+
+test('valid backup format with a foreign household is rejected before publication',async t=>{
+  const f=await fixture(t)
+  await gracefullyStop(f)
+  fs.mkdirSync(path.join(f.sourceRoot,'households','unknown-household'))
+  await assert.rejects(captureAfterDisposableReviewedShutdown(options(f)),
+    /offline source households differ from supervised household scope/)
+  assert.equal(fs.existsSync(f.destinationRoot),false)
+  assert.equal(f.supervisor.snapshot().phase,'capturing')
+})
