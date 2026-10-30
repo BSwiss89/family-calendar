@@ -102,6 +102,12 @@ export async function captureAfterDisposableReviewedShutdown({
   const captured = captureDisposableCoordinatedHouseholdSnapshot({
     serverDirectory, sourceRoot, destinationRoot,
   })
+  // A valid backup of DIFFERENT families must never count as this owner's
+  // verified capture. The internal staging folder remains for operator review.
+  if (JSON.stringify([...captured.attestation.households].sort()) !==
+      JSON.stringify([...ids].sort())) {
+    fail('captured household inventory does not match supervised identities.')
+  }
   // Detect even a listener that appeared after copying. Remain held on error.
   for (const port of allPorts) await requireClosedLoopback(port)
   supervisor.completeDisposableOfflineCapture()
