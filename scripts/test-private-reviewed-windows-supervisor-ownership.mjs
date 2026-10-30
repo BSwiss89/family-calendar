@@ -18,7 +18,11 @@ function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-reviewed-supervisor-'))
   const stateDirectory = path.join(root, 'supervisor')
   fs.mkdirSync(stateDirectory)
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const children = []
+  t.after(async () => {
+    for (const child of children) await stop(child)
+    fs.rmSync(root, { recursive: true, force: true })
+  })
   function plan(ids = [home]) {
     return Object.freeze({
       kind: 'reviewed-private-test-startup-plan-v1',
@@ -30,14 +34,14 @@ function fixture(t) {
       taskSchedulerInstalled: false,
     })
   }
-  return { stateDirectory, plan }
+  return { stateDirectory, plan, children }
 }
 
-async function start(t) {
+async function start(f) {
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
     windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
   })
-  t.after(async () => { await stop(child) })
+  f.children.push(child)
   await new Promise((resolve, reject) => {
     child.once('spawn', resolve)
     child.once('error', reject)
@@ -74,7 +78,7 @@ test('reviewed primary-only child starts, stops, and releases only its own lock'
   const guard = createReviewedWindowsSupervisorOwnership({
     plan: f.plan(), stateDirectory: f.stateDirectory,
   })
-  const c = await start(t)
+  const c = await start(f)
   guard.captureBackend({ householdId: home, child: c })
   guard.markHealthy()
   const active = guard.snapshot()
@@ -106,8 +110,8 @@ test('operator-reviewed primary and invited owner each needs a captured OS child
   const guard = createReviewedWindowsSupervisorOwnership({
     plan: f.plan([home, invited]), stateDirectory: f.stateDirectory,
   })
-  const a = await start(t)
-  const b = await start(t)
+  const a = await start(f)
+  const b = await start(f)
   guard.captureBackend({ householdId: home, child: a })
   assert.throws(() => guard.markHealthy(), /every approved backend/)
   assert.throws(() => guard.captureBackend({ householdId: home, child: b }),
@@ -128,7 +132,7 @@ test('unexpected actual child exit writes durable hold and blocks new ownership'
   const guard = createReviewedWindowsSupervisorOwnership({
     plan: f.plan(), stateDirectory: f.stateDirectory,
   })
-  const child = await start(t)
+  const child = await start(f)
   guard.captureBackend({ householdId: home, child })
   guard.markHealthy()
   await stop(child)
@@ -148,7 +152,7 @@ test('disconnected IPC is held even before the child exits', async t => {
   const guard = createReviewedWindowsSupervisorOwnership({
     plan: f.plan(), stateDirectory: f.stateDirectory,
   })
-  const child = await start(t)
+  const child = await start(f)
   guard.captureBackend({ householdId: home, child })
   guard.markHealthy()
   await new Promise(resolve => {
@@ -179,7 +183,7 @@ test('altering another process ownership lock prevents clean release', async t =
   const guard = createReviewedWindowsSupervisorOwnership({
     plan: f.plan(), stateDirectory: f.stateDirectory,
   })
-  const child = await start(t)
+  const child = await start(f)
   guard.captureBackend({ householdId: home, child })
   guard.markHealthy()
   guard.beginGracefulShutdown()
