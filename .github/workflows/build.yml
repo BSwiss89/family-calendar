@@ -60,6 +60,8 @@ jobs:
         run: node --test scripts/test-independent-household-onboarding.mjs
       - name: Activate a real third private household and verify event/List isolation
         run: node --test scripts/test-independent-household-activation.mjs
+      - name: Verify reviewed primary household and invited friend TEST startup plan
+        run: node --test scripts/test-private-reviewed-test-startup-plan.mjs
       - name: Verify approved-only private supervisor startup and lock fencing
         run: node --test scripts/test-private-approved-household-startup.mjs
       - name: Verify private Windows supervisor crash hold and restart refusal
