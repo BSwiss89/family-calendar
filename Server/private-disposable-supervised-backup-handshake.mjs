@@ -7,6 +7,7 @@
 import net from 'node:net'
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import { ChildProcess } from 'node:child_process'
 import { captureDisposableCoordinatedHouseholdSnapshot }
   from './private-disposable-coordinated-snapshot.mjs'
@@ -94,6 +95,19 @@ export async function captureAfterDisposableReviewedShutdown({
   }
   if (new Set(allPorts).size !== allPorts.length) {
     fail('gateway and backend loopback ports must be distinct.')
+  }
+
+  // Never examine arbitrary caller-selected source folders first. Refuse any
+  // installed/LIVE/TEST path BEFORE reading a household name or data file.
+  if (typeof sourceRoot !== 'string' || !path.isAbsolute(sourceRoot)) {
+    fail('only absolute disposable source folders are permitted.')
+  }
+  const temp = fs.realpathSync(os.tmpdir())
+  const source = fs.realpathSync(sourceRoot)
+  const relative = path.relative(temp, source)
+  if (!relative || relative === '..' ||
+      relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
+    fail('backup source must be an isolated OS-temp fixture.')
   }
 
   // This transition atomically protects the supervisor instance lock against
