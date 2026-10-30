@@ -54,6 +54,9 @@ async function spawnSyntheticWorker(householdId, token, root) {
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     windowsHide: true,
   })
+  // The close event (rather than only exit) must finish before deleting the
+  // worker's current directory on Windows, or rmSync can fail with EPERM.
+  const closed = new Promise(resolve => child.once('close', resolve))
   // Subscribe to the actual child message immediately, before it can report
   // ready, and verify the exact reviewed family identity and a safe port.
   const ready = new Promise((resolve, reject) => {
@@ -93,7 +96,7 @@ async function spawnSyntheticWorker(householdId, token, root) {
     child.kill()
     throw error
   }
-  return { child, ready }
+  return { child, ready, closed }
 }
 
 async function probeAuthorizedLoopback(port, householdId, token) {
@@ -168,8 +171,8 @@ export async function launchDisposableReviewedWindowsHouseholds({
   try {
     for (const householdId of plan.householdIds) {
       const token = randomBytes(32).toString('hex')
-      const { child, ready } = await spawnSyntheticWorker(householdId, token, root)
-      children.push({ householdId, child })
+      const { child, ready, closed } = await spawnSyntheticWorker(householdId, token, root)
+      children.push({ householdId, child, closed })
       // Capture the actual OS handle before declaring it healthy.
       guard.captureBackend({ householdId, child })
       const port = await ready
@@ -183,10 +186,11 @@ export async function launchDisposableReviewedWindowsHouseholds({
     // The uncompleted reviewed instance lock is intentionally NOT released.
     // Stopping only our own fixture processes does not prove all OS writers
     // are fenced and never authorizes unattended startup.
-    await Promise.allSettled(children.map(({ child }) => stopSyntheticWorker(child)))
-    for (const { child } of children) {
-      if (child.exitCode === null && child.signalCode === null) child.kill()
-    }
+    await Promise.allSettled(children.map(async ({ child, closed }) => {
+      try { await stopSyntheticWorker(child) }
+      catch { if (child.exitCode === null && child.signalCode === null) child.kill() }
+      await closed
+    }))
     throw error
   }
 
@@ -223,10 +227,14 @@ export async function launchDisposableReviewedWindowsHouseholds({
     },
     // Purely for fixture test cleanup; never interpret as permission to
     // automatically clear a durable owner lock.
-    terminateRemainingSyntheticChildrenForTest() {
-      for (const { child } of children) {
-        if (child.exitCode === null && child.signalCode === null) child.kill()
-      }
+    async terminateRemainingSyntheticChildrenForTest() {
+      // Tests never remove a synthetic directory while a child still holds it
+      // as its cwd. This is deliberately NOT an automatic production unlock.
+      await Promise.all(children.map(async ({ child, closed }) => {
+        try { await stopSyntheticWorker(child) }
+        catch { if (child.exitCode === null && child.signalCode === null) child.kill() }
+        await closed
+      }))
     },
   })
 }
