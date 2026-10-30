@@ -79,6 +79,8 @@ jobs:
       - name: Verify private upstream authentication and household mutation boundaries
         run: |
           node --test scripts/test-private-upstream-access.mjs scripts/test-private-gateway-mutation-policy.mjs scripts/test-private-event-source-outbox.mjs
+      - name: Capture and independently attest disposable coordinated multi-family backup
+        run: node --test scripts/test-private-disposable-coordinated-snapshot.mjs
       - name: Verify synthetic household AI budgets and offline backup restore safety
         run: |
           node --test scripts/test-private-local-ai-budget.mjs scripts/test-private-paid-api-budget.mjs
