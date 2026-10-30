@@ -126,7 +126,7 @@ test('stale activation on inactive registry and multi-membership refuse startup'
   f.args.identityDatabase.prepare(
     'UPDATE household_registry SET disabled=0 WHERE storage_id=?'
   ).run(friend)
-  const user = f.args.primaryUser
+  const user = f.primaryUser
   f.args.identityDatabase.exec('DROP INDEX household_memberships_one_household_per_user')
   const id = f.args.identityDatabase.prepare(
     'SELECT id FROM household_registry WHERE storage_id=?').get(friend).id
