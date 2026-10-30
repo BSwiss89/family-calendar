@@ -32,11 +32,11 @@ function fixture(t) {
   const runtimes = []
   t.after(async () => {
     for (const runtime of runtimes) {
-      runtime.terminateRemainingSyntheticChildrenForTest()
+      await runtime.terminateRemainingSyntheticChildrenForTest()
     }
     // Removing temporary synthetic fixtures is only a test teardown action.
     // It is NEVER a production orphan-lock recovery technique.
-    fs.rmSync(root, { recursive: true, force: true })
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 150 })
   })
   async function start(ids = [primary]) {
     const runtime = await launchDisposableReviewedWindowsHouseholds({
