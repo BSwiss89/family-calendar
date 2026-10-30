@@ -5,6 +5,8 @@
 // do NOT prove OS-wide writer fencing, SQLite checkpointing or LIVE safety.
 // Production paths are rejected by the underlying OS-temp-only capture.
 import net from 'node:net'
+import fs from 'node:fs'
+import path from 'node:path'
 import { ChildProcess } from 'node:child_process'
 import { captureDisposableCoordinatedHouseholdSnapshot }
   from './private-disposable-coordinated-snapshot.mjs'
@@ -98,6 +100,12 @@ export async function captureAfterDisposableReviewedShutdown({
   // its own graceful release during capture. It is NEVER automatically undone
   // after a partial or unverified capture.
   supervisor.beginDisposableOfflineCapture(ids)
+  // Reject a backup of another family's data BEFORE any snapshot publication.
+  // The capture module validates complete source inventory and OS-temp scope.
+  const slugs = fs.readdirSync(path.join(sourceRoot, 'households')).sort()
+  if (JSON.stringify(slugs) !== JSON.stringify([...ids].sort())) {
+    fail('offline source households differ from supervised household scope.')
+  }
   for (const port of allPorts) await requireClosedLoopback(port)
   const captured = captureDisposableCoordinatedHouseholdSnapshot({
     serverDirectory, sourceRoot, destinationRoot,
