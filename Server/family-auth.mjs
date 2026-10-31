@@ -3,11 +3,20 @@ import { promisify } from 'node:util'
 import path from 'node:path'
 
 const derive = promisify(scrypt)
-// Secure browser cookies are scoped to the hostname, not its TCP port.
-// LIVE and TEST use different cookie names for the two Funnel ports.
-const COOKIE_NAME = process.env.FAMILY_CALENDAR_PORT === '13002'
-  ? '__Host-fc_test_session'
-  : '__Host-fc_live_session'
+// Match the secure production two-site cookie names. The localhost-only
+// draft gateway uses a separate explicit cookie identity so its future
+// HTTPS origin cannot overwrite either LIVE or TEST browser sessions.
+export function familySessionCookieNameForPort(port) {
+  return String(port) === '13002' ? '__Host-fc_test_session'
+    : String(port) === '3001' ? '__Host-fc_live_session'
+      : '__Host-fc_session'
+}
+// Preserve the production LIVE default (port 3001) whenever the port
+// environment variable is omitted. The private gateway overrides this
+// explicitly; the TEST port retains its own cookie.
+const COOKIE_NAME = familySessionCookieNameForPort(
+  process.env.FAMILY_CALENDAR_PORT ?? '3001'
+)
 const SESSION_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000
 const TOUCH_INTERVAL_MS = 24 * 60 * 60 * 1000
 const LOGIN_WINDOW_MS = 15 * 60 * 1000
@@ -57,6 +66,7 @@ export function createFamilyAuthTables(database) {
     'username TEXT NOT NULL UNIQUE,',
     'display_name TEXT NOT NULL,',
     'password_hash TEXT NOT NULL,',
+    "account_kind TEXT NOT NULL DEFAULT 'person' CHECK(account_kind IN ('person','hub')),",
     'disabled INTEGER NOT NULL DEFAULT 0',
     ') STRICT;',
     'CREATE TABLE IF NOT EXISTS family_sessions (',
@@ -72,9 +82,18 @@ export function createFamilyAuthTables(database) {
     'CREATE INDEX IF NOT EXISTS family_sessions_user_idx ON family_sessions(user_id);',
     'CREATE INDEX IF NOT EXISTS family_sessions_expiry_idx ON family_sessions(expires_at);',
   ].join('\n'))
+  // Old central identity databases created before hub-account roles should
+  // retain all logins and sessions, never be dropped/rebuilt for this change.
+  const columns = database.prepare('PRAGMA table_info(family_users)').all()
+  if (!columns.some(column => column.name === 'account_kind')) {
+    database.exec("ALTER TABLE family_users ADD COLUMN account_kind TEXT NOT NULL DEFAULT 'person' CHECK(account_kind IN ('person','hub'))")
+  }
 }
 
-export function setFamilyAccount(database, username, displayName, password) {
+export function setFamilyAccount(database, username, displayName, password, { accountKind = 'person' } = {}) {
+  if (!['person', 'hub'].includes(accountKind)) {
+    throw new Error('A family account must represent a person or a household hub.')
+  }
   const name = normalizedUsername(username)
   if (!name) throw new Error('Username must be 3–40 letters, digits, dots, dashes, or underscores.')
   if (typeof displayName !== 'string' || !displayName.trim() || displayName.trim().length > 80) {
@@ -86,13 +105,13 @@ export function setFamilyAccount(database, username, displayName, password) {
   try {
     const existing = database.prepare('SELECT id FROM family_users WHERE username = ?').get(name)
     if (existing) {
-      database.prepare('UPDATE family_users SET display_name = ?, password_hash = ?, disabled = 0 WHERE id = ?')
-        .run(displayName.trim(), passwordHash, existing.id)
+      database.prepare('UPDATE family_users SET display_name = ?, password_hash = ?, account_kind = ?, disabled = 0 WHERE id = ?')
+        .run(displayName.trim(), passwordHash, accountKind, existing.id)
       // A password reset revokes all trusted devices.
       database.prepare('DELETE FROM family_sessions WHERE user_id = ?').run(existing.id)
     } else {
-      database.prepare('INSERT INTO family_users(username, display_name, password_hash) VALUES (?, ?, ?)')
-        .run(name, displayName.trim(), passwordHash)
+      database.prepare('INSERT INTO family_users(username, display_name, password_hash, account_kind) VALUES (?, ?, ?, ?)')
+        .run(name, displayName.trim(), passwordHash, accountKind)
     }
     database.exec('COMMIT')
   } catch (error) {
@@ -101,20 +120,20 @@ export function setFamilyAccount(database, username, displayName, password) {
   }
 }
 
-function cookieValue(request) {
+function cookieValue(request, cookieName = COOKIE_NAME) {
   const raw = request.headers.cookie
   if (typeof raw !== 'string') return null
   for (const part of raw.split(';')) {
     const split = part.indexOf('=')
-    if (split === -1 || part.slice(0, split).trim() !== COOKIE_NAME) continue
+    if (split === -1 || part.slice(0, split).trim() !== cookieName) continue
     const token = part.slice(split + 1).trim()
     return /^[a-f0-9]{64}$/.test(token) ? token : null
   }
   return null
 }
 
-function secureCookie(response, token) {
-  response.cookie(COOKIE_NAME, token, {
+function secureCookie(response, token, cookieName = COOKIE_NAME) {
+  response.cookie(cookieName, token, {
     httpOnly: true,
     secure: true,
     sameSite: 'strict',
@@ -123,8 +142,8 @@ function secureCookie(response, token) {
   })
 }
 
-function clearCookie(response) {
-  response.clearCookie(COOKIE_NAME, {
+function clearCookie(response, cookieName = COOKIE_NAME) {
+  response.clearCookie(cookieName, {
     httpOnly: true,
     secure: true,
     sameSite: 'strict',
@@ -154,12 +173,12 @@ function securityHeaders(response) {
   response.set('X-Frame-Options', 'DENY')
 }
 
-function getSession(database, request, response, touch = true) {
-  const token = cookieValue(request)
+function getSession(database, request, response, touch = true, cookieName = COOKIE_NAME) {
+  const token = cookieValue(request, cookieName)
   if (!token) return null
   const now = Date.now()
   const session = database.prepare([
-    'SELECT s.id, s.user_id, s.device_label, s.last_seen_at, u.username, u.display_name',
+    'SELECT s.id, s.user_id, s.device_label, s.last_seen_at, u.username, u.display_name, u.account_kind',
     'FROM family_sessions s JOIN family_users u ON u.id = s.user_id',
     'WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ? AND u.disabled = 0',
   ].join(' ')).get(sha256(token), now)
@@ -167,7 +186,7 @@ function getSession(database, request, response, touch = true) {
   if (touch && now - session.last_seen_at > TOUCH_INTERVAL_MS) {
     database.prepare('UPDATE family_sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?')
       .run(now, now + SESSION_MAX_AGE_MS, session.id)
-    secureCookie(response, token)
+    secureCookie(response, token, cookieName)
   }
   return session
 }
@@ -210,7 +229,13 @@ function safeDeviceLabel(value) {
   return label.slice(0, 60) || 'Family device'
 }
 
-export function installFamilyAuth(app, database, directory, mode = process.env.FAMILY_CALENDAR_AUTH_MODE ?? 'disabled') {
+export function installFamilyAuth(app, database, directory, mode = process.env.FAMILY_CALENDAR_AUTH_MODE ?? 'disabled',
+  { cookieName = COOKIE_NAME } = {}) {
+  // Deliberately restrict the override to the private authenticated gateway.
+  // Other sites always use their own port-specific secure cookie name.
+  if (cookieName !== COOKIE_NAME && cookieName !== '__Host-fc_gateway_session') {
+    throw new Error('Unapproved session cookie name.')
+  }
   if (!['required', 'disabled'].includes(mode)) {
     throw new Error('FAMILY_CALENDAR_AUTH_MODE must be required or disabled.')
   }
@@ -219,6 +244,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
     return
   }
   createFamilyAuthTables(database)
+  const privateSession = (request, response) => getSession(database, request, response, true, cookieName)
   const uiFolder = path.join(directory, 'auth-ui')
 
   app.use((_request, response, next) => {
@@ -231,7 +257,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
     response.sendFile(path.join(uiFolder, file))
   }
   app.get('/login', (request, response) => {
-    if (getSession(database, request, response)) return response.redirect(303, '/')
+    if (privateSession(request, response)) return response.redirect(303, '/')
     sendUi('login.html')(request, response)
   })
   app.get('/auth/login.js', sendUi('login.js'))
@@ -239,11 +265,14 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   app.get('/auth/styles.css', sendUi('styles.css'))
 
   app.get('/api/auth/status', (request, response) => {
-    const session = getSession(database, request, response)
+    const session = privateSession(request, response)
     response.json({
       enabled: true,
       authenticated: Boolean(session),
-      ...(session ? { displayName: session.display_name, username: session.username } : {}),
+      ...(session ? {
+        displayName: session.display_name, username: session.username,
+        accountKind: session.account_kind,
+      } : {}),
     })
   })
 
@@ -304,7 +333,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
         now, now, expires
       )
 
-      secureCookie(response, token)
+      secureCookie(response, token, cookieName)
       response.json({ ok: true, displayName: user.display_name })
     } catch (error) {
       console.error(
@@ -320,7 +349,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   app.use((request, response, next) => {
     // Health returns only generic process status. No other route is exempt.
     if (request.path === '/api/health' && (request.method === 'GET' || request.method === 'HEAD')) return next()
-    const session = getSession(database, request, response)
+    const session = privateSession(request, response)
     if (!session) {
       if (request.path.startsWith('/api/')) return response.status(401).json({ error: 'Sign in required.' })
       if (request.method === 'GET' || request.method === 'HEAD') return response.redirect(303, '/login')
@@ -338,7 +367,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   app.post('/api/auth/logout', (request, response) => {
     database.prepare('UPDATE family_sessions SET revoked_at = ? WHERE id = ?')
       .run(Date.now(), request.familyAccount.id)
-    clearCookie(response)
+    clearCookie(response, cookieName)
     response.json({ ok: true })
   })
 
@@ -367,7 +396,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
       'WHERE id = ? AND user_id = ? AND revoked_at IS NULL',
     ].join(' ')).run(Date.now(), id, request.familyAccount.user_id)
     if (result.changes !== 1) return response.status(404).json({ error: 'Device not found.' })
-    if (id === request.familyAccount.id) clearCookie(response)
+    if (id === request.familyAccount.id) clearCookie(response, cookieName)
     response.json({ ok: true })
   })
 }

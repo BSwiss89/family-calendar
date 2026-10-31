@@ -20,6 +20,24 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Refuse missing LIVE features or household foundations in isolated candidate
+        if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.number == 70 || github.event.pull_request.base.ref == 'feature/live-preserving-household-integration-candidate') }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (!(Test-Path 'scripts/audit-household-live-parity.mjs')) {
+            throw 'Household/LIVE parity audit is missing; cannot approve candidate.'
+          }
+          node scripts/audit-household-live-parity.mjs --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'LIVE-preservation audit fixture failed.' }
+          # Fetch pinned working LIVE baseline for read-only Git object comparisons.
+          # No checkout, reset, merging, DB access, deployment or Tailscale change.
+          git fetch --no-tags --depth=1 origin feature/auth-current-calendar-two-sites
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned LIVE baseline fetch failed.' }
+          node scripts/audit-household-live-parity.mjs --require-preserved-features
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline LIVE feature or household foundation file missing.' }
+      - name: Validate permanent CI attempt journal with mocked GitHub API
+        run: node --test scripts/test-ci-history-journal.mjs
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
       - name: Check TypeScript and build frontend
@@ -30,6 +48,73 @@ jobs:
         run: node --test scripts/test-list-features.mjs && node --test scripts/test-shopping-stores.mjs && node --test scripts/test-list-icons.mjs
       - name: Verify auth, remembered devices, and separate site cookies
         run: node --test scripts/test-family-auth.mjs
+      - name: Test isolated household storage, memberships and secure invitations
+        run: |
+          node --test scripts/test-household-storage.mjs scripts/test-household-memberships.mjs scripts/test-household-member-invitations.mjs scripts/test-household-member-directory.mjs scripts/test-household-member-access-revocation.mjs
+      - name: Test household settings, registration and migration on disposable databases
+        run: |
+          node --test scripts/test-household-members-settings.mjs scripts/test-private-household-invite-signup.mjs scripts/test-legacy-household-account-rehearsal.mjs
+      - name: Reconcile isolated migrated calendar rows and uploads against offline legacy backup
+        run: node --test scripts/test-private-legacy-household-reconciliation.mjs
+      - name: Test invite-only independent household owner onboarding
+        run: node --test scripts/test-independent-household-onboarding.mjs
+      - name: Activate a real third private household and verify event/List isolation
+        run: node --test scripts/test-independent-household-activation.mjs
+      - name: Verify reviewed primary household and invited friend TEST startup plan
+        run: node --test scripts/test-private-reviewed-test-startup-plan.mjs
+      - name: Verify approved-only private supervisor startup and lock fencing
+        run: node --test scripts/test-private-approved-household-startup.mjs
+      - name: Exercise disposable supervisor against real Node children and authenticated loopback health
+        run: node --test scripts/test-private-disposable-reviewed-windows-supervisor-runtime.mjs
+      - name: Rehearse pinned Windows scheduler handoff around real disposable Node children
+        run: node --test scripts/test-private-disposable-pinned-windows-host-handoff.mjs
+      - name: Verify real-household supervisor OS child ownership and durable crash hold
+        run: node --test scripts/test-private-reviewed-windows-supervisor-ownership.mjs
+      - name: Verify private Windows supervisor crash hold and restart refusal
+        run: node --test scripts/test-private-windows-supervisor-crash-hold.mjs
+      - name: Audit Windows protected-port ownership with synthetic inventory
+        run: node --test scripts/test-private-windows-port-owners.mjs
+      - name: Audit Windows TEST host readiness using safe synthetic inventories
+        run: node --test scripts/test-private-windows-test-readiness.mjs
+      - name: Check one-family TEST pilot inspection and cutover blockers without touching installed sites
+        run: node --test scripts/test-private-one-family-test-pilot.mjs
+      - name: Verify accepted shared event overlays and parsing
+        run: node --test scripts/test-live-received-shared-calendar.mjs scripts/test-shared-event-overlay.mjs
+      - name: Verify LIVE desktop and mobile household invitation inbox
+        run: node --test scripts/test-live-invitation-inbox.mjs
+      - name: Verify LIVE event detail single-share entry point
+        run: node --test scripts/test-live-single-event-share-action.mjs
+      - name: Verify private upstream authentication and household mutation boundaries
+        run: |
+          node --test scripts/test-private-upstream-access.mjs scripts/test-private-gateway-mutation-policy.mjs scripts/test-private-event-source-outbox.mjs
+      - name: Verify supervised shutdown and exclusive owner lock through offline backup
+        run: node --test scripts/test-private-disposable-supervised-backup-handshake.mjs
+      - name: Capture and independently attest disposable coordinated multi-family backup
+        run: node --test scripts/test-private-disposable-coordinated-snapshot.mjs
+      - name: Verify synthetic household AI budgets and offline backup restore safety
+        run: |
+          node --test scripts/test-private-local-ai-budget.mjs scripts/test-private-paid-api-budget.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Private household AI budget test failure.' }
+          node --test scripts/test-private-restore-preflight.mjs scripts/test-private-offline-restore-rehearsal.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Private household offline restore test failure.' }
+      - name: Refuse concurrent private gateways and unreviewed stale writer locks
+        run: node --test scripts/test-private-gateway-writer-lock.mjs
+      - name: Inspect abandoned private gateway locks without clearing them
+        run: node --test scripts/test-private-gateway-recovery-audit.mjs
+      - name: Verify supervised disposable gateway and backend shutdown fencing
+        run: node --test scripts/test-private-supervised-writer-quiescence.mjs
+      - name: Rehearse actual orphaned gateway lock after a synthetic process crash
+        run: node --test scripts/test-private-gateway-process-crash.mjs
+      - name: Crash actual Family A backend and prove Family B data remains independent
+        run: node --test scripts/test-private-backend-process-crash.mjs
+      - name: Verify private gateway restart binding retries transport only
+        run: node --test scripts/test-private-gateway-binding-retry.mjs
+      - name: Test real two-household private gateway with LIVE Lists preserved
+        run: |
+          node --test scripts/test-private-household-gateway.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Two-household private gateway tests failed.' }
+          node --test scripts/test-household-browser-demo.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Two-household browser demo tests failed.' }
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
@@ -178,3 +263,127 @@ jobs:
             }
           }
 
+  ci-history:
+    name: ci-history
+    needs: frontend-build
+    if: ${{ always() && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: Preserve CI initial attempt, failures and reruns in GitHub Issue #84
+        uses: actions/github-script@v7
+        with:
+          script: |
+            return await (async function recorder(github, context, core) {
+              const { owner, repo } = context.repo;
+              const issue_number = 84;
+              const run_id = Number(context.runId);
+              const currentAttempt = Number(context.runAttempt ?? process.env.GITHUB_RUN_ATTEMPT);
+              if (!Number.isSafeInteger(run_id) || !Number.isSafeInteger(currentAttempt) || currentAttempt < 1) {
+                throw new Error('Untrusted or missing workflow run / attempt number');
+              }
+              const timestamp = (value) => {
+                if (!value) return 'not reported';
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) return 'invalid timestamp';
+                const central = new Intl.DateTimeFormat('en-US', {
+                  timeZone: 'America/Chicago', year: 'numeric', month: '2-digit',
+                  day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+                  hour12: true, timeZoneName: 'short'
+                }).format(date);
+                return `${date.toISOString()} (UTC); ${central} (Central)`;
+              };
+              const marker = (attempt) => `<!-- fc-ci-attempt:v1:${run_id}:${attempt} -->`;
+              const { data: run } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id });
+              if (run.repository?.full_name !== `${owner}/${repo}`) {
+                throw new Error('Workflow run repository identity mismatch');
+              }
+              const previous = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number, per_page: 100
+              });
+              const known = new Set(
+                previous
+                  .filter((comment) => comment.user?.login === 'github-actions[bot]')
+                  .flatMap((comment) => [...(comment.body || '').matchAll(/<!-- fc-ci-attempt:v1:(\d+):(\d+) -->/g)]
+                    .map((match) => `${match[1]}:${match[2]}`))
+              );
+              for (let attempt = 1; attempt <= currentAttempt; attempt++) {
+                if (known.has(`${run_id}:${attempt}`)) continue;
+                // GitHub may carry completed jobs from the previous attempt into a
+                // single-job rerun, re-labelling them with the new attempt number.
+                // Only count work actually completed after this attempt began.
+                const { data: attemptRun } = await github.rest.actions.getWorkflowRunAttempt({
+                  owner, repo, run_id, attempt_number: attempt
+                });
+                const beganAt = Date.parse(attemptRun.run_started_at);
+                if (attemptRun.run_attempt !== attempt || !Number.isFinite(beganAt)) {
+                  throw new Error(`Attempt ${attempt} has unverified start metadata`);
+                }
+                const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
+                  owner, repo, run_id, attempt_number: attempt, per_page: 100
+                });
+                const candidateJobs = jobs.filter((job) => job.name !== 'ci-history');
+                if (candidateJobs.some((job) => job.status !== 'completed' ||
+                  !Number.isFinite(Date.parse(job.completed_at)))) {
+                  throw new Error(`Attempt ${attempt} has unfinished or undated test jobs; refusing incomplete archive`);
+                }
+                const tested = candidateJobs.filter((job) =>
+                  Date.parse(job.completed_at) >= beganAt);
+                const carriedForward = candidateJobs.length - tested.length;
+                const conclusions = tested.map((job) => job.conclusion || 'unknown');
+                const result = !tested.length
+                  ? 'NO TEST JOB RERUN'
+                  : conclusions.every((status) => status === 'success')
+                    ? 'PASS'
+                    : conclusions.some((status) => ['failure', 'timed_out', 'cancelled', 'action_required'].includes(status))
+                      ? 'FAIL'
+                      : 'NOT PASSED';
+                const stepCount = tested.reduce((sum, job) => sum + (job.steps || []).length, 0);
+                const passedCount = tested.reduce((sum, job) =>
+                  sum + (job.steps || []).filter((step) => step.conclusion === 'success').length, 0);
+                const rows = [];
+                for (const job of tested) {
+                  rows.push(`### Job: ${job.name} — ${job.conclusion || 'no conclusion'}`);
+                  rows.push(`Started: ${timestamp(job.started_at)}`);
+                  rows.push(`Completed: ${timestamp(job.completed_at)}`);
+                  rows.push('');
+                  rows.push('| Step | Result | Finished (UTC and Central) |');
+                  rows.push('|---|---|---|');
+                  for (const step of job.steps || []) {
+                    const safeName = String(step.name || 'unnamed')
+                      .replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+                    rows.push(`| ${step.number}: ${safeName} | ${step.conclusion || step.status || 'unknown'} | ${timestamp(step.completed_at)} |`);
+                  }
+                  rows.push('');
+                }
+                const text = [
+                  marker(attempt),
+                  `## CI attempt ${attempt} — ${result}`,
+                  `Workflow: ${run.name || 'unknown'}  `,
+                  `Run ID: \`${run_id}\`  `,
+                  `Attempt: **${attempt} of ${currentAttempt} observed**  `,
+                  `Event: \`${run.event || 'unknown'}\`  `,
+                  `Head SHA: \`${run.head_sha || 'unknown'}\`  `,
+                  `Run: https://github.com/${owner}/${repo}/actions/runs/${run_id}  `,
+                  `Recorded: ${timestamp(new Date().toISOString())}  `,
+                  `Attempt began: ${timestamp(attemptRun.run_started_at)}`,
+                  `Test jobs executed in this attempt: ${tested.length}; successful steps: **${passedCount}/${stepCount}**`,
+                  `Earlier jobs carried forward by GitHub (excluded): ${carriedForward}`,
+                  '',
+                  ...(tested.length ? rows : [
+                    'This was a history-only rerun; no test job was executed in this attempt.',
+                    'The previous attempt records remain unchanged.'
+                  ]),
+                  '',
+                  '_This durable summary is independent of GitHub Actions log retention. It preserves step outcomes, not raw logs or secrets._'
+                ].join('\n');
+                if (text.length > 60000) {
+                  throw new Error(`Attempt ${attempt} summary is oversized; refusing to silently truncate it`);
+                }
+                await github.rest.issues.createComment({ owner, repo, issue_number, body: text });
+                core.info(`Permanently recorded CI run ${run_id} attempt ${attempt}: ${result}`);
+                known.add(`${run_id}:${attempt}`);
+              }
+            })(github, context, core)

@@ -7,6 +7,11 @@ import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
+import { resolveHouseholdStorage } from './household-storage.mjs'
+import { acquirePrivateHouseholdBackendWriterLock } from './private-gateway-writer-lock.mjs'
+import { installPrivateEventIdentity } from './private-event-identity.mjs'
+import { installPrivateEventSourceOutbox } from './private-event-source-outbox.mjs'
+import { installPrivateUpstreamGuard, requirePrivateUpstreamToken } from './private-upstream-access.mjs'
 import {
   normalizeListCategory,
   ensureListItemCategories,
@@ -35,8 +40,35 @@ const __dirname = path.dirname(__filename)
 // a future approved npm cutover must not boot against mixed package assets.
 assertCalendarReleaseBootSafe(path.resolve(__dirname, '..'))
 
-const dataFolder = path.join(__dirname, 'data')
-const uploadFolder = path.join(__dirname, 'uploads')
+// The LIVE/TEST legacy data paths and schemas remain unchanged by default.
+// Household storage is only enabled for explicitly isolated loopback testing.
+const householdStorage = resolveHouseholdStorage({
+  serverDirectory: __dirname,
+  storageRoot: process.env.FAMILY_CALENDAR_HOUSEHOLD_STORAGE_ROOT ?? null,
+  householdId: process.env.FAMILY_CALENDAR_HOUSEHOLD_ID ?? null,
+})
+if (householdStorage.mode === 'household') {
+  if (process.env.FAMILY_CALENDAR_HOUSEHOLD_TEST_ONLY !== 'YES' ||
+    HOST !== '127.0.0.1' || [3001, 13001, 13002, 13003, 11434, 443, 8443].includes(PORT)) {
+    throw new Error('Private household mode requires explicit non-production loopback test.')
+  }
+  requirePrivateUpstreamToken(process.env.FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN)
+  installPrivateUpstreamGuard(app, {
+    expectedToken: process.env.FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN,
+  })
+  // Test-only, service-authenticated metadata. The regular LIVE and TEST
+  // calendar never expose this route. No user or calendar fields are returned.
+  app.get('/api/internal/household-binding', (_request, response) => {
+    response.set('Cache-Control', 'no-store')
+    response.json({ mode: 'household', householdId: householdStorage.householdId })
+  })
+}
+// Reserve the provisioned household before opening any SQLite connection.
+// An unexpectedly killed test backend leaves a lock for operator review.
+const privateBackendWriterLock = householdStorage.mode === 'household'
+  ? acquirePrivateHouseholdBackendWriterLock(householdStorage)
+  : null
+const { dataFolder, uploadFolder, databasePath } = householdStorage
 const OLLAMA_URL =
   'http://127.0.0.1:11434/api/chat'
 
@@ -47,10 +79,10 @@ const CAPTURE_VISION_MODEL = LOCAL_AI_MODEL
 
 const distFolder = path.join(__dirname, '..', 'dist')
 
-fs.mkdirSync(dataFolder, { recursive: true })
-fs.mkdirSync(uploadFolder, { recursive: true })
-
-const databasePath = path.join(dataFolder, 'calendar.db')
+if (householdStorage.mode === 'legacy') {
+  fs.mkdirSync(dataFolder, { recursive: true })
+  fs.mkdirSync(uploadFolder, { recursive: true })
+}
 const database = new DatabaseSync(databasePath)
 
 database.exec(`PRAGMA foreign_keys = ON`)
@@ -356,6 +388,13 @@ if (!eventColumns.includes('location')) {
     ALTER TABLE events
     ADD COLUMN location TEXT
   `)
+}
+
+// Per-household event IDs are created only in disposable, explicitly opted-in
+// private backends. Legacy LIVE/TEST databases are not modified by this.
+if (householdStorage.mode === 'household') {
+  installPrivateEventIdentity(database)
+  installPrivateEventSourceOutbox(database)
 }
 
 database.exec(`
@@ -7161,6 +7200,42 @@ app.get(/.*/, (request, response) => {
   response.sendFile(path.join(distFolder, 'index.html'))
 })
 
-app.listen(PORT, HOST, () => {
+const httpServer = app.listen(PORT, HOST, () => {
   console.log(`Family Calendar server running at http://127.0.0.1:${PORT}`)
 })
+// Explicit test-only graceful shutdown. Windows TerminateProcess may bypass
+// SIGTERM handlers, so only the parent that spawned this child may use the
+// private Node IPC command. A hard kill intentionally leaves a stale lock.
+if (privateBackendWriterLock) {
+  let closing = false
+  const closePrivateBackend = () => {
+    if (closing) return
+    closing = true
+    httpServer.close(error => {
+      if (error) {
+        console.error('Private household backend shutdown failed:', error)
+        process.exitCode = 1
+        return // Keep writer lock quarantined.
+      }
+      try {
+        database.close()
+        privateBackendWriterLock.release()
+        process.exitCode = 0
+        if (process.connected) process.disconnect()
+      } catch (cleanupError) {
+        console.error('Private household writer-lock cleanup failed:', cleanupError)
+        process.exitCode = 1
+      }
+    })
+  }
+  process.once('SIGTERM', closePrivateBackend)
+  process.once('SIGINT', closePrivateBackend)
+  if (typeof process.send === 'function') {
+    process.on('message', message => {
+      if (message?.type === 'private-household-test-shutdown' &&
+          message.householdId === householdStorage.householdId) {
+        closePrivateBackend()
+      }
+    })
+  }
+}
