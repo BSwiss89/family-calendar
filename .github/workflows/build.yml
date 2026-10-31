@@ -64,6 +64,8 @@ jobs:
         run: node --test scripts/test-private-reviewed-test-startup-plan.mjs
       - name: Verify approved-only private supervisor startup and lock fencing
         run: node --test scripts/test-private-approved-household-startup.mjs
+      - name: Exercise disposable supervisor against real Node children and authenticated loopback health
+        run: node --test scripts/test-private-disposable-reviewed-windows-supervisor-runtime.mjs
       - name: Verify real-household supervisor OS child ownership and durable crash hold
         run: node --test scripts/test-private-reviewed-windows-supervisor-ownership.mjs
       - name: Verify private Windows supervisor crash hold and restart refusal
