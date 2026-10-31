@@ -67,7 +67,14 @@ function assertDisposableCheckout(checkout, expectedSha) {
   try { topReal = fs.realpathSync(top) } catch {
     refuse('the disposable Git top-level cannot be resolved.')
   }
-  if (topReal.toLowerCase() !== root.toLowerCase()) {
+  // Windows Git may spell the same physical directory differently from
+  // Node (case, drive normalization or separator style). Compare OS file IDs,
+  // never approximate using a case-insensitive string or a path prefix.
+  const expectedDirectory = fs.statSync(root, { bigint: true })
+  const gitDirectory = fs.statSync(topReal, { bigint: true })
+  if (expectedDirectory.ino === 0n ||
+      expectedDirectory.dev !== gitDirectory.dev ||
+      expectedDirectory.ino !== gitDirectory.ino) {
     refuse('the disposable Git top-level identity differs from its physical checkout.')
   }
   if (gitRead(root, ['rev-parse', 'HEAD']) !== expectedSha) {
