@@ -116,11 +116,11 @@ test('pinned clean disposable checkout starts two healthy real Node children des
 test('wrong full SHA or an uncommitted candidate is rejected before any ownership claim', async t => {
   const f = fixture(t)
   await assert.rejects(f.start({ expectedCommitSha: 'a'.repeat(40) }),
-    /reviewed clean commit/)
+    /reviewed pinned commit/)
   assert.equal(inspectReviewedWindowsSupervisorOwnership(f.state)
     .instanceLockPresent, false)
   fs.writeFileSync(path.join(f.checkout, 'untracked.txt'), 'dirty')
-  await assert.rejects(f.start(), /reviewed clean commit/)
+  await assert.rejects(f.start(), /unreviewed local changes/)
   assert.equal(inspectReviewedWindowsSupervisorOwnership(f.state)
     .instanceLockPresent, false)
 })
