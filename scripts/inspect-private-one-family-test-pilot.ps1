@@ -27,7 +27,7 @@ if ($LASTEXITCODE -ne 0 -or $head.Count -ne 1 -or
     throw 'Candidate Git HEAD is not the explicitly reviewed commit.'
 }
 if (!(Test-Path -LiteralPath (Join-Path $root '.git'))) {
-    throw 'An isolated candidate Git checkout is required.'
+    throw 'An isolated candidate source repository is required.'
 }
 
 $hostInspector = Join-Path $PSScriptRoot 'inspect-private-test-host.ps1'
