@@ -63,10 +63,18 @@ function assertDisposableCheckout(checkout, expectedSha) {
   }
   const root = checkedPhysicalTempDirectory(checkout)
   const top = gitRead(root, ['rev-parse', '--show-toplevel'])
-  if (path.resolve(top).toLowerCase() !== root.toLowerCase() ||
-      gitRead(root, ['rev-parse', 'HEAD']) !== expectedSha ||
-      gitRead(root, ['status', '--porcelain', '--untracked-files=all']) !== '') {
-    refuse('the disposable candidate checkout differs from its reviewed clean commit.')
+  let topReal
+  try { topReal = fs.realpathSync(top) } catch {
+    refuse('the disposable Git top-level cannot be resolved.')
+  }
+  if (topReal.toLowerCase() !== root.toLowerCase()) {
+    refuse('the disposable Git top-level identity differs from its physical checkout.')
+  }
+  if (gitRead(root, ['rev-parse', 'HEAD']) !== expectedSha) {
+    refuse('the disposable candidate is not at its reviewed pinned commit.')
+  }
+  if (gitRead(root, ['status', '--porcelain', '--untracked-files=all']) !== '') {
+    refuse('the disposable candidate checkout has unreviewed local changes.')
   }
   return root
 }
