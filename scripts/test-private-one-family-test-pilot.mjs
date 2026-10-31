@@ -153,7 +153,9 @@ test('one-command PowerShell only reads existing inventories and pinned Git HEAD
   assert.doesNotMatch(ps,
     /\b(?:Start|Stop|Register|Unregister|Disable|Enable|Set|New)-ScheduledTask\b/i)
   assert.doesNotMatch(ps, /\b(?:Copy|Remove|Move|New|Set)-Item\b/i)
-  assert.doesNotMatch(ps, /\bgit\s+(?:checkout|pull|fetch|push|reset|clean|switch)\b/i)
+  // Inspect executable lines only: explanatory comments may say 'Git checkout'.
+  const operations = ps.split(/\r?\n/).filter(line => !/^\s*#/.test(line)).join('\n')
+  assert.doesNotMatch(operations, /\bgit\s+(?:checkout|pull|fetch|push|reset|clean|switch)\b/i)
   assert.doesNotMatch(ps, /\b(?:tailscale\s+(?:serve|funnel)|sqlite3|Set-NetTCPConnection)\b/i)
   for (const path of [
     'scripts/inspect-private-one-family-test-pilot.ps1',
