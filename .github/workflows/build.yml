@@ -32,6 +32,8 @@ jobs:
         run: node --test scripts/test-family-auth.mjs
       - name: Verify household profile selection and remembered devices
         run: node --test scripts/test-household-profile-selection.mjs
+      - name: Verify event assignment notification recipient and transaction rules
+        run: node --test scripts/test-event-assignment-notifications.mjs
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
