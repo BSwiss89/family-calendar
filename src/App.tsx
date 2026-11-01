@@ -1,5 +1,6 @@
 import {
   Fragment,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -11,6 +12,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import HouseholdProfilePicker from './HouseholdProfilePicker'
 import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
 import {
@@ -1985,6 +1987,8 @@ const [isEditingHome, setIsEditingHome] =
   useState(false)
 const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
 const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
+const [profileSwitchRequest, setProfileSwitchRequest] = useState(0)
+const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | null>(null)
 
 useEffect(() => {
   let cancelled = false
@@ -3516,6 +3520,10 @@ function positionMobileScheduleTimeline(
   useState<number | null>(null)
 const [calendarPersonFilterId, setCalendarPersonFilterId] =
   useState<number | null>(null)
+const handleHouseholdProfileChange = useCallback((name: string | null) => {
+  setActiveHouseholdProfile(name)
+  if (name === 'Home') setCalendarPersonFilterId(null)
+}, [])
 const [lists, setLists] = useState<CalendarList[]>([])
 const [shoppingStores, setShoppingStores] = useState<ShoppingStore[]>([])
 const [storeFilter, setStoreFilter] = useState('all')
@@ -15039,7 +15047,9 @@ createPortal(
         <h1>Home</h1>
 
         <p>
-          Everything your family needs at a glance.
+          {activeHouseholdProfile && activeHouseholdProfile !== 'Home'
+            ? 'Welcome, ' + activeHouseholdProfile + '. Your family at a glance.'
+            : 'Everything your family needs at a glance.'}
         </p>
       </div>
 
@@ -15741,6 +15751,16 @@ createPortal(
         </button>
       </div>
       <p>Manage your family calendar preferences.</p>
+      {familyAuthEnabled && (
+        <button className="mobile-settings-option" type="button"
+          onClick={() => {
+            setMobileSettingsOpen(false)
+            setProfileSwitchRequest((request) => request + 1)
+          }}>
+          Switch Profile{activeHouseholdProfile ? ' · ' + activeHouseholdProfile : ''}
+          <span aria-hidden="true">›</span>
+        </button>
+      )}
       {familyAuthEnabled && (
         <button
           className="mobile-settings-option"
@@ -23838,6 +23858,8 @@ capture.captureType !== 'other' && (
     </section>
   </div>, document.body
 )}
+      <HouseholdProfilePicker switchRequest={profileSwitchRequest}
+        onProfileChange={handleHouseholdProfileChange} />
     </main>
   )
 }

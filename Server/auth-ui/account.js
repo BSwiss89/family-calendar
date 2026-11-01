@@ -27,7 +27,10 @@ function deviceRow(device) {
   const last = document.createElement('span')
   last.className = 'muted small'
   last.textContent = 'Last used: ' + new Date(device.lastSeenAt).toLocaleDateString()
-  details.append(name, last)
+  const profile = document.createElement('span')
+  profile.className = 'muted small'
+  profile.textContent = 'Profile: ' + (device.selectedProfile || 'Not selected')
+  details.append(name, profile, last)
   const button = document.createElement('button')
   button.type = 'button'
   button.className = 'revoke-button'
