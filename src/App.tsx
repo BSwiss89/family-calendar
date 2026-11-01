@@ -3535,6 +3535,11 @@ function positionMobileScheduleTimeline(
   useState<number | null>(null)
 const [calendarPersonFilterId, setCalendarPersonFilterId] =
   useState<number | null>(null)
+const handleHouseholdProfileChange = useCallback((name: string | null) => {
+  setActiveHouseholdProfile(name)
+  // A shared Home display always starts with the complete family calendar.
+  if (name === 'Home') setCalendarPersonFilterId(null)
+}, [])
 const [lists, setLists] = useState<CalendarList[]>([])
 const [shoppingStores, setShoppingStores] = useState<ShoppingStore[]>([])
 const [storeFilter, setStoreFilter] = useState('all')
@@ -24023,7 +24028,7 @@ capture.captureType !== 'other' && (
       <MobileInvitationReminder {...invitationInbox} suppress={page === 'invitations'} />
       <HouseholdProfilePicker
         switchRequest={profileSwitchRequest}
-        onProfileChange={setActiveHouseholdProfile}
+        onProfileChange={handleHouseholdProfileChange}
       />
     </main>
   )
