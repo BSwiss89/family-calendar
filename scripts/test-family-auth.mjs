@@ -7,6 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   installFamilyAuth,
+  createFamilyAuthTables,
   setFamilyAccount,
   verifyFamilyPassword,
 } from '../Server/family-auth.mjs'
@@ -278,6 +279,103 @@ test('LIVE and TEST have independent secure cookies on the same hostname', async
     const liveNamedCookie = cookiePair.replace('__Host-fc_test_session=', '__Host-fc_live_session=')
     const denied = await fetch(site.base + '/api/events', { headers: { Cookie: liveNamedCookie } })
     assert.equal(denied.status, 401)
+  } finally {
+    await site.close()
+    db.close()
+  }
+})
+
+
+test('existing admin credentials and trusted device sessions survive additive profile migration', () => {
+  const db = new DatabaseSync(':memory:')
+  try {
+    db.exec([
+      'CREATE TABLE family_users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE,',
+      'display_name TEXT NOT NULL, password_hash TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0) STRICT;',
+      'CREATE TABLE family_sessions (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES family_users(id),',
+      'token_hash TEXT NOT NULL UNIQUE, device_label TEXT NOT NULL, created_at INTEGER NOT NULL,',
+      'last_seen_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER) STRICT;',
+      "INSERT INTO family_users VALUES (1,'familyadmin','Admin','hash-unchanged',0);",
+      "INSERT INTO family_sessions VALUES (4,1,'hash-session','iPhone',123,123,9999999999999,NULL);",
+    ].join(' '))
+    createFamilyAuthTables(db)
+    createFamilyAuthTables(db)
+    const saved = db.prepare('SELECT username,password_hash,disabled FROM family_users').get()
+    assert.deepEqual({ ...saved }, { username: 'familyadmin', password_hash: 'hash-unchanged', disabled: 0 })
+    const session = db.prepare('SELECT id,device_label,token_hash,selected_profile_kind,selected_person_id FROM family_sessions').get()
+    assert.equal(session.id, 4)
+    assert.equal(session.device_label, 'iPhone')
+    assert.equal(session.token_hash, 'hash-session')
+    assert.equal(session.selected_profile_kind, null)
+    assert.equal(session.selected_person_id, null)
+  } finally {
+    db.close()
+  }
+})
+
+test('Devices screen tracks each authenticated session profile without granting permissions', async () => {
+  const db = new DatabaseSync(':memory:')
+  setFamilyAccount(db, 'familyadmin', 'Family Admin', password)
+  db.exec("CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE) STRICT;")
+  db.exec("INSERT INTO people(name) VALUES ('Bobby'),('Haylee')")
+  const site = await startServer(db)
+  try {
+    const login = async (label) => {
+      const res = await fetch(site.base + '/api/auth/login', {
+        method: 'POST',
+        headers: { Origin: site.origin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'familyadmin', password, deviceLabel: label }),
+      })
+      assert.equal(res.status, 200)
+      return res.headers.get('set-cookie').split(';')[0]
+    }
+    const phone = await login('iPhone')
+    const wall = await login('Wall calendar')
+    const devicesFor = (cookie) => fetch(site.base + '/api/auth/devices', {
+      headers: { Cookie: cookie },
+    }).then(async res => {
+      assert.equal(res.status, 200)
+      return (await res.json()).devices
+    })
+    let rows = await devicesFor(phone)
+    assert.equal(rows.length, 2)
+    assert.ok(rows.every(item => item.selectedProfile === null))
+    const select = (cookie, origin, body) => fetch(site.base + '/api/auth/device-profile', {
+      method: 'POST',
+      headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    assert.equal((await select('', site.origin, { kind: 'home' })).status, 401)
+    assert.equal((await select(phone, 'https://attacker.example', { kind: 'home' })).status, 403)
+    assert.equal((await select(phone, site.origin, { kind: 'person', personId: 9999 })).status, 400)
+    assert.equal((await select(phone, site.origin, { kind: 'person', personId: '1' })).status, 400)
+    assert.equal((await select(phone, site.origin, { kind: 'unknown' })).status, 400)
+    assert.equal((await select(phone, site.origin, { kind: 'person', personId: 1 })).status, 200)
+    assert.equal((await select(wall, site.origin, { kind: 'home' })).status, 200)
+    rows = await devicesFor(phone)
+    assert.equal(rows.find(item => item.label === 'iPhone').selectedProfile, 'Bobby')
+    assert.equal(rows.find(item => item.label === 'Wall calendar').selectedProfile, 'Home')
+    assert.ok(rows.find(item => item.label === 'iPhone').current)
+    assert.ok(!rows.find(item => item.label === 'Wall calendar').current)
+    // Renaming a person appears automatically, with no stale session label.
+    db.prepare('UPDATE people SET name = ? WHERE id = ?').run('Robert', 1)
+    rows = await devicesFor(wall)
+    assert.equal(rows.find(item => item.label === 'iPhone').selectedProfile, 'Robert')
+    // Removing the person causes an unselected label, not a dead name.
+    db.prepare('DELETE FROM people WHERE id = ?').run(1)
+    rows = await devicesFor(phone)
+    assert.equal(rows.find(item => item.label === 'iPhone').selectedProfile, null)
+    assert.equal(rows.find(item => item.label === 'Wall calendar').selectedProfile, 'Home')
+    // Revoked devices cannot update the metadata or appear on the screen.
+    const wallRow = rows.find(item => item.label === 'Wall calendar')
+    const revoked = await fetch(site.base + '/api/auth/devices/' + wallRow.id + '/revoke', {
+      method: 'POST', headers: { Cookie: phone, Origin: site.origin },
+    })
+    assert.equal(revoked.status, 200)
+    assert.equal((await select(wall, site.origin, { kind: 'home' })).status, 401)
+    assert.equal((await devicesFor(phone)).length, 1)
+    const accountPage = await fetch(site.base + '/auth/account.js')
+    assert.match(await accountPage.text(), /Profile: /)
   } finally {
     await site.close()
     db.close()

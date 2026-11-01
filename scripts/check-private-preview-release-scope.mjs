@@ -10,6 +10,9 @@ const PRIVATE_PREVIEW_PATHS = [
   /^Server\/(?:private-|household-)/i,
   /^Server\/(?:family-auth|event-only-shares|event-share-sync-journal|event-creator-audit)\.mjs$/i,
   /^Server\/auth-ui\//i,
+  // Host-readiness tools must stay private until a separately approved cutover.
+  /^scripts\/(?:assess-private-test-host-readiness\.mjs|inspect-private-test-host\.ps1)$/i,
+  /^scripts\/(?:assess-private-one-family-test-pilot\.mjs|inspect-private-one-family-test-pilot\.ps1)$/i,
   /^src\/(?:FamilyAccountEntry|FamilyEventSharing|InvitationCenter|SharedEventDetails|SharedEventsOverlay|useAuthenticatedCalendarIdentity|useInvitationInbox|useSharedEventFeed|sharedEventOverlay|eventSharingUiModel)(?:\.|$)/i,
   // The release-safety fixture itself is not a household-preview test.
   // Exempt only this exact file, not the other private test modules.

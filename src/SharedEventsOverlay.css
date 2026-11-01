@@ -1,0 +1,174 @@
+/* Scoped, non-editable event-only overlay. Never style local edit cards. */
+.received-shared-events {
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  margin: 5px 0 12px;
+  border: 1px solid #c3d4e9;
+  border-radius: 12px;
+  background: #eef5ff;
+  padding: 9px 11px;
+  color: #1f3554;
+}
+.received-shared-events-heading {
+  flex: 0 0 160px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+.received-shared-events-heading strong { font-size: 13px; line-height: 1.3; }
+.received-shared-events-heading span { font-size: 11px; line-height: 1.3; opacity: .84; }
+.received-shared-events-scroll {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 3px;
+}
+.received-shared-event {
+  box-sizing: border-box;
+  flex: 0 0 190px;
+  max-width: 240px;
+  border: 1px solid #bfd0e9;
+  border-left: 3px solid #5484bd;
+  border-radius: 9px;
+  background: #ffffff;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  cursor: default;
+  user-select: text;
+}
+.received-shared-event-date,
+.received-shared-event-source {
+  font-size: 10px;
+  line-height: 1.3;
+  color: #4e6177;
+}
+.received-shared-event-title {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.month-shared-event-chip {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #bfd0e9;
+  border-left: 3px solid #5484bd;
+  border-radius: 6px;
+  background: #e7f0ff;
+  padding: 2px 5px;
+  font-size: 11px;
+  line-height: 17px;
+  color: #17375c;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+.month-shared-event-chip .month-shared-event-source {
+  opacity: .78;
+  margin-left: 3px;
+}
+@media (max-width: 760px) {
+  .received-shared-events {
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+  }
+  .received-shared-events-heading {
+    flex: none;
+    gap: 0;
+  }
+  .received-shared-events-scroll {
+    flex: none;
+    width: 100%;
+  }
+  .received-shared-event {
+    flex-basis: 165px;
+    padding: 6px 8px;
+  }
+}
+
+/* Accepted invitations appear alongside the recipient's Day events but
+   are not buttons and can never open the recipient's local event editor. */
+.day-summary-received-event {
+  cursor: default;
+  border: 1px dashed #a3c3e8;
+  border-radius: 9px;
+  background: #eaf3ff;
+  color: #253f5e;
+  width: 100%;
+}
+.day-summary-received-event .day-summary-event-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.day-summary-received-event .day-summary-event-text small {
+  display: block;
+  color: #47688b;
+}
+
+
+/* Shared items are interactive calendar entries, not a calendar-wide banner. */
+.month-shared-event-chip,
+.day-summary-received-event,
+.shared-week-event,
+.shared-schedule-event {
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.month-shared-event-chip:focus-visible,
+.day-summary-received-event:focus-visible,
+.shared-week-event:focus-visible,
+.shared-schedule-event:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+.shared-week-event,
+.shared-schedule-event {
+  border: 1px dashed #a3c3e8;
+  border-left: 3px solid #5484bd;
+  background: #e7f0ff;
+  color: #17375c;
+}
+.shared-week-event { display: block; width: 100%; box-sizing: border-box; }
+.shared-schedule-event { height: auto; min-height: 23px; white-space: normal; overflow-wrap: anywhere; }
+.shared-mobile-event-group .mobile-schedule-all-day-label { font-weight: 700; }
+
+
+/* A scheduled shared event occupies its actual time slot. The calendar's
+   existing collision layout positions it beside other timed events. */
+.schedule-event.shared-schedule-timed-event,
+.mobile-schedule-event.shared-schedule-timed-event {
+  border: 1px dashed #8faed4;
+  border-left: 3px solid #5484bd;
+  background: #e7f0ff;
+  color: #17375c;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.schedule-event.shared-schedule-timed-event small,
+.mobile-schedule-event.shared-schedule-timed-event small {
+  display: block;
+  font-size: 10px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.shared-schedule-timed-event:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
