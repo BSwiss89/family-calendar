@@ -30,6 +30,8 @@ jobs:
         run: node --test scripts/test-list-features.mjs && node --test scripts/test-shopping-stores.mjs && node --test scripts/test-list-icons.mjs
       - name: Verify auth, remembered devices, and separate site cookies
         run: node --test scripts/test-family-auth.mjs
+      - name: Verify household profile selection and remembered devices
+        run: node --test scripts/test-household-profile-selection.mjs
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
