@@ -14607,28 +14607,6 @@ createPortal(
   Choose a photo or screenshot and let AI create the event or recipe.
 </p>
 
-<button
-  type="button"
-  className="capture-view-inbox-button"
-  onClick={() => {
-    if (capturePreviewUrl) {
-      URL.revokeObjectURL(
-        capturePreviewUrl
-      )
-    }
-
-    setCaptureOpen(false)
-    setCaptureFile(null)
-    setCapturePreviewUrl('')
-    setCaptureNote('')
-
-    setPage('capture')
-    void loadCaptureInbox()
-  }}
->
-  View Capture Inbox
-</button>
-
 <input
   className="event-input"
   type="file"
