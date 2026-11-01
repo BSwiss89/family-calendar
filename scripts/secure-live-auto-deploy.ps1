@@ -145,6 +145,18 @@ try {
   $oldDist=Join-Path $backup 'active-dist-before-cutover'
   Assert (-not (Test-Path $newDist) -and -not (Test-Path $oldDist)) 'Staged/previous path collision'
   Copy-Item -LiteralPath (Join-Path $stage 'dist') -Destination $newDist -Recurse -Force
+  # Preserve previous hashed assets so already-open browsers can refresh safely.
+  $previousAssets=Join-Path $liveDist 'assets'
+  $candidateAssets=Join-Path $newDist 'assets'
+  if(Test-Path -LiteralPath $previousAssets){
+    New-Item -ItemType Directory -Path $candidateAssets -Force | Out-Null
+    Get-ChildItem -LiteralPath $previousAssets -File | ForEach-Object {
+      $target=Join-Path $candidateAssets $_.Name
+      if(-not (Test-Path -LiteralPath $target)){
+        Copy-Item -LiteralPath $_.FullName -Destination $target -ErrorAction Stop
+      }
+    }
+  }
   $indexHash=(Get-FileHash -LiteralPath (Join-Path $newDist 'index.html') -Algorithm SHA256).Hash
   # Record the exact operation before touching LIVE's Git checkout or dist.
   @{from=$from;to=$to;backup=$backup;stage=$stage;test=$testBefore;started=(Get-Date -Format o)} |
@@ -165,6 +177,12 @@ try {
   Assert ($login.StatusCode -eq 200) 'LIVE login route failed'
   Assert ((GitSha $live) -eq $to -and (GitSha $test) -eq $testBefore) 'Post-deployment LIVE/TEST SHA verification failed'
   Remove-Item -LiteralPath $journal -Force -ErrorAction Stop
+  # Staging dependencies are disposable; retain every backup and old frontend.
+  try {
+    if((Test-Path -LiteralPath $stage) -and $stage.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase)){
+      Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop
+    }
+  } catch { Write-Warning ("Staging cleanup deferred: "+$_.Exception.Message) }
   Write-Host ("SECURE LIVE AUTO DEPLOY PASS: "+(Get-Date -Format o))
   Write-Host "LIVE_SHA=$to"
   Write-Host "RECOVERY_BACKUP=$backup"
@@ -187,7 +205,7 @@ try {
       } catch { $recovery+=("Git recovery: "+$_.Exception.Message) }
     }
   }
-  if(Test-Path -LiteralPath $root){
+  if($Apply -and (Test-Path -LiteralPath $root)){
     try {
       $message="SECURE LIVE AUTO DEPLOY FAILURE $(Get-Date -Format o) - $failure"
       if($recovery.Count -gt 0){$message+="; RECOVERY INCOMPLETE: "+($recovery -join '; ')}
