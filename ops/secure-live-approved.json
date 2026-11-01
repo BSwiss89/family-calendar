@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "kind": "frontend-only",
+  "repository": "BSwiss89/family-calendar",
+  "from_sha": "0130a06bde94a1b616f38765c46a79b5764b0eef",
+  "to_sha": "25e927b6f7fcee4e07bf8d87678419d2575cf523",
+  "build_run_id": 41351911533,
+  "safety_run_id": 41351911560,
+  "files": [
+    "src/App.tsx",
+    "src/HouseholdProfilePicker.css",
+    "src/HouseholdProfilePicker.tsx",
+    "src/personColorOptions.ts"
+  ],
+  "approval_note": "User explicitly approved LIVE deployment of merged PR #110 in this conversation on November 1, 2026. No future commit is approved by this record."
+}
