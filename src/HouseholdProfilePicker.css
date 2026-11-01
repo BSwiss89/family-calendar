@@ -193,3 +193,81 @@
 .household-profile-form-buttons .household-profile-retry { margin: 0; }
 .household-profile-back { background: #e2e8f0; color: #1e293b; border: 0; cursor: pointer; }
 .household-profile-form-buttons button:disabled { cursor: wait; opacity: .65; }
+
+/* Match the People profile creator's nine swatches and rainbow custom picker. */
+.household-profile-color-field {
+  min-width: 0;
+  padding: 0;
+  margin: 7px 0 0;
+  border: 0;
+}
+.household-profile-color-field legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 650;
+}
+.household-profile-color-palette {
+  display: grid;
+  grid-template-columns: repeat(5, 44px);
+  gap: 14px;
+  align-items: center;
+  margin: 8px 0 0;
+}
+.household-profile-color-swatch,
+.household-profile-create-form .household-profile-color-custom {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  margin: 0;
+  border: 2px solid rgba(74, 61, 46, .08);
+  border-radius: 50%;
+  box-sizing: border-box;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(74, 61, 46, .09);
+}
+.household-profile-color-swatch {
+  appearance: none;
+}
+.household-profile-create-form .household-profile-color-custom {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  background: linear-gradient(135deg,
+    #e7a8b2 0%, #e8b08a 14%, #e4c878 28%, #9fc3a5 42%,
+    #9fd6c5 56%, #9cc7e8 70%, #a8b0e8 82%, #c0a8e8 91%,
+    #d3a7c8 100%);
+}
+.household-profile-create-form .household-profile-color-custom input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  opacity: 0;
+  cursor: pointer;
+}
+.household-profile-color-swatch.household-profile-color-selected,
+.household-profile-create-form .household-profile-color-custom.household-profile-color-selected {
+  border-color: rgba(63, 52, 43, .68);
+  box-shadow: 0 0 0 3px #fff, 0 0 0 6px rgba(63, 52, 43, .44),
+    0 5px 12px rgba(74, 61, 46, .14);
+  transform: scale(1.08);
+}
+.household-profile-color-swatch:focus-visible,
+.household-profile-create-form .household-profile-color-custom:focus-within {
+  outline: 3px solid #2563eb;
+  outline-offset: 5px;
+}
+.household-profile-color-field:disabled .household-profile-color-swatch,
+.household-profile-color-field:disabled .household-profile-color-custom {
+  opacity: .55;
+  cursor: wait;
+}
+@media (max-width: 380px) {
+  .household-profile-color-palette { grid-template-columns: repeat(4, 44px); }
+}
