@@ -1,0 +1,65 @@
+name: Secure LIVE auto deploy safety
+
+on:
+  pull_request:
+    branches:
+      - feature/auth-current-calendar-two-sites
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secure-live-review:
+    name: Secure LIVE isolated deployment safety
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Parse all new PowerShell scripts and validate safety invariants
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @('scripts/secure-live-auto-deploy.ps1','scripts/install-secure-live-auto-deploy.ps1')
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file).Path, [ref]$tokens, [ref]$errors
+            ) | Out-Null
+            if (@($errors).Count -ne 0) { throw "$file PowerShell parse FAILED: $($errors -join '; ')" }
+            Write-Host "POWERSHELL PARSE PASS: $file"
+          }
+          $release = Get-Content -LiteralPath $files[0] -Raw
+          $installer = Get-Content -LiteralPath $files[1] -Raw
+          foreach ($required in @(
+            'secure-live-release-approvals',
+            'secure-live-approved.json',
+            'CheckRun',
+            'frontend-only',
+            'merge-base --is-ancestor',
+            'secure-live-online-backup.mjs',
+            'DEPLOYMENT-IN-PROGRESS',
+            'REQUIRES-REVIEW',
+            'git -C $live checkout --quiet --detach $from',
+            'git -C $live checkout --quiet --detach $to'
+          )) {
+            if (-not $release.Contains($required)) { throw "Secure LIVE release protection missing: $required" }
+          }
+          if ($release.Contains('Get-FamilyCalendarGitHubRefs') -or $release.Contains('origin/main') -or
+              $release.Contains('Stop-ScheduledTask') -or $release.Contains('Start-ScheduledTask') -or
+              $release.Contains('git reset --hard') -or $release.Contains('git -C $test checkout')) {
+            throw 'The new auto deploy controller contains a blocked legacy or destructive operation'
+          }
+          if (-not $installer.Contains('Disable-ScheduledTask') -or
+              -not $installer.Contains('Enable-ScheduledTask')) {
+            throw 'New task must install disabled and enable only after a separate check'
+          }
+          Write-Host 'SECURE LIVE APPROVAL-GATE REVIEW PASS'
+      - name: Verify synthetic online SQLite recovery
+        run: node --test scripts/test-secure-live-online-backup.mjs
+      - name: Check JavaScript syntax
+        run: node --check scripts/secure-live-online-backup.mjs && node --check scripts/test-secure-live-online-backup.mjs
