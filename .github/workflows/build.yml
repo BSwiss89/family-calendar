@@ -46,6 +46,8 @@ jobs:
         run: node --test scripts/test-duplicate-event.mjs
       - name: Test list categories and additive migration
         run: node --test scripts/test-list-features.mjs && node --test scripts/test-shopping-stores.mjs && node --test scripts/test-list-icons.mjs
+      - name: Verify household profile choice, Home and stale-device preference
+        run: node --test scripts/test-household-profile-selection.mjs
       - name: Verify auth, remembered devices, and separate site cookies
         run: node --test scripts/test-family-auth.mjs
       - name: Test isolated household storage, memberships and secure invitations
