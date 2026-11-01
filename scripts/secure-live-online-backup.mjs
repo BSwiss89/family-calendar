@@ -33,7 +33,7 @@ try {
   )
   for (const table of ['family_users', 'family_sessions']) {
     if (tables.has(table)) {
-      console.log(\`BACKUP_\${table.toUpperCase()}=\${restored.prepare(\`SELECT count(*) AS n FROM \${table}\`).get().n}\`)
+      console.log('BACKUP_' + table.toUpperCase() + '=' + restored.prepare('SELECT count(*) AS n FROM ' + table).get().n)
     }
   }
 } finally {
