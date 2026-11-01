@@ -74,7 +74,10 @@ function CheckLocal {
   Assert ($LASTEXITCODE -eq 0 -and [string]$origin -match '^(?:git@github\.com:|https://github\.com/)BSwiss89/family-calendar(?:\.git)?$') 'Untrusted LIVE Git origin'
   $status=@(& git -C $live status --porcelain --untracked-files=no)
   Assert ($LASTEXITCODE -eq 0 -and $status.Count -eq 0) 'LIVE tracked files are dirty'
-  Assert (([string](& git -C $live branch --show-current)).Trim() -eq '') 'Secure LIVE must stay detached'
+  # A detached HEAD has no branch name. PowerShell may represent Git's empty
+  # stdout as $null, so never call .Trim() directly on command substitution.
+  $branchOutput=@(& git -C $live branch --show-current)
+  Assert ($LASTEXITCODE -eq 0 -and (($branchOutput -join '').Trim() -eq '')) 'Secure LIVE must stay detached'
   RequireHealthy
 }
 
