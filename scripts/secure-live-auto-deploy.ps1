@@ -116,9 +116,12 @@ try {
   $timestamp=Get-Date -Format 'yyyyMMdd-HHmmss'
   $stage=Join-Path $root ("stage-"+$timestamp+"-"+$to.Substring(0,8))
   Assert (-not (Test-Path -LiteralPath $stage)) 'Stage already exists'
-  $origin=(& git -C $live remote get-url origin).Trim()
-  & git clone --quiet --no-checkout --single-branch --branch feature/auth-current-calendar-two-sites $origin $stage
-  Assert ($LASTEXITCODE -eq 0) 'Candidate clone failed'
+  # The LIVE checkout may use SSH, but the noninteractive Scheduled Task does
+  # not inherit the desktop's SSH agent. Fetch this PUBLIC repository over HTTPS.
+  # Never change the existing LIVE origin or the machine's SSH configuration.
+  $readOnlySource='https://github.com/BSwiss89/family-calendar.git'
+  & git -c credential.interactive=never clone --quiet --no-checkout --single-branch --branch feature/auth-current-calendar-two-sites $readOnlySource $stage
+  Assert ($LASTEXITCODE -eq 0) 'HTTPS candidate clone failed'
   & git -C $stage checkout --quiet --detach $to
   Assert ($LASTEXITCODE -eq 0 -and (GitSha $stage) -eq $to) 'Approved commit not found in source branch'
   & git -C $stage merge-base --is-ancestor $from $to
