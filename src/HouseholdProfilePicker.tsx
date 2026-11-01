@@ -19,6 +19,26 @@ type Props = {
 
 type Screen = 'checking' | 'choose' | 'create' | 'ready' | 'error'
 
+/** The server stores the label of this signed-in device, not profile permissions. */
+async function syncDeviceProfile(selection: HouseholdProfileSelection): Promise<void> {
+  const response = await fetch('/api/auth/device-profile', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(selection),
+  })
+  if (response.status === 401) {
+    window.location.assign('/login')
+    throw new Error('Sign in again to select a profile.')
+  }
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null)
+    const message = body && typeof body === 'object' && 'error' in body &&
+      typeof body.error === 'string' ? body.error : 'Device profile could not be saved.'
+    throw new Error(message)
+  }
+}
+
 function isProfilePerson(value: unknown): value is ProfilePerson {
   if (!value || typeof value !== 'object') return false
   const item = value as Record<string, unknown>
@@ -113,6 +133,9 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       const wallSetup = new URLSearchParams(window.location.search).get('display') === 'home'
       const selection = resolveProfileSelection(remembered, records, wallSetup)
       if (selection && !forcePicker) {
+        // Also restore server-side session metadata for an already remembered
+        // profile, including devices upgraded from the browser-only version.
+        await syncDeviceProfile(selection)
         if (remembered === null && wallSetup) {
           try { window.localStorage.setItem(key, 'home') } catch { setNotSaved(true) }
         }
@@ -137,21 +160,31 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
     if (switchRequest > 0) void refresh(true)
   }, [switchRequest, refresh])
 
-  function selectProfile(selection: HouseholdProfileSelection) {
+  async function selectProfile(selection: HouseholdProfileSelection) {
     if (screen !== 'choose' || !storageKey) return
     const person = selection.kind === 'person'
       ? people.find((entry) => entry.id === selection.personId) : null
     if (selection.kind === 'person' && !person) return
     const value = serializeProfileSelection(selection)
     if (value === null) return
+    setScreen('checking')
+    setErrorText('')
     try {
-      window.localStorage.setItem(storageKey, value)
-      setNotSaved(false)
-    } catch {
-      setNotSaved(true)
+      // Do not claim selection succeeded on the Devices screen until the
+      // authenticated session actually saved the profile.
+      await syncDeviceProfile(selection)
+      try {
+        window.localStorage.setItem(storageKey, value)
+        setNotSaved(false)
+      } catch {
+        setNotSaved(true)
+      }
+      onProfileChange(person?.name ?? 'Home')
+      setScreen('ready')
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : 'Could not save device profile.')
+      setScreen('error')
     }
-    onProfileChange(person?.name ?? 'Home')
-    setScreen('ready')
   }
 
 
@@ -166,6 +199,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
     }
     setCreateError('')
     setCreatingProfile(true)
+    let profileCreated = false
     try {
       const data = new FormData()
       data.append('name', name)
@@ -193,7 +227,9 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
         throw new Error('Profile saved, but the response could not be verified. Return to profiles to select it.')
       }
       const newPerson: ProfilePerson = payload
+      profileCreated = true
       setPeople((current) => [...current, newPerson])
+      await syncDeviceProfile({ kind: 'person', personId: newPerson.id })
       const savedSelection = serializeProfileSelection({ kind: 'person', personId: newPerson.id })
       let persisted = false
       try {
@@ -211,7 +247,15 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       // picker, sliders, and Settings). No server restart or database migration.
       if (persisted) window.location.reload()
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : 'Could not create the profile.')
+      const message = error instanceof Error ? error.message : 'Could not save the profile.'
+      if (profileCreated) {
+        // The person was already created. Do not offer to submit this form
+        // again and accidentally create a duplicate profile.
+        setErrorText('Profile created. Select it again to finish device setup. ' + message)
+        setScreen('choose')
+      } else {
+        setCreateError(message)
+      }
     } finally {
       setCreatingProfile(false)
     }
@@ -242,16 +286,17 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
         </div>
         {screen === 'choose' && (
           <>
+            {errorText && <p className="household-profile-form-error" role="alert">{errorText}</p>}
             <div className="household-profile-grid">
               <button className="household-profile-card" type="button"
-                onClick={() => selectProfile({ kind: 'home' })}>
+                onClick={() => { void selectProfile({ kind: 'home' }) }}>
                 <span className="household-profile-avatar household-profile-house" aria-hidden="true">🏠</span>
                 <strong>Home</strong>
                 <small>Shared family display</small>
               </button>
               {people.map((person) => (
                 <button type="button" className="household-profile-card" key={person.id}
-                  onClick={() => selectProfile({ kind: 'person', personId: person.id })}>
+                  onClick={() => { void selectProfile({ kind: 'person', personId: person.id }) }}>
                   <PersonPicture key={person.id + ':' + person.image} person={person} />
                   <strong>{person.name}</strong>
                   <small>Personal profile</small>

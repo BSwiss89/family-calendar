@@ -88,6 +88,16 @@ export function createFamilyAuthTables(database) {
   if (!columns.some(column => column.name === 'account_kind')) {
     database.exec("ALTER TABLE family_users ADD COLUMN account_kind TEXT NOT NULL DEFAULT 'person' CHECK(account_kind IN ('person','hub'))")
   }
+  // Additive, nullable session metadata: old trusted devices stay signed in.
+  // A selected People profile is display metadata only, NEVER authorization.
+  const sessionColumns = database.prepare('PRAGMA table_info(family_sessions)').all()
+    .map(column => column.name)
+  if (!sessionColumns.includes('selected_profile_kind')) {
+    database.exec("ALTER TABLE family_sessions ADD COLUMN selected_profile_kind TEXT CHECK(selected_profile_kind IN ('home','person'))")
+  }
+  if (!sessionColumns.includes('selected_person_id')) {
+    database.exec('ALTER TABLE family_sessions ADD COLUMN selected_person_id INTEGER')
+  }
 }
 
 export function setFamilyAccount(database, username, displayName, password, { accountKind = 'person' } = {}) {
@@ -371,12 +381,39 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
     response.json({ ok: true })
   })
 
+  // Only the authenticated current session may record its selected device
+  // profile. It cannot edit another session, account, or security permissions.
+  app.post('/api/auth/device-profile', (request, response) => {
+    const selection = request.body
+    const kind = selection?.kind
+    if (kind !== 'home' && kind !== 'person') {
+      return response.status(400).json({ error: 'Choose Home or an existing person profile.' })
+    }
+    let personId = null
+    if (kind === 'person') {
+      personId = selection?.personId
+      if (!Number.isSafeInteger(personId) || personId <= 0) {
+        return response.status(400).json({ error: 'Invalid person profile.' })
+      }
+      const person = database.prepare('SELECT id FROM people WHERE id = ?').get(personId)
+      if (!person) return response.status(400).json({ error: 'Person profile no longer exists.' })
+    }
+    const saved = database.prepare([
+      'UPDATE family_sessions SET selected_profile_kind = ?, selected_person_id = ?',
+      'WHERE id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?',
+    ].join(' ')).run(kind, personId, request.familyAccount.id, request.familyAccount.user_id, Date.now())
+    if (saved.changes !== 1) return response.status(401).json({ error: 'Session expired.' })
+    response.json({ ok: true })
+  })
+
   app.get('/api/auth/devices', (request, response) => {
     const sessions = database.prepare([
-      'SELECT id, device_label, created_at, last_seen_at, expires_at FROM family_sessions',
+      'SELECT id, device_label, created_at, last_seen_at, expires_at, selected_profile_kind, selected_person_id FROM family_sessions',
       'WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?',
       'ORDER BY last_seen_at DESC',
     ].join(' ')).all(request.familyAccount.user_id, Date.now())
+    const personName = sessions.some(session => session.selected_profile_kind === 'person')
+      ? database.prepare('SELECT name FROM people WHERE id = ?') : null
     response.json({
       devices: sessions.map((session) => ({
         id: session.id,
@@ -384,6 +421,11 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
         createdAt: session.created_at,
         lastSeenAt: session.last_seen_at,
         current: session.id === request.familyAccount.id,
+        selectedProfile: session.selected_profile_kind === 'home'
+          ? 'Home'
+          : session.selected_profile_kind === 'person'
+            ? personName.get(session.selected_person_id)?.name ?? null
+            : null,
       })),
     })
   })
