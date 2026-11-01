@@ -9,3 +9,7 @@ export function serializeProfileSelection(selection: HouseholdProfileSelection |
 export function resolveProfileSelection(
   raw: string | null, people: readonly ProfilePerson[], defaultHome?: boolean,
 ): HouseholdProfileSelection | null
+export function validateNewProfileInput(
+  name: unknown, color: unknown,
+  photo?: { size: number; type: string } | null,
+): string | null

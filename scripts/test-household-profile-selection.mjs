@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   HOME_SELECTION, profileStorageKey, parseProfileSelection,
-  serializeProfileSelection, resolveProfileSelection,
+  serializeProfileSelection, resolveProfileSelection, validateNewProfileInput,
 } from '../src/householdProfileSelection.mjs'
 
 const sevenPeople = Array.from({ length: 7 }, (_, index) => ({ id: index + 1 }))
@@ -50,4 +50,20 @@ test('Device selection storage is scoped to the signed-in account and household'
 test('A rejected profile never produces a persisted preference', () => {
   assert.equal(serializeProfileSelection(null), null)
   assert.equal(serializeProfileSelection({ kind: 'person', personId: -1 }), null)
+})
+
+test('New household member can create a valid person profile (no extra account)', () => {
+  assert.equal(validateNewProfileInput('New member', '#3A82F6'), null)
+  assert.equal(validateNewProfileInput('  Jane  ', '#12ab34', { size: 1000, type: 'image/jpeg' }), null)
+  assert.equal(validateNewProfileInput('A', '#ffffff', { size: 1000, type: 'image/png' }), null)
+  assert.equal(validateNewProfileInput('A', '#ffffff', { size: 1000, type: 'image/webp' }), null)
+})
+
+test('New profile form refuses missing names, invalid colors, and unsafe photos', () => {
+  assert.match(validateNewProfileInput(' ', '#abcdef'), /name/i)
+  assert.match(validateNewProfileInput('x'.repeat(51), '#abcdef'), /name/i)
+  assert.match(validateNewProfileInput('Person', 'blue'), /color/i)
+  assert.match(validateNewProfileInput('Person', '#ffffff', { size: 21 * 1024 * 1024, type: 'image/png' }), /20 MB/i)
+  assert.match(validateNewProfileInput('Person', '#ffffff', { size: 10, type: 'image/heic' }), /JPG/i)
+  assert.match(validateNewProfileInput('Person', '#ffffff', { size: 0, type: 'image/png' }), /20 MB/i)
 })

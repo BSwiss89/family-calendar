@@ -34,3 +34,24 @@ export function resolveProfileSelection(raw, people, defaultHome = false) {
     !people.some(person => person?.id === selection.personId)) return null
   return selection
 }
+
+/** Mirror the existing POST /api/people validation before uploading a photo. */
+export function validateNewProfileInput(name, color, photo = null) {
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 50) {
+    return 'Enter a name between 1 and 50 characters.'
+  }
+  if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) {
+    return 'Choose a valid profile color.'
+  }
+  if (photo !== null) {
+    if (!photo || typeof photo !== 'object' ||
+      typeof photo.size !== 'number' || !Number.isFinite(photo.size) ||
+      photo.size <= 0 || photo.size > 20 * 1024 * 1024) {
+      return 'Choose a photo smaller than 20 MB.'
+    }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(photo.type)) {
+      return 'Choose a JPG, PNG, or WebP photo.'
+    }
+  }
+  return null
+}

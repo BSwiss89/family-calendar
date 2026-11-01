@@ -137,3 +137,59 @@
   .household-profile-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .household-profile-card { min-height: 186px; }
 }
+
+.household-profile-add {
+  background: #dcefe5;
+  color: #246645;
+  font-size: 48px;
+  line-height: 1;
+  font-weight: 300;
+  border: 2px dashed #87b99e;
+}
+.household-profile-create-card { background: #f5fbf7; }
+.household-profile-create-form {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 460px);
+  margin: 0 auto;
+  gap: 10px;
+}
+.household-profile-create-form label { font-weight: 650; font-size: 14px; margin-top: 7px; }
+.household-profile-create-form input[type="text"],
+.household-profile-create-form input[type="file"] {
+  font: inherit;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #1e293b;
+}
+.household-profile-create-form input[type="color"] {
+  width: 68px;
+  height: 48px;
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 3px;
+  border: 1px solid #cbd5e1;
+}
+.household-profile-create-form input:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+.household-profile-photo-help { margin: 0; color: #64748b; font-size: 12px; }
+.household-profile-form-error { color: #991b1b; font-size: 14px; margin: 5px 0; }
+.household-profile-form-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+.household-profile-form-buttons button { font: inherit; border-radius: 10px; padding: 12px 18px; }
+.household-profile-form-buttons .household-profile-retry { margin: 0; }
+.household-profile-back { background: #e2e8f0; color: #1e293b; border: 0; cursor: pointer; }
+.household-profile-form-buttons button:disabled { cursor: wait; opacity: .65; }
