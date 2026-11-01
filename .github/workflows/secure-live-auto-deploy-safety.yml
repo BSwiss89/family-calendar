@@ -41,7 +41,7 @@ jobs:
             'CheckRun',
             'frontend-only',
             'merge-base --is-ancestor',
-            'SQLITE',
+            'secure-live-online-backup.mjs',
             'DEPLOYMENT-IN-PROGRESS',
             'REQUIRES-REVIEW',
             "git -C \$live checkout --quiet --detach \$from",
