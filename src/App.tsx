@@ -13,6 +13,7 @@ import {
 import { createPortal } from 'react-dom'
 import './App.css'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
+import HouseholdProfilePicker from './HouseholdProfilePicker'
 import SharedEventDetails from './SharedEventDetails'
 import './SharedEventsOverlay.css'
 import { useSharedEventFeed } from './useSharedEventFeed'
@@ -1996,6 +1997,8 @@ const [isEditingHome, setIsEditingHome] =
   useState(false)
 const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
 const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
+const [profileSwitchRequest, setProfileSwitchRequest] = useState(0)
+const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | null>(null)
 const invitationInbox = useInvitationInbox()
 
 useEffect(() => {
@@ -15109,7 +15112,9 @@ createPortal(
         <h1>Home</h1>
 
         <p>
-          Everything your family needs at a glance.
+          {activeHouseholdProfile && activeHouseholdProfile !== 'Home'
+            ? 'Welcome, ' + activeHouseholdProfile + '. Your family at a glance.'
+            : 'Everything your family needs at a glance.'}
         </p>
       </div>
 
@@ -15811,6 +15816,19 @@ createPortal(
         </button>
       </div>
       <p>Manage your family calendar preferences.</p>
+      {familyAuthEnabled && (
+        <button
+          className="mobile-settings-option"
+          type="button"
+          onClick={() => {
+            setMobileSettingsOpen(false)
+            setProfileSwitchRequest((request) => request + 1)
+          }}
+        >
+          Switch Profile{activeHouseholdProfile ? ' · ' + activeHouseholdProfile : ''}
+          <span aria-hidden="true">›</span>
+        </button>
+      )}
       {familyAuthEnabled && (
         <button
           className="mobile-settings-option"
@@ -24003,6 +24021,10 @@ capture.captureType !== 'other' && (
   </div>, document.body
 )}
       <MobileInvitationReminder {...invitationInbox} suppress={page === 'invitations'} />
+      <HouseholdProfilePicker
+        switchRequest={profileSwitchRequest}
+        onProfileChange={setActiveHouseholdProfile}
+      />
     </main>
   )
 }
