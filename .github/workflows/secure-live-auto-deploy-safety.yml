@@ -44,7 +44,7 @@ jobs:
             'secure-live-online-backup.mjs',
             'DEPLOYMENT-IN-PROGRESS',
             'REQUIRES-REVIEW',
-            "git -C \$live checkout --quiet --detach \$from",
+            'git -C $live checkout --quiet --detach $from',
             'git -C $live checkout --quiet --detach $to'
           )) {
             if (-not $release.Contains($required)) { throw "Secure LIVE release protection missing: $required" }
