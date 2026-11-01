@@ -59,6 +59,9 @@ jobs:
             throw 'New task must install disabled and enable only after a separate check'
           }
           Write-Host 'SECURE LIVE APPROVAL-GATE REVIEW PASS'
+      - name: Verify detached Git HEAD preflight on Windows PowerShell
+        shell: powershell
+        run: .\scripts\test-secure-live-detached-head.ps1
       - name: Verify synthetic online SQLite recovery
         run: node --test scripts/test-secure-live-online-backup.mjs
       - name: Check JavaScript syntax
