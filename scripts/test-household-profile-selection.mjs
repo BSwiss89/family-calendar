@@ -27,7 +27,7 @@ test('Deleted or invalid people require a new choice', () => {
     assert.equal(resolveProfileSelection(input, sevenPeople), null)
   }
   assert.equal(resolveProfileSelection('person:5', sevenPeople.filter(p => p.id !== 5)), null)
-  assert.equal(resolveProfileSelection('home', []), parseProfileSelection('home'))
+  assert.deepEqual(resolveProfileSelection('home', []), parseProfileSelection('home'))
 })
 
 test('A new wall device may enroll Home, but existing preference wins', () => {
