@@ -104,6 +104,26 @@ test('wrong port, auth mode, checkout and config fail before any migration',t=>{
   assert.equal(exists(db,'assignment_notification_outbox'),false)
 })
 
+test('native refresh form keeps secure Origin while unrelated routes retain no-referrer',async t=>{
+  const db=makeDb(t),app=setupApp(db)
+  // Match production required family-auth securityHeaders middleware.
+  app.use((_request,response,next)=>{
+    response.set('Referrer-Policy','no-referrer')
+    next()
+  })
+  pilot(app,db)
+  const base=await withServer(t,app)
+  const personPage=await get(base,'/test-notification-pilot',11)
+  assert.equal(personPage.status,200)
+  assert.equal(personPage.headers.get('referrer-policy'),'same-origin')
+  const api=await get(base,'/api/test-notification-pilot',11)
+  assert.equal(api.status,200)
+  assert.equal(api.headers.get('referrer-policy'),'no-referrer')
+  const homePage=await get(base,'/test-notification-pilot',13)
+  assert.equal(homePage.status,403)
+  assert.equal(homePage.headers.get('referrer-policy'),'no-referrer')
+})
+
 test('real HTTP pilot shows person-selected event changes, never Home or other persons',async t=>{
   const db=makeDb(t)
   createEvent(db,1,[7]) // preexisting data must not notify on migration
