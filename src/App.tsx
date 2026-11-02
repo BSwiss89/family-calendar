@@ -21,6 +21,8 @@ import { sharedEventsInRange, formatSharedTime, type AcceptedSharedEvent } from 
 import FamilyEventSharing from './FamilyEventSharing'
 import { DesktopInvitations, MobileInvitationReminder } from './InvitationCenter'
 import { useInvitationInbox } from './useInvitationInbox'
+import { useAssignmentInbox } from './useAssignmentInbox'
+import HouseholdEventJoin from './HouseholdEventJoin'
 import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
 import {
@@ -1999,7 +2001,9 @@ const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
 const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
 const [profileSwitchRequest, setProfileSwitchRequest] = useState(0)
 const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | null>(null)
+const [activeHouseholdPersonId, setActiveHouseholdPersonId] = useState<number | null>(null)
 const invitationInbox = useInvitationInbox()
+const assignmentInbox = useAssignmentInbox(activeHouseholdPersonId)
 
 useEffect(() => {
   let cancelled = false
@@ -3535,8 +3539,9 @@ function positionMobileScheduleTimeline(
   useState<number | null>(null)
 const [calendarPersonFilterId, setCalendarPersonFilterId] =
   useState<number | null>(null)
-const handleHouseholdProfileChange = useCallback((name: string | null) => {
+const handleHouseholdProfileChange = useCallback((name: string | null, personId: number | null) => {
   setActiveHouseholdProfile(name)
+  setActiveHouseholdPersonId(personId)
   // A shared Home display always starts with the complete family calendar.
   if (name === 'Home') setCalendarPersonFilterId(null)
 }, [])
@@ -13597,6 +13602,21 @@ const showCalendarSidebar =
           calendarEvent.id === viewingEventId
       ) ?? null
 
+const notificationDisplayProps = {
+  assignmentAvailable: assignmentInbox.available,
+  assignmentNotifications: assignmentInbox.notifications,
+  acknowledgingId: assignmentInbox.acknowledgingId,
+  assignmentError: assignmentInbox.error,
+  acknowledge: assignmentInbox.acknowledge,
+  titleForEvent: (eventId: number) => events.find(e => e.id === eventId)?.title ?? null,
+  openEvent: (eventId: number) => {
+    const target = events.find(e => e.id === eventId)
+    if (!target) return
+    setPage('calendar')
+    openEventDetails(target, target.date)
+  },
+}
+
 const viewingDateKey =
   viewingCalendarEvent === null
     ? null
@@ -15924,7 +15944,7 @@ createPortal(
           </button>
         </div>
       )}
-      {page === 'invitations' && <DesktopInvitations {...invitationInbox} />}
+      {page === 'invitations' && <DesktopInvitations {...invitationInbox} {...notificationDisplayProps} />}
 
       {page === 'calendar' && (
        <section
@@ -18348,6 +18368,13 @@ onClick={(event) => {
   </button>
 </div>
 
+<HouseholdEventJoin
+  eventId={viewingCalendarEvent.id}
+  selectedPersonId={activeHouseholdPersonId}
+  joined={viewingCalendarEvent.people.some(person => person.id === activeHouseholdPersonId)}
+  recurring={Boolean(viewingCalendarEvent.repeatUnit && viewingCalendarEvent.repeatUnit !== 'none')}
+  onChanged={loadEvents}
+/>
 <FamilyEventSharing event={viewingCalendarEvent} />
 
 {detailsDeleteConfirmOpen && (
@@ -24025,7 +24052,7 @@ capture.captureType !== 'other' && (
     </section>
   </div>, document.body
 )}
-      <MobileInvitationReminder {...invitationInbox} suppress={page === 'invitations'} />
+      <MobileInvitationReminder {...invitationInbox} {...notificationDisplayProps} suppress={page === 'invitations'} />
       <HouseholdProfilePicker
         switchRequest={profileSwitchRequest}
         onProfileChange={handleHouseholdProfileChange}
