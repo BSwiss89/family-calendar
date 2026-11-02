@@ -22,6 +22,7 @@ import FamilyEventSharing from './FamilyEventSharing'
 import { DesktopInvitations, MobileInvitationReminder } from './InvitationCenter'
 import { useInvitationInbox } from './useInvitationInbox'
 import { useAssignmentInbox } from './useAssignmentInbox'
+import { useFamilyPush, PushNotificationsControl } from './FamilyPushNotifications'
 import HouseholdEventJoin from './HouseholdEventJoin'
 import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
@@ -2004,6 +2005,7 @@ const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | nu
 const [activeHouseholdPersonId, setActiveHouseholdPersonId] = useState<number | null>(null)
 const invitationInbox = useInvitationInbox()
 const assignmentInbox = useAssignmentInbox(activeHouseholdPersonId)
+const familyPush = useFamilyPush(activeHouseholdPersonId)
 
 useEffect(() => {
   let cancelled = false
@@ -15945,6 +15947,7 @@ createPortal(
         </div>
       )}
       {page === 'invitations' && <DesktopInvitations {...invitationInbox} {...notificationDisplayProps} />}
+      {page === 'invitations' && <PushNotificationsControl controls={familyPush} />}
 
       {page === 'calendar' && (
        <section
