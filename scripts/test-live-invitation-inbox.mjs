@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8')
 const inbox = readFileSync(fileURLToPath(new URL('../src/useInvitationInbox.ts', import.meta.url)), 'utf8')
 const ui = readFileSync(fileURLToPath(new URL('../src/InvitationCenter.tsx', import.meta.url)), 'utf8')
+const assignment = readFileSync(fileURLToPath(new URL('../src/useAssignmentInbox.ts', import.meta.url)), 'utf8')
 
 test('desktop invites have their own page without replacing LIVE navigation', () => {
   assert.match(app, /import \{ DesktopInvitations, MobileInvitationReminder \} from '\.\/InvitationCenter'/)
@@ -20,7 +21,7 @@ test('desktop invites have their own page without replacing LIVE navigation', ()
 test('mobile invitation reminder is optional and remains isolated from editing events', () => {
   assert.match(app, /<MobileInvitationReminder \{\.\.\.invitationInbox\} suppress=\{page === 'invitations'\} \/>/)
   assert.match(ui, /mobile && available && invitations\.length > 0 && !remindLater/)
-  assert.match(ui, /Remind Later/)
+  assert.match(ui, /Ask Again Later/)
   assert.match(ui, /Accept/)
   assert.match(ui, /Decline/)
   assert.match(ui, /document\.visibilityState === 'hidden'/)
@@ -30,7 +31,7 @@ test('mobile invitation reminder is optional and remains isolated from editing e
   assert.doesNotMatch(inbox, /\/api\/events/)
 })
 
-test('mobile Settings reopens pending invites after Remind Later without duplicate modal', () => {
+test('mobile Settings reopens pending invites after Ask Again Later without duplicate modal', () => {
   assert.match(app, /className="mobile-settings-invitation-count"/)
   assert.match(app, /setPage\('invitations'\)/)
   assert.match(app, /void invitationInbox\.refresh\(\)/)
