@@ -122,6 +122,8 @@ jobs:
         run: node --test scripts/test-test-notification-inbox-pilot.mjs
       - name: Verify TEST-only household join and leave identity limits
         run: node --test scripts/test-test-household-event-join.mjs
+      - name: Verify TEST-only informational Web Push and account session boundaries
+        run: node --test scripts/test-test-informational-push.mjs
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
