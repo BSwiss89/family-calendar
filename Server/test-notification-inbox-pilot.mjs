@@ -83,6 +83,14 @@ export function installTestNotificationInboxPilot(app, db, {
   }
   installAssignmentNotificationOutbox(db)
   installNotificationMutationCapture(db)
+  // Acknowledging in the Invitations UI is distinct from push delivery.
+  // This additive TEST-only state never mutates the delivery outbox.
+  db.exec([
+    'CREATE TABLE IF NOT EXISTS test_assignment_acknowledgements(',
+    'notification_id INTEGER PRIMARY KEY REFERENCES assignment_notification_outbox(id),',
+    'acknowledged_at INTEGER NOT NULL CHECK(acknowledged_at > 0)',
+    ') STRICT;',
+  ].join(' '))
 
   function requirePerson(request,response) {
     const selected = selectedPerson(db,request.familyAccount,now())
@@ -111,10 +119,33 @@ export function installTestNotificationInboxPilot(app, db, {
     const selected = requirePerson(request,response)
     if (!selected) return
     response.set('Cache-Control','no-store')
+    const notifications = latest(db,selected.personId).map(note => ({
+      ...note,
+      acknowledged: Boolean(db.prepare(
+        'SELECT 1 FROM test_assignment_acknowledgements WHERE notification_id=?'
+      ).get(note.id)),
+    }))
     response.json({
       pilot:true,profile:'person',personId:selected.personId,
-      notifications:latest(db,selected.personId),
+      notifications,
     })
+  })
+  app.post('/api/test-notification-pilot/:notificationId/acknowledge',(request,response)=>{
+    const selected = requirePerson(request,response)
+    if (!selected) return
+    const raw = request.params.notificationId
+    const id = /^[1-9][0-9]*$/.test(raw) ? Number(raw) : NaN
+    if (!Number.isSafeInteger(id)) return response.status(400).json({error:'Invalid notification.'})
+    const item = db.prepare([
+      'SELECT id FROM assignment_notification_outbox WHERE id=? AND person_id=?',
+    ].join(' ')).get(id,selected.personId)
+    if (!item) return response.status(404).json({error:'Notification unavailable.'})
+    db.prepare([
+      'INSERT OR IGNORE INTO test_assignment_acknowledgements(notification_id,acknowledged_at)',
+      'VALUES (?,?)',
+    ].join(' ')).run(id,now())
+    response.set('Cache-Control','no-store')
+    response.json({acknowledged:true})
   })
   app.post('/test-notification-pilot/refresh',(request,response)=>{
     if (!requirePerson(request,response)) return
