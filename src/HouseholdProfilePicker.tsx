@@ -14,7 +14,7 @@ type ProfilePerson = {
 
 type Props = {
   switchRequest: number
-  onProfileChange: (name: string | null) => void
+  onProfileChange: (name: string | null, personId: number | null) => void
 }
 
 type Screen = 'checking' | 'choose' | 'create' | 'ready' | 'error'
@@ -93,7 +93,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       if (!auth || typeof auth !== 'object' || !('enabled' in auth) ||
         auth.enabled !== true) {
         // Legacy, authentication-disabled calendars retain their existing UI.
-        onProfileChange(null)
+        onProfileChange(null, null)
         setScreen('ready')
         return
       }
@@ -141,7 +141,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
         }
         const person = selection.kind === 'person'
           ? records.find((item) => item.id === selection.personId) : null
-        onProfileChange(person?.name ?? 'Home')
+        onProfileChange(person?.name ?? 'Home', person?.id ?? null)
         setScreen('ready')
       } else {
         setScreen('choose')
@@ -179,7 +179,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       } catch {
         setNotSaved(true)
       }
-      onProfileChange(person?.name ?? 'Home')
+      onProfileChange(person?.name ?? 'Home', person?.id ?? null)
       setScreen('ready')
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : 'Could not save device profile.')
@@ -241,7 +241,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       } catch {
         setNotSaved(true)
       }
-      onProfileChange(newPerson.name)
+      onProfileChange(newPerson.name, newPerson.id)
       setScreen('ready')
       // Reload just the browser UI to refresh People everywhere (event assignment
       // picker, sliders, and Settings). No server restart or database migration.

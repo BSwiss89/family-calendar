@@ -194,3 +194,27 @@ test('TEST pilot catches direct batch deletion, event reassignments and recurrin
   assert.equal((await (await get(base,'/api/test-notification-pilot',12)).json())
     .notifications[0].kind,'cancelled')
 })
+
+
+test('assignment acknowledgements belong to selected profile and survive refresh',async t=>{
+  const db=makeDb(t),app=setupApp(db)
+  pilot(app,db)
+  const base=await withServer(t,app)
+  createEvent(db,56,[7])
+  assert.equal((await post(base,'/test-notification-pilot/refresh')).status,303)
+  const inbox=await (await get(base,'/api/test-notification-pilot',11)).json()
+  assert.equal(inbox.notifications.length,1)
+  assert.equal(inbox.notifications[0].acknowledged,false)
+  const id=inbox.notifications[0].id
+  assert.equal((await post(base,'/api/test-notification-pilot/'+id+'/acknowledge',13)).status,403)
+  assert.equal((await post(base,'/api/test-notification-pilot/'+id+'/acknowledge',12)).status,404)
+  assert.equal((await post(base,'/api/test-notification-pilot/0001/acknowledge',11)).status,400)
+  assert.equal((await post(base,'/api/test-notification-pilot/'+id+'/acknowledge',11)).status,200)
+  assert.equal((await post(base,'/api/test-notification-pilot/'+id+'/acknowledge',11)).status,200)
+  const after=await (await get(base,'/api/test-notification-pilot',11)).json()
+  assert.equal(after.notifications.length,1)
+  assert.equal(after.notifications[0].acknowledged,true)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM test_assignment_acknowledgements').get().n,1)
+  assert.equal((await post(base,'/test-notification-pilot/refresh')).status,303)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM assignment_notification_outbox').get().n,1)
+})

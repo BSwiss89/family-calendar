@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { IncomingEventInvitation } from './eventSharingUiModel'
+import type { AssignmentNotice } from './useAssignmentInbox'
 import { formatSharedDate, formatSharedTime } from './sharedEventOverlay'
 import './InvitationCenter.css'
 
@@ -11,6 +12,13 @@ type Props = {
   error: string
   suppress?: boolean
   respond: (shareId: number, decision: 'accepted' | 'declined') => Promise<boolean>
+  assignmentAvailable?: boolean
+  assignmentNotifications?: readonly AssignmentNotice[]
+  acknowledgingId?: number | null
+  assignmentError?: string
+  acknowledge?: (notificationId: number) => Promise<boolean>
+  titleForEvent?: (eventId: number) => string | null
+  openEvent?: (eventId: number) => void
 }
 
 function InvitationCards({
@@ -43,27 +51,66 @@ function InvitationCards({
   )
 }
 
+function AssignmentCards({
+  items,acknowledgingId,acknowledge,titleForEvent,openEvent,
+}: {
+  items: readonly AssignmentNotice[]
+  acknowledgingId?: number | null
+  acknowledge?: (id: number) => Promise<boolean>
+  titleForEvent?: (eventId: number) => string | null
+  openEvent?: (eventId: number) => void
+}) {
+  const kindLabel: Record<AssignmentNotice['kind'],string> = {
+    assigned: "You\'ve been assigned an event",
+    changed: 'An assigned event was updated',
+    unassigned: 'You were removed from an event',
+    cancelled: 'An assigned event was cancelled',
+  }
+  return <div className="invitation-center-items">
+    {items.map(item => <article className="invitation-center-item" key={'assignment-' + item.id}>
+      <span className="invitation-center-source">Calendar notification</span>
+      <strong>{kindLabel[item.kind]}</strong>
+      <span className="invitation-center-date">
+        {titleForEvent?.(item.eventId) || 'Event #' + item.eventId}
+      </span>
+      <div className="invitation-center-actions">
+        {titleForEvent?.(item.eventId) && openEvent && <button type="button"
+          className="invitation-decline"
+          onClick={() => openEvent(item.eventId)}>View Event</button>}
+        <button type="button" className="invitation-accept"
+          disabled={acknowledgingId !== null && acknowledgingId !== undefined}
+          onClick={() => { void acknowledge?.(item.id) }}>
+          {acknowledgingId === item.id ? 'Saving…' : 'Acknowledge'}
+        </button>
+      </div>
+    </article>)}
+  </div>
+}
+
 /** Persistent desktop/tablet sidebar destination; never a calendar-wide share action. */
 export function DesktopInvitations({
   available, invitations, respondingId, error, respond,
+  assignmentAvailable = false, assignmentNotifications = [],
+  acknowledgingId = null, assignmentError = '', acknowledge, titleForEvent, openEvent,
 }: Props) {
   return (
     <section className="invitation-center-page" aria-label="Invitations">
       <header>
         <h2>Invitations</h2>
-        <p>Review only the events other families have invited your calendar to.</p>
+        <p>Review invitations and assigned-event updates in one place.</p>
       </header>
-      {!available ? (
-        <p className="invitation-center-empty">
-          Invitations are not available on this calendar.
-        </p>
-      ) : invitations.length === 0 ? (
-        <p className="invitation-center-empty">No invitations awaiting a response.</p>
-      ) : (
-        <InvitationCards invitations={invitations}
-          respondingId={respondingId} respond={respond} />
-      )}
+      <h3>Event invitations</h3>
+      {!available || invitations.length === 0 ? (
+        <p className="invitation-center-empty">No event invitations awaiting a response.</p>
+      ) : <InvitationCards invitations={invitations}
+          respondingId={respondingId} respond={respond} />}
       {error && <p role="alert" className="invitation-center-error">{error}</p>}
+      <h3>Calendar notifications</h3>
+      {!assignmentAvailable || assignmentNotifications.length === 0 ? (
+        <p className="invitation-center-empty">No new calendar notifications.</p>
+      ) : <AssignmentCards items={assignmentNotifications} acknowledgingId={acknowledgingId}
+          acknowledge={acknowledge} titleForEvent={titleForEvent} openEvent={openEvent} />}
+      {assignmentError && <p role="alert" className="invitation-center-error">{assignmentError}</p>}
     </section>
   )
 }
@@ -75,12 +122,14 @@ export function DesktopInvitations({
  */
 export function MobileInvitationReminder({
   available, invitations, respondingId, error, respond, suppress = false,
+  assignmentAvailable = false, assignmentNotifications = [],
+  acknowledgingId = null, assignmentError = '', acknowledge, titleForEvent, openEvent,
 }: Props) {
   const [mobile, setMobile] = useState(() =>
     window.matchMedia('(max-width: 760px)').matches)
   const [remindLater, setRemindLater] = useState(false)
   const wasHidden = useRef(false)
-  const seenInviteIds = useRef(new Set<number>())
+  const seenInviteIds = useRef(new Set<string>())
   const dialog = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -106,15 +155,20 @@ export function MobileInvitationReminder({
   // A genuinely new invitation (including a confirmed resend with a fresh ID)
   // must be visible, even if a previous reminder was dismissed on this device.
   useEffect(() => {
-    const incoming = new Set(invitations.map(item => item.shareId))
-    const hasNew = invitations.some(item => !seenInviteIds.current.has(item.shareId))
+    const ids = [
+      ...invitations.map(item => 'invite:' + item.shareId),
+      ...assignmentNotifications.map(item => 'notification:' + item.id),
+    ]
+    const incoming = new Set(ids)
+    const hasNew = ids.some(id => !seenInviteIds.current.has(id))
     seenInviteIds.current = incoming
     if (hasNew) setRemindLater(false)
-  }, [invitations])
+  }, [invitations, assignmentNotifications])
 
   // The full inbox must be accessible after Remind Later without a duplicate
   // modal covering it. Pending invitations remain on the server until answered.
-  const visible = mobile && available && invitations.length > 0 && !remindLater && !suppress
+  const visible = mobile && ((available && invitations.length > 0) ||
+    (assignmentAvailable && assignmentNotifications.length > 0)) && !remindLater && !suppress
 
   useEffect(() => {
     if (!visible) return
@@ -164,26 +218,35 @@ export function MobileInvitationReminder({
           <div>
             <span>Family Calendar</span>
             <h2 id="mobile-invite-title">
-              {invitations.length === 1 ? 'You have an invitation' :
-                'You have ' + invitations.length + ' invitations'}
+              {invitations.length + assignmentNotifications.length === 1
+                ? 'You have a new notification'
+                : 'You have ' + (invitations.length + assignmentNotifications.length) + ' new items'}
             </h2>
           </div>
           <button type="button" onClick={() => setRemindLater(true)}
             aria-label="Remind me later about these events">×</button>
         </div>
         <p className="mobile-invitations-description">
-          Accept an event to add a read-only copy to your family's calendar,
-          or decline it. No other calendar events are shared.
+          Please respond to invitations or acknowledge calendar updates. You can ask again later without accepting or declining.
         </p>
-        <InvitationCards invitations={invitations}
-          respondingId={respondingId} respond={respond} />
+        {invitations.length > 0 && <>
+          <h3>Invitations</h3>
+          <InvitationCards invitations={invitations}
+            respondingId={respondingId} respond={respond} />
+        </>}
+        {assignmentNotifications.length > 0 && <>
+          <h3>Calendar notifications</h3>
+          <AssignmentCards items={assignmentNotifications} acknowledgingId={acknowledgingId}
+            acknowledge={acknowledge} titleForEvent={titleForEvent} openEvent={openEvent} />
+        </>}
         {error && <p role="alert" className="invitation-center-error">{error}</p>}
+        {assignmentError && <p role="alert" className="invitation-center-error">{assignmentError}</p>}
         <button className="mobile-invitations-remind" type="button"
           onClick={() => setRemindLater(true)}>
-          Remind Later
+          Ask Again Later
         </button>
         <p className="mobile-invitations-footnote">
-          Pending invitations will be shown again when you next open the app.
+          Pending invitations and unacknowledged updates stay in Invitations and will be shown again when you reopen the app.
         </p>
       </div>
     </div>,

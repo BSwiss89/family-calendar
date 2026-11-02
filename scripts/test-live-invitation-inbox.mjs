@@ -5,11 +5,12 @@ import { fileURLToPath } from 'node:url'
 const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8')
 const inbox = readFileSync(fileURLToPath(new URL('../src/useInvitationInbox.ts', import.meta.url)), 'utf8')
 const ui = readFileSync(fileURLToPath(new URL('../src/InvitationCenter.tsx', import.meta.url)), 'utf8')
+const assignment = readFileSync(fileURLToPath(new URL('../src/useAssignmentInbox.ts', import.meta.url)), 'utf8')
 
 test('desktop invites have their own page without replacing LIVE navigation', () => {
   assert.match(app, /import \{ DesktopInvitations, MobileInvitationReminder \} from '\.\/InvitationCenter'/)
   assert.match(app, /const invitationInbox = useInvitationInbox\(\)/)
-  assert.match(app, /page === 'invitations' && <DesktopInvitations \{\.\.\.invitationInbox\} \/>/)
+  assert.match(app, /page === 'invitations' && <DesktopInvitations \{\.\.\.invitationInbox\} \{\.\.\.notificationDisplayProps\} \/>/)
   assert.match(app, /<span>Invitations<\/span>/)
   assert.match(app, /onClick=\{\(\) => setPage\('invitations'\)\}/)
   for (const page of ['home', 'calendar', 'meals', 'lists', 'householdMembers']) {
@@ -18,9 +19,9 @@ test('desktop invites have their own page without replacing LIVE navigation', ()
 })
 
 test('mobile invitation reminder is optional and remains isolated from editing events', () => {
-  assert.match(app, /<MobileInvitationReminder \{\.\.\.invitationInbox\} suppress=\{page === 'invitations'\} \/>/)
-  assert.match(ui, /mobile && available && invitations\.length > 0 && !remindLater/)
-  assert.match(ui, /Remind Later/)
+  assert.match(app, /<MobileInvitationReminder \{\.\.\.invitationInbox\} \{\.\.\.notificationDisplayProps\} suppress=\{page === 'invitations'\} \/>/)
+  assert.match(ui, /mobile && \(\(available && invitations\.length > 0\)/)
+  assert.match(ui, /Ask Again Later/)
   assert.match(ui, /Accept/)
   assert.match(ui, /Decline/)
   assert.match(ui, /document\.visibilityState === 'hidden'/)
@@ -30,7 +31,7 @@ test('mobile invitation reminder is optional and remains isolated from editing e
   assert.doesNotMatch(inbox, /\/api\/events/)
 })
 
-test('mobile Settings reopens pending invites after Remind Later without duplicate modal', () => {
+test('mobile Settings reopens pending invites after Ask Again Later without duplicate modal', () => {
   assert.match(app, /className="mobile-settings-invitation-count"/)
   assert.match(app, /setPage\('invitations'\)/)
   assert.match(app, /void invitationInbox\.refresh\(\)/)
@@ -44,6 +45,11 @@ test('pending invitations do not copy external events into the editable local ca
   assert.match(inbox, /setInvitations\(current => current\.filter/)
   assert.doesNotMatch(inbox, /setEvents\(|\/api\/events/)
   assert.match(app, /<FamilyEventSharing event=\{viewingCalendarEvent\} \/>/)
+  assert.match(app, /<HouseholdEventJoin/)
+  assert.match(app, /useAssignmentInbox\(activeHouseholdPersonId\)/)
+  assert.match(assignment, /test-notification-pilot/)
+  assert.match(ui, /Calendar notifications/)
+  assert.match(ui, /Acknowledge/)
   assert.match(app, /storeSortingEnabled/)
   assert.match(app, /makeEventDuplicateDraft/)
 })
