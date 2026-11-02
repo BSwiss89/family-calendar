@@ -120,6 +120,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Two-household browser demo tests failed.' }
       - name: Verify TEST-only notification inbox HTTP and SQLite profile separation
         run: node --test scripts/test-test-notification-inbox-pilot.mjs
+      - name: Verify TEST-only household join and leave identity limits
+        run: node --test scripts/test-test-household-event-join.mjs
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
