@@ -40,6 +40,8 @@ jobs:
         run: node --test scripts/test-trusted-assignment-dispatch.mjs
       - name: Verify SQL mutation capture, AI edits, recurring exceptions and restart recovery
         run: node --test scripts/test-notification-mutation-capture.mjs
+      - name: Exercise real HTTP TEST-only notification inbox and person-profile isolation
+        run: node --test scripts/test-test-notification-inbox-pilot.mjs
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
