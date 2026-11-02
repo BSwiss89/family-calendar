@@ -7,6 +7,7 @@ import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
+import { installTestNotificationInboxPilot } from './test-notification-inbox-pilot.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { acquirePrivateHouseholdBackendWriterLock } from './private-gateway-writer-lock.mjs'
 import { installPrivateEventIdentity } from './private-event-identity.mjs'
@@ -651,6 +652,8 @@ app.use(express.json())
 // Required mode protects all subsequent calendar APIs, uploads and pages.
 // Disabled by default; never enable public Funnel before a tested rollout.
 installFamilyAuth(app, database, __dirname)
+// No routes/schema unless separately approved, TEST-only opt-in startup flag.
+installTestNotificationInboxPilot(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 
 function isValidDate(date) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date)
