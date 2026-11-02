@@ -78,6 +78,14 @@ export function installTestInformationalPush(app,db,{
   }
   const publicKey=publicVapidKey(privateKey)
 
+  // Existing TEST notification inbox must be installed first. Never create a
+  // parallel outbox or silently start a worker that cannot see calendar edits.
+  const required=new Set(['assignment_notification_outbox',
+    'notification_event_baselines','notification_dirty_events'])
+  const present=db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()
+  for(const row of present) required.delete(row.name)
+  if(required.size) throw new Error('TEST notification inbox prerequisite is missing.')
+
   db.exec([
     'CREATE TABLE IF NOT EXISTS test_push_subscriptions(',
     'endpoint_hash TEXT PRIMARY KEY,endpoint TEXT NOT NULL,',
