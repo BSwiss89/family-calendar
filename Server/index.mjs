@@ -9,6 +9,7 @@ import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boo
 import { installFamilyAuth } from './family-auth.mjs'
 import { installTestNotificationInboxPilot } from './test-notification-inbox-pilot.mjs'
 import { installTestHouseholdEventJoin } from './test-household-event-join.mjs'
+import { installTestInformationalPush } from './test-informational-push.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { acquirePrivateHouseholdBackendWriterLock } from './private-gateway-writer-lock.mjs'
 import { installPrivateEventIdentity } from './private-event-identity.mjs'
@@ -657,6 +658,8 @@ installFamilyAuth(app, database, __dirname)
 installTestNotificationInboxPilot(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 // Single-household Join/Leave preview; same guarded TEST-only opt-in.
 installTestHouseholdEventJoin(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
+// Informational Web Push: explicitly disabled unless authenticated TEST startup opts in.
+installTestInformationalPush(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 
 function isValidDate(date) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date)
