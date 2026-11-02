@@ -54,7 +54,7 @@ test('VAPID JWT is correctly signed and RFC8291 aes128gcm payload can be decrypt
 test('Push delivery destinations reject URLs that could reach local/internal hosts',()=>{
   for(const endpoint of ['https://127.0.0.1/push','http://web.push.apple.com/a',
     'https://push.apple.com.evil.example/push','https://user@web.push.apple.com/a',
-    'https://fcm.googleapis.com:443/a','https://example.com/a']) {
+    'https://fcm.googleapis.com:444/a','https://example.com/a']) {
     assert.equal(approvedPushEndpoint(endpoint),false,endpoint)
   }
   assert.equal(approvedPushEndpoint(subscription.endpoint),true)
