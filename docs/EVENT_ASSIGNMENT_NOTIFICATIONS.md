@@ -193,3 +193,64 @@ Dedicated tests exercise direct SQL/AI-style edits, new event assignments,
 person removals/additions, recurring exceptions, batch deletion with cascades,
 rollback, read/ack atomicity, coalesced no-op, simulated restart of an actual
 file-backed SQLite DB, and missing outbox recovery.
+
+
+## Single-family real TEST inbox pilot — optional, disabled by default
+
+This pilot addresses the gap between isolated GitHub unit tests and the actual
+running calendar. It adds a guarded \`Server/test-notification-inbox-pilot.mjs\`
+integration after the existing secure family-auth middleware. It is
+**disabled by default** and installs no schema or routes when disabled.
+
+Only a separately authorized **TEST** operator may set
+\`FAMILY_CALENDAR_NOTIFICATION_TEST_PILOT=enabled\` for the existing test
+backend. All of the following are required or startup refuses to enable:
+- Actual server port \`13002\`, not LIVE \`3001\`.
+- \`FAMILY_CALENDAR_AUTH_MODE=required\`, including HTTPS session-cookie
+  authentication and same-origin POST protection from the existing middleware.
+- The source checkout directory must be a \`family-calendar-test*\` tree,
+  not a LIVE or general preview folder.
+
+Once explicitly enabled, it installs the optional Stage 2A outbox and 2D SQL
+mutation capture on the TEST SQLite database. Existing events are baselined,
+so they do **not** generate an initial notification flood. A signed-in person
+may open \`/test-notification-pilot\` on the TEST site's HTTPS origin, perform
+real calendar creates/edits/AI reschedules/cancellations in the normal TEST UI,
+then press **Refresh notifications from calendar changes**. The server
+reconciles the TEST event changes and renders a read-only inbox for the
+person profile selected on *that session*. Refresh is same-origin POST.
+A Home profile is denied; event title/notes are not returned in the inbox.
+The \`/api/test-notification-pilot\` endpoint provides the same records as
+minimal JSON, without push credentials or other people's rows.
+
+**Very important:** The existing one-family calendar uses a **shared login
+with selectable people profiles**. That selection is not strong person
+authorization; this is a household TEST display-only pilot, NOT a private
+multi-family notification inbox, NOT production push, and NOT evidence that
+the eventual server-verified per-person account/device mapping is installed.
+It must not be enabled for the private multi-household gateway or on LIVE.
+
+Before any TEST activation:
+1. Record current LIVE/TEST commit and actual process/port identity; confirm
+   dedicated nonshared TEST SQLite and enabled cookie authentication.
+2. Verify scheduled TEST updater policy; do not let an auto-deploy or boot task
+   overwrite a manually staged candidate. Preserve current task definitions.
+3. Make and verify a consistent TEST SQLite backup (integrity check), source
+   checkout and rollback artifacts. Test restoring onto an **isolated** path.
+4. Run the entire existing Windows CI suite and isolated real-backend
+   checks, then seek **separate explicit authorization** for TEST deployment,
+   backend restart, and enabling the opt-in flag.
+5. Check HTTPS TEST health, login/profile, normal event/list behavior,
+   changes to the TEST inbox, Home exclusion, restart behavior and rollback.
+6. Do not deploy to LIVE without a separate fully reviewed cutover, and never
+   use the frontend-only Secure LIVE automatic release approval for this.
+
+The pilot only records and displays **generic in-app notices**. It cannot yet
+send notifications to an iPhone while the web app is closed. True Web Push
+still requires VAPID, a service worker, consent flow, device-specific delivery
+tracking, and complete identity/household authorization.
+
+The HTTP tests in \`scripts/test-test-notification-inbox-pilot.mjs\` use isolated
+synthetic SQLite and a synthetic authentication fixture. They prove the
+route functionality and secure opt-in gates, **not** the state of the real
+Windows TEST website. That site must be explicitly checked and exercised.
