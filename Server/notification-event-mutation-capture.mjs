@@ -95,7 +95,8 @@ function markDirty(sqlId) {
 
 const triggerDefinitions = [
   ['notify_event_insert','AFTER INSERT ON events', markDirty('NEW.id')],
-  ['notify_event_update','AFTER UPDATE ON events', markDirty('NEW.id')],
+  ['notify_event_update','AFTER UPDATE ON events',
+    markDirty('OLD.id') + '\n' + markDirty('NEW.id')],
   ['notify_event_delete','AFTER DELETE ON events', markDirty('OLD.id')],
   ['notify_people_insert','AFTER INSERT ON event_people',markDirty('NEW.event_id')],
   ['notify_people_delete','AFTER DELETE ON event_people',markDirty('OLD.event_id')],
