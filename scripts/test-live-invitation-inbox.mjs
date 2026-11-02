@@ -10,7 +10,7 @@ const assignment = readFileSync(fileURLToPath(new URL('../src/useAssignmentInbox
 test('desktop invites have their own page without replacing LIVE navigation', () => {
   assert.match(app, /import \{ DesktopInvitations, MobileInvitationReminder \} from '\.\/InvitationCenter'/)
   assert.match(app, /const invitationInbox = useInvitationInbox\(\)/)
-  assert.match(app, /page === 'invitations' && <DesktopInvitations \{\.\.\.invitationInbox\} \/>/)
+  assert.match(app, /page === 'invitations' && <DesktopInvitations \{\.\.\.invitationInbox\} \{\.\.\.notificationDisplayProps\} \/>/)
   assert.match(app, /<span>Invitations<\/span>/)
   assert.match(app, /onClick=\{\(\) => setPage\('invitations'\)\}/)
   for (const page of ['home', 'calendar', 'meals', 'lists', 'householdMembers']) {
@@ -19,8 +19,8 @@ test('desktop invites have their own page without replacing LIVE navigation', ()
 })
 
 test('mobile invitation reminder is optional and remains isolated from editing events', () => {
-  assert.match(app, /<MobileInvitationReminder \{\.\.\.invitationInbox\} suppress=\{page === 'invitations'\} \/>/)
-  assert.match(ui, /mobile && available && invitations\.length > 0 && !remindLater/)
+  assert.match(app, /<MobileInvitationReminder \{\.\.\.invitationInbox\} \{\.\.\.notificationDisplayProps\} suppress=\{page === 'invitations'\} \/>/)
+  assert.match(ui, /mobile && \(\(available && invitations\.length > 0\)/)
   assert.match(ui, /Ask Again Later/)
   assert.match(ui, /Accept/)
   assert.match(ui, /Decline/)
@@ -45,6 +45,11 @@ test('pending invitations do not copy external events into the editable local ca
   assert.match(inbox, /setInvitations\(current => current\.filter/)
   assert.doesNotMatch(inbox, /setEvents\(|\/api\/events/)
   assert.match(app, /<FamilyEventSharing event=\{viewingCalendarEvent\} \/>/)
+  assert.match(app, /<HouseholdEventJoin/)
+  assert.match(app, /useAssignmentInbox\(activeHouseholdPersonId\)/)
+  assert.match(assignment, /test-notification-pilot/)
+  assert.match(ui, /Calendar notifications/)
+  assert.match(ui, /Acknowledge/)
   assert.match(app, /storeSortingEnabled/)
   assert.match(app, /makeEventDuplicateDraft/)
 })
