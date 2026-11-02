@@ -23,6 +23,7 @@ export function planTrustedAssignmentDispatch({
   trustedHouseholdId,
   trustedOutboxId,
   resolveAccountPerson,
+  verifySourceHousehold,
   now = Date.now(),
 }) {
   if (!householdDatabase || typeof householdDatabase.prepare !== 'function'
@@ -34,9 +35,18 @@ export function planTrustedAssignmentDispatch({
     throw new Error('Trusted household and outbox IDs required.')
   }
   if (typeof resolveAccountPerson !== 'function'
+    || typeof verifySourceHousehold !== 'function'
     || !Number.isSafeInteger(now) || now <= 0) {
-    throw new Error('Trusted synchronous person resolver and time required.')
+    throw new Error('Trusted person and source-household resolvers and time required.')
   }
+  // The trusted gateway must establish this binding from the actual selected
+  // source storage before the outbox row is read. Never rely on a caller's
+  // browser-provided householdId; a SQLite event ID is not globally unique.
+  const binding = verifySourceHousehold({ householdDatabase, trustedHouseholdId })
+  if (binding && typeof binding.then === 'function') {
+    throw new Error('Source-household verification must be synchronous.')
+  }
+  if (binding !== true) throw new Error('Source household identity mismatch.')
   const row = householdDatabase.prepare([
     'SELECT id,event_id AS eventId,person_id AS personId,kind,created_at AS createdAt',
     'FROM assignment_notification_outbox',
@@ -89,7 +99,7 @@ export function planTrustedAssignmentDispatch({
   }
 }
 
-// Cross-household source IDs may collide. The dispatcher MUST obtain both
-// householdDatabase and trustedHouseholdId from the same verified gateway
-// selection, not from independent user-provided input. This pure helper
-// intentionally cannot prove that binding on its own.
+// Cross-household source IDs may collide. verifySourceHousehold MUST validate
+// trusted server-selected physical storage (as in PR #70's storage resolver),
+// never a browser-supplied label. The caller remains responsible for binding
+// both the database and ID to the same verified gateway session.
