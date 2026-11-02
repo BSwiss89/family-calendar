@@ -102,3 +102,40 @@ For a production rollout, the browser registration route must require secure
 same-origin CSRF protection, an explicit user action and a freshly checked
 authenticated account-person link. The dispatcher must recheck the event's
 original household and the active recipient assignment before each send.
+
+
+## Stage 2C: trusted assignment-to-device dispatch preview (isolated)
+
+\`Server/trusted-assignment-dispatch.mjs\` joins the event assignment outbox
+from Stage 2A with the verified device registry from Stage 2B, but **does
+not send any push notification, acknowledge delivery, or expose an HTTP API**.
+
+The caller must supply a physically verified single-household SQLite DB and
+the independent central identity DB. A \`verifySourceHousehold\` function must
+confirm the database is exactly the claimed trusted household from the
+server-side gateway's storage selection; a browser-provided household label
+does not count. Failure stops before looking up event or device data.
+
+Every notification is checked against the CURRENT household event state:
+- \`assigned\` and \`changed\` require a current \`event_people\` assignment;
+- \`unassigned\` requires the event still exists and person is no longer assigned;
+- \`cancelled\` requires the event no longer exists;
+- when multiple pending intents exist for one event/person, only the latest
+  pending intent is eligible;
+- expired/revoked/disabled sessions, changed Home selections, and revoked
+  person memberships are filtered by the Stage 2B verified-device resolver.
+
+Secrets (push endpoints and encryption keys) are provided only to internal
+future dispatch code, **never** to a browser. Tests include same numeric event
+and person IDs in TWO different household databases, mismatched physical
+storage, replay/stale suppression, cancellation, reassignment, Home switching,
+account and session revocation, and fail-closed resolver behavior.
+
+**Not yet completed:** production wiring to event create/edit/AI/batch routes,
+immutable event identities across DB restores, authorization-bound dispatch
+serialization and durable delivery receipts, duplicate handling across crashes,
+device permissions/service workers/VAPID, explicit recipient preferences,
+and end-to-end two-household tests. In particular, merely running this
+preview repeatedly is NOT a production deduplication strategy: a sender
+can deliver twice if it crashes after sending but before acknowledging.
+Do not infer readiness for production Web Push from these tests.
