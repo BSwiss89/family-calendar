@@ -61,7 +61,7 @@ function AssignmentCards({
   openEvent?: (eventId: number) => void
 }) {
   const kindLabel: Record<AssignmentNotice['kind'],string> = {
-    assigned: 'You've been assigned an event',
+    assigned: "You\'ve been assigned an event",
     changed: 'An assigned event was updated',
     unassigned: 'You were removed from an event',
     cancelled: 'An assigned event was cancelled',
