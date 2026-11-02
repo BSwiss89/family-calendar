@@ -36,6 +36,8 @@ jobs:
         run: node --test scripts/test-event-assignment-notifications.mjs
       - name: Verify person-bound push subscription isolation, consent and revocation
         run: node --test scripts/test-verified-push-subscriptions.mjs
+      - name: Verify trusted assignment dispatch and cross-household notification privacy
+        run: node --test scripts/test-trusted-assignment-dispatch.mjs
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
