@@ -139,3 +139,57 @@ and end-to-end two-household tests. In particular, merely running this
 preview repeatedly is NOT a production deduplication strategy: a sender
 can deliver twice if it crashes after sending but before acknowledging.
 Do not infer readiness for production Web Push from these tests.
+
+
+## Stage 2D: transaction-bound SQL mutation capture and restart-safe intent reconciliation
+
+**Development-only, NOT installed in any calendar server.** The optional
+\`Server/notification-event-mutation-capture.mjs\` module creates
+\`notification_dirty_events\` and \`notification_event_baselines\` only when
+\`installNotificationMutationCapture\` is explicitly called by an isolated
+test or a future authorized migration. No current application startup calls it.
+
+Rather than adding notification hooks to just one event form handler, nine
+SQLite triggers record mutations to \`events\`, \`event_people\` and
+\`event_exceptions\`, including direct SQL changes made by AI and batch deletes.
+They run inside the **same transaction** as the event change and roll back
+with failed edits. A recipient-agnostic revision per event records the net
+change even across restarts, without storing titles, notes or event location in
+the dirty queue. (The hashed material fingerprint and sorted assigned person IDs
+are stored in the protected local baseline table.)
+
+The installer baselines pre-existing event data *before* arming triggers, and
+never re-baselines on a subsequent call, preventing existing appointments from
+spontaneously alerting everyone. \`reconcileNotificationMutations\` acquires a
+SQLite write lock, checks committed current data against the persisted prior
+baseline, uses Stage 2A to queue per-person assigned, changed, unassigned and
+cancelled intents, updates that baseline and acknowledges the dirty revision,
+then commits everything atomically. A crash or error rolls the entire
+reconciliation transaction back. Replaying an already-reconciled event doesn't
+create duplicate intent rows.
+
+Recurring exception inserts/deletes currently produce **series changed**
+intents, not occurrence-specific cancellation notifications. We need an
+occurrence-aware design before sending individual recurring-event alerts.
+
+**Known limitations / next gates:**
+- This is event ID-based and coalesces all changes before reconciliation;
+  deleting and recreating the *same numeric event ID* before the next
+  reconciliation yields a net change. Production should use immutable event
+  identities from isolated PR #70 and a versioned dispatch receipt.
+- A reconciliation can collapse intermediate changes even across separate
+  committed SQL transactions; this is useful for noise prevention, but a
+  delivery worker must not presume every historical intermediate action was
+  emitted.
+- This only durably queues **notification intents**. It does not provide
+  exactly-once phone delivery. A crash after Web Push sends but before an
+  acknowledgement can resend; design per-device receipts/idempotency before
+  enabling delivery.
+- Must still stage the approved migration, trust boundaries, selected-household
+  binding, opt-in browser UX, Web Push/VAPID and two-household integration
+  checks. No LIVE database migration, no TEST change, no automatic deploy.
+
+Dedicated tests exercise direct SQL/AI-style edits, new event assignments,
+person removals/additions, recurring exceptions, batch deletion with cascades,
+rollback, read/ack atomicity, coalesced no-op, simulated restart of an actual
+file-backed SQLite DB, and missing outbox recovery.
