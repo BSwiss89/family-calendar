@@ -61,3 +61,44 @@ central source reconciliation. It is not a push-notification delivery queue.
 Do **not** install its triggers in the legacy LIVE database or merge the
 household branches merely to enable notifications. Reconcile identity and
 household scoping before connecting these features.
+
+
+## Stage 2B: verified, consented device registry (this PR, still isolated)
+
+`Server/verified-push-subscriptions.mjs` is a central-identity SQLite
+**opt-in registry** with no HTTP routes, no service worker, no VAPID transport,
+and no notifications sent. Nothing is added to the LIVE calendar schema.
+It is not run automatically by any current server startup.
+
+Important controls:
+
+- Registration requires an actual unexpired, unrevoked, active login session,
+  `explicitOptIn: true`, and an authoritative **server-side**
+  account→household→person resolver. It refuses a shared Home display session
+  or mismatched selected person. Selecting another person's UI profile is
+  deliberately insufficient to gain notification access.
+- The resolver must use a verified gateway session (not a body/query/header
+  identity) and recheck member/account status, household and the person row.
+  The already-written `getLinkedHouseholdPerson` under draft PR #70 supplies
+  this foundation once approved and safely integrated. Both helper interfaces
+  will need a narrow, reviewed adapter — no automatic integration is implied.
+- The endpoint is uniquely owned by one verified session and identity; another
+  account cannot silently take it. The module accepts only standard HTTPS
+  push-provider hostnames (Apple, Google and Mozilla) with correctly shaped
+  encryption keys. URLs are never treated as arbitrary fetch destinations.
+- The internal dispatch lookup **rechecks** session validity, selected
+  profile, account status and current verified person link on each lookup.
+  When a device is revoked, Home is selected, or membership is removed,
+  that device stops qualifying immediately. The returned endpoints/keys are
+  secret server-side material and must never be echoed through a browser API.
+- Per-device unsubscribe is restricted to the signed-in session. This is
+  important before exposing actual opt-in registration.
+
+Privacy caveats: This stage does not implement physical device ownership,
+service workers, push transport, iOS permission UX, subscription expiry cleanup
+or delivery retry. It does not verify a person account in LIVE because the
+household account-to-person membership system is not yet installed there.
+For a production rollout, the browser registration route must require secure
+same-origin CSRF protection, an explicit user action and a freshly checked
+authenticated account-person link. The dispatcher must recheck the event's
+original household and the active recipient assignment before each send.
