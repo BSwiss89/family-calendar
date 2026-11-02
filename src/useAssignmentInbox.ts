@@ -20,7 +20,13 @@ function parseNotice(input: unknown): AssignmentNotice | null {
     typeof row.kind !== 'string' || !kinds.has(row.kind) ||
     !Number.isSafeInteger(row.createdAt) || (row.createdAt as number) <= 0 ||
     typeof row.acknowledged !== 'boolean') return null
-  return row as AssignmentNotice
+  return {
+    id: row.id as number,
+    eventId: row.eventId as number,
+    kind: row.kind as AssignmentNotice['kind'],
+    createdAt: row.createdAt as number,
+    acknowledged: row.acknowledged as boolean,
+  }
 }
 
 export function useAssignmentInbox(personId: number | null) {
