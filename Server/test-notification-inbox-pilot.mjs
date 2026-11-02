@@ -101,6 +101,10 @@ export function installTestNotificationInboxPilot(app, db, {
     const selected = requirePerson(request,response)
     if (!selected) return
     response.set('Cache-Control','no-store')
+    // Only this TEST inbox page needs a same-origin referrer policy:
+    // native HTML form POSTs otherwise use Origin: null under no-referrer.
+    // Keep family-auth's strict secure Origin validation unchanged.
+    response.set('Referrer-Policy','same-origin')
     response.type('html').send(page(selected,latest(db,selected.personId)))
   })
   app.get('/api/test-notification-pilot',(request,response)=>{
