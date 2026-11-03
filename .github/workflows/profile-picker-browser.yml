@@ -1,0 +1,30 @@
+name: Profile picker browser regressions
+
+on:
+  pull_request:
+    paths:
+      - 'src/HouseholdProfilePicker*'
+      - 'src/householdProfileSelection*'
+      - 'src/App.tsx'
+      - 'scripts/test-profile-picker-browser.mjs'
+      - '.github/workflows/profile-picker-browser.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  profile-picker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Install browser test tooling without changing dependency manifests
+        run: npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund playwright@1.62.1
+      - run: npx playwright install --with-deps chromium
+      - name: Exercise real React profile lifecycle with disposable mocked APIs
+        run: node --test scripts/test-profile-picker-browser.mjs

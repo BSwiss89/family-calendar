@@ -1995,6 +1995,7 @@ const [isEditingHome, setIsEditingHome] =
 const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
 const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
 const [profileSwitchRequest, setProfileSwitchRequest] = useState(0)
+const [profilePeopleRevision, setProfilePeopleRevision] = useState(0)
 const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | null>(null)
 const [activeHouseholdPersonId,setActiveHouseholdPersonId] = useState<number|null>(null)
 const assignmentInbox=useAssignmentInbox(activeHouseholdPersonId)
@@ -3527,6 +3528,11 @@ function positionMobileScheduleTimeline(
 }
 
   const [people, setPeople] = useState<Person[]>([])
+const handleProfileCreated = useCallback((person: Person) => {
+  setPeople(current => current.some(item => item.id === person.id)
+    ? current.map(item => item.id === person.id ? person : item)
+    : [...current, person])
+}, [])
   const [draggedPersonId, setDraggedPersonId] =
   useState<number | null>(null)
 const [calendarPersonFilterId, setCalendarPersonFilterId] =
@@ -10157,6 +10163,7 @@ setRepeatEndDateError(false)
 
     const updatedPeople =
   await loadPeople()
+setProfilePeopleRevision(revision => revision + 1)
 
 await loadEvents()
 
@@ -10201,6 +10208,7 @@ async function confirmDeletePerson() {
 
   const updatedPeople =
     await loadPeople()
+  setProfilePeopleRevision(revision => revision + 1)
 
   await loadEvents()
 
@@ -23855,6 +23863,7 @@ capture.captureType !== 'other' && (
 )}
       <LiveInvitationReminder {...liveInvitationProps} suppressed={page === 'invitations'}/>
       <HouseholdProfilePicker switchRequest={profileSwitchRequest}
+        peopleRevision={profilePeopleRevision} onProfileCreated={handleProfileCreated}
         onProfileChange={handleHouseholdProfileChange} />
     </main>
   )
