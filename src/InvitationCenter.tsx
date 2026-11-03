@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { IncomingEventInvitation } from './eventSharingUiModel'
 import type { AssignmentNotice } from './useAssignmentInbox'
+import type { FamilyEventInvitation } from './useFamilyEventInvitations'
 import { formatSharedDate, formatSharedTime } from './sharedEventOverlay'
 import './InvitationCenter.css'
 
@@ -12,6 +13,11 @@ type Props = {
   error: string
   suppress?: boolean
   respond: (shareId: number, decision: 'accepted' | 'declined') => Promise<boolean>
+  familyInvitesAvailable?: boolean
+  familyInvitations?: readonly FamilyEventInvitation[]
+  respondingFamilyId?: number | null
+  familyInvitationError?: string
+  respondFamily?: (id: number, decision: 'accepted' | 'declined') => Promise<boolean>
   assignmentAvailable?: boolean
   assignmentNotifications?: readonly AssignmentNotice[]
   acknowledgingId?: number | null
@@ -49,6 +55,36 @@ function InvitationCards({
       ))}
     </div>
   )
+}
+
+function HouseholdInvitationCards({
+  invitations,respondingId,respond,
+}: {
+  invitations: readonly FamilyEventInvitation[]
+  respondingId?: number | null
+  respond?: (id:number,decision:'accepted'|'declined') => Promise<boolean>
+}) {
+  return <div className="invitation-center-items">
+    {invitations.map(invite => <article key={'family-'+invite.id}
+      className="invitation-center-item">
+      <span className="invitation-center-source">From {invite.invitedBy || 'your family'}</span>
+      <strong>{invite.title}</strong>
+      <span className="invitation-center-date">{invite.date}{invite.time ? ' · '+invite.time : ''}</span>
+      <p>You're invited to participate in this event.</p>
+      <div className="invitation-center-actions">
+        <button type="button" className="invitation-accept"
+          disabled={respondingId !== null && respondingId !== undefined}
+          onClick={()=>{void respond?.(invite.id,'accepted')}}>
+          {respondingId===invite.id?'Saving…':'Accept'}
+        </button>
+        <button type="button" className="invitation-decline"
+          disabled={respondingId !== null && respondingId !== undefined}
+          onClick={()=>{void respond?.(invite.id,'declined')}}>
+          Decline
+        </button>
+      </div>
+    </article>)}
+  </div>
 }
 
 function AssignmentCards({
@@ -90,6 +126,8 @@ function AssignmentCards({
 /** Persistent desktop/tablet sidebar destination; never a calendar-wide share action. */
 export function DesktopInvitations({
   available, invitations, respondingId, error, respond,
+  familyInvitesAvailable = false, familyInvitations = [],
+  respondingFamilyId = null, familyInvitationError = '', respondFamily,
   assignmentAvailable = false, assignmentNotifications = [],
   acknowledgingId = null, assignmentError = '', acknowledge, titleForEvent, openEvent,
 }: Props) {
@@ -105,6 +143,13 @@ export function DesktopInvitations({
       ) : <InvitationCards invitations={invitations}
           respondingId={respondingId} respond={respond} />}
       {error && <p role="alert" className="invitation-center-error">{error}</p>}
+      <h3>Household invitations</h3>
+      {!familyInvitesAvailable || familyInvitations.length === 0 ? (
+        <p className="invitation-center-empty">No household invitations awaiting a response.</p>
+      ) : <HouseholdInvitationCards invitations={familyInvitations}
+          respondingId={respondingFamilyId} respond={respondFamily} />}
+      {familyInvitationError && <p role="alert" className="invitation-center-error">
+        {familyInvitationError}</p>}
       <h3>Calendar notifications</h3>
       {!assignmentAvailable || assignmentNotifications.length === 0 ? (
         <p className="invitation-center-empty">No new calendar notifications.</p>
@@ -122,6 +167,8 @@ export function DesktopInvitations({
  */
 export function MobileInvitationReminder({
   available, invitations, respondingId, error, respond, suppress = false,
+  familyInvitesAvailable = false, familyInvitations = [],
+  respondingFamilyId = null, familyInvitationError = '', respondFamily,
   assignmentAvailable = false, assignmentNotifications = [],
   acknowledgingId = null, assignmentError = '', acknowledge, titleForEvent, openEvent,
 }: Props) {
@@ -157,17 +204,19 @@ export function MobileInvitationReminder({
   useEffect(() => {
     const ids = [
       ...invitations.map(item => 'invite:' + item.shareId),
+      ...familyInvitations.map(item => 'household:' + item.id),
       ...assignmentNotifications.map(item => 'notification:' + item.id),
     ]
     const incoming = new Set(ids)
     const hasNew = ids.some(id => !seenInviteIds.current.has(id))
     seenInviteIds.current = incoming
     if (hasNew) setRemindLater(false)
-  }, [invitations, assignmentNotifications])
+  }, [invitations, familyInvitations, assignmentNotifications])
 
   // The full inbox must be accessible after Remind Later without a duplicate
   // modal covering it. Pending invitations remain on the server until answered.
   const visible = mobile && ((available && invitations.length > 0) ||
+    (familyInvitesAvailable && familyInvitations.length > 0) ||
     (assignmentAvailable && assignmentNotifications.length > 0)) && !remindLater && !suppress
 
   useEffect(() => {
@@ -218,9 +267,9 @@ export function MobileInvitationReminder({
           <div>
             <span>Family Calendar</span>
             <h2 id="mobile-invite-title">
-              {invitations.length + assignmentNotifications.length === 1
+              {(invitations.length + familyInvitations.length + assignmentNotifications.length) === 1
                 ? 'You have a new notification'
-                : 'You have ' + (invitations.length + assignmentNotifications.length) + ' new items'}
+                : 'You have ' + ((invitations.length + familyInvitations.length + assignmentNotifications.length)) + ' new items'}
             </h2>
           </div>
           <button type="button" onClick={() => setRemindLater(true)}
@@ -234,6 +283,12 @@ export function MobileInvitationReminder({
           <InvitationCards invitations={invitations}
             respondingId={respondingId} respond={respond} />
         </>}
+        {familyInvitations.length > 0 && <>
+          <h3>Household invitations</h3>
+          <HouseholdInvitationCards invitations={familyInvitations}
+            respondingId={respondingFamilyId} respond={respondFamily} />
+        </>}
+        {familyInvitationError && <p role="alert" className="invitation-center-error">{familyInvitationError}</p>}
         {assignmentNotifications.length > 0 && <>
           <h3>Calendar notifications</h3>
           <AssignmentCards items={assignmentNotifications} acknowledgingId={acknowledgingId}
