@@ -32,6 +32,11 @@ jobs:
             if ((Manifest (Join-Path $fixture 'source')) -ceq (Manifest (Join-Path $fixture 'backup'))) { throw 'Tamper was not detected' }
             New-Item -ItemType Directory -Path (Join-Path $fixture 'empty') | Out-Null
             CopyVerified (Join-Path $fixture 'empty') (Join-Path $fixture 'empty-backup')
+            New-Item -ItemType Junction -Path (Join-Path $fixture 'uploads-link') -Target (Join-Path $fixture 'source') | Out-Null
+            CopyVerified (Join-Path $fixture 'uploads-link') (Join-Path $fixture 'uploads-backup')
+            if ((Get-Item (Join-Path $fixture 'uploads-backup') -Force).LinkType) { throw 'Backup retained a junction' }
+            Set-Content (Join-Path $fixture 'source\index.html') 'changed active upload' -Encoding UTF8
+            if ((Manifest (Join-Path $fixture 'uploads-link')) -ceq (Manifest (Join-Path $fixture 'uploads-backup'))) { throw 'Backup aliases active uploads' }
             Write-Host 'ROLLOUT SYNTAX AND BACKUP FIXTURES PASS; NO SERVICES ACCESSED'
           } finally { if (Test-Path $fixture) { Remove-Item $fixture -Recurse -Force } }
       - name: Exercise supervisor pin update and exact rollback fixtures

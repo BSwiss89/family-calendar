@@ -38,13 +38,30 @@ function Head([string]$folder) {
 }
 function Manifest([string]$folder) {
     Assert (Test-Path -LiteralPath $folder -PathType Container) "Directory missing: $folder"
-    return (@(Get-ChildItem -LiteralPath $folder -File -Recurse -Force | ForEach-Object {
-        "$($_.FullName.Substring($folder.Length))|$(Hash $_.FullName)"
-    } | Sort-Object) -join "`n")
+    # Build relative names from directory entries, independent of Windows short
+    # paths, provider normalization and a legitimate root uploads junction.
+    $walk = {
+        param([string]$dir,[string]$prefix)
+        foreach ($item in Get-ChildItem -LiteralPath $dir -Force) {
+            Assert (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) 'Nested storage links require review.'
+            if ($item.PSIsContainer) { & $walk $item.FullName ($prefix + $item.Name + '\') }
+            else { "$prefix$($item.Name)|$(Hash $item.FullName)" }
+        }
+    }
+    return (@(& $walk $folder '' | Sort-Object) -join "`n")
 }
 function CopyVerified([string]$source,[string]$destination) {
     Assert (-not (Test-Path -LiteralPath $destination)) 'Backup destination already exists.'
-    Copy-Item -LiteralPath $source -Destination $destination -Recurse -ErrorAction Stop
+    $links=@(Get-ChildItem -LiteralPath $source -Recurse -Force | Where-Object {
+        ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+    })
+    Assert ($links.Count -eq 0) 'Nested storage links require review.'
+    # Source may itself be TEST's uploads junction. Always create a real backup
+    # directory and copy its contents, never an alias back to the active uploads.
+    New-Item -ItemType Directory -Path $destination -ErrorAction Stop | Out-Null
+    foreach ($item in Get-ChildItem -LiteralPath $source -Force) {
+        Copy-Item -LiteralPath $item.FullName -Destination $destination -Recurse -ErrorAction Stop
+    }
     Assert ((Manifest $source) -ceq (Manifest $destination)) 'Directory backup hash verification failed.'
 }
 function Status([string]$url) {
