@@ -3758,6 +3758,10 @@ const personCursorPositionRef =
   const [personImageFile, setPersonImageFile] =
     useState<File | null>(null)
   const [personImagePreview, setPersonImagePreview] = useState('')
+  const [personPhotoRemoved, setPersonPhotoRemoved] = useState(false)
+  useEffect(() => () => {
+    if (personImagePreview.startsWith('blob:')) URL.revokeObjectURL(personImagePreview)
+  }, [personImagePreview])
   const [personFileInputKey, setPersonFileInputKey] = useState(0)
   const [editingPersonId, setEditingPersonId] = useState<number | null>(null)
   const [
@@ -10156,7 +10160,13 @@ setRepeatEndDateError(false)
     setPersonImageFile(file)
 
     if (file) {
+      setPersonPhotoRemoved(false)
       setPersonImagePreview(URL.createObjectURL(file))
+      return
+    }
+
+    if (personPhotoRemoved) {
+      setPersonImagePreview('')
       return
     }
 
@@ -10177,6 +10187,20 @@ setRepeatEndDateError(false)
     setPersonImagePreview('')
   }
 
+  function removePersonPhoto() {
+    const savedPhoto = people.find(person => person.id === editingPersonId)?.image
+    setPersonPhotoRemoved(Boolean(savedPhoto))
+    setPersonImageFile(null)
+    setPersonImagePreview('')
+    setPersonFileInputKey(value => value + 1)
+  }
+
+  function undoPersonPhotoRemoval() {
+    const savedPhoto = people.find(person => person.id === editingPersonId)?.image
+    setPersonPhotoRemoved(false)
+    setPersonImagePreview(savedPhoto ? getPersonImageUrl(savedPhoto) : '')
+  }
+
   async function savePerson(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -10188,6 +10212,8 @@ setRepeatEndDateError(false)
 
     if (personImageFile) {
       formData.append('image', personImageFile)
+    } else if (personPhotoRemoved && editingPersonId !== null) {
+      formData.append('removeImage', 'true')
     }
 
     const url =
@@ -10227,6 +10253,7 @@ clearPersonForm(updatedPeople)
     setEditingPersonId(person.id)
     setPersonName(person.name)
     setPersonColor(person.color)
+    setPersonPhotoRemoved(false)
     setPersonImageFile(null)
     setPersonImagePreview(
       person.image ? getPersonImageUrl(person.image) : ''
@@ -10291,6 +10318,7 @@ setPersonCapsLockActive(false)
     )
   )
 
+  setPersonPhotoRemoved(false)
   setPersonImageFile(null)
   setPersonImagePreview('')
   setPersonFileInputKey(
@@ -22653,7 +22681,7 @@ onSelect={(event) => {
 </div>
 
                 <label className="event-field">
-                  Photo
+                  Profile photo
                   <input
                     key={personFileInputKey}
                     className="person-file-input"
@@ -22670,6 +22698,20 @@ onSelect={(event) => {
                       src={personImagePreview}
                       alt="Person preview"
                     />
+                    <button type="button" className="cancel-button" onClick={removePersonPhoto}>
+                      Remove photo
+                    </button>
+                  </div>
+                )}
+                {editingPersonId !== null && !personPhotoRemoved && people.some(person => person.id === editingPersonId && person.image) && (
+                  <p className="person-photo-help">Choose a new photo to replace the current one, then save.</p>
+                )}
+                {personPhotoRemoved && (
+                  <div className="person-photo-removal" role="status">
+                    <p>Photo will be removed when you save. Your initial will be shown instead.</p>
+                    <button type="button" className="cancel-button" onClick={undoPersonPhotoRemoval}>
+                      Undo removal
+                    </button>
                   </div>
                 )}
 

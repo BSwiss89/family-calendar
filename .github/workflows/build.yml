@@ -126,6 +126,8 @@ jobs:
         run: node --test scripts/test-test-informational-push.mjs
       - name: Verify TEST family event invitation and response lifecycle
         run: node --test scripts/test-test-event-invitations.mjs
+      - name: Verify profile photo replacement and removal against disposable real backend
+        run: node --test scripts/test-person-photo-edit.mjs
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
