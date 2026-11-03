@@ -1,0 +1,151 @@
+name: TEST photo rollout tools
+on:
+  pull_request:
+    paths:
+      - 'scripts/deploy-test-profile-photo.ps1'
+      - '.github/workflows/test-photo-rollout-tools.yml'
+permissions:
+  contents: read
+jobs:
+  verify-rollout:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse rollout under Windows PowerShell without executing it
+        shell: powershell
+        run: |
+          $tokens=$null; $errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $pwd 'scripts/deploy-test-profile-photo.ps1'),[ref]$tokens,[ref]$errors)
+          if (@($errors).Count) { $errors | ForEach-Object { Write-Host $_.Message }; throw 'Rollout syntax failed' }
+          # Load definitions only; never execute the rollout's top-level commands.
+          foreach ($function in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)) {
+            . ([scriptblock]::Create($function.Extent.Text))
+          }
+          $fixture=Join-Path $env:TEMP ('profile-photo-rollout-'+[guid]::NewGuid().ToString('N'))
+          try {
+            New-Item -ItemType Directory -Path (Join-Path $fixture 'source') -Force | Out-Null
+            Set-Content (Join-Path $fixture 'source\index.html') 'synthetic frontend' -Encoding UTF8
+            CopyVerified (Join-Path $fixture 'source') (Join-Path $fixture 'backup')
+            if ((Manifest (Join-Path $fixture 'source')) -cne (Manifest (Join-Path $fixture 'backup'))) { throw 'Copy fixture failed' }
+            Set-Content (Join-Path $fixture 'backup\index.html') 'tampered' -Encoding UTF8
+            if ((Manifest (Join-Path $fixture 'source')) -ceq (Manifest (Join-Path $fixture 'backup'))) { throw 'Tamper was not detected' }
+            New-Item -ItemType Directory -Path (Join-Path $fixture 'empty') | Out-Null
+            CopyVerified (Join-Path $fixture 'empty') (Join-Path $fixture 'empty-backup')
+            New-Item -ItemType Junction -Path (Join-Path $fixture 'uploads-link') -Target (Join-Path $fixture 'source') | Out-Null
+            CopyVerified (Join-Path $fixture 'uploads-link') (Join-Path $fixture 'uploads-backup')
+            if ((Get-Item (Join-Path $fixture 'uploads-backup') -Force).LinkType) { throw 'Backup retained a junction' }
+            Set-Content (Join-Path $fixture 'source\index.html') 'changed active upload' -Encoding UTF8
+            if ((Manifest (Join-Path $fixture 'uploads-link')) -ceq (Manifest (Join-Path $fixture 'uploads-backup'))) { throw 'Backup aliases active uploads' }
+            # Repeat-stop during rollback must tolerate an already stopped task.
+            $taskName='disposable-test-task'; $test='disposable-root'
+            function OwnedProcess { param($port,$root,$optional) return $null }
+            function Get-NetTCPConnection { [CmdletBinding()]param($LocalPort,$State) return @() }
+            function Get-ScheduledTask { param($TaskName) [pscustomobject]@{State='Disabled'} }
+            function Stop-ScheduledTask { throw 'Must not stop an inactive task' }
+            StopTest
+            Write-Host 'ROLLOUT SYNTAX AND BACKUP FIXTURES PASS; NO SERVICES ACCESSED'
+          } finally { if (Test-Path $fixture) { Remove-Item $fixture -Recurse -Force } }
+      - name: Exercise supervisor pin update and exact rollback fixtures
+        shell: powershell
+        run: .\scripts\test-secure-test-source-pins.ps1
+      - name: Verify the real supervisor shape includes the protected runtime hash
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $tokens=$null; $errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $pwd 'scripts/deploy-test-profile-photo.ps1'),[ref]$tokens,[ref]$errors)
+          if (@($errors).Count) { throw 'Rollout syntax failed' }
+          foreach ($function in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)) {
+            . ([scriptblock]::Create($function.Extent.Text))
+          }
+          . .\scripts\secure-test-source-pins.ps1
+          $fixture=Join-Path $env:TEMP ('runtime-pin-fixture-'+[guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $fixture | Out-Null
+          try {
+            $index=('1'*64); $auth=('2'*64); $runtime=('3'*64); $next=('4'*64)
+            $text=@'
+          $root='C:\Users\bobby\Projects\family-calendar-test-security-stage'
+          $indexHash='INDEX'
+          $authHash='AUTH'
+          if ($false) { throw 'Server source changed. Refusing unreviewed startup.' }
+          if ($false) { throw 'Authentication code changed. Refusing unreviewed startup.' }
+          if ((Get-FileHash $node).Hash -ne 'RUNTIME') { throw 'Runtime changed' }
+          '@
+            $text=$text.Replace('INDEX',$index).Replace('AUTH',$auth).Replace('RUNTIME',$runtime)
+            $text=$text.Replace("`r`n","`n").Replace("`n","`r`n")
+            $original=Join-Path $fixture 'original.ps1'
+            $candidate=Join-Path $fixture 'candidate.ps1'
+            [IO.File]::WriteAllText($original,$text,[Text.UTF8Encoding]::new($true))
+            AssertSupervisorHashes $original $index $auth $runtime
+            Copy-Item $original $candidate
+            $null=Set-SecureTestSourcePins $candidate $original $next $auth
+            AssertSupervisorHashes $candidate $next $auth $runtime
+            AssertSupervisorReplacement $original $candidate $index $next
+            $bad=Join-Path $fixture 'bad.ps1'
+            foreach ($badText in @(
+              $text.Replace($runtime,'missing-runtime-pin'),
+              ($text+"`r`n"+'$extra='''+('5'*64)+''''),
+              $text.Replace($runtime,('6'*64))
+            )) {
+              [IO.File]::WriteAllText($bad,$badText,[Text.UTF8Encoding]::new($true))
+              $blocked=$false
+              try { AssertSupervisorHashes $bad $index $auth $runtime } catch { $blocked=$true }
+              if (-not $blocked) { throw 'Invalid runtime/extra/missing check was accepted' }
+            }
+            [IO.File]::AppendAllText($candidate,"`r`n# unexpected edit")
+            $blocked=$false
+            try { AssertSupervisorReplacement $original $candidate $index $next } catch { $blocked=$true }
+            if (-not $blocked) { throw 'Unrelated supervisor edit was accepted' }
+            Restore-SecureTestSupervisor $candidate $original
+            if ((Get-FileHash $candidate).Hash -ne (Get-FileHash $original).Hash) { throw 'Exact rollback failed' }
+            Write-Host 'THREE VERIFIED PINS / RUNTIME PRESERVED / UNKNOWN REJECTED / EXACT ROLLBACK PASS'
+          } finally { Remove-Item $fixture -Recurse -Force }
+      - name: Handle shutdown observation races while rejecting foreign owners
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version Latest
+          $tokens=$null; $errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $pwd 'scripts/deploy-test-profile-photo.ps1'),[ref]$tokens,[ref]$errors)
+          if (@($errors).Count) { throw 'Rollout syntax failed' }
+          foreach ($function in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)) {
+            . ([scriptblock]::Create($function.Extent.Text))
+          }
+          $node='C:\disposable\node.exe'; $root='C:\disposable\test'
+          function Start-Sleep { param($Milliseconds,$Seconds) }
+          function Get-NetTCPConnection {
+            [CmdletBinding()]param($LocalPort,$State)
+            $script:tcpCalls++
+            if ($script:scenario -eq 'lookup-failed') { Write-Error 'Synthetic query failure' -Category PermissionDenied; return }
+            if ($script:scenario -eq 'empty' -or ($script:scenario -eq 'gone' -and $script:tcpCalls -gt 1)) { return @() }
+            $owner=400
+            if ($script:scenario -eq 'changed' -and $script:tcpCalls -gt 1) { $owner=401 }
+            [pscustomobject]@{OwningProcess=$owner}
+          }
+          function Get-CimInstance {
+            [CmdletBinding()]param($ClassName,$Filter)
+            $script:cimCalls++
+            if ($script:scenario -in @('gone','missing')) { return $null }
+            if ($script:scenario -eq 'metadata-lag' -and $script:cimCalls -eq 1) { return $null }
+            $exe=$node; $command=$root+'\Server\index.mjs'
+            if ($script:scenario -eq 'foreign-exe') { $exe='C:\disposable\other.exe' }
+            if ($script:scenario -eq 'foreign-root' -or ($script:scenario -eq 'changed' -and $Filter -match '401')) { $command='C:\other\Server\index.mjs' }
+            [pscustomobject]@{ProcessId=400;ExecutablePath=$exe;CommandLine=$command}
+          }
+          function Stop-Process { throw 'No process signalling allowed in fixtures' }
+          foreach ($case in @('empty','gone','metadata-lag')) {
+            $script:scenario=$case; $script:tcpCalls=0; $script:cimCalls=0
+            $result=OwnedProcess 13002 $root $true
+            if ($case -eq 'metadata-lag' -and $null -eq $result) { throw 'Verified owner was not returned' }
+            if ($case -ne 'metadata-lag' -and $null -ne $result) { throw 'Absent owner was returned' }
+          }
+          foreach ($case in @('missing','foreign-exe','foreign-root','changed','lookup-failed')) {
+            $script:scenario=$case; $script:tcpCalls=0; $script:cimCalls=0
+            $blocked=$false
+            try { $null=OwnedProcess 13002 $root $true } catch { $blocked=$true }
+            if (-not $blocked) { throw ('Unsafe ownership accepted: '+$case) }
+          }
+          Write-Host 'DISAPPEARING CHILD / METADATA LAG PASS; FOREIGN OWNERS AND QUERY FAILURES BLOCKED'
