@@ -1,0 +1,8 @@
+.household-event-join { border:1px solid #c9d9e9; border-radius:12px; padding:13px; margin:14px 0; background:#f7fbff; color:#253d57; }
+.household-event-join-heading { font-size:13px; font-weight:800; }
+.household-event-join p { margin:6px 0 12px; font-size:12px; line-height:1.4; color:#567087; }
+.household-event-join button { border:1px solid #2868a5; color:white; background:#2868a5; border-radius:10px; padding:10px 18px; min-height:42px; font:inherit; font-weight:700; cursor:pointer; }
+.household-event-join button:disabled { opacity:.65; cursor:wait; }
+.household-event-join button:focus-visible { outline:3px solid #6eb0ed; outline-offset:2px; }
+.household-event-joined { margin-left:12px; font-size:12px; font-weight:700; color:#287147; }
+.household-event-join p[role="alert"] { color:#a32731; }

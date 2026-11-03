@@ -13,6 +13,11 @@ import {
 import { createPortal } from 'react-dom'
 import './App.css'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
+import { useAssignmentInbox } from './useAssignmentInbox'
+import { useFamilyEventInvitations } from './useFamilyEventInvitations'
+import { useFamilyPush, PushNotificationsControl } from './FamilyPushNotifications'
+import { LiveInvitationsPage, LiveInvitationReminder } from './LiveInvitations'
+import HouseholdEventJoin from './HouseholdEventJoin'
 import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
 import {
@@ -1980,7 +1985,8 @@ const [page, setPage] =
     'meals' |
     'people' |
     'lists' |
-    'capture'
+    'capture' |
+    'invitations'
   >('home')
 
 const [isEditingHome, setIsEditingHome] =
@@ -1989,6 +1995,10 @@ const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
 const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
 const [profileSwitchRequest, setProfileSwitchRequest] = useState(0)
 const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | null>(null)
+const [activeHouseholdPersonId,setActiveHouseholdPersonId] = useState<number|null>(null)
+const assignmentInbox=useAssignmentInbox(activeHouseholdPersonId)
+const familyInvites=useFamilyEventInvitations(activeHouseholdPersonId)
+const familyPush=useFamilyPush(activeHouseholdPersonId)
 
 useEffect(() => {
   let cancelled = false
@@ -3520,8 +3530,9 @@ function positionMobileScheduleTimeline(
   useState<number | null>(null)
 const [calendarPersonFilterId, setCalendarPersonFilterId] =
   useState<number | null>(null)
-const handleHouseholdProfileChange = useCallback((name: string | null) => {
+const handleHouseholdProfileChange = useCallback((name: string | null, personId: number | null) => {
   setActiveHouseholdProfile(name)
+  setActiveHouseholdPersonId(personId)
   if (name === 'Home') setCalendarPersonFilterId(null)
 }, [])
 const [lists, setLists] = useState<CalendarList[]>([])
@@ -13541,6 +13552,27 @@ const showCalendarSidebar =
           calendarEvent.id === viewingEventId
       ) ?? null
 
+const liveInvitationProps = {
+  invitations:familyInvites.familyInvitations,
+  notifications:assignmentInbox.notifications,
+  responseBusy:familyInvites.respondingFamilyId,
+  notificationBusy:assignmentInbox.acknowledgingId,
+  error:familyInvites.familyInvitationError || assignmentInbox.error,
+  onRespond:async (id:number,decision:'accepted'|'declined')=>{
+    const ok=await familyInvites.respondFamily(id,decision)
+    if(ok){void loadEvents();void assignmentInbox.refresh()}
+    return ok
+  },
+  onAcknowledge:assignmentInbox.acknowledge,
+  onView:(id:number)=>{
+    const event=events.find(item=>item.id===id)
+    if(!event)return
+    setPage('calendar')
+    openEventDetails(event,event.date)
+  },
+  eventTitle:(id:number)=>events.find(item=>item.id===id)?.title ?? null,
+}
+
 const viewingDateKey =
   viewingCalendarEvent === null
     ? null
@@ -13745,6 +13777,12 @@ return (
   >
     <span className="sidebar-nav-icon">▣</span>
     <span>Calendar</span>
+  </button>
+  <button type="button"
+    className={`sidebar-nav-button ${page === 'invitations' ? 'active-sidebar-nav' : ''}`}
+    onClick={() => setPage('invitations')}>
+    <span className="sidebar-nav-icon">✉</span>
+    <span>Invitations</span>
   </button>
 
   <button
@@ -15771,6 +15809,10 @@ createPortal(
           <span aria-hidden="true">›</span>
         </button>
       )}
+      <button type="button" className="mobile-settings-option"
+        onClick={() => {setMobileSettingsOpen(false);setPage('invitations')}}>
+        Invitations <span aria-hidden="true">›</span>
+      </button>
       <button
         className="mobile-settings-option"
         type="button"
@@ -15815,6 +15857,10 @@ createPortal(
   document.body
 )}
 
+      {page === 'invitations' && <>
+        <LiveInvitationsPage {...liveInvitationProps}/>
+        <PushNotificationsControl controls={familyPush}/>
+      </>}
       {page === 'calendar' && (
        <section
   className={`dashboard ${
@@ -18182,6 +18228,15 @@ onClick={(event) => {
     Edit Event
   </button>
 </div>
+<HouseholdEventJoin
+  eventId={viewingCalendarEvent.id}
+  selectedPersonId={activeHouseholdPersonId}
+  joined={viewingCalendarEvent.people.some(person=>person.id===activeHouseholdPersonId)}
+  pendingInvitation={familyInvites.familyInvitations.some(invite=>invite.eventId===viewingCalendarEvent.id)}
+  onReviewInvitation={()=>{setViewingEventId(null);setViewingOccurrenceDate(null);setPage('invitations')}}
+  recurring={Boolean(viewingCalendarEvent.repeatUnit && viewingCalendarEvent.repeatUnit!=='none')}
+  onChanged={loadEvents}
+/>
 
 {detailsDeleteConfirmOpen && (
   <div className="event-details-delete-confirm">
@@ -23858,6 +23913,7 @@ capture.captureType !== 'other' && (
     </section>
   </div>, document.body
 )}
+      <LiveInvitationReminder {...liveInvitationProps} suppressed={page === 'invitations'}/>
       <HouseholdProfilePicker switchRequest={profileSwitchRequest}
         onProfileChange={handleHouseholdProfileChange} />
     </main>
