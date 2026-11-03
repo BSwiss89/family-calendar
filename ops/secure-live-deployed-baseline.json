@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "kind": "deployed-baseline",
+  "repository": "BSwiss89/family-calendar",
+  "to_sha": "ea6dcd4805cf9f3dcf1dc5a9b25a91931148bd6d",
+  "build_run_id": 41572196673,
+  "files": [],
+  "approval_note": "Proposed receipt for the user-approved notification release deployed November 2, 2026 at 22:31:50 America/Chicago. LIVE HTTPS, authentication, database integrity and existing counts passed; user confirmed LIVE iPhone push delivery. This receipt authorizes no deployment or file changes. Activate only after reviewed controller installation and operator verification."
+}
