@@ -6521,13 +6521,16 @@ app.put(
   avatarUpload.single('image'),
   async (request, response) => {
     const id = Number(request.params.id)
-    const { name, color } = request.body
+    const { name, color, removeImage } = request.body
+    const removingPhoto = removeImage === 'true'
 
     if (
       !Number.isInteger(id) ||
       id <= 0 ||
       !isValidPersonName(name) ||
-      !isValidColor(color)
+      !isValidColor(color) ||
+      (removeImage !== undefined && removeImage !== 'true' && removeImage !== 'false') ||
+      (removingPhoto && Boolean(request.file))
     ) {
       if (request.file) {
         deleteStoredImageFile(
@@ -6561,7 +6564,7 @@ app.put(
     }
 
     const cleanName = name.trim()
-    let nextImage = existingPerson.image
+    let nextImage = removingPhoto ? null : existingPerson.image
     let optimizedImage = null
 
     if (request.file) {
@@ -6618,14 +6621,15 @@ app.put(
       database.exec('COMMIT')
 
       if (
-        optimizedImage &&
         existingPerson.image &&
-        existingPerson.image !==
-          optimizedImage
+        existingPerson.image !== nextImage
       ) {
-        deleteStoredImageFile(
-          existingPerson.image
-        )
+        // The database save has committed. A locked file must not turn a
+        // successful profile update into a failed/duplicate retry.
+        try {
+          const sharedPhoto = database.prepare('SELECT 1 FROM people WHERE image = ? LIMIT 1').get(existingPerson.image)
+          if (!sharedPhoto) deleteStoredImageFile(existingPerson.image)
+        } catch { console.warn('Unused profile photo could not be removed from storage.') }
       }
 
       response.json({

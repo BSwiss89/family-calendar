@@ -32,6 +32,13 @@ jobs:
         run: node --test scripts/test-family-auth.mjs
       - name: Verify household profile selection and remembered devices
         run: node --test scripts/test-household-profile-selection.mjs
+      - name: Verify profile photo replacement and removal against disposable real backend
+        run: node --test scripts/test-person-photo-edit.mjs
+      - name: Rehearse LIVE backend and frontend launcher pin activation and rollback
+        shell: powershell
+        run: .\scripts\test-live-profile-launcher-plan.ps1
+      - name: Check LIVE release database verifier syntax
+        run: node --check scripts/live-profile-db-check.mjs
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax

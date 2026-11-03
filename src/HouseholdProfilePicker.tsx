@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
   profileStorageKey, resolveProfileSelection, serializeProfileSelection, validateNewProfileInput,
   type HouseholdProfileSelection,
@@ -15,6 +15,8 @@ type ProfilePerson = {
 
 type Props = {
   switchRequest: number
+  peopleRevision: number
+  onProfileCreated: (person: ProfilePerson) => void
   onProfileChange: (name: string | null, personId: number | null) => void
 }
 
@@ -76,7 +78,9 @@ function PersonPicture({ person }: { person: ProfilePerson }) {
  * A profile is an identification preference for this browser. It never changes
  * server authentication, permissions, People, event assignments or shared data.
  */
-export default function HouseholdProfilePicker({ switchRequest, onProfileChange }: Props) {
+export default function HouseholdProfilePicker({ switchRequest, peopleRevision, onProfileCreated, onProfileChange }: Props) {
+  const rememberedInMemory = useRef<{ key: string; value: string } | null>(null)
+  const refreshSequence = useRef(0)
   const [screen, setScreen] = useState<Screen>('checking')
   const [people, setPeople] = useState<ProfilePerson[]>([])
   const [storageKey, setStorageKey] = useState<string | null>(null)
@@ -89,6 +93,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
   const [createError, setCreateError] = useState('')
 
   const refresh = useCallback(async (forcePicker = false) => {
+    const sequence = ++refreshSequence.current
     setScreen('checking')
     setErrorText('')
     try {
@@ -97,6 +102,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       })
       if (!authResponse.ok) throw new Error('Could not verify your login.')
       const auth: unknown = await authResponse.json()
+      if (sequence !== refreshSequence.current) return
       if (!auth || typeof auth !== 'object' || !('enabled' in auth) ||
         auth.enabled !== true) {
         // Legacy, authentication-disabled calendars retain their existing UI.
@@ -124,14 +130,21 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       if (!Array.isArray(payload) || !payload.every(isProfilePerson)) {
         throw new Error('Family profiles could not be read safely.')
       }
+      if (sequence !== refreshSequence.current) return
       const records: ProfilePerson[] = payload
       setPeople(records)
       setStorageKey(key)
 
       let remembered: string | null = null
       try {
-        remembered = window.localStorage.getItem(key)
+        const stored = window.localStorage.getItem(key)
+        // Keep this tab's confirmed choice if storage writes were refused.
+        remembered = rememberedInMemory.current?.key === key
+          ? rememberedInMemory.current.value : stored
+        setNotSaved(remembered !== stored)
       } catch {
+        remembered = rememberedInMemory.current?.key === key
+          ? rememberedInMemory.current.value : null
         setNotSaved(true)
       }
       // Set up a wall device once using /?display=home after sign-in.
@@ -143,6 +156,8 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
         // Also restore server-side session metadata for an already remembered
         // profile, including devices upgraded from the browser-only version.
         await syncDeviceProfile(selection)
+        if (sequence !== refreshSequence.current) return
+        rememberedInMemory.current = { key, value: serializeProfileSelection(selection)! }
         if (remembered === null && wallSetup) {
           try { window.localStorage.setItem(key, 'home') } catch { setNotSaved(true) }
         }
@@ -151,9 +166,14 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
         onProfileChange(person?.name ?? 'Home',person?.id ?? null)
         setScreen('ready')
       } else {
+        if (!selection) {
+          rememberedInMemory.current = null
+          onProfileChange(null, null)
+        }
         setScreen('choose')
       }
     } catch (error) {
+      if (sequence !== refreshSequence.current) return
       setErrorText(error instanceof Error ? error.message : 'Could not open family profiles.')
       setScreen('error')
     }
@@ -161,11 +181,17 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
 
   useEffect(() => {
     void refresh()
+    return () => { refreshSequence.current++ }
   }, [refresh])
 
   useEffect(() => {
     if (switchRequest > 0) void refresh(true)
   }, [switchRequest, refresh])
+
+  // Successful People edits/deletions must update this already-open device too.
+  useEffect(() => {
+    if (peopleRevision > 0) void refresh()
+  }, [peopleRevision, refresh])
 
   async function selectProfile(selection: HouseholdProfileSelection) {
     if (screen !== 'choose' || !storageKey) return
@@ -180,6 +206,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       // Do not claim selection succeeded on the Devices screen until the
       // authenticated session actually saved the profile.
       await syncDeviceProfile(selection)
+      rememberedInMemory.current = { key: storageKey, value }
       try {
         window.localStorage.setItem(storageKey, value)
         setNotSaved(false)
@@ -236,13 +263,13 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       const newPerson: ProfilePerson = payload
       profileCreated = true
       setPeople((current) => [...current, newPerson])
+      onProfileCreated(newPerson)
       await syncDeviceProfile({ kind: 'person', personId: newPerson.id })
       const savedSelection = serializeProfileSelection({ kind: 'person', personId: newPerson.id })
-      let persisted = false
+      rememberedInMemory.current = savedSelection ? { key: storageKey, value: savedSelection } : null
       try {
         if (savedSelection && storageKey) {
           window.localStorage.setItem(storageKey, savedSelection)
-          persisted = true
           setNotSaved(false)
         }
       } catch {
@@ -250,9 +277,6 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       }
       onProfileChange(newPerson.name,newPerson.id)
       setScreen('ready')
-      // Reload just the browser UI to refresh People everywhere (event assignment
-      // picker, sliders, and Settings). No server restart or database migration.
-      if (persisted) window.location.reload()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not save the profile.'
       if (profileCreated) {
