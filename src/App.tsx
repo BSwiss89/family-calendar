@@ -3765,6 +3765,37 @@ const personCursorPositionRef =
   }, [personImagePreview])
   const [personFileInputKey, setPersonFileInputKey] = useState(0)
   const [editingPersonId, setEditingPersonId] = useState<number | null>(null)
+  useEffect(() => {
+    if (editingPersonId === null || page !== 'people') return
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    personEditorRef.current?.focus({ preventScroll: true })
+    const handleKey = (event: KeyboardEvent) => {
+      // The name keyboard has its own overlay and keyboard handling.
+      if (document.querySelector('.person-keyboard-overlay')) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        clearPersonForm()
+      } else if (event.key === 'Tab') {
+        const editor = personEditorRef.current
+        const controls = editor?.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select, textarea, a[href]')
+        if (!editor || !controls?.length) return
+        const first = controls[0], last = controls[controls.length - 1]
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === editor)) {
+          event.preventDefault(); last.focus()
+        } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === editor)) {
+          event.preventDefault(); first.focus()
+        }
+      }
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', handleKey)
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true })
+    }
+  }, [editingPersonId, page])
   const [
   personDeleteTarget,
   setPersonDeleteTarget,
@@ -10260,17 +10291,7 @@ clearPersonForm(updatedPeople)
       person.image ? getPersonImageUrl(person.image) : ''
     )
     setPersonFileInputKey((value) => value + 1)
-    // On phones the editor sits below the profile cards. Bring the changed
-    // form into view after React commits so a tap gives immediate feedback.
-    window.requestAnimationFrame(() => {
-      const editor = personEditorRef.current
-      if (!editor) return
-      editor.focus({ preventScroll: true })
-      editor.scrollIntoView({
-        block: 'start',
-        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
-      })
-    })
+
   }
 
  function deletePerson(person: Person) {
@@ -13831,6 +13852,177 @@ const homeTodayMeals =
         )
       )
     })
+
+const personEditor = (
+            <div className="card people-editor-card" ref={personEditorRef} tabIndex={-1}
+              role={editingPersonId === null ? "region" : "dialog"}
+              aria-modal={editingPersonId !== null ? true : undefined}
+              aria-label="Profile editor" onClick={event => event.stopPropagation()}>
+              <h2>
+                {editingPersonId !== null
+                  ? 'Edit Person'
+                  : 'Add Person'}
+              </h2>
+
+              <form
+                className="people-form"
+                onSubmit={savePerson}
+              >
+                <div className="event-field">
+  <span>Name</span>
+
+  <input
+  className={`event-input person-name-display ${
+    personName === ''
+      ? 'person-name-display-placeholder'
+      : ''
+  }`}
+  type="text"
+  readOnly
+  placeholder="Family member name"
+  value={personName}
+ onClick={(event) => {
+  const nextPosition =
+    event.currentTarget.selectionStart ??
+    personName.length
+
+  personCursorPositionRef.current =
+    nextPosition
+
+  setPersonCursorPosition(
+    nextPosition
+  )
+
+  setPersonKeyboardOpen(true)
+}}
+onSelect={(event) => {
+  const nextPosition =
+    event.currentTarget.selectionStart ??
+    personName.length
+
+  personCursorPositionRef.current =
+    nextPosition
+
+  setPersonCursorPosition(
+    nextPosition
+  )
+}}
+/>
+</div>
+
+                <div className="event-field">
+  <span>Color</span>
+
+  <div className="person-color-palette">
+    {personColorOptions.map((option) => {
+      const isSelected =
+        personColor.toLowerCase() ===
+        option.color.toLowerCase()
+
+      return (
+        <button
+          type="button"
+          key={option.color}
+          className={`person-color-swatch ${
+            isSelected
+              ? 'person-color-swatch-selected'
+              : ''
+          }`}
+          style={{
+            backgroundColor: option.color,
+          }}
+          title={option.name}
+          aria-label={option.name}
+          onClick={() =>
+            setPersonColor(option.color)
+          }
+        />
+      )
+    })}
+
+    <label
+      className={`person-color-custom ${
+        !personColorOptions.some(
+          (option) =>
+            option.color.toLowerCase() ===
+            personColor.toLowerCase()
+        )
+          ? 'person-color-custom-selected'
+          : ''
+      }`}
+      title="Custom color"
+    >
+
+      <input
+        className="person-color-custom-input"
+        type="color"
+        value={personColor}
+        onChange={(event) =>
+          setPersonColor(event.target.value)
+        }
+      />
+    </label>
+  </div>
+</div>
+
+                <label className="event-field">
+                  Profile photo
+                  <input
+                    key={personFileInputKey}
+                    className="person-file-input"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={handlePersonImageChange}
+                  />
+                </label>
+
+                {personImagePreview !== '' && (
+                  <div className="person-preview-block">
+                    <img
+                      className="person-image-preview"
+                      src={personImagePreview}
+                      alt="Person preview"
+                    />
+                    <button type="button" className="cancel-button" onClick={removePersonPhoto}>
+                      Remove photo
+                    </button>
+                  </div>
+                )}
+                {editingPersonId !== null && !personPhotoRemoved && people.some(person => person.id === editingPersonId && person.image) && (
+                  <p className="person-photo-help">Choose a new photo to replace the current one, then save.</p>
+                )}
+                {personPhotoRemoved && (
+                  <div className="person-photo-removal" role="status">
+                    <p>Photo will be removed when you save. Your initial will be shown instead.</p>
+                    <button type="button" className="cancel-button" onClick={undoPersonPhotoRemoval}>
+                      Undo removal
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  className="add-event-button"
+                  type="submit"
+                >
+                  {editingPersonId !== null
+                    ? 'Save Person'
+                    : 'Add Person'}
+                </button>
+
+                {editingPersonId !== null && (
+                  <button
+                    className="cancel-button"
+                    type="button"
+                    onClick={() => {
+  clearPersonForm()
+}}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </form>
+            </div>
+)
 
 const homeListPreview =
   lists.slice(0, 4)
@@ -22583,173 +22775,11 @@ resetMealPlannerScroll()
           </div>
 
           <div className="people-page-layout people-management-layout">
-            <div className="card people-editor-card" ref={personEditorRef} tabIndex={-1}
-              role="region" aria-label="Profile editor">
-              <h2>
-                {editingPersonId !== null
-                  ? 'Edit Person'
-                  : 'Add Person'}
-              </h2>
-
-              <form
-                className="people-form"
-                onSubmit={savePerson}
-              >
-                <div className="event-field">
-  <span>Name</span>
-
-  <input
-  className={`event-input person-name-display ${
-    personName === ''
-      ? 'person-name-display-placeholder'
-      : ''
-  }`}
-  type="text"
-  readOnly
-  placeholder="Family member name"
-  value={personName}
- onClick={(event) => {
-  const nextPosition =
-    event.currentTarget.selectionStart ??
-    personName.length
-
-  personCursorPositionRef.current =
-    nextPosition
-
-  setPersonCursorPosition(
-    nextPosition
-  )
-
-  setPersonKeyboardOpen(true)
-}}
-onSelect={(event) => {
-  const nextPosition =
-    event.currentTarget.selectionStart ??
-    personName.length
-
-  personCursorPositionRef.current =
-    nextPosition
-
-  setPersonCursorPosition(
-    nextPosition
-  )
-}}
-/>
-</div>
-
-                <div className="event-field">
-  <span>Color</span>
-
-  <div className="person-color-palette">
-    {personColorOptions.map((option) => {
-      const isSelected =
-        personColor.toLowerCase() ===
-        option.color.toLowerCase()
-
-      return (
-        <button
-          type="button"
-          key={option.color}
-          className={`person-color-swatch ${
-            isSelected
-              ? 'person-color-swatch-selected'
-              : ''
-          }`}
-          style={{
-            backgroundColor: option.color,
-          }}
-          title={option.name}
-          aria-label={option.name}
-          onClick={() =>
-            setPersonColor(option.color)
-          }
-        />
-      )
-    })}
-
-    <label
-      className={`person-color-custom ${
-        !personColorOptions.some(
-          (option) =>
-            option.color.toLowerCase() ===
-            personColor.toLowerCase()
-        )
-          ? 'person-color-custom-selected'
-          : ''
-      }`}
-      title="Custom color"
-    >
-      
-
-      <input
-        className="person-color-custom-input"
-        type="color"
-        value={personColor}
-        onChange={(event) =>
-          setPersonColor(event.target.value)
-        }
-      />
-    </label>
-  </div>
-</div>
-
-                <label className="event-field">
-                  Profile photo
-                  <input
-                    key={personFileInputKey}
-                    className="person-file-input"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    onChange={handlePersonImageChange}
-                  />
-                </label>
-
-                {personImagePreview !== '' && (
-                  <div className="person-preview-block">
-                    <img
-                      className="person-image-preview"
-                      src={personImagePreview}
-                      alt="Person preview"
-                    />
-                    <button type="button" className="cancel-button" onClick={removePersonPhoto}>
-                      Remove photo
-                    </button>
-                  </div>
-                )}
-                {editingPersonId !== null && !personPhotoRemoved && people.some(person => person.id === editingPersonId && person.image) && (
-                  <p className="person-photo-help">Choose a new photo to replace the current one, then save.</p>
-                )}
-                {personPhotoRemoved && (
-                  <div className="person-photo-removal" role="status">
-                    <p>Photo will be removed when you save. Your initial will be shown instead.</p>
-                    <button type="button" className="cancel-button" onClick={undoPersonPhotoRemoval}>
-                      Undo removal
-                    </button>
-                  </div>
-                )}
-
-                <button
-                  className="add-event-button"
-                  type="submit"
-                >
-                  {editingPersonId !== null
-                    ? 'Save Person'
-                    : 'Add Person'}
-                </button>
-
-                {editingPersonId !== null && (
-                  <button
-                    className="cancel-button"
-                    type="button"
-                    onClick={() => {
-  clearPersonForm()
-}}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </form>
-            </div>
+            {editingPersonId === null ? personEditor : createPortal(
+              <div className="person-editor-overlay" onClick={() => clearPersonForm()}>
+                {personEditor}
+              </div>, document.body
+            )}
 
             <div className="people-grid">
               {people.length === 0 ? (

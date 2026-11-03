@@ -56,6 +56,7 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
               page.on('pageerror',error=>console.error('App fixture error:',error.message))
               let people=Array.from({length:7},(_,i)=>({id:i+1,name:`Person ${i+1}`,color:'#4488bb',image:i===0?'original.png':null}))
               const writes=[]
+              let rejectSave=false
               await page.route('**/*',async route=>{
                 const req=route.request(),url=new URL(req.url()),p=url.pathname
                 if(url.origin!==origin) return route.fulfill({status:503,body:'External services disabled in fixture'})
@@ -67,6 +68,7 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
                 if(p==='/api/auth/device-profile') return send({ok:true})
                 if(p==='/api/people'&&req.method()==='GET') return send(people)
                 if(p==='/api/people/1'&&req.method()==='PUT') {
+                  if(rejectSave) return route.fulfill({status:400,json:{error:'Save rejected for regression test'}})
                   const body=req.postDataBuffer().toString('latin1')
                   const removing=/name="removeImage"\r\n\r\ntrue/.test(body)
                   const uploading=/name="image"; filename=/.test(body)
@@ -105,13 +107,34 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
               assert.equal(writes.length,0)
               await editor.getByRole('button',{name:'Undo removal',exact:true})[touch?'tap':'click']()
               assert.equal(await editor.locator('.person-image-preview').count(),1)
-              await card.getByRole('button',{name:'Edit',exact:true})[touch?'tap':'click']()
-              await page.waitForFunction(()=>{const r=document.querySelector('.people-editor-card h2').getBoundingClientRect();return r.top>=0&&r.bottom<innerHeight},null,{timeout:10000})
+              assert.equal(await editor.getAttribute('role'),'dialog')
+              assert.equal(await editor.getAttribute('aria-modal'),'true')
+              assert.equal(await page.evaluate(()=>document.body.style.overflow),'hidden')
+              await editor.locator('.person-name-display')[touch?'tap':'click']()
+              await page.locator('.person-keyboard-overlay').waitFor()
+              await page.mouse.click(2,2)
+              await page.locator('.person-keyboard-overlay').waitFor({state:'hidden'})
               await editor.getByRole('button',{name:'Cancel',exact:true})[touch?'tap':'click']()
+              assert.equal(writes.length,0)
+              await page.locator('.person-editor-overlay').waitFor({state:'hidden'})
+              assert.equal(await page.evaluate(()=>document.body.style.overflow),'')
+              // Escape and backdrop close without saving.
+              await card.getByRole('button',{name:'Edit',exact:true})[touch?'tap':'click']()
+              await page.keyboard.press('Escape')
+              await page.locator('.person-editor-overlay').waitFor({state:'hidden'})
+              await card.getByRole('button',{name:'Edit',exact:true})[touch?'tap':'click']()
+              await page.mouse.click(2,2)
+              await page.locator('.person-editor-overlay').waitFor({state:'hidden'})
               assert.equal(writes.length,0)
               // Selecting the same person again must also reopen the editor.
               await card.getByRole('button',{name:'Edit',exact:true})[touch?'tap':'click']()
               await editor.getByRole('button',{name:'Remove photo',exact:true})[touch?'tap':'click']()
+              rejectSave=true
+              await editor.getByRole('button',{name:'Save Person',exact:true})[touch?'tap':'click']()
+              await page.getByText('Save rejected for regression test',{exact:true}).waitFor()
+              assert.equal(await editor.getAttribute('role'),'dialog')
+              assert.equal(writes.length,0)
+              rejectSave=false
               await editor.getByRole('button',{name:'Save Person',exact:true})[touch?'tap':'click']()
               await page.waitForFunction(()=>document.querySelector('.people-editor-card h2')?.textContent.trim()==='Add Person')
               assert.deepEqual(writes,[{removing:true,uploading:false}])
