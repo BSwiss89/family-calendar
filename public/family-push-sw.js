@@ -14,7 +14,8 @@ self.addEventListener('push', event => {
     ? info.body : 'You have a calendar update. Open Family Calendar to review it.'
   event.waitUntil(self.registration.showNotification('Family Calendar', {
     body, icon:'/calendar-icon-192.png', badge:'/calendar-icon-192.png',
-    tag:'family-event-'+(info?.body === undefined?'update':info.body.slice(0,22)),
+    tag:(typeof info?.tag === 'string' && /^family-event-[1-9][0-9]*$/.test(info.tag))
+      ? info.tag : 'family-event-update',
     data:{url:'/'},
   }))
 })
