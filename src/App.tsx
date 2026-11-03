@@ -22,6 +22,8 @@ import FamilyEventSharing from './FamilyEventSharing'
 import { DesktopInvitations, MobileInvitationReminder } from './InvitationCenter'
 import { useInvitationInbox } from './useInvitationInbox'
 import { useAssignmentInbox } from './useAssignmentInbox'
+import { useFamilyPush, PushNotificationsControl } from './FamilyPushNotifications'
+import { useFamilyEventInvitations } from './useFamilyEventInvitations'
 import HouseholdEventJoin from './HouseholdEventJoin'
 import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
@@ -2004,6 +2006,8 @@ const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | nu
 const [activeHouseholdPersonId, setActiveHouseholdPersonId] = useState<number | null>(null)
 const invitationInbox = useInvitationInbox()
 const assignmentInbox = useAssignmentInbox(activeHouseholdPersonId)
+const familyPush = useFamilyPush(activeHouseholdPersonId)
+const familyEventInvites = useFamilyEventInvitations(activeHouseholdPersonId)
 
 useEffect(() => {
   let cancelled = false
@@ -13603,6 +13607,18 @@ const showCalendarSidebar =
       ) ?? null
 
 const notificationDisplayProps = {
+  familyInvitesAvailable: familyEventInvites.familyInvitesAvailable,
+  familyInvitations: familyEventInvites.familyInvitations,
+  respondingFamilyId: familyEventInvites.respondingFamilyId,
+  familyInvitationError: familyEventInvites.familyInvitationError,
+  respondFamily: async (id: number, decision: 'accepted' | 'declined') => {
+    const successful = await familyEventInvites.respondFamily(id, decision)
+    if (successful) {
+      void loadEvents()
+      void assignmentInbox.refresh()
+    }
+    return successful
+  },
   assignmentAvailable: assignmentInbox.available,
   assignmentNotifications: assignmentInbox.notifications,
   acknowledgingId: assignmentInbox.acknowledgingId,
@@ -15945,6 +15961,7 @@ createPortal(
         </div>
       )}
       {page === 'invitations' && <DesktopInvitations {...invitationInbox} {...notificationDisplayProps} />}
+      {page === 'invitations' && <PushNotificationsControl controls={familyPush} />}
 
       {page === 'calendar' && (
        <section
@@ -18372,6 +18389,12 @@ onClick={(event) => {
   eventId={viewingCalendarEvent.id}
   selectedPersonId={activeHouseholdPersonId}
   joined={viewingCalendarEvent.people.some(person => person.id === activeHouseholdPersonId)}
+  pendingInvitation={familyEventInvites.familyInvitations.some(invite => invite.eventId === viewingCalendarEvent.id)}
+  onReviewInvitation={() => {
+    setViewingEventId(null)
+    setViewingOccurrenceDate(null)
+    setPage('invitations')
+  }}
   recurring={Boolean(viewingCalendarEvent.repeatUnit && viewingCalendarEvent.repeatUnit !== 'none')}
   onChanged={loadEvents}
 />

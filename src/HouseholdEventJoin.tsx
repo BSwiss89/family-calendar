@@ -5,6 +5,8 @@ type Props = {
   eventId: number
   selectedPersonId: number | null
   joined: boolean
+  pendingInvitation?: boolean
+  onReviewInvitation?: () => void
   recurring: boolean
   onChanged: () => Promise<void>
 }
@@ -15,7 +17,7 @@ type Props = {
  * until trusted person/account links exist for multi-family production.
  */
 export default function HouseholdEventJoin({
-  eventId,selectedPersonId,joined,recurring,onChanged,
+  eventId,selectedPersonId,joined,pendingInvitation=false,onReviewInvitation,recurring,onChanged,
 }:Props) {
   const [supported,setSupported] = useState(false)
   const [busy,setBusy] = useState(false)
@@ -53,6 +55,14 @@ export default function HouseholdEventJoin({
     }catch(e) {
       setError(e instanceof Error ? e.message : 'Could not update participation.')
     }finally{setBusy(false)}
+  }
+
+  if (pendingInvitation) {
+    return <section className="household-event-join" aria-label="Household participation">
+      <div className="household-event-join-heading">Household invitation pending</div>
+      <p>You are invited, but have not confirmed participation yet.</p>
+      <button type="button" onClick={onReviewInvitation}>Review Invitation</button>
+    </section>
   }
 
   return <section className="household-event-join" aria-label="Household participation">
