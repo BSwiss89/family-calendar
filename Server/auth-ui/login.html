@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#4f46e5">
+  <title>Sign in — Family Calendar</title>
+  <link rel="stylesheet" href="/auth/styles.css">
+  <script src="/auth/login.js" defer></script>
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card" aria-labelledby="auth-title">
+      <div class="auth-mark" aria-hidden="true">▦</div>
+      <h1 id="auth-title">Family Calendar</h1>
+      <div id="session-check" class="auth-session-check" role="status" aria-live="polite">
+        <span class="auth-check-spinner" aria-hidden="true"></span>
+        <p>Checking your saved login…</p>
+      </div>
+      <div id="login-content" hidden>
+      <p class="auth-intro">Sign in once on a trusted device to keep your calendar private.</p>
+      <form id="login-form">
+        <label for="username">Family username</label>
+        <input id="username" name="username" type="text" autocomplete="username" maxlength="40" required autofocus>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <label for="device">Device name <span class="muted">(optional)</span></label>
+        <input id="device" name="deviceLabel" type="text" autocomplete="off" maxlength="60" placeholder="My phone, Wall display, Laptop…">
+        <p class="muted small">This device can stay signed in while it's used regularly. You can revoke it later.</p>
+        <p id="login-message" class="error" role="alert" aria-live="polite"></p>
+        <button id="login-button" type="submit">Sign in</button>
+      </form>
+      <p class="auth-footnote">Only sign in on devices you trust. Your account password is never saved by the calendar website.</p>
+      </div>
+      <noscript>JavaScript is required to sign in to Family Calendar. Please enable it and reload.</noscript>
+    </section>
+  </main>
+</body>
+</html>

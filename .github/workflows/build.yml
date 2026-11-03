@@ -27,7 +27,21 @@ jobs:
       - name: Verify Duplicate Event drafts are independent of their source
         run: node --test scripts/test-duplicate-event.mjs
       - name: Test list categories and additive migration
-        run: node --test scripts/test-list-features.mjs && node --test scripts/test-shopping-stores.mjs
+        run: node --test scripts/test-list-features.mjs && node --test scripts/test-shopping-stores.mjs && node --test scripts/test-list-icons.mjs
+      - name: Verify auth, remembered devices, and separate site cookies
+        run: node --test scripts/test-family-auth.mjs
+      - name: Verify household profile selection and remembered devices
+        run: node --test scripts/test-household-profile-selection.mjs
+      - name: Verify event assignment notification recipient and transaction rules
+        run: node --test scripts/test-event-assignment-notifications.mjs
+      - name: Verify person-bound push subscription isolation, consent and revocation
+        run: node --test scripts/test-verified-push-subscriptions.mjs
+      - name: Verify trusted assignment dispatch and cross-household notification privacy
+        run: node --test scripts/test-trusted-assignment-dispatch.mjs
+      - name: Verify SQL mutation capture, AI edits, recurring exceptions and restart recovery
+        run: node --test scripts/test-notification-mutation-capture.mjs
+      - name: Exercise real HTTP TEST-only notification inbox and person-profile isolation
+        run: node --test scripts/test-test-notification-inbox-pilot.mjs
       - name: Check backend JavaScript syntax
         run: node --check Server/index.mjs
       - name: Check recovery test JavaScript syntax
