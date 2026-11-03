@@ -10,6 +10,7 @@ import { installFamilyAuth } from './family-auth.mjs'
 import { installTestNotificationInboxPilot } from './test-notification-inbox-pilot.mjs'
 import { installTestHouseholdEventJoin } from './test-household-event-join.mjs'
 import { installTestInformationalPush } from './test-informational-push.mjs'
+import { installTestEventInvitations } from './test-event-invitations.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { acquirePrivateHouseholdBackendWriterLock } from './private-gateway-writer-lock.mjs'
 import { installPrivateEventIdentity } from './private-event-identity.mjs'
@@ -658,6 +659,7 @@ installFamilyAuth(app, database, __dirname)
 installTestNotificationInboxPilot(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 // Single-household Join/Leave preview; same guarded TEST-only opt-in.
 installTestHouseholdEventJoin(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
+const testEventInvitations = installTestEventInvitations(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 // Informational Web Push: explicitly disabled unless authenticated TEST startup opts in.
 installTestInformationalPush(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 
@@ -5951,6 +5953,7 @@ cleanBatchId,
       )
     }
 
+    testEventInvitations.recordAssignments(request,eventId,[],requestedPeople.map(person=>person.id))
     database.exec('COMMIT')
 
    response.status(201).json({
@@ -6100,6 +6103,7 @@ if (
   database.exec('BEGIN')
 
   try {
+    const previousPersonIds = database.prepare('SELECT person_id FROM event_people WHERE event_id=?').all(id).map(row=>row.person_id)
     database
       .prepare(`
         UPDATE events
@@ -6158,6 +6162,7 @@ if (
       )
     }
 
+    testEventInvitations.recordAssignments(request,id,previousPersonIds,requestedPeople.map(person=>person.id))
     database.exec('COMMIT')
 
    response.json({
