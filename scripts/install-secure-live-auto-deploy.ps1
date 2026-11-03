@@ -14,6 +14,8 @@ $controller=Join-Path $root 'secure-live-auto-deploy.ps1'
 $helper=Join-Path $root 'secure-live-online-backup.mjs'
 $sourceController=Join-Path $PSScriptRoot 'secure-live-auto-deploy.ps1'
 $sourceHelper=Join-Path $PSScriptRoot 'secure-live-online-backup.mjs'
+$sourcePins=Join-Path $PSScriptRoot 'secure-live-launcher-pins.ps1'
+$installedPins=Join-Path $root 'secure-live-launcher-pins.ps1'
 $approvalUri='https://api.github.com/repos/BSwiss89/family-calendar/contents/ops/secure-live-approved.json?ref=secure-live-release-approvals'
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 $principal=[Security.Principal.WindowsPrincipal]$identity
@@ -23,6 +25,7 @@ function Assert([bool]$ok,[string]$why){if(-not $ok){throw $why}}
 Assert (-not ($Install -and $Enable)) 'Install and Enable must run separately'
 Assert (Test-Path -LiteralPath $sourceController) 'Source controller missing'
 Assert (Test-Path -LiteralPath $sourceHelper) 'Source SQLite helper missing'
+Assert (Test-Path -LiteralPath $sourcePins) 'Source launcher pin helper missing'
 Assert (Test-Path -LiteralPath (Join-Path $live '.git')) 'Secure LIVE source not found'
 Assert (Test-Path -LiteralPath (Join-Path $test '.git')) 'Secure TEST source not found'
 $liveSha=(& git -C $live rev-parse HEAD).Trim()
@@ -31,8 +34,13 @@ $approvalResponse=Invoke-RestMethod -Uri $approvalUri -Headers @{'User-Agent'='F
 Assert ($approvalResponse.type -eq 'file' -and $approvalResponse.encoding -eq 'base64') 'Approved release manifest could not be read'
 $approvedJson=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(([string]$approvalResponse.content -replace '\s','')))
 $release=$approvedJson | ConvertFrom-Json
-Assert ($release.schema -eq 1 -and $release.kind -eq 'frontend-only' -and $release.repository -eq 'BSwiss89/family-calendar') 'Release approval schema invalid'
-Assert ($liveSha -eq $release.from_sha -or $liveSha -eq $release.to_sha) 'LIVE version does not match the approved release; inspect before installing'
+Assert ($release.schema -eq 1 -and $release.kind -in @('frontend-only','deployed-baseline') -and $release.repository -eq 'BSwiss89/family-calendar') 'Release approval schema invalid'
+if($release.kind -eq 'deployed-baseline'){
+  . $sourcePins
+  Assert-SecureLiveBaseline $release $liveSha
+}else{
+  Assert ($liveSha -eq $release.from_sha -or $liveSha -eq $release.to_sha) 'LIVE version does not match the approved release; inspect before installing'
+}
 $testSha=(& git -C $test rev-parse HEAD).Trim()
 Assert ($LASTEXITCODE -eq 0 -and $testSha -match '^[a-f0-9]{40}$') 'TEST source commit could not be read'
 $origin=(& git -C $live remote get-url origin).Trim()
@@ -59,6 +67,7 @@ if($Install){
   New-Item -ItemType Directory -Path $root -ErrorAction Stop | Out-Null
   Copy-Item -LiteralPath $sourceController -Destination $controller -ErrorAction Stop
   Copy-Item -LiteralPath $sourceHelper -Destination $helper -ErrorAction Stop
+  Copy-Item -LiteralPath $sourcePins -Destination $installedPins -ErrorAction Stop
   & icacls.exe $root '/inheritance:r' '/grant:r' '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Host
   Assert ($LASTEXITCODE -eq 0) 'Unable to restrict updater directory to SYSTEM and Administrators'
   $action=New-ScheduledTaskAction -Execute (Join-Path $PSHOME 'powershell.exe') -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$controller+'" -Apply') -WorkingDirectory $root
@@ -84,6 +93,7 @@ if($Install){
 Assert ($null -ne $existing -and $existing.State -eq 'Disabled') 'Expected an installed, disabled Secure LIVE deploy task'
 Assert ((Get-FileHash -LiteralPath $controller -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $sourceController -Algorithm SHA256).Hash) 'Installed controller hash differs from reviewed source'
 Assert ((Get-FileHash -LiteralPath $helper -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $sourceHelper -Algorithm SHA256).Hash) 'Installed backup helper differs from reviewed source'
+Assert ((Get-FileHash -LiteralPath $installedPins).Hash -eq (Get-FileHash -LiteralPath $sourcePins).Hash) 'Installed pin helper differs from reviewed source'
 Assert (-not (Test-Path -LiteralPath (Join-Path $root 'REQUIRES-REVIEW.txt'))) 'Secure LIVE auto-deploy hold exists'
 Assert (-not (Test-Path -LiteralPath (Join-Path $root 'DEPLOYMENT-IN-PROGRESS.json'))) 'Secure LIVE auto-deploy transaction journal exists'
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $controller
