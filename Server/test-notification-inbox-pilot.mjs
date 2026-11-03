@@ -119,7 +119,18 @@ export function installTestNotificationInboxPilot(app, db, {
     const selected = requirePerson(request,response)
     if (!selected) return
     response.set('Cache-Control','no-store')
-    const notifications = latest(db,selected.personId).map(note => ({
+    const hasInvitations = db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='test_event_invitations'"
+    ).get()
+    // When a proposed assignment has a pending/answered RSVP record, show
+    // Accept/Decline in the same Invitations screen rather than a duplicate
+    // generic Acknowledge alert. Previously existing notices remain unchanged.
+    const notifications = latest(db,selected.personId).filter(note => {
+      if (!hasInvitations || (note.kind!=='assigned' && note.kind!=='unassigned')) return true
+      return !db.prepare([
+        'SELECT 1 FROM test_event_invitations WHERE event_id=? AND person_id=?',
+      ].join(' ')).get(note.eventId,selected.personId)
+    }).map(note => ({
       ...note,
       acknowledged: Boolean(db.prepare(
         'SELECT 1 FROM test_assignment_acknowledgements WHERE notification_id=?'
