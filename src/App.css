@@ -20126,7 +20126,7 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
     top: 0;
     left: 0;
     right: 0;
-    height: 1px;
+    height: 6px;
     background-color: #efe7da;
     z-index: 2147483647;
     pointer-events: none;

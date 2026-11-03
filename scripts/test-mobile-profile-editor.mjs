@@ -104,7 +104,7 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
                   assert.equal(style.events, 'none')
                   assert.equal(style.top, 0)
                   assert.equal(style.width, viewport.width)
-                  assert.equal(style.height, 1)
+                  assert.equal(style.height, 6)
                   const geometry = () => page.evaluate(() => {
                     const p = document.querySelector('.people-page').getBoundingClientRect()
                     const c = document.querySelector('.person-card').getBoundingClientRect()
