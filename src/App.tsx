@@ -23,6 +23,7 @@ import { DesktopInvitations, MobileInvitationReminder } from './InvitationCenter
 import { useInvitationInbox } from './useInvitationInbox'
 import { useAssignmentInbox } from './useAssignmentInbox'
 import { useFamilyPush, PushNotificationsControl } from './FamilyPushNotifications'
+import { useFamilyEventInvitations } from './useFamilyEventInvitations'
 import HouseholdEventJoin from './HouseholdEventJoin'
 import { ListIcon, LIST_ICON_OPTIONS, getListIconOption } from './ListIcons'
 import { makeEventDuplicateDraft } from './duplicateEvent.mjs'
@@ -2006,6 +2007,7 @@ const [activeHouseholdPersonId, setActiveHouseholdPersonId] = useState<number | 
 const invitationInbox = useInvitationInbox()
 const assignmentInbox = useAssignmentInbox(activeHouseholdPersonId)
 const familyPush = useFamilyPush(activeHouseholdPersonId)
+const familyEventInvites = useFamilyEventInvitations(activeHouseholdPersonId)
 
 useEffect(() => {
   let cancelled = false
@@ -13605,6 +13607,18 @@ const showCalendarSidebar =
       ) ?? null
 
 const notificationDisplayProps = {
+  familyInvitesAvailable: familyEventInvites.familyInvitesAvailable,
+  familyInvitations: familyEventInvites.familyInvitations,
+  respondingFamilyId: familyEventInvites.respondingFamilyId,
+  familyInvitationError: familyEventInvites.familyInvitationError,
+  respondFamily: async (id: number, decision: 'accepted' | 'declined') => {
+    const successful = await familyEventInvites.respondFamily(id, decision)
+    if (successful) {
+      void loadEvents()
+      void assignmentInbox.refresh()
+    }
+    return successful
+  },
   assignmentAvailable: assignmentInbox.available,
   assignmentNotifications: assignmentInbox.notifications,
   acknowledgingId: assignmentInbox.acknowledgingId,
