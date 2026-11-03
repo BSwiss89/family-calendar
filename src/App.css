@@ -20045,3 +20045,36 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   }
   .list-item-add-sheet {padding: 14px 18px 20px;}
 }
+
+
+/* Month day cards keep the date corner square and soften the other three. */
+.month-calendar-grid .month-week-days .day:not(.empty-day) {
+  border: 1px solid #ebe8e2;
+  border-radius: 0 10px 10px 10px;
+  box-sizing: border-box;
+}
+
+/* Keep the existing compact filter pill; place a photo in its right-hand end. */
+@media (max-width: 760px) {
+  .calendar-app .calendar-mobile-avatar-button .calendar-mobile-avatar-face {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .calendar-app .calendar-mobile-avatar-button .calendar-mobile-avatar-face-with-photo {
+    justify-content: flex-start;
+    padding-left: 8px;
+  }
+
+  .calendar-app .calendar-mobile-avatar-button .calendar-mobile-avatar-photo {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    object-position: center;
+  }
+}

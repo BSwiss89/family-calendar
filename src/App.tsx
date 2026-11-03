@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom'
 import './App.css'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
+import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
 import SharedEventDetails from './SharedEventDetails'
 import './SharedEventsOverlay.css'
 import { useSharedEventFeed } from './useSharedEventFeed'
@@ -2002,6 +2003,7 @@ const [isEditingHome, setIsEditingHome] =
 const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
 const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
 const [profileSwitchRequest, setProfileSwitchRequest] = useState(0)
+const [profilePeopleRevision, setProfilePeopleRevision] = useState(0)
 const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | null>(null)
 const [activeHouseholdPersonId, setActiveHouseholdPersonId] = useState<number | null>(null)
 const invitationInbox = useInvitationInbox()
@@ -3539,6 +3541,11 @@ function positionMobileScheduleTimeline(
 }
 
   const [people, setPeople] = useState<Person[]>([])
+const handleProfileCreated = useCallback((person: Person) => {
+  setPeople(current => current.some(item => item.id === person.id)
+    ? current.map(item => item.id === person.id ? person : item)
+    : [...current, person])
+}, [])
   const [draggedPersonId, setDraggedPersonId] =
   useState<number | null>(null)
 const [calendarPersonFilterId, setCalendarPersonFilterId] =
@@ -10209,6 +10216,7 @@ setRepeatEndDateError(false)
 
     const updatedPeople =
   await loadPeople()
+  setProfilePeopleRevision(revision => revision + 1)
 
 await loadEvents()
 
@@ -10253,6 +10261,7 @@ async function confirmDeletePerson() {
 
   const updatedPeople =
     await loadPeople()
+  setProfilePeopleRevision(revision => revision + 1)
 
   await loadEvents()
 
@@ -16107,13 +16116,8 @@ createPortal(
             `color-mix(in srgb, ${person.color} 42%, white)`,
         }}
       >
-        <span
-          style={{
-            background: person.color,
-          }}
-        >
-          {initial}
-        </span>
+        <CalendarPersonFilterAvatar key={person.image ?? 'no-photo'}
+          initial={initial} color={person.color} image={person.image} />
       </button>
     )
   })}
@@ -24078,6 +24082,7 @@ capture.captureType !== 'other' && (
       <MobileInvitationReminder {...invitationInbox} {...notificationDisplayProps} suppress={page === 'invitations'} />
       <HouseholdProfilePicker
         switchRequest={profileSwitchRequest}
+        peopleRevision={profilePeopleRevision} onProfileCreated={handleProfileCreated}
         onProfileChange={handleHouseholdProfileChange}
       />
     </main>
