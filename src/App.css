@@ -20078,3 +20078,16 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
     object-position: center;
   }
 }
+
+
+.people-management-layout .people-editor-card {
+  scroll-margin-block-start: 16px;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .people-management-layout .person-card { cursor: default; }
+  .people-management-layout .person-card-actions button {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+}

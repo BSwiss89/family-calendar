@@ -3757,6 +3757,7 @@ const personCursorPositionRef =
   useState(personColorOptions[0].color)
   const [personImageFile, setPersonImageFile] =
     useState<File | null>(null)
+  const personEditorRef = useRef<HTMLDivElement | null>(null)
   const [personImagePreview, setPersonImagePreview] = useState('')
   const [personPhotoRemoved, setPersonPhotoRemoved] = useState(false)
   useEffect(() => () => {
@@ -10259,6 +10260,17 @@ clearPersonForm(updatedPeople)
       person.image ? getPersonImageUrl(person.image) : ''
     )
     setPersonFileInputKey((value) => value + 1)
+    // On phones the editor sits below the profile cards. Bring the changed
+    // form into view after React commits so a tap gives immediate feedback.
+    window.requestAnimationFrame(() => {
+      const editor = personEditorRef.current
+      if (!editor) return
+      editor.focus({ preventScroll: true })
+      editor.scrollIntoView({
+        block: 'start',
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      })
+    })
   }
 
  function deletePerson(person: Person) {
@@ -22571,7 +22583,8 @@ resetMealPlannerScroll()
           </div>
 
           <div className="people-page-layout people-management-layout">
-            <div className="card people-editor-card">
+            <div className="card people-editor-card" ref={personEditorRef} tabIndex={-1}
+              role="region" aria-label="Profile editor">
               <h2>
                 {editingPersonId !== null
                   ? 'Edit Person'
@@ -22752,8 +22765,13 @@ onSelect={(event) => {
         : ''
     }`}
     key={person.id}
-    draggable
+    draggable={window.matchMedia('(hover: hover) and (pointer: fine)').matches}
     onDragStart={(event) => {
+      if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches ||
+          (event.target instanceof Element && event.target.closest('button, input, select, textarea, a'))) {
+        event.preventDefault()
+        return
+      }
       setDraggedPersonId(person.id)
 
       event.dataTransfer.effectAllowed =
