@@ -1,0 +1,15 @@
+.live-invitations-page{width:min(100%,950px);margin:0 auto;padding:20px;overflow:auto}
+.live-invitations-list{display:grid;gap:12px;max-width:850px}
+.live-invitation-card{display:grid;gap:6px;padding:16px;border:1px solid var(--border-color,#a5acb7);border-radius:12px;background:var(--card-background,#ffffff);color:var(--text-color,#20242b)}
+.live-invitation-card strong{font-size:1.05rem}
+.live-invitation-card p{margin:0}
+.live-invitation-card small{opacity:.7}
+.live-invitation-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.live-invitation-buttons button,.live-remind-later{border:1px solid #8b95a3;border-radius:10px;padding:10px 14px;background:#f3f5f8;color:#1d2738;cursor:pointer}
+.live-invitation-buttons button:first-child{background:#2a669f;color:white}
+.live-invitation-buttons button:disabled{opacity:.5;cursor:wait}
+.live-invitation-backdrop{position:fixed;inset:0;z-index:9999;background:#0009;display:flex;align-items:center;justify-content:center;padding:16px}
+.live-invitation-dialog{background:var(--card-background,#fff);color:var(--text-color,#1d2738);border-radius:16px;width:min(100%,520px);max-height:92dvh;overflow:auto;padding:20px}
+.live-invitation-dialog h2{margin:0 0 8px}
+.live-remind-later{display:block;width:100%;margin-top:16px}
+@media(max-width:760px){.live-invitations-page{padding:12px}.live-invitation-dialog{padding:16px}}

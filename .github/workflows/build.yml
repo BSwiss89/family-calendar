@@ -139,6 +139,18 @@ jobs:
             throw 'Shared release recovery helper not imported before server stop'
           }
           Write-Host 'BACKEND DEPENDENCY GATES VERIFIED BEFORE SERVER SHUTDOWN'
+      - name: Verify LIVE notification and invitation exact production gates
+        run: |
+          node --test scripts/test-live-informational-push.mjs
+          node --test scripts/test-live-event-invitations.mjs
+          node --test scripts/test-live-household-event-join.mjs
+          node --test scripts/test-live-notification-inbox-pilot.mjs
+      - name: Validate LIVE notification startup JavaScript
+        run: |
+          node --check Server/index.mjs
+          node --check Server/live-informational-push.mjs
+          node --check Server/live-event-invitations.mjs
+          node --check Server/live-notification-inbox.mjs
       - name: Validate isolated real-backend candidate test syntax
         run: node --check scripts/test-real-backend-candidate.mjs
       - name: Boot actual calendar API against isolated npm and synthetic SQLite

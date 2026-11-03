@@ -3,6 +3,7 @@ import {
   profileStorageKey, resolveProfileSelection, serializeProfileSelection, validateNewProfileInput,
   type HouseholdProfileSelection,
 } from './householdProfileSelection.mjs'
+import { personColorOptions } from './personColorOptions'
 import './HouseholdProfilePicker.css'
 
 type ProfilePerson = {
@@ -14,7 +15,7 @@ type ProfilePerson = {
 
 type Props = {
   switchRequest: number
-  onProfileChange: (name: string | null) => void
+  onProfileChange: (name: string | null, personId: number | null) => void
 }
 
 type Screen = 'checking' | 'choose' | 'create' | 'ready' | 'error'
@@ -48,6 +49,12 @@ function isProfilePerson(value: unknown): value is ProfilePerson {
     (item.image === null || typeof item.image === 'string')
 }
 
+function getNextUnusedProfileColor(people: ProfilePerson[]): string {
+  const usedColors = new Set(people.map((person) => person.color.toLowerCase()))
+  return personColorOptions.find((option) => !usedColors.has(option.color.toLowerCase()))?.color
+    ?? personColorOptions[0].color
+}
+
 function PersonPicture({ person }: { person: ProfilePerson }) {
   const [imageFailed, setImageFailed] = useState(false)
   const fallbackStyle: CSSProperties = {
@@ -76,7 +83,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
   const [errorText, setErrorText] = useState('')
   const [notSaved, setNotSaved] = useState(false)
   const [newProfileName, setNewProfileName] = useState('')
-  const [newProfileColor, setNewProfileColor] = useState('#477EBD')
+  const [newProfileColor, setNewProfileColor] = useState<string>(personColorOptions[0].color)
   const [newProfilePhoto, setNewProfilePhoto] = useState<File | null>(null)
   const [creatingProfile, setCreatingProfile] = useState(false)
   const [createError, setCreateError] = useState('')
@@ -93,7 +100,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       if (!auth || typeof auth !== 'object' || !('enabled' in auth) ||
         auth.enabled !== true) {
         // Legacy, authentication-disabled calendars retain their existing UI.
-        onProfileChange(null)
+        onProfileChange(null,null)
         setScreen('ready')
         return
       }
@@ -141,7 +148,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
         }
         const person = selection.kind === 'person'
           ? records.find((item) => item.id === selection.personId) : null
-        onProfileChange(person?.name ?? 'Home')
+        onProfileChange(person?.name ?? 'Home',person?.id ?? null)
         setScreen('ready')
       } else {
         setScreen('choose')
@@ -179,7 +186,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       } catch {
         setNotSaved(true)
       }
-      onProfileChange(person?.name ?? 'Home')
+      onProfileChange(person?.name ?? 'Home',person?.id ?? null)
       setScreen('ready')
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : 'Could not save device profile.')
@@ -241,7 +248,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
       } catch {
         setNotSaved(true)
       }
-      onProfileChange(newPerson.name)
+      onProfileChange(newPerson.name,newPerson.id)
       setScreen('ready')
       // Reload just the browser UI to refresh People everywhere (event assignment
       // picker, sliders, and Settings). No server restart or database migration.
@@ -305,6 +312,7 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
               <button type="button" className="household-profile-card household-profile-create-card"
                 onClick={() => {
                   setCreateError('')
+                  setNewProfileColor(getNextUnusedProfileColor(people))
                   setScreen('create')
                 }}>
                 <span className="household-profile-avatar household-profile-add" aria-hidden="true">+</span>
@@ -324,10 +332,36 @@ export default function HouseholdProfilePicker({ switchRequest, onProfileChange 
               autoComplete="name" autoFocus required disabled={creatingProfile}
               placeholder="First name or nickname" value={newProfileName}
               onChange={(event) => setNewProfileName(event.target.value)} />
-            <label htmlFor="household-new-profile-color">Profile color</label>
-            <input id="household-new-profile-color" type="color"
-              value={newProfileColor} disabled={creatingProfile}
-              onChange={(event) => setNewProfileColor(event.target.value)} />
+            <fieldset className="household-profile-color-field" disabled={creatingProfile}>
+              <legend>Profile color</legend>
+              <div className="household-profile-color-palette">
+                {personColorOptions.map((option) => (
+                  <button
+                    key={option.color}
+                    type="button"
+                    className={`household-profile-color-swatch ${newProfileColor.toLowerCase() === option.color.toLowerCase() ? 'household-profile-color-selected' : ''}`}
+                    style={{ backgroundColor: option.color }}
+                    aria-label={option.name}
+                    aria-pressed={newProfileColor.toLowerCase() === option.color.toLowerCase()}
+                    title={option.name}
+                    onClick={() => setNewProfileColor(option.color)}
+                  />
+                ))}
+                <label
+                  className={`household-profile-color-custom ${!personColorOptions.some((option) => option.color.toLowerCase() === newProfileColor.toLowerCase()) ? 'household-profile-color-selected' : ''}`}
+                  title="Custom color"
+                >
+                  <input
+                    id="household-new-profile-color"
+                    type="color"
+                    aria-label="Custom color"
+                    value={newProfileColor}
+                    disabled={creatingProfile}
+                    onChange={(event) => setNewProfileColor(event.target.value)}
+                  />
+                </label>
+              </div>
+            </fieldset>
             <label htmlFor="household-new-profile-photo">Profile photo (optional)</label>
             <input id="household-new-profile-photo" type="file"
               accept="image/jpeg,image/png,image/webp" disabled={creatingProfile}

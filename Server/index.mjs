@@ -7,6 +7,10 @@ import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
+import { installLiveNotificationInboxPilot } from './live-notification-inbox.mjs'
+import { installLiveHouseholdEventJoin } from './live-household-event-join.mjs'
+import { installLiveEventInvitations } from './live-event-invitations.mjs'
+import { installLiveInformationalPush } from './live-informational-push.mjs'
 import {
   normalizeListCategory,
   ensureListItemCategories,
@@ -612,6 +616,12 @@ app.use(express.json())
 // Required mode protects all subsequent calendar APIs, uploads and pages.
 // Disabled by default; never enable public Funnel before a tested rollout.
 installFamilyAuth(app, database, __dirname)
+// User-approved one-household notification pilot. Disabled by default;
+// source and database migration are never enabled without LIVE operator opt-in.
+installLiveNotificationInboxPilot(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
+installLiveHouseholdEventJoin(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
+const liveEventInvitations = installLiveEventInvitations(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
+installLiveInformationalPush(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 
 function isValidDate(date) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date)
@@ -5903,6 +5913,7 @@ cleanBatchId,
       )
     }
 
+    liveEventInvitations.recordAssignments(request,eventId,[],requestedPeople.map(p=>p.id))
     database.exec('COMMIT')
 
    response.status(201).json({
@@ -6052,6 +6063,7 @@ if (
   database.exec('BEGIN')
 
   try {
+    const previousPersonIds = database.prepare('SELECT person_id FROM event_people WHERE event_id=?').all(id).map(row=>row.person_id)
     database
       .prepare(`
         UPDATE events
@@ -6110,6 +6122,7 @@ if (
       )
     }
 
+    liveEventInvitations.recordAssignments(request,id,previousPersonIds,requestedPeople.map(p=>p.id))
     database.exec('COMMIT')
 
    response.json({
