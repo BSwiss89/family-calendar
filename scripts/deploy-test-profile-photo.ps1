@@ -71,14 +71,36 @@ function Status([string]$url) {
         return 0
     }
 }
+function Listeners([int]$port) {
+    $lookupErrors=@()
+    $rows=@(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue -ErrorVariable lookupErrors)
+    $unexpected=@($lookupErrors | Where-Object { $_.CategoryInfo.Category -ne 'ObjectNotFound' })
+    Assert ($unexpected.Count -eq 0) "TCP ownership lookup failed on port $port."
+    return $rows
+}
 function OwnedProcess([int]$port,[string]$root,[bool]$optional=$false) {
-    $rows = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
-    if ($optional -and $rows.Count -eq 0) { return $null }
-    Assert ($rows.Count -eq 1) "Unexpected listeners on port $port."
-    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($rows[0].OwningProcess)"
-    Assert ($null -ne $proc -and $proc.ExecutablePath -ieq $node -and
-        $proc.CommandLine -like "*$root*") "Unexpected process on port $port."
-    return $proc
+    for ($attempt=0; $attempt -lt 10; $attempt++) {
+        $rows = @(Listeners $port)
+        if ($optional -and $rows.Count -eq 0) { return $null }
+        Assert ($rows.Count -eq 1) "Unexpected listeners on port $port."
+        $owner = $rows[0].OwningProcess
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$owner" -ErrorAction Stop
+        # A task stop can destroy Node between the TCP and CIM snapshots.
+        # Confirm disappearance/ownership again before returning or signalling it.
+        $current = @(Listeners $port)
+        if ($optional -and $current.Count -eq 0) { return $null }
+        Assert ($current.Count -le 1) "Unexpected listeners on port $port."
+        if ($current.Count -eq 1 -and $current[0].OwningProcess -eq $owner -and
+            $null -ne $proc -and -not [string]::IsNullOrWhiteSpace($proc.ExecutablePath) -and
+            -not [string]::IsNullOrWhiteSpace($proc.CommandLine)) {
+            $nodeMatch = $proc.ExecutablePath -ieq $node
+            $sourceMatch = $proc.CommandLine -like "*$root*"
+            Assert ($nodeMatch -and $sourceMatch) "Unexpected process on port $port; PID=$owner; NODE_MATCH=$nodeMatch; SOURCE_MATCH=$sourceMatch."
+            return $proc
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    throw "Process metadata/ownership did not stabilize on port $port; no process was signalled."
 }
 function LiveStamp {
     $p = OwnedProcess 3001 $live
@@ -103,6 +125,11 @@ function StopTest {
         Start-Sleep -Seconds 1
     }
     Assert ((Get-ScheduledTask -TaskName $taskName).State -notin @('Running','Queued')) 'TEST supervisor did not stop.'
+    # Give the task's child a chance to finish before considering a forced stop.
+    for ($i=0; $i -lt 20; $i++) {
+        if (@(Listeners 13002).Count -eq 0) { return }
+        Start-Sleep -Milliseconds 250
+    }
     $p = OwnedProcess 13002 $test $true
     if ($null -ne $p) { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop }
     for ($i=0; $i -lt 10; $i++) {

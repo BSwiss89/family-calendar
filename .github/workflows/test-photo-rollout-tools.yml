@@ -40,6 +40,7 @@ jobs:
             # Repeat-stop during rollback must tolerate an already stopped task.
             $taskName='disposable-test-task'; $test='disposable-root'
             function OwnedProcess { param($port,$root,$optional) return $null }
+            function Get-NetTCPConnection { [CmdletBinding()]param($LocalPort,$State) return @() }
             function Get-ScheduledTask { param($TaskName) [pscustomobject]@{State='Disabled'} }
             function Stop-ScheduledTask { throw 'Must not stop an inactive task' }
             StopTest
@@ -101,3 +102,50 @@ jobs:
             if ((Get-FileHash $candidate).Hash -ne (Get-FileHash $original).Hash) { throw 'Exact rollback failed' }
             Write-Host 'THREE VERIFIED PINS / RUNTIME PRESERVED / UNKNOWN REJECTED / EXACT ROLLBACK PASS'
           } finally { Remove-Item $fixture -Recurse -Force }
+      - name: Handle shutdown observation races while rejecting foreign owners
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version Latest
+          $tokens=$null; $errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $pwd 'scripts/deploy-test-profile-photo.ps1'),[ref]$tokens,[ref]$errors)
+          if (@($errors).Count) { throw 'Rollout syntax failed' }
+          foreach ($function in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)) {
+            . ([scriptblock]::Create($function.Extent.Text))
+          }
+          $node='C:\disposable\node.exe'; $root='C:\disposable\test'
+          function Start-Sleep { param($Milliseconds,$Seconds) }
+          function Get-NetTCPConnection {
+            [CmdletBinding()]param($LocalPort,$State)
+            $script:tcpCalls++
+            if ($script:scenario -eq 'lookup-failed') { Write-Error 'Synthetic query failure' -Category PermissionDenied; return }
+            if ($script:scenario -eq 'empty' -or ($script:scenario -eq 'gone' -and $script:tcpCalls -gt 1)) { return @() }
+            $owner=400
+            if ($script:scenario -eq 'changed' -and $script:tcpCalls -gt 1) { $owner=401 }
+            [pscustomobject]@{OwningProcess=$owner}
+          }
+          function Get-CimInstance {
+            [CmdletBinding()]param($ClassName,$Filter)
+            $script:cimCalls++
+            if ($script:scenario -in @('gone','missing')) { return $null }
+            if ($script:scenario -eq 'metadata-lag' -and $script:cimCalls -eq 1) { return $null }
+            $exe=$node; $command=$root+'\Server\index.mjs'
+            if ($script:scenario -eq 'foreign-exe') { $exe='C:\disposable\other.exe' }
+            if ($script:scenario -eq 'foreign-root' -or ($script:scenario -eq 'changed' -and $Filter -match '401')) { $command='C:\other\Server\index.mjs' }
+            [pscustomobject]@{ProcessId=400;ExecutablePath=$exe;CommandLine=$command}
+          }
+          function Stop-Process { throw 'No process signalling allowed in fixtures' }
+          foreach ($case in @('empty','gone','metadata-lag')) {
+            $script:scenario=$case; $script:tcpCalls=0; $script:cimCalls=0
+            $result=OwnedProcess 13002 $root $true
+            if ($case -eq 'metadata-lag' -and $null -eq $result) { throw 'Verified owner was not returned' }
+            if ($case -ne 'metadata-lag' -and $null -ne $result) { throw 'Absent owner was returned' }
+          }
+          foreach ($case in @('missing','foreign-exe','foreign-root','changed','lookup-failed')) {
+            $script:scenario=$case; $script:tcpCalls=0; $script:cimCalls=0
+            $blocked=$false
+            try { $null=OwnedProcess 13002 $root $true } catch { $blocked=$true }
+            if (-not $blocked) { throw ('Unsafe ownership accepted: '+$case) }
+          }
+          Write-Host 'DISAPPEARING CHILD / METADATA LAG PASS; FOREIGN OWNERS AND QUERY FAILURES BLOCKED'
