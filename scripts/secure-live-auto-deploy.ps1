@@ -14,6 +14,10 @@ $approvalUrl='https://api.github.com/repos/BSwiss89/family-calendar/contents/ops
 $legacyTask='Family Calendar Auto Deploy'
 $liveTask='Family Calendar Server'
 $task='Family Calendar Secure LIVE Auto Deploy'
+$secureLauncher='C:\ProgramData\FamilyCalendar\SecureLive\start-secure-live-node24.ps1'
+. (Join-Path $PSScriptRoot 'secure-live-launcher-pins.ps1')
+$launcherPlan=$null
+$launcherChanged=$false
 $mutex=[Threading.Mutex]::new($false,'Global\FamilyCalendarSecureLiveAutoDeploy')
 $locked=$false
 $transcribing=$false
@@ -78,6 +82,7 @@ function CheckLocal {
   # stdout as $null, so never call .Trim() directly on command substitution.
   $branchOutput=@(& git -C $live branch --show-current)
   Assert ($LASTEXITCODE -eq 0 -and (($branchOutput -join '').Trim() -eq '')) 'Secure LIVE must stay detached'
+  Assert-SecureLiveLauncherPins $secureLauncher $live
   RequireHealthy
 }
 
@@ -98,7 +103,13 @@ try {
   $transcribing=$true
   CheckLocal
   $approval=GetApproval
-  Assert ($approval.schema -eq 1 -and $approval.kind -eq 'frontend-only' -and $approval.repository -eq $repo) 'Unsupported release approval'
+  Assert ($approval.schema -eq 1 -and $approval.kind -in @('frontend-only','deployed-baseline') -and $approval.repository -eq $repo) 'Unsupported release approval'
+  if($approval.kind -eq 'deployed-baseline'){
+    Assert-SecureLiveBaseline $approval (GitSha $live)
+    CheckRun ([long]$approval.build_run_id) 'Build Family Calendar' ([string]$approval.to_sha)
+    Write-Host ('DEPLOYED BASELINE VERIFIED; NO DEPLOYMENT: '+$approval.to_sha)
+    return
+  }
   $from=[string]$approval.from_sha
   $to=[string]$approval.to_sha
   Assert ($from -cmatch '^[a-f0-9]{40}$' -and $to -cmatch '^[a-f0-9]{40}$' -and $from -ne $to) 'Invalid approved commit pair'
@@ -120,7 +131,7 @@ try {
   # not inherit the desktop's SSH agent. Fetch this PUBLIC repository over HTTPS.
   # Never change the existing LIVE origin or the machine's SSH configuration.
   $readOnlySource='https://github.com/BSwiss89/family-calendar.git'
-  & git -c credential.interactive=never clone --quiet --no-checkout --single-branch --branch feature/auth-current-calendar-two-sites $readOnlySource $stage
+  & git -c credential.interactive=never clone --quiet --no-checkout $readOnlySource $stage
   Assert ($LASTEXITCODE -eq 0) 'HTTPS candidate clone failed'
   & git -C $stage checkout --quiet --detach $to
   Assert ($LASTEXITCODE -eq 0 -and (GitSha $stage) -eq $to) 'Approved commit not found in source branch'
@@ -164,8 +175,9 @@ try {
     }
   }
   $indexHash=(Get-FileHash -LiteralPath (Join-Path $newDist 'index.html') -Algorithm SHA256).Hash
+  $launcherPlan=New-SecureLiveLauncherPlan $secureLauncher $live $stage $newDist $backup
   # Record the exact operation before touching LIVE's Git checkout or dist.
-  @{from=$from;to=$to;backup=$backup;stage=$stage;test=$testBefore;started=(Get-Date -Format o)} |
+  @{from=$from;to=$to;backup=$backup;stage=$stage;test=$testBefore;launcherBackup=$launcherPlan.Previous;launcherCandidate=$launcherPlan.Candidate;started=(Get-Date -Format o)} |
     ConvertTo-Json -Compress | Set-Content -LiteralPath $journal -Encoding UTF8
   $transactionOpened=$true
   & git -C $live fetch --quiet $stage $to
@@ -177,6 +189,9 @@ try {
   $oldMoved=$true
   Move-Item -LiteralPath $newDist -Destination $liveDist -ErrorAction Stop
   $newActivated=$true
+  $launcherChanged=$true
+  Set-SecureLiveLauncher $launcherPlan.Candidate $secureLauncher
+  Assert-SecureLiveLauncherPins $secureLauncher $live
   Assert ((Get-FileHash -LiteralPath (Join-Path $liveDist 'index.html') -Algorithm SHA256).Hash -eq $indexHash) 'Live frontend hash does not match candidate'
   RequireHealthy
   $login=Invoke-WebRequest 'http://127.0.0.1:3001/login' -UseBasicParsing -TimeoutSec 10
@@ -210,6 +225,13 @@ try {
         if($LASTEXITCODE -ne 0 -or (GitSha $live) -ne $from){throw 'Git rollback did not restore the previous commit'}
       } catch { $recovery+=("Git recovery: "+$_.Exception.Message) }
     }
+  }
+  if($transactionOpened -and $null -ne $launcherPlan){
+    try {
+      if($launcherChanged){Set-SecureLiveLauncher $launcherPlan.Previous $secureLauncher}
+      Assert-SecureLiveLauncherPins $secureLauncher $live
+      RequireHealthy
+    } catch { $recovery+=("Launcher recovery: "+$_.Exception.Message) }
   }
   if($Apply -and (Test-Path -LiteralPath $root)){
     try {

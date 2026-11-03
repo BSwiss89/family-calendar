@@ -7,7 +7,7 @@ $source="https://github.com/BSwiss89/family-calendar.git"
 if(-not $text.Contains("$"+"readOnlySource='"+$source+"'")){
   throw 'HTTPS read-only candidate source missing'
 }
-if(-not $text.Contains('git -c credential.interactive=never clone --quiet --no-checkout --single-branch --branch feature/auth-current-calendar-two-sites $readOnlySource $stage')){
+if(-not $text.Contains('git -c credential.interactive=never clone --quiet --no-checkout $readOnlySource $stage')){
   throw 'Noninteractive Git clone command does not use the approved HTTPS source'
 }
 if($text.Contains('branch feature/auth-current-calendar-two-sites $origin $stage')){

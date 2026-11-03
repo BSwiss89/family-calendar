@@ -23,7 +23,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $files = @('scripts/secure-live-auto-deploy.ps1','scripts/install-secure-live-auto-deploy.ps1')
+          $files = @('scripts/secure-live-auto-deploy.ps1','scripts/install-secure-live-auto-deploy.ps1','scripts/secure-live-launcher-pins.ps1','scripts/test-secure-live-launcher-pins.ps1')
           foreach ($file in $files) {
             $tokens = $null
             $errors = $null
@@ -65,6 +65,9 @@ jobs:
       - name: Verify scheduled updater uses noninteractive HTTPS Git
         shell: powershell
         run: .\scripts\test-secure-live-https-clone.ps1
+      - name: Rehearse launcher pins, backup, activation and rollback on synthetic files
+        shell: powershell
+        run: .\scripts\test-secure-live-launcher-pins.ps1
       - name: Verify synthetic online SQLite recovery
         run: node --test scripts/test-secure-live-online-backup.mjs
       - name: Check JavaScript syntax
