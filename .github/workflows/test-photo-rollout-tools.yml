@@ -1,0 +1,39 @@
+name: TEST photo rollout tools
+on:
+  pull_request:
+    paths:
+      - 'scripts/deploy-test-profile-photo.ps1'
+      - '.github/workflows/test-photo-rollout-tools.yml'
+permissions:
+  contents: read
+jobs:
+  verify-rollout:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse rollout under Windows PowerShell without executing it
+        shell: powershell
+        run: |
+          $tokens=$null; $errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $pwd 'scripts/deploy-test-profile-photo.ps1'),[ref]$tokens,[ref]$errors)
+          if (@($errors).Count) { $errors | ForEach-Object { Write-Host $_.Message }; throw 'Rollout syntax failed' }
+          # Load definitions only; never execute the rollout's top-level commands.
+          foreach ($function in $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$false)) {
+            . ([scriptblock]::Create($function.Extent.Text))
+          }
+          $fixture=Join-Path $env:TEMP ('profile-photo-rollout-'+[guid]::NewGuid().ToString('N'))
+          try {
+            New-Item -ItemType Directory -Path (Join-Path $fixture 'source') -Force | Out-Null
+            Set-Content (Join-Path $fixture 'source\index.html') 'synthetic frontend' -Encoding UTF8
+            CopyVerified (Join-Path $fixture 'source') (Join-Path $fixture 'backup')
+            if ((Manifest (Join-Path $fixture 'source')) -cne (Manifest (Join-Path $fixture 'backup'))) { throw 'Copy fixture failed' }
+            Set-Content (Join-Path $fixture 'backup\index.html') 'tampered' -Encoding UTF8
+            if ((Manifest (Join-Path $fixture 'source')) -ceq (Manifest (Join-Path $fixture 'backup'))) { throw 'Tamper was not detected' }
+            New-Item -ItemType Directory -Path (Join-Path $fixture 'empty') | Out-Null
+            CopyVerified (Join-Path $fixture 'empty') (Join-Path $fixture 'empty-backup')
+            Write-Host 'ROLLOUT SYNTAX AND BACKUP FIXTURES PASS; NO SERVICES ACCESSED'
+          } finally { if (Test-Path $fixture) { Remove-Item $fixture -Recurse -Force } }
+      - name: Exercise supervisor pin update and exact rollback fixtures
+        shell: powershell
+        run: .\scripts\test-secure-test-source-pins.ps1
