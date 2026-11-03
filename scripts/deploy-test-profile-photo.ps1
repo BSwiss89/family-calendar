@@ -95,12 +95,14 @@ function Healthy {
 }
 function StopTest {
     $null = OwnedProcess 13002 $test $true
-    Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    if ((Get-ScheduledTask -TaskName $taskName).State -in @('Running','Queued')) {
+        Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    }
     for ($i=0; $i -lt 10; $i++) {
-        if ((Get-ScheduledTask -TaskName $taskName).State -ne 'Running') { break }
+        if ((Get-ScheduledTask -TaskName $taskName).State -notin @('Running','Queued')) { break }
         Start-Sleep -Seconds 1
     }
-    Assert ((Get-ScheduledTask -TaskName $taskName).State -ne 'Running') 'TEST supervisor did not stop.'
+    Assert ((Get-ScheduledTask -TaskName $taskName).State -notin @('Running','Queued')) 'TEST supervisor did not stop.'
     $p = OwnedProcess 13002 $test $true
     if ($null -ne $p) { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop }
     for ($i=0; $i -lt 10; $i++) {
