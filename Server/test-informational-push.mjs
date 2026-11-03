@@ -181,8 +181,12 @@ export function installTestInformationalPush(app,db,{
       const inviteJoin=invitationTable
         ? "LEFT JOIN test_event_invitations ei ON ei.event_id=n.event_id AND ei.person_id=n.person_id"
         : ""
-      const excludeSelf=invitationTable
-        ? "AND NOT (n.kind='assigned' AND ei.responded_at IS NOT NULL)"
+      // An RSVP already answered in the calendar should never trigger
+      // a redundant "assigned" alert, and declining should never cause a
+      // separate "you were removed" phone notification.
+      const suppressAnswered=invitationTable
+        ? "AND NOT (n.kind='assigned' AND ei.responded_at IS NOT NULL)" +
+          " AND NOT (n.kind='unassigned' AND COALESCE(ei.status,'')='declined')"
         : ""
       const entries=db.prepare([
         'SELECT n.id AS noticeId,n.kind,s.endpoint_hash AS endpointHash,',
@@ -197,7 +201,7 @@ export function installTestInformationalPush(app,db,{
         'WHERE n.created_at>=s.subscribed_at AND fs.revoked_at IS NULL',
         'AND fs.expires_at>? AND fs.selected_profile_kind=\'person\'',
         'AND fs.selected_person_id=s.person_id AND fu.disabled=0',
-        excludeSelf,
+        suppressAnswered,
         'AND (d.status IS NULL OR (d.status=\'pending\' AND d.attempts<3',
         'AND d.next_attempt<=?))',
         'ORDER BY n.id,s.endpoint_hash LIMIT 20',
