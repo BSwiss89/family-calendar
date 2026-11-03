@@ -2,8 +2,8 @@
   "schema": 1,
   "kind": "deployed-baseline",
   "repository": "BSwiss89/family-calendar",
-  "to_sha": "ea6dcd4805cf9f3dcf1dc5a9b25a91931148bd6d",
-  "build_run_id": 41572196673,
+  "to_sha": "df4ecc4a57fcbe4de76a01c4863bdcb7fa5df418",
+  "build_run_id": 41736463874,
   "files": [],
-  "approval_note": "Proposed receipt for the user-approved notification release deployed November 2, 2026 at 22:31:50 America/Chicago. LIVE HTTPS, authentication, database integrity and existing counts passed; user confirmed LIVE iPhone push delivery. This receipt authorizes no deployment or file changes. Activate only after reviewed controller installation and operator verification."
+  "approval_note": "User-authorized profile lifecycle, month corners/photo pills, profile photo management and Edit popup release deployed November 3, 2026 at 17:18:19 America/Chicago. Operator confirmed LIVE_PROFILE_DEPLOYMENT=PASS, all four startup pins, SQLite backup and independent restore, existing counts/data/uploads, health/authentication and unchanged TEST. Recovery: C:\\Users\\bobby\\CalendarBackups\\LiveProfiles\\20261103-171810-16f571. Exact-head Windows build and Chromium/WebKit browser checks passed. Receipt records the installed release only and authorizes no deployment or file changes."
 }
