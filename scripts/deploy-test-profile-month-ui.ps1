@@ -1,4 +1,4 @@
-# Frontend-only profile editor popup on the existing TEST site.
+# Frontend-only solid status-bar strip experiment on the existing TEST site.
 # Default is read-only. -Apply builds isolated source, backs up, then swaps UI.
 param([Parameter(Mandatory=$true)][string]$CandidateSha, [switch]$Apply)
 Set-StrictMode -Version Latest
@@ -7,8 +7,8 @@ $stage = Split-Path $PSScriptRoot -Parent
 $test = 'C:\Users\bobby\Projects\family-calendar-test-security-stage'
 $live = 'C:\Users\bobby\Projects\family-calendar-live-auth-candidate'
 $node = 'C:\ProgramData\FamilyCalendar\Runtime\node-v24.22.1\node.exe'
-$original = 'c9562e94d1a04bd2d069d58cb4fbd93f180dde8a'
-$expectedLive = 'ea6dcd4805cf9f3dcf1dc5a9b25a91931148bd6d'
+$original = '8007921a3e9f9bf47ba4f2e128618a89ea0a063b'
+$expectedLive = 'df4ecc4a57fcbe4de76a01c4863bdcb7fa5df418'
 $taskName = 'Family Calendar Secure TEST Auto Deploy'
 $state = 'C:\ProgramData\FamilyCalendar\ProfileMonthTest'
 $journal = Join-Path $state 'IN-PROGRESS.json'

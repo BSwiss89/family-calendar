@@ -88,6 +88,38 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
                 await page.locator('.sidebar-nav-button').filter({hasText:'People'}).click()
               }
               const card=page.locator('.person-card').filter({has:page.getByRole('heading',{name:'Person 1',exact:true})})
+              if (mode === 'fixed') {
+                const strip = page.locator('.app-status-bar-strip')
+                assert.equal(await strip.count(), 1)
+                assert.equal(await strip.evaluate(el => el.parentElement === document.body), true)
+                const style = await strip.evaluate(el => {
+                  const css = getComputedStyle(el), rect = el.getBoundingClientRect()
+                  return {display:css.display, position:css.position, color:css.backgroundColor,
+                    events:css.pointerEvents, top:rect.top, width:rect.width, height:rect.height}
+                })
+                if (touch) {
+                  assert.equal(style.display, 'block')
+                  assert.equal(style.position, 'fixed')
+                  assert.equal(style.color, 'rgb(239, 231, 218)')
+                  assert.equal(style.events, 'none')
+                  assert.equal(style.top, 0)
+                  assert.equal(style.width, viewport.width)
+                  assert.ok(style.height >= 1)
+                  const geometry = () => page.evaluate(() => {
+                    const p = document.querySelector('.people-page').getBoundingClientRect()
+                    const c = document.querySelector('.person-card').getBoundingClientRect()
+                    return {pageTop:p.top, cardTop:c.top, height:document.documentElement.scrollHeight, y:scrollY}
+                  })
+                  const before = await geometry()
+                  await strip.evaluate(el => el.style.display = 'none')
+                  assert.deepEqual(await geometry(), before, 'Strip must not move or resize the page')
+                  await strip.evaluate(el => el.style.removeProperty('display'))
+                  assert.deepEqual(await geometry(), before)
+                  await page.evaluate(() => window.scrollTo(0, 200))
+                  assert.equal((await strip.boundingBox()).y, 0, 'Strip stays fixed while document scrolls')
+                  await page.evaluate(() => window.scrollTo(0, 0))
+                } else assert.equal(style.display, 'none')
+              }
               await card.getByRole('button',{name:'Edit',exact:true})[touch?'tap':'click']()
               const editor=page.locator('.people-editor-card')
               if(mode==='baseline') {

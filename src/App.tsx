@@ -14028,6 +14028,7 @@ const homeListPreview =
   lists.slice(0, 4)
 return (
     <main className="calendar-app">
+      {createPortal(<div className="app-status-bar-strip" aria-hidden="true" />, document.body)}
       <header
   className={`top-bar ${
     page === 'meals'
