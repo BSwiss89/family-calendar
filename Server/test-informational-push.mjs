@@ -182,7 +182,7 @@ export function installTestInformationalPush(app,db,{
         ? "LEFT JOIN test_event_invitations ei ON ei.event_id=n.event_id AND ei.person_id=n.person_id"
         : ""
       const excludeSelf=invitationTable
-        ? "AND NOT (n.kind='assigned' AND ei.status='accepted' AND ei.invited_by_person_id=n.person_id)"
+        ? "AND NOT (n.kind='assigned' AND ei.responded_at IS NOT NULL)"
         : ""
       const entries=db.prepare([
         'SELECT n.id AS noticeId,n.kind,s.endpoint_hash AS endpointHash,',
