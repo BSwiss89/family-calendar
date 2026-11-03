@@ -45,14 +45,15 @@ function validatedSubscription(input) {
   return {endpoint:input.endpoint,p256dh:input.keys.p256dh,auth:input.keys.auth}
 }
 
-function notificationMessage(kind) {
+function notificationMessage(kind,noticeId) {
   const bodies = {
     assigned:'An event involving you was added. Open your calendar to review it.',
     changed:'An event involving you was updated. Open your calendar for details.',
     unassigned:'An event assignment changed. Open your calendar for details.',
     cancelled:'An event involving you was cancelled. Open your calendar for details.',
   }
-  return {title:'Family Calendar',body:bodies[kind] || bodies.changed,url:'/'}
+  return {title:'Family Calendar',body:bodies[kind] || bodies.changed,url:'/',
+    tag:'family-event-'+noticeId}
 }
 
 export function installTestInformationalPush(app,db,{
@@ -172,6 +173,17 @@ export function installTestInformationalPush(app,db,{
       // Reconcile independently of whether any browser has the calendar open.
       // The existing TEST outbox records intents; no private event text leaves.
       reconcileNotificationMutations(db,{limit:100,at:now()})
+      const invitationTable=db.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='test_event_invitations'"
+      ).get()
+      // The creator is already participating, so exclude their own new-event
+      // assignment push. Invited relatives still receive the alert.
+      const inviteJoin=invitationTable
+        ? "LEFT JOIN test_event_invitations ei ON ei.event_id=n.event_id AND ei.person_id=n.person_id"
+        : ""
+      const excludeSelf=invitationTable
+        ? "AND NOT (n.kind='assigned' AND ei.status='accepted' AND ei.invited_by_person_id=n.person_id)"
+        : ""
       const entries=db.prepare([
         'SELECT n.id AS noticeId,n.kind,s.endpoint_hash AS endpointHash,',
         's.endpoint,s.p256dh,s.auth',
@@ -181,9 +193,11 @@ export function installTestInformationalPush(app,db,{
         'JOIN family_users fu ON fu.id=s.user_id',
         'LEFT JOIN test_push_deliveries d ON d.notification_id=n.id',
         'AND d.endpoint_hash=s.endpoint_hash',
+        inviteJoin,
         'WHERE n.created_at>=s.subscribed_at AND fs.revoked_at IS NULL',
         'AND fs.expires_at>? AND fs.selected_profile_kind=\'person\'',
         'AND fs.selected_person_id=s.person_id AND fu.disabled=0',
+        excludeSelf,
         'AND (d.status IS NULL OR (d.status=\'pending\' AND d.attempts<3',
         'AND d.next_attempt<=?))',
         'ORDER BY n.id,s.endpoint_hash LIMIT 20',
@@ -201,7 +215,7 @@ export function installTestInformationalPush(app,db,{
         if (!valid) continue
         let status=0
         try {
-          status=await send(entry,notificationMessage(entry.kind),{privateKey,subject})
+          status=await send(entry,notificationMessage(entry.kind,entry.noticeId),{privateKey,subject})
         } catch { /* best effort, bounded retry; do not log endpoint or token */ }
         if (status===404 || status===410) {
           db.prepare('DELETE FROM test_push_subscriptions WHERE endpoint_hash=?')
