@@ -13,6 +13,7 @@ import {
 import { createPortal } from 'react-dom'
 import './App.css'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
+import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
 import { useAssignmentInbox } from './useAssignmentInbox'
 import { useFamilyEventInvitations } from './useFamilyEventInvitations'
 import { useFamilyPush, PushNotificationsControl } from './FamilyPushNotifications'
@@ -15945,13 +15946,8 @@ createPortal(
             `color-mix(in srgb, ${person.color} 42%, white)`,
         }}
       >
-        <span
-          style={{
-            background: person.color,
-          }}
-        >
-          {initial}
-        </span>
+        <CalendarPersonFilterAvatar key={person.image ?? 'no-photo'}
+          initial={initial} color={person.color} image={person.image} />
       </button>
     )
   })}
