@@ -161,3 +161,37 @@ test('Subscription rejects arbitrary endpoints and other sessions cannot imperso
   assert.equal(x.call('get','/api/test-push/status',{}, {id:11,user_id:1}).status,401)
   pilot.close();x.db.close()
 })
+
+test('Declining a family invitation never causes a redundant removal push',async()=>{
+  const x=fixture()
+  x.db.exec([
+    "CREATE TABLE test_event_invitations(event_id INTEGER,person_id INTEGER,status TEXT,responded_at INTEGER);",
+    "INSERT INTO test_event_invitations VALUES(55,2,'declined',1000);",
+    "INSERT INTO test_event_invitations VALUES(56,2,'pending',NULL);",
+    "INSERT INTO test_event_invitations VALUES(57,2,'accepted',1000);",
+  ].join(' '))
+  const sent=[]
+  const pilot=installTestInformationalPush(x.app,x.db,{
+    flag:'enabled',port:13002,authMode:'required',
+    rootFolder:'/tmp/family-calendar-test-pilot',...config,
+    now:()=>fixed,schedule:false,
+    send:async (subscription,notification)=>{
+      sent.push(notification);return 201
+    },
+  })
+  assert.equal(x.call('post','/api/test-push/subscriptions',{
+    endpoint:subscription.endpoint,keys:subscription.keys,
+  }).status,200)
+  const insert=x.db.prepare(
+    'INSERT INTO assignment_notification_outbox(event_id,person_id,kind,created_at) VALUES (?,?,?,?)'
+  )
+  insert.run(55,2,'unassigned',fixed)
+  insert.run(56,2,'assigned',fixed)
+  insert.run(57,2,'assigned',fixed)
+  assert.equal((await pilot.tick()).accepted,1)
+  assert.equal(sent.length,1)
+  assert.match(sent[0].body,/added/)
+  assert.equal((await pilot.tick()).accepted,0)
+  pilot.close()
+  x.db.close()
+})
