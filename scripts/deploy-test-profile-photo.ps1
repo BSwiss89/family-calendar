@@ -132,6 +132,25 @@ function CheckCI {
         Assert ($run.Count -eq 1 -and $run[0].status -eq 'completed' -and $run[0].conclusion -eq 'success') "Exact-head CI is not successful: $name"
     }
 }
+function AssertSupervisorHashes([string]$file,[string]$index,[string]$auth,[string]$runtime) {
+    $tokens=$null; $errors=$null
+    $ast=[System.Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)
+    Assert (@($errors).Count -eq 0) 'Supervisor syntax is invalid.'
+    $hashes=@($ast.FindAll({param($n)
+        $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.Value -match '^[A-Fa-f0-9]{64}$'
+    },$true) | ForEach-Object { $_.Value.ToUpperInvariant() })
+    Assert ($hashes.Count -eq 3) 'Unexpected supervisor integrity checks require inspection.'
+    foreach ($expected in @($index,$auth,$runtime)) {
+        Assert ($expected -match '^[A-Fa-f0-9]{64}$' -and @($hashes | Where-Object { $_ -eq $expected }).Count -eq 1) 'Supervisor backend/auth/runtime pin does not match the verified file.'
+    }
+}
+function AssertSupervisorReplacement([string]$original,[string]$candidate,[string]$oldHash,[string]$newHash) {
+    $encoding=[Text.Encoding]::GetEncoding(28591)
+    $text=$encoding.GetString([IO.File]::ReadAllBytes($original))
+    Assert ([regex]::Matches($text,[regex]::Escape($oldHash)).Count -eq 1) 'Backend pin replacement is not unique.'
+    $expected=$encoding.GetBytes($text.Replace($oldHash,$newHash))
+    Assert ([Convert]::ToBase64String($expected) -ceq [Convert]::ToBase64String([IO.File]::ReadAllBytes($candidate))) 'Supervisor changed beyond the approved backend pin.'
+}
 
 try {
     try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
@@ -142,13 +161,8 @@ try {
     $dirty = @(& git -C $test status --porcelain --untracked-files=no)
     Assert ($LASTEXITCODE -eq 0 -and $dirty.Count -eq 0) 'TEST tracked source is dirty.'
     Assert ((Hash $supervisor) -eq $supervisorHash -and (Hash "$test\Server\index.mjs") -eq $oldIndex -and (Hash "$test\Server\family-auth.mjs") -eq $oldAuth) 'Observed TEST supervisor/backend pins changed.'
-    $tokens=$null; $parseErrors=$null
-    $supervisorAst=[System.Management.Automation.Language.Parser]::ParseFile($supervisor,[ref]$tokens,[ref]$parseErrors)
-    Assert (@($parseErrors).Count -eq 0) 'Installed supervisor syntax is invalid.'
-    $literalHashes=@($supervisorAst.FindAll({param($n)
-        $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.Value -match '^[A-Fa-f0-9]{64}$'
-    },$true) | ForEach-Object { $_.Value.ToUpperInvariant() })
-    Assert ($literalHashes.Count -eq 2 -and $literalHashes -contains $oldIndex -and $literalHashes -contains $oldAuth) 'Additional supervisor integrity checks require inspection.'
+    $runtimeHash=Hash $node
+    AssertSupervisorHashes $supervisor $oldIndex $oldAuth $runtimeHash
     $serverTask = Get-ScheduledTask -TaskName $taskName
     Assert ($serverTask.State -eq 'Running' -and $serverTask.Settings.Enabled) 'TEST task is not enabled/running.'
     $actions = ($serverTask.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join ' '
@@ -219,6 +233,8 @@ try {
     $null = Set-SecureTestSourcePins "$backup\candidate-supervisor.ps1" "$backup\previous-supervisor.ps1" $newIndex $oldAuth
     $planPins = Get-SecureTestSourcePins "$backup\candidate-supervisor.ps1"
     Assert ($planPins.Index -eq $newIndex -and $planPins.Auth -eq $oldAuth) 'Prepared supervisor pins failed.'
+    AssertSupervisorHashes "$backup\candidate-supervisor.ps1" $newIndex $oldAuth $runtimeHash
+    AssertSupervisorReplacement "$backup\previous-supervisor.ps1" "$backup\candidate-supervisor.ps1" $oldIndex $newIndex
     $dbTool = @'
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const {DatabaseSync,backup}=require('node:sqlite');
@@ -273,6 +289,7 @@ function inspect(file){const d=new DatabaseSync(file,{readOnly:true});try{
     [IO.File]::WriteAllBytes($supervisor,[IO.File]::ReadAllBytes("$backup\candidate-supervisor.ps1"))
     Assert ((Hash $supervisor) -eq (Hash "$backup\candidate-supervisor.ps1")) 'Installed supervisor write mismatch.'
     Assert-SecureTestSourcePins $supervisor $test
+    AssertSupervisorHashes $supervisor $newIndex $oldAuth (Hash $node)
     Report 'TEST_BACKEND_AND_STARTUP_PINS=PASS'
     StartTest
     & $node --no-warnings "$backup\verify-db.cjs" verify "$test\Server\data\calendar.db" $backup "$live\Server\data\calendar.db" "$test\Server\uploads" "$live\Server\uploads"
