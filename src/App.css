@@ -20115,3 +20115,20 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   box-sizing: border-box;
 }
 .person-editor-overlay button { min-height: 44px; touch-action: manipulation; }
+
+/* Real, opaque viewport-edge element for the iPhone status-bar color sampler.
+   Fixed positioning preserves page geometry and the existing document scroll. */
+.app-status-bar-strip { display: none; }
+@media (max-width: 760px) {
+  .app-status-bar-strip {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 6px;
+    background-color: #efe7da;
+    z-index: 2147483647;
+    pointer-events: none;
+  }
+}

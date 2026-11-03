@@ -1,4 +1,4 @@
-# Frontend-only profile editor popup on the existing TEST site.
+# Frontend-only solid status-bar strip experiment on the existing TEST site.
 # Default is read-only. -Apply builds isolated source, backs up, then swaps UI.
 param([Parameter(Mandatory=$true)][string]$CandidateSha, [switch]$Apply)
 Set-StrictMode -Version Latest
@@ -7,8 +7,8 @@ $stage = Split-Path $PSScriptRoot -Parent
 $test = 'C:\Users\bobby\Projects\family-calendar-test-security-stage'
 $live = 'C:\Users\bobby\Projects\family-calendar-live-auth-candidate'
 $node = 'C:\ProgramData\FamilyCalendar\Runtime\node-v24.22.1\node.exe'
-$original = 'c9562e94d1a04bd2d069d58cb4fbd93f180dde8a'
-$expectedLive = 'ea6dcd4805cf9f3dcf1dc5a9b25a91931148bd6d'
+$original = '4bfd6f28d1154df2fa9d68e09d1a3cb648d2900b'
+$expectedLive = 'df4ecc4a57fcbe4de76a01c4863bdcb7fa5df418'
 $taskName = 'Family Calendar Secure TEST Auto Deploy'
 $state = 'C:\ProgramData\FamilyCalendar\ProfileMonthTest'
 $journal = Join-Path $state 'IN-PROGRESS.json'
@@ -87,7 +87,7 @@ try {
     }
     & git -C $stage merge-base --is-ancestor $original $CandidateSha
     Assert ($LASTEXITCODE -eq 0) 'Candidate does not descend from current TEST.'
-    $allowed = @('src/App.tsx','src/App.css','scripts/test-mobile-profile-editor.mjs',
+    $allowed = @('src/App.css','scripts/test-mobile-profile-editor.mjs',
         'scripts/deploy-test-profile-month-ui.ps1')
     $changed = @(& git -C $stage diff --name-only $original $CandidateSha | Sort-Object)
     Assert ($LASTEXITCODE -eq 0 -and ($changed -join '|') -ceq (($allowed | Sort-Object) -join '|')) 'Candidate file scope differs from review.'
