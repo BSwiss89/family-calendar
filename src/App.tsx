@@ -18389,6 +18389,12 @@ onClick={(event) => {
   eventId={viewingCalendarEvent.id}
   selectedPersonId={activeHouseholdPersonId}
   joined={viewingCalendarEvent.people.some(person => person.id === activeHouseholdPersonId)}
+  pendingInvitation={familyEventInvites.familyInvitations.some(invite => invite.eventId === viewingCalendarEvent.id)}
+  onReviewInvitation={() => {
+    setViewingEventId(null)
+    setViewingOccurrenceDate(null)
+    setPage('invitations')
+  }}
   recurring={Boolean(viewingCalendarEvent.repeatUnit && viewingCalendarEvent.repeatUnit !== 'none')}
   onChanged={loadEvents}
 />
