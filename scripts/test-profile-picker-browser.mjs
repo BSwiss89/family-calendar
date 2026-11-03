@@ -167,7 +167,7 @@ test('profile lifecycle in the real React picker', {timeout: 90000}, async t => 
       await active(page, 'New member', 3)
       assert.equal(state.creates, 1)
     })
-    await t.test('month corners and photo/initial pill placement match the requested phone layout', async () => {
+    await t.test('four rounded month corners and photo/initial pill placement match the requested phone layout', async () => {
       const {page} = await fixture()
       await active(page, 'Bobby', 1)
       await page.locator('#photo-pill img').waitFor()
@@ -187,7 +187,7 @@ test('profile lifecycle in the real React picker', {timeout: 90000}, async t => 
           broken:getComputedStyle(document.querySelector('#broken-pill span')).justifyContent,
         }
       })
-      assert.deepEqual(layout.corners, ['0px','10px','10px','10px'])
+      assert.deepEqual(layout.corners, ['10px','10px','10px','10px'])
       assert.equal(layout.photoWidth, 24)
       assert.equal(layout.letterEndsBeforePhoto, true)
       assert.equal(layout.plain, 'center')

@@ -1,4 +1,4 @@
-# Manual frontend-only cutover for PRs #125/#126 on the existing TEST site.
+# Incremental frontend-only four-corner adjustment on the existing TEST site.
 # Default is read-only. -Apply builds isolated source, backs up, then swaps UI.
 param([Parameter(Mandatory=$true)][string]$CandidateSha, [switch]$Apply)
 Set-StrictMode -Version Latest
@@ -7,7 +7,7 @@ $stage = Split-Path $PSScriptRoot -Parent
 $test = 'C:\Users\bobby\Projects\family-calendar-test-security-stage'
 $live = 'C:\Users\bobby\Projects\family-calendar-live-auth-candidate'
 $node = 'C:\ProgramData\FamilyCalendar\Runtime\node-v24.22.1\node.exe'
-$original = '9df1251a3b1a24f3c4626b8ac0f3cea3b0fb8103'
+$original = 'e6790c73e458535f78964909d64891431c00a4bd'
 $expectedLive = 'ea6dcd4805cf9f3dcf1dc5a9b25a91931148bd6d'
 $taskName = 'Family Calendar Secure TEST Auto Deploy'
 $state = 'C:\ProgramData\FamilyCalendar\ProfileMonthTest'
@@ -87,9 +87,8 @@ try {
     }
     & git -C $stage merge-base --is-ancestor $original $CandidateSha
     Assert ($LASTEXITCODE -eq 0) 'Candidate does not descend from current TEST.'
-    $allowed = @('src/App.tsx','src/App.css','src/HouseholdProfilePicker.tsx',
-        'src/CalendarPersonFilterAvatar.tsx','scripts/test-profile-picker-browser.mjs',
-        '.github/workflows/profile-picker-browser.yml','scripts/deploy-test-profile-month-ui.ps1')
+    $allowed = @('src/App.css','scripts/test-profile-picker-browser.mjs',
+        'scripts/deploy-test-profile-month-ui.ps1')
     $changed = @(& git -C $stage diff --name-only $original $CandidateSha | Sort-Object)
     Assert ($LASTEXITCODE -eq 0 -and ($changed -join '|') -ceq (($allowed | Sort-Object) -join '|')) 'Candidate file scope differs from review.'
     & git -C $stage diff --quiet $original $CandidateSha -- Server package.json package-lock.json

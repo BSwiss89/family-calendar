@@ -20047,10 +20047,10 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 }
 
 
-/* Month day cards keep the date corner square and soften the other three. */
+/* Month day cards have four matching rounded corners. */
 .month-calendar-grid .month-week-days .day:not(.empty-day) {
   border: 1px solid #ebe8e2;
-  border-radius: 0 10px 10px 10px;
+  border-radius: 10px;
   box-sizing: border-box;
 }
 
