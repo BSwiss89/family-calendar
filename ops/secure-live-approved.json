@@ -1,9 +1,17 @@
 {
   "schema": 1,
-  "kind": "deployed-baseline",
+  "kind": "frontend-only",
   "repository": "BSwiss89/family-calendar",
-  "to_sha": "0a3a0f49420819622b5f0bf1ec5e02c0bf05e7a7",
-  "build_run_id": 41875561816,
-  "files": [],
-  "approval_note": "Secure LIVE deployment passed 2026-11-04 14:13:48 America/Chicago. SQLite online backup integrity_check=ok. Recovery: C:\\ProgramData\\FamilyCalendar\\SecureLiveAutoDeploy\\backup-20261104-141337-42ae5ece. Large iPhone photo verified on TEST; owner confirmed the large iPhone photo saves and persists on LIVE."
+  "from_sha": "0a3a0f49420819622b5f0bf1ec5e02c0bf05e7a7",
+  "to_sha": "f739e140c2e5011481f5cbede630d150c3159bfe",
+  "build_run_id": 41928442649,
+  "safety_run_id": 41930405153,
+  "files": [
+    "scripts/test-mobile-profile-editor.mjs",
+    "scripts/test-profile-picker-browser.mjs",
+    "src/App.tsx",
+    "src/HouseholdProfilePicker.tsx",
+    "src/normalizePersonPhoto.ts"
+  ],
+  "approval_note": "Owner verified both fixes on TEST at 2026-11-04 16:42:30 America/Chicago and explicitly authorized LIVE deployment. Exact candidate SHA passed the profile picker browser check, production build, and deployment safety workflow. Read-only LIVE preflight passed at 2026-11-04 16:45:10 America/Chicago with LIVE healthy, no review hold or deployment journal, and the existing recovery backup present. Frontend-only change: large iPhone photo normalization for Create Profile and native mobile keyboard behavior for Add/Edit Person; no backend, authentication, database, dependency, or deployment-controller changes. Preserve the existing secure backup, SQLite integrity verification, health checks, and automatic rollback process."
 }
