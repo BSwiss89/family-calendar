@@ -128,7 +128,7 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
               const editor=page.locator('.people-editor-card')
               if(mode==='baseline') {
                 const state=await editor.evaluate(el=>({top:el.getBoundingClientRect().top,title:el.querySelector('h2').textContent.trim()}))
-                assert.ok(state.top>=viewport.height || state.top<0 || state.title!=='Edit Person','Baseline unexpectedly opened a visible editor')
+                assert.equal(await page.locator('.person-editor-overlay').count(),0,'Baseline should retain its inline editor')
                 console.log(`BASELINE ${engine}: editor title=${state.title}, top=${state.top}`)
                 return
               }
@@ -172,13 +172,13 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
               assert.equal(writes.length,0)
               rejectSave=false
               await editor.getByRole('button',{name:'Save Person',exact:true})[touch?'tap':'click']()
-              await page.waitForFunction(()=>document.querySelector('.people-editor-card h2')?.textContent.trim()==='Add Person')
+              await page.locator('.person-editor-overlay').waitFor({state:'hidden'})
               assert.deepEqual(writes,[{removing:true,uploading:false}])
               assert.equal(await card.locator('img').count(),0)
               await card.getByRole('button',{name:'Edit',exact:true})[touch?'tap':'click']()
               await editor.getByLabel('Profile photo',{exact:true}).setInputFiles({name:'replacement.png',mimeType:'image/png',buffer:png})
               await editor.getByRole('button',{name:'Save Person',exact:true})[touch?'tap':'click']()
-              await page.waitForFunction(()=>document.querySelector('.people-editor-card h2')?.textContent.trim()==='Add Person')
+              await page.locator('.person-editor-overlay').waitFor({state:'hidden'})
               assert.deepEqual(writes[1],{removing:false,uploading:true})
               await card.locator('img[src="/uploads/replacement.png"]').waitFor()
 
