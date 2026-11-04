@@ -5358,12 +5358,7 @@ function handleHomeWidgetDragEnd(
     month: 'long',
   })
 
-  const fullDate = today.toLocaleDateString('default', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  })
+
 
   
 
@@ -14040,15 +14035,7 @@ return (
           : ''
   }`}
 >
-     {page !== 'meals' &&
-  page !== 'home' &&
-  page !== 'calendar' &&
-  page !== 'lists' && (
-  <div>
-    <h1>Family Calendar</h1>
-    <p>{fullDate}</p>
-  </div>
-)}
+
 
          
 
@@ -22770,7 +22757,7 @@ resetMealPlannerScroll()
             <div>
               <h2>People</h2>
               <p>
-                Manage the people who can be assigned to calendar events.
+                Manage your household profiles.
               </p>
             </div>
           </div>
@@ -22844,7 +22831,7 @@ onDrop={(event) => {
 
                     <h3>{person.name}</h3>
 
-                    <div className="person-color-row">
+                    <div className="person-color-row" aria-hidden="true">
                       <span
                         className="person-color-dot"
                         style={{
@@ -22852,7 +22839,7 @@ onDrop={(event) => {
                         }}
                       />
 
-                      <span>{person.color}</span>
+
                     </div>
 
                     <div className="person-card-actions">

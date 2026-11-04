@@ -20132,3 +20132,45 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
     pointer-events: none;
   }
 }
+
+/* People polish: retain the existing centered cards, grid and editor layout. */
+.calendar-app > .top-bar { margin-bottom: 0; }
+.people-page-heading h2 { margin: 0 0 6px; font-size: 28px; letter-spacing: -0.5px; }
+.people-page-heading p { margin: 0; color: #766e65; font-size: 14px; line-height: 1.5; }
+.people-page .person-card {
+  border: 1px solid #e7dfd3;
+  border-radius: 24px;
+  background: #fffefd;
+  box-shadow: 0 4px 18px rgba(68, 53, 36, 0.055);
+}
+.people-page .person-card h3 { letter-spacing: -0.3px; overflow-wrap: anywhere; }
+.people-page .person-card-avatar { box-shadow: 0 0 0 5px #f7f2eb; }
+.people-page .person-color-row { margin: 12px 0; }
+.people-page .person-color-dot { width: 12px; height: 12px; border: 1px solid rgba(0,0,0,0.06); }
+.people-page .person-card-actions { gap: 10px; }
+.people-page .person-card-actions button {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #e6ddd0;
+  border-radius: 14px;
+  background: #f3ede4;
+  color: #514436;
+  font-weight: 600;
+  touch-action: manipulation;
+}
+.people-page .person-card-actions button:last-child {
+  border-color: #ecdedb;
+  background: #fffaf9;
+  color: #974b42;
+}
+.people-page .person-card-actions button:focus-visible {
+  outline: 3px solid #6c8dce;
+  outline-offset: 2px;
+}
+@media (hover: hover) {
+  .people-page .person-card-actions button:hover { background: #eae1d5; }
+  .people-page .person-card-actions button:last-child:hover { background: #faeeeb; }
+}
+@media (max-width: 760px) {
+  .calendar-app > .top-bar { display: none; }
+}

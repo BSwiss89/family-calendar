@@ -89,6 +89,10 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
               }
               const card=page.locator('.person-card').filter({has:page.getByRole('heading',{name:'Person 1',exact:true})})
               if (mode === 'fixed') {
+                assert.equal(await page.getByRole('heading', {name:'Family Calendar', exact:true}).count(), 0)
+                assert.equal((await page.locator('.person-color-row').allTextContents()).join('').trim(), '')
+                assert.equal(await card.locator('.person-color-dot').count(), 1)
+                assert.ok((await card.getByRole('button', {name:'Edit',exact:true}).boundingBox()).height >= 44)
                 const strip = page.locator('.app-status-bar-strip')
                 assert.equal(await strip.count(), 1)
                 assert.equal(await strip.evaluate(el => el.parentElement === document.body), true)
