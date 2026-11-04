@@ -20177,7 +20177,7 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 
 /* Put profile creation beside the People heading and keep its form in a dialog. */
 .people-management-layout { display: block; }
-.people-page-heading {
+.people-management-page > .people-page-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -20213,6 +20213,6 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   .people-add-person-button:hover { background: #eae1d5; }
 }
 @media (max-width: 600px) {
-  .people-page-heading { align-items: stretch; }
+  .people-management-page > .people-page-heading { align-items: stretch; }
   .people-add-person-button { width: 100%; }
 }

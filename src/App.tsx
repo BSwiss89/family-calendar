@@ -22756,7 +22756,7 @@ resetMealPlannerScroll()
   )}
 
       {page === 'people' && (
-        <section className="people-page">
+        <section className="people-page people-management-page">
           <div className="people-page-heading">
             <div>
               <h2>People</h2>
