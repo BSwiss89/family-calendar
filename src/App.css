@@ -20134,7 +20134,7 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 }
 
 /* People polish: retain the existing centered cards, grid and editor layout. */
-.calendar-app > .top-bar { margin-bottom: 0; }
+.calendar-app:has(.people-page) > .top-bar { margin-bottom: 0; }
 .people-page-heading h2 { margin: 0 0 6px; font-size: 28px; letter-spacing: -0.5px; }
 .people-page-heading p { margin: 0; color: #766e65; font-size: 14px; line-height: 1.5; }
 .people-page .person-card {
@@ -20172,5 +20172,5 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   .people-page .person-card-actions button:last-child:hover { background: #faeeeb; }
 }
 @media (max-width: 760px) {
-  .calendar-app > .top-bar { display: none; }
+  .calendar-app:has(.people-page) > .top-bar { display: none; }
 }
