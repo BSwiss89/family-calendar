@@ -13895,35 +13895,13 @@ const personEditor = (
       : ''
   }`}
   type="text"
-  readOnly
+  maxLength={50}
+  autoComplete="name"
   placeholder="Family member name"
   value={personName}
- onClick={(event) => {
-  const nextPosition =
-    event.currentTarget.selectionStart ??
-    personName.length
-
-  personCursorPositionRef.current =
-    nextPosition
-
-  setPersonCursorPosition(
-    nextPosition
-  )
-
-  setPersonKeyboardOpen(true)
-}}
-onSelect={(event) => {
-  const nextPosition =
-    event.currentTarget.selectionStart ??
-    personName.length
-
-  personCursorPositionRef.current =
-    nextPosition
-
-  setPersonCursorPosition(
-    nextPosition
-  )
-}}
+  onChange={(event) => {
+    setPersonName(event.target.value)
+  }}
 />
 </div>
 
