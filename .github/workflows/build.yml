@@ -337,13 +337,27 @@ jobs:
                 if (attemptRun.run_attempt !== attempt || !Number.isFinite(beganAt)) {
                   throw new Error(`Attempt ${attempt} has unverified start metadata`);
                 }
-                const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
-                  owner, repo, run_id, attempt_number: attempt, per_page: 100
-                });
-                const candidateJobs = jobs.filter((job) => job.name !== 'ci-history');
-                if (candidateJobs.some((job) => job.status !== 'completed' ||
-                  !Number.isFinite(Date.parse(job.completed_at)))) {
-                  throw new Error(`Attempt ${attempt} has unfinished or undated test jobs; refusing incomplete archive`);
+                // The Actions API can briefly return stale job status/timestamps
+                // immediately after the required test job completes. Retry that
+                // read before failing closed so a transient API delay does not turn
+                // a passing test run red.
+                let candidateJobs = [];
+                let incompleteJobs = [];
+                for (let poll = 0; poll < 15; poll++) {
+                  const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
+                    owner, repo, run_id, attempt_number: attempt, per_page: 100
+                  });
+                  candidateJobs = jobs.filter((job) => job.name !== 'ci-history');
+                  incompleteJobs = candidateJobs.filter((job) => job.status !== 'completed' ||
+                    !Number.isFinite(Date.parse(job.completed_at)));
+                  if (!incompleteJobs.length) break;
+                  if (poll < 14) await new Promise((resolve) => setTimeout(resolve, 1000));
+                }
+                if (incompleteJobs.length) {
+                  const details = incompleteJobs.map((job) =>
+                    `${job.name || 'unnamed'}[status=${job.status || 'missing'},completed_at=${job.completed_at || 'missing'}]`
+                  ).join(', ');
+                  throw new Error(`Attempt ${attempt} has unfinished or undated test jobs after polling; refusing incomplete archive: ${details}`);
                 }
                 const tested = candidateJobs.filter((job) =>
                   Date.parse(job.completed_at) >= beganAt);

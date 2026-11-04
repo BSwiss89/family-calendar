@@ -89,6 +89,10 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
               }
               const card=page.locator('.person-card').filter({has:page.getByRole('heading',{name:'Person 1',exact:true})})
               if (mode === 'fixed') {
+                assert.equal(await page.getByRole('heading', {name:'Family Calendar', exact:true}).count(), 0)
+                assert.equal((await page.locator('.person-color-row').allTextContents()).join('').trim(), '')
+                assert.equal(await card.locator('.person-color-dot').count(), 1)
+                assert.ok((await card.getByRole('button', {name:'Edit',exact:true}).boundingBox()).height >= 44)
                 const strip = page.locator('.app-status-bar-strip')
                 assert.equal(await strip.count(), 1)
                 assert.equal(await strip.evaluate(el => el.parentElement === document.body), true)
@@ -124,7 +128,7 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
               const editor=page.locator('.people-editor-card')
               if(mode==='baseline') {
                 const state=await editor.evaluate(el=>({top:el.getBoundingClientRect().top,title:el.querySelector('h2').textContent.trim()}))
-                assert.ok(state.top>=viewport.height || state.top<0 || state.title!=='Edit Person','Baseline unexpectedly opened a visible editor')
+                assert.equal(await page.locator('.person-editor-overlay').count(),0,'Baseline should retain its inline editor')
                 console.log(`BASELINE ${engine}: editor title=${state.title}, top=${state.top}`)
                 return
               }
@@ -168,15 +172,36 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
               assert.equal(writes.length,0)
               rejectSave=false
               await editor.getByRole('button',{name:'Save Person',exact:true})[touch?'tap':'click']()
-              await page.waitForFunction(()=>document.querySelector('.people-editor-card h2')?.textContent.trim()==='Add Person')
+              await page.locator('.person-editor-overlay').waitFor({state:'hidden'})
               assert.deepEqual(writes,[{removing:true,uploading:false}])
               assert.equal(await card.locator('img').count(),0)
               await card.getByRole('button',{name:'Edit',exact:true})[touch?'tap':'click']()
               await editor.getByLabel('Profile photo',{exact:true}).setInputFiles({name:'replacement.png',mimeType:'image/png',buffer:png})
               await editor.getByRole('button',{name:'Save Person',exact:true})[touch?'tap':'click']()
-              await page.waitForFunction(()=>document.querySelector('.people-editor-card h2')?.textContent.trim()==='Add Person')
+              await page.locator('.person-editor-overlay').waitFor({state:'hidden'})
               assert.deepEqual(writes[1],{removing:false,uploading:true})
               await card.locator('img[src="/uploads/replacement.png"]').waitFor()
+
+              // Add is available above the people list and opens the same modal without scrolling.
+              const addButton=page.getByRole('button',{name:'Add Person',exact:true})
+              assert.equal(await addButton.count(),1)
+              const addBox=await addButton.boundingBox()
+              const firstCardBox=await card.boundingBox()
+              assert.ok(addBox&&firstCardBox&&addBox.y<firstCardBox.y,'Add Person should appear above the people cards')
+              const scrollBefore=await page.evaluate(()=>window.scrollY)
+              await addButton[touch?'tap':'click']()
+              await page.waitForFunction(()=>{
+                const dialog=document.querySelector('.people-editor-card')
+                const rect=dialog?.getBoundingClientRect()
+                return dialog?.querySelector('h2')?.textContent.trim()==='Add Person'&&
+                  dialog.getAttribute('role')==='dialog'&&rect.top>=0&&rect.bottom<=window.innerHeight
+              })
+              assert.equal(await editor.getAttribute('aria-modal'),'true')
+              assert.equal(await page.evaluate(()=>document.body.style.overflow),'hidden')
+              assert.equal(await page.evaluate(()=>window.scrollY),scrollBefore,'Opening Add Person must not scroll the page')
+              await editor.getByRole('button',{name:'Cancel',exact:true})[touch?'tap':'click']()
+              await page.locator('.person-editor-overlay').waitFor({state:'hidden'})
+              assert.equal(await page.evaluate(()=>document.body.style.overflow),'')
             } finally {await context.close()}
           })
         }

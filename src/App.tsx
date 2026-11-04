@@ -3765,8 +3765,9 @@ const personCursorPositionRef =
   }, [personImagePreview])
   const [personFileInputKey, setPersonFileInputKey] = useState(0)
   const [editingPersonId, setEditingPersonId] = useState<number | null>(null)
+  const [personEditorOpen, setPersonEditorOpen] = useState(false)
   useEffect(() => {
-    if (editingPersonId === null || page !== 'people') return
+    if (!personEditorOpen || page !== 'people') return
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -3795,7 +3796,7 @@ const personCursorPositionRef =
       document.removeEventListener('keydown', handleKey)
       if (trigger?.isConnected) trigger.focus({ preventScroll: true })
     }
-  }, [editingPersonId, page])
+  }, [personEditorOpen, page])
   const [
   personDeleteTarget,
   setPersonDeleteTarget,
@@ -5358,12 +5359,7 @@ function handleHomeWidgetDragEnd(
     month: 'long',
   })
 
-  const fullDate = today.toLocaleDateString('default', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  })
+
 
   
 
@@ -10233,6 +10229,65 @@ setRepeatEndDateError(false)
     setPersonImagePreview(savedPhoto ? getPersonImageUrl(savedPhoto) : '')
   }
 
+  async function normalizePersonPhoto(file: File): Promise<File> {
+    const sourceUrl = URL.createObjectURL(file)
+
+    try {
+      const image = new Image()
+      const loaded = new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve()
+        image.onerror = () => reject(new Error('The selected photo could not be decoded.'))
+      })
+      image.src = sourceUrl
+      await loaded
+
+      const sourceWidth = image.naturalWidth
+      const sourceHeight = image.naturalHeight
+      if (sourceWidth < 1 || sourceHeight < 1) {
+        throw new Error('The selected photo has no usable image dimensions.')
+      }
+
+      const maxDimension = 512
+      const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(sourceWidth * scale))
+      canvas.height = Math.max(1, Math.round(sourceHeight * scale))
+
+      const context = canvas.getContext('2d')
+      if (!context) {
+        throw new Error('Photo conversion is unavailable in this browser.')
+      }
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+      const encode = (type: string, quality: number) =>
+        new Promise<Blob>((resolve, reject) => {
+          canvas.toBlob(
+            blob => blob ? resolve(blob) : reject(new Error('Photo conversion failed.')),
+            type,
+            quality,
+          )
+        })
+
+      let normalized = await encode('image/webp', 0.84)
+      if (normalized.type.toLowerCase() !== 'image/webp') {
+        normalized = await encode('image/jpeg', 0.88)
+      }
+
+      const mimeType = normalized.type.toLowerCase()
+      if (mimeType !== 'image/webp' && mimeType !== 'image/jpeg') {
+        throw new Error('This browser could not convert the photo to a supported format.')
+      }
+
+      const extension = mimeType === 'image/webp' ? 'webp' : 'jpg'
+      return new File([normalized], `profile-photo.${extension}`, {
+        type: mimeType,
+        lastModified: Date.now(),
+      })
+    } finally {
+      URL.revokeObjectURL(sourceUrl)
+    }
+  }
+
   async function savePerson(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -10243,7 +10298,13 @@ setRepeatEndDateError(false)
     formData.append('color', personColor)
 
     if (personImageFile) {
-      formData.append('image', personImageFile)
+      try {
+        const normalizedPhoto = await normalizePersonPhoto(personImageFile)
+        formData.append('image', normalizedPhoto, normalizedPhoto.name)
+      } catch {
+        showAppNotification('This photo could not be prepared for upload. Please choose a different image.')
+        return
+      }
     } else if (personPhotoRemoved && editingPersonId !== null) {
       formData.append('removeImage', 'true')
     }
@@ -10258,17 +10319,24 @@ setRepeatEndDateError(false)
         ? 'POST'
         : 'PUT'
 
-    const response = await fetch(url, {
-      method,
-      body: formData,
-    })
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method,
+        body: formData,
+      })
+    } catch {
+      showAppNotification('The calendar could not be reached. Your profile was not saved; please try again.')
+      return
+    }
 
     if (!response.ok) {
-      const errorData = await response.json()
-
-     showAppNotification(
-  errorData.error ?? 'Could not save person.'
-)
+      let errorMessage = `Could not save person (HTTP ${response.status}).`
+      try {
+        const errorData = await response.json()
+        if (typeof errorData.error === 'string') errorMessage = errorData.error
+      } catch {}
+      showAppNotification(errorMessage)
       return
     }
 
@@ -10281,8 +10349,14 @@ await loadEvents()
 clearPersonForm(updatedPeople)
   }
 
+  function startAddingPerson() {
+    clearPersonForm()
+    setPersonEditorOpen(true)
+  }
+
   function startEditingPerson(person: Person) {
     setEditingPersonId(person.id)
+    setPersonEditorOpen(true)
     setPersonName(person.name)
     setPersonColor(person.color)
     setPersonPhotoRemoved(false)
@@ -10336,6 +10410,7 @@ async function confirmDeletePerson() {
   peopleToCheck: Person[] = people
 ) {
   setEditingPersonId(null)
+  setPersonEditorOpen(false)
   setPersonKeyboardOpen(false)
 setPersonShiftActive(false)
 setPersonCapsLockActive(false)
@@ -13855,8 +13930,8 @@ const homeTodayMeals =
 
 const personEditor = (
             <div className="card people-editor-card" ref={personEditorRef} tabIndex={-1}
-              role={editingPersonId === null ? "region" : "dialog"}
-              aria-modal={editingPersonId !== null ? true : undefined}
+              role="dialog"
+              aria-modal="true"
               aria-label="Profile editor" onClick={event => event.stopPropagation()}>
               <h2>
                 {editingPersonId !== null
@@ -13971,7 +14046,7 @@ onSelect={(event) => {
                     key={personFileInputKey}
                     className="person-file-input"
                     type="file"
-                    accept="image/png,image/jpeg,image/webp"
+                    accept="image/*"
                     onChange={handlePersonImageChange}
                   />
                 </label>
@@ -14009,17 +14084,13 @@ onSelect={(event) => {
                     : 'Add Person'}
                 </button>
 
-                {editingPersonId !== null && (
-                  <button
-                    className="cancel-button"
-                    type="button"
-                    onClick={() => {
-  clearPersonForm()
-}}
-                  >
-                    Cancel
-                  </button>
-                )}
+                <button
+                  className="cancel-button"
+                  type="button"
+                  onClick={() => clearPersonForm()}
+                >
+                  Cancel
+                </button>
               </form>
             </div>
 )
@@ -14040,15 +14111,7 @@ return (
           : ''
   }`}
 >
-     {page !== 'meals' &&
-  page !== 'home' &&
-  page !== 'calendar' &&
-  page !== 'lists' && (
-  <div>
-    <h1>Family Calendar</h1>
-    <p>{fullDate}</p>
-  </div>
-)}
+
 
          
 
@@ -22765,18 +22828,27 @@ resetMealPlannerScroll()
   )}
 
       {page === 'people' && (
-        <section className="people-page">
+        <section className="people-page people-management-page">
           <div className="people-page-heading">
             <div>
               <h2>People</h2>
               <p>
-                Manage the people who can be assigned to calendar events.
+                Manage your household profiles.
               </p>
             </div>
+            <button
+              type="button"
+              className="people-add-person-button"
+              aria-label="Add Person"
+              onClick={startAddingPerson}
+            >
+              <span aria-hidden="true">+</span>
+              <span>Add Person</span>
+            </button>
           </div>
 
           <div className="people-page-layout people-management-layout">
-            {editingPersonId === null ? personEditor : createPortal(
+            {personEditorOpen && createPortal(
               <div className="person-editor-overlay" onClick={() => clearPersonForm()}>
                 {personEditor}
               </div>, document.body
@@ -22844,7 +22916,7 @@ onDrop={(event) => {
 
                     <h3>{person.name}</h3>
 
-                    <div className="person-color-row">
+                    <div className="person-color-row" aria-hidden="true">
                       <span
                         className="person-color-dot"
                         style={{
@@ -22852,7 +22924,7 @@ onDrop={(event) => {
                         }}
                       />
 
-                      <span>{person.color}</span>
+
                     </div>
 
                     <div className="person-card-actions">

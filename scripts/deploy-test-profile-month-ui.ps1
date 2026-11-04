@@ -1,4 +1,4 @@
-# Frontend-only solid status-bar strip experiment on the existing TEST site.
+# Frontend-only People cosmetics on the existing TEST site.
 # Default is read-only. -Apply builds isolated source, backs up, then swaps UI.
 param([Parameter(Mandatory=$true)][string]$CandidateSha, [switch]$Apply)
 Set-StrictMode -Version Latest
@@ -7,8 +7,8 @@ $stage = Split-Path $PSScriptRoot -Parent
 $test = 'C:\Users\bobby\Projects\family-calendar-test-security-stage'
 $live = 'C:\Users\bobby\Projects\family-calendar-live-auth-candidate'
 $node = 'C:\ProgramData\FamilyCalendar\Runtime\node-v24.22.1\node.exe'
-$original = '4bfd6f28d1154df2fa9d68e09d1a3cb648d2900b'
-$expectedLive = 'df4ecc4a57fcbe4de76a01c4863bdcb7fa5df418'
+$original = 'a7d63f4dfbef7d1d69468c81f6449e1213486478'
+$expectedLive = '6b77f15da9e2f4166317e1ad005a6e95501f0dab'
 $taskName = 'Family Calendar Secure TEST Auto Deploy'
 $state = 'C:\ProgramData\FamilyCalendar\ProfileMonthTest'
 $journal = Join-Path $state 'IN-PROGRESS.json'
@@ -29,6 +29,12 @@ function Head([string]$folder) {
     return ([string]$v).Trim()
 }
 function Hash([string]$file) { (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash }
+function GitHash([string]$folder,[string]$path) {
+    $file = Join-Path $folder $path
+    $value = & git -C $folder hash-object "--path=$path" -- $file
+    Assert ($LASTEXITCODE -eq 0) "Cannot verify protected file: $path"
+    return ([string]$value).Trim()
+}
 function Manifest([string]$folder) {
     Assert (Test-Path -LiteralPath $folder -PathType Container) 'Frontend directory missing.'
     $rows = @(Get-ChildItem -LiteralPath $folder -File -Recurse -Force | ForEach-Object {
@@ -87,14 +93,16 @@ try {
     }
     & git -C $stage merge-base --is-ancestor $original $CandidateSha
     Assert ($LASTEXITCODE -eq 0) 'Candidate does not descend from current TEST.'
-    $allowed = @('src/App.css','scripts/test-mobile-profile-editor.mjs',
+    $allowed = @('src/App.tsx','src/App.css','scripts/test-mobile-profile-editor.mjs',
         'scripts/deploy-test-profile-month-ui.ps1')
     $changed = @(& git -C $stage diff --name-only $original $CandidateSha | Sort-Object)
     Assert ($LASTEXITCODE -eq 0 -and ($changed -join '|') -ceq (($allowed | Sort-Object) -join '|')) 'Candidate file scope differs from review.'
     & git -C $stage diff --quiet $original $CandidateSha -- Server package.json package-lock.json
     Assert ($LASTEXITCODE -eq 0) 'Backend/auth/dependency changes are forbidden.'
     foreach ($path in @('Server\index.mjs','Server\family-auth.mjs','package.json','package-lock.json')) {
-        Assert ((Hash (Join-Path $test $path)) -eq (Hash (Join-Path $stage $path))) 'Installed protected files differ from candidate.'
+        $installedHash = GitHash $test $path
+        $candidateHash = GitHash $stage $path
+        Assert ($installedHash -ceq $candidateHash) "Installed protected file differs from candidate: $path"
     }
     Health
     $testProcess = ProcessStamp 13002 $test
