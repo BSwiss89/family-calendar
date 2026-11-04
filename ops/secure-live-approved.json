@@ -1,9 +1,14 @@
 {
   "schema": 1,
-  "kind": "deployed-baseline",
+  "kind": "frontend-only",
   "repository": "BSwiss89/family-calendar",
-  "to_sha": "df4ecc4a57fcbe4de76a01c4863bdcb7fa5df418",
-  "build_run_id": 41736463874,
-  "files": [],
-  "approval_note": "User-authorized profile lifecycle, month corners/photo pills, profile photo management and Edit popup release deployed November 3, 2026 at 17:18:19 America/Chicago. Operator confirmed LIVE_PROFILE_DEPLOYMENT=PASS, all four startup pins, SQLite backup and independent restore, existing counts/data/uploads, health/authentication and unchanged TEST. Recovery: C:\\Users\\bobby\\CalendarBackups\\LiveProfiles\\20261103-171810-16f571. Exact-head Windows build and Chromium/WebKit browser checks passed. Receipt records the installed release only and authorizes no deployment or file changes."
+  "from_sha": "df4ecc4a57fcbe4de76a01c4863bdcb7fa5df418",
+  "to_sha": "6b77f15da9e2f4166317e1ad005a6e95501f0dab",
+  "build_run_id": 41743493455,
+  "safety_run_id": 41743493790,
+  "files": [
+    "src/App.css",
+    "src/App.tsx"
+  ],
+  "approval_note": "Release only the iPhone-confirmed 6px status-bar strip. User confirmed the TEST fix works after deployment at 2026-11-03 17:56:35 America/Chicago, asked to continue, and asked to deploy it to LIVE. Exact deployed-LIVE delta is src/App.tsx and src/App.css only. All three exact-head checks passed. No People cosmetic changes, backend changes or server restart. Existing approved-only controller performs verified backup, frontend launcher pin update and rollback."
 }
