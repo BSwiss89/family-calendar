@@ -1,13 +1,9 @@
 {
   "schema": 1,
-  "kind": "frontend-only",
+  "kind": "deployed-baseline",
   "repository": "BSwiss89/family-calendar",
-  "from_sha": "42ae5ecefe0aa7bd74c9a09fe3f730aab434d549",
   "to_sha": "0a3a0f49420819622b5f0bf1ec5e02c0bf05e7a7",
   "build_run_id": 41875561816,
-  "safety_run_id": 41904071739,
-  "files": [
-    "src/App.tsx"
-  ],
-  "approval_note": "Owner verified the large iPhone profile photo on TEST and authorized LIVE. Both PR #137 build and browser checks passed. Deployment safety run 41904071739 passed on the LIVE candidate. Use the existing secure frontend-only recovery process."
+  "files": [],
+  "approval_note": "Secure LIVE deployment passed 2026-11-04 14:13:48 America/Chicago. SQLite online backup integrity_check=ok. Recovery: C:\\ProgramData\\FamilyCalendar\\SecureLiveAutoDeploy\\backup-20261104-141337-42ae5ece. Large iPhone photo verified on TEST; LIVE phone verification pending."
 }
