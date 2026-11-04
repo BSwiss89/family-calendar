@@ -2639,6 +2639,14 @@ const mobileScheduleEmptyTapRef = useRef({
   y: 0,
 })
 
+const mobileMonthDayTapRef = useRef({
+  time: 0,
+  dateKey: '',
+  x: 0,
+  y: 0,
+  singleTapTimer: null as number | null,
+})
+
 const mobileScheduleSuppressClickUntilRef =
   useRef(0)
 function resetMobileMealsSwipeGesture() {
@@ -16669,7 +16677,7 @@ const visibleDayEventCount =
                     ? 'selected-day'
                     : ''
                 }`}
-                onClick={() => {
+                onClick={(event) => {
   const openEventsForDay = () => {
     setSelectedDay(day)
     clearEventForm()
@@ -16685,6 +16693,93 @@ const visibleDayEventCount =
     }
 
     setMonthEventsOpen(true)
+  }
+
+  const isMobileMonth =
+    !window.matchMedia(
+      '(min-width: 761px)'
+    ).matches
+
+  if (isMobileMonth) {
+    const now = performance.now()
+    const dateKey = getDateKeyForMonth(
+      targetYear,
+      targetMonth,
+      day
+    )
+    const previousTap =
+      mobileMonthDayTapRef.current
+    const tapDistance = Math.hypot(
+      event.clientX - previousTap.x,
+      event.clientY - previousTap.y
+    )
+    const isDoubleTap =
+      now - previousTap.time <= 325 &&
+      previousTap.dateKey === dateKey &&
+      tapDistance <= 40
+
+    if (isDoubleTap) {
+      if (previousTap.singleTapTimer !== null) {
+        window.clearTimeout(
+          previousTap.singleTapTimer
+        )
+      }
+
+      mobileMonthDayTapRef.current = {
+        time: 0,
+        dateKey: '',
+        x: 0,
+        y: 0,
+        singleTapTimer: null,
+      }
+
+      clearEventForm()
+      setViewDate(
+        new Date(
+          targetYear,
+          targetMonth,
+          1
+        )
+      )
+      setSelectedDay(day)
+      setEventStartDate(dateKey)
+      setEventStartDateText(
+        formatDateKeyForText(dateKey)
+      )
+      setMonthEventsOpen(true)
+      setIsAddingEvent(true)
+
+      window.setTimeout(() => {
+        document
+          .querySelector<HTMLInputElement>(
+            '.event-form .event-input[type="text"]'
+          )
+          ?.focus()
+      }, 0)
+      return
+    }
+
+    if (previousTap.singleTapTimer !== null) {
+      window.clearTimeout(
+        previousTap.singleTapTimer
+      )
+    }
+
+    const singleTapTimer =
+      window.setTimeout(() => {
+        openEventsForDay()
+        mobileMonthDayTapRef.current.singleTapTimer =
+          null
+      }, 325)
+
+    mobileMonthDayTapRef.current = {
+      time: now,
+      dateKey,
+      x: event.clientX,
+      y: event.clientY,
+      singleTapTimer,
+    }
+    return
   }
 
   if (showCalendarSidebar) {
