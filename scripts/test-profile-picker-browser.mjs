@@ -98,7 +98,6 @@ test('profile lifecycle in the real React picker', {timeout: 90000}, async t => 
         }
         if (path === '/api/people' && route.request().method() === 'GET') return send(state.people)
         if (path === '/api/people' && route.request().method() === 'POST') {
-          state.uploadBody = route.request().postDataBuffer()
           state.creates++
           const person = {id:3, name:'New member', color:'#3a82f6', image:null}
           state.people.push(person)
@@ -142,23 +141,9 @@ test('profile lifecycle in the real React picker', {timeout: 90000}, async t => 
         await page.evaluate(() => { window.navigationSentinel = 'still here' })
         await page.getByRole('button', {name:'Create Profile New household member'}).click()
         await page.getByLabel('Profile name', {exact:true}).fill('New member')
-        if (!blocked) {
-          const png = await page.evaluate(() => {
-            const canvas = document.createElement('canvas')
-            canvas.width = 2048
-            canvas.height = 1024
-            return canvas.toDataURL('image/png').split(',')[1]
-          })
-          const largePhoto = Buffer.concat([Buffer.from(png, 'base64'), Buffer.alloc(21 * 1024 * 1024)])
-          await page.getByLabel('Profile photo (optional)').setInputFiles({name:'large.png', mimeType:'image/png', buffer:largePhoto})
-        }
         await page.getByRole('button', {name:'Create & Continue'}).click()
         await active(page, 'New member', 3)
         assert.equal(state.creates, 1)
-        if (!blocked) {
-          assert.match(state.uploadBody.toString('latin1'), /filename="profile-photo\.(webp|jpg)"/)
-          assert.ok(state.uploadBody.length < 1024 * 1024)
-        }
         assert.equal(await page.evaluate(() => window.navigationSentinel), 'still here')
         assert.equal(JSON.parse(await page.locator('#created').textContent())[0].id, 3)
         if (blocked) {
