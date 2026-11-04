@@ -1,14 +1,9 @@
 {
   "schema": 1,
-  "kind": "frontend-only",
+  "kind": "deployed-baseline",
   "repository": "BSwiss89/family-calendar",
-  "from_sha": "6b77f15da9e2f4166317e1ad005a6e95501f0dab",
   "to_sha": "42ae5ecefe0aa7bd74c9a09fe3f730aab434d549",
   "build_run_id": 41759342584,
-  "safety_run_id": 41759342545,
-  "files": [
-    "src/App.css",
-    "src/App.tsx"
-  ],
-  "approval_note": "User reviewed the People cleanup and top-of-screen Add Person dialog on TEST and said it looks good, then explicitly asked to add the tested changes to LIVE. TEST deployment of SHA 1214883204185c60431e2eae20637879acd813f3 passed 2026-11-03 20:02:11 America/Chicago; user hands-on review followed. This LIVE candidate is based exactly on current deployed LIVE 6b77f15da9e2f4166317e1ad005a6e95501f0dab and differs only in src/App.css and src/App.tsx. Exact-head Build Family Calendar run 41759342584 and Deployment safety run 41759342545 passed; Profile picker browser regressions run 41759342568 also passed. Preserve existing 6px status strip. No backend/auth/database/dependency changes; use existing approved frontend-only backup, pin, rollback flow, without restarting server."
+  "files": [],
+  "approval_note": "Verified LIVE deployment PASS at 2026-11-03 20:20:31 America/Chicago. LIVE_SHA=42ae5ecefe0aa7bd74c9a09fe3f730aab434d549. Secure LIVE online SQLite backup passed with integrity_check=ok; previous LIVE baseline 6b77f15da9e2f4166317e1ad005a6e95501f0dab saved at C:\\ProgramData\\FamilyCalendar\\SecureLiveAutoDeploy\\backup-20261103-202020-6b77f15d. People cleanup and top Add Person dialog were approved after successful TEST deployment and hands-on user review. No backend/auth/database/dependency changes; frontend-only rollout."
 }
