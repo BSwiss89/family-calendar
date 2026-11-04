@@ -1,14 +1,9 @@
 {
   "schema": 1,
-  "kind": "frontend-only",
+  "kind": "deployed-baseline",
   "repository": "BSwiss89/family-calendar",
-  "from_sha": "df4ecc4a57fcbe4de76a01c4863bdcb7fa5df418",
   "to_sha": "6b77f15da9e2f4166317e1ad005a6e95501f0dab",
   "build_run_id": 41743493455,
-  "safety_run_id": 41743493790,
-  "files": [
-    "src/App.css",
-    "src/App.tsx"
-  ],
-  "approval_note": "Release only the iPhone-confirmed 6px status-bar strip. User confirmed the TEST fix works after deployment at 2026-11-03 17:56:35 America/Chicago, asked to continue, and asked to deploy it to LIVE. Exact deployed-LIVE delta is src/App.tsx and src/App.css only. All three exact-head checks passed. No People cosmetic changes, backend changes or server restart. Existing approved-only controller performs verified backup, frontend launcher pin update and rollback."
+  "files": [],
+  "approval_note": "Verified LIVE deployment PASS at 2026-11-03 18:10:05 America/Chicago. LIVE_SHA=6b77f15da9e2f4166317e1ad005a6e95501f0dab. Exact approved 6px iPhone status-bar strip release; online SQLite backup passed with integrity_check=ok; prior LIVE df4ecc4a57fcbe4de76a01c4863bdcb7fa5df418 saved at C:\\ProgramData\\FamilyCalendar\\SecureLiveAutoDeploy\\backup-20261103-180955-df4ecc4a. No server restart."
 }
