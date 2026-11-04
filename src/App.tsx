@@ -3765,8 +3765,9 @@ const personCursorPositionRef =
   }, [personImagePreview])
   const [personFileInputKey, setPersonFileInputKey] = useState(0)
   const [editingPersonId, setEditingPersonId] = useState<number | null>(null)
+  const [personEditorOpen, setPersonEditorOpen] = useState(false)
   useEffect(() => {
-    if (editingPersonId === null || page !== 'people') return
+    if (!personEditorOpen || page !== 'people') return
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -3795,7 +3796,7 @@ const personCursorPositionRef =
       document.removeEventListener('keydown', handleKey)
       if (trigger?.isConnected) trigger.focus({ preventScroll: true })
     }
-  }, [editingPersonId, page])
+  }, [personEditorOpen, page])
   const [
   personDeleteTarget,
   setPersonDeleteTarget,
@@ -10276,8 +10277,14 @@ await loadEvents()
 clearPersonForm(updatedPeople)
   }
 
+  function startAddingPerson() {
+    clearPersonForm()
+    setPersonEditorOpen(true)
+  }
+
   function startEditingPerson(person: Person) {
     setEditingPersonId(person.id)
+    setPersonEditorOpen(true)
     setPersonName(person.name)
     setPersonColor(person.color)
     setPersonPhotoRemoved(false)
@@ -10331,6 +10338,7 @@ async function confirmDeletePerson() {
   peopleToCheck: Person[] = people
 ) {
   setEditingPersonId(null)
+  setPersonEditorOpen(false)
   setPersonKeyboardOpen(false)
 setPersonShiftActive(false)
 setPersonCapsLockActive(false)
@@ -13850,8 +13858,8 @@ const homeTodayMeals =
 
 const personEditor = (
             <div className="card people-editor-card" ref={personEditorRef} tabIndex={-1}
-              role={editingPersonId === null ? "region" : "dialog"}
-              aria-modal={editingPersonId !== null ? true : undefined}
+              role="dialog"
+              aria-modal="true"
               aria-label="Profile editor" onClick={event => event.stopPropagation()}>
               <h2>
                 {editingPersonId !== null
@@ -14004,17 +14012,13 @@ onSelect={(event) => {
                     : 'Add Person'}
                 </button>
 
-                {editingPersonId !== null && (
-                  <button
-                    className="cancel-button"
-                    type="button"
-                    onClick={() => {
-  clearPersonForm()
-}}
-                  >
-                    Cancel
-                  </button>
-                )}
+                <button
+                  className="cancel-button"
+                  type="button"
+                  onClick={() => clearPersonForm()}
+                >
+                  Cancel
+                </button>
               </form>
             </div>
 )
@@ -22760,10 +22764,19 @@ resetMealPlannerScroll()
                 Manage your household profiles.
               </p>
             </div>
+            <button
+              type="button"
+              className="people-add-person-button"
+              aria-label="Add Person"
+              onClick={startAddingPerson}
+            >
+              <span aria-hidden="true">+</span>
+              <span>Add Person</span>
+            </button>
           </div>
 
           <div className="people-page-layout people-management-layout">
-            {editingPersonId === null ? personEditor : createPortal(
+            {personEditorOpen && createPortal(
               <div className="person-editor-overlay" onClick={() => clearPersonForm()}>
                 {personEditor}
               </div>, document.body

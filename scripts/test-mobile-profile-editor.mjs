@@ -181,6 +181,27 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
               await page.waitForFunction(()=>document.querySelector('.people-editor-card h2')?.textContent.trim()==='Add Person')
               assert.deepEqual(writes[1],{removing:false,uploading:true})
               await card.locator('img[src="/uploads/replacement.png"]').waitFor()
+
+              // Add is available above the people list and opens the same modal without scrolling.
+              const addButton=page.getByRole('button',{name:'Add Person',exact:true})
+              assert.equal(await addButton.count(),1)
+              const addBox=await addButton.boundingBox()
+              const firstCardBox=await card.boundingBox()
+              assert.ok(addBox&&firstCardBox&&addBox.y<firstCardBox.y,'Add Person should appear above the people cards')
+              const scrollBefore=await page.evaluate(()=>window.scrollY)
+              await addButton[touch?'tap':'click']()
+              await page.waitForFunction(()=>{
+                const dialog=document.querySelector('.people-editor-card')
+                const rect=dialog?.getBoundingClientRect()
+                return dialog?.querySelector('h2')?.textContent.trim()==='Add Person'&&
+                  dialog.getAttribute('role')==='dialog'&&rect.top>=0&&rect.bottom<=window.innerHeight
+              })
+              assert.equal(await editor.getAttribute('aria-modal'),'true')
+              assert.equal(await page.evaluate(()=>document.body.style.overflow),'hidden')
+              assert.equal(await page.evaluate(()=>window.scrollY),scrollBefore,'Opening Add Person must not scroll the page')
+              await editor.getByRole('button',{name:'Cancel',exact:true})[touch?'tap':'click']()
+              await page.locator('.person-editor-overlay').waitFor({state:'hidden'})
+              assert.equal(await page.evaluate(()=>document.body.style.overflow),'')
             } finally {await context.close()}
           })
         }
