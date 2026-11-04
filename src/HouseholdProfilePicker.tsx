@@ -1,3 +1,4 @@
+import { normalizePersonPhoto } from './normalizePersonPhoto'
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
   profileStorageKey, resolveProfileSelection, serializeProfileSelection, validateNewProfileInput,
@@ -226,7 +227,7 @@ export default function HouseholdProfilePicker({ switchRequest, peopleRevision, 
     event.preventDefault()
     if (screen !== 'create' || !storageKey || creatingProfile) return
     const name = newProfileName.trim()
-    const validation = validateNewProfileInput(name, newProfileColor, newProfilePhoto)
+    const validation = validateNewProfileInput(name, newProfileColor)
     if (validation) {
       setCreateError(validation)
       return
@@ -238,7 +239,12 @@ export default function HouseholdProfilePicker({ switchRequest, peopleRevision, 
       const data = new FormData()
       data.append('name', name)
       data.append('color', newProfileColor)
-      if (newProfilePhoto) data.append('image', newProfilePhoto, newProfilePhoto.name)
+      if (newProfilePhoto) {
+        const photo = await normalizePersonPhoto(newProfilePhoto)
+        const photoError = validateNewProfileInput(name, newProfileColor, photo)
+        if (photoError) throw new Error(photoError)
+        data.append('image', photo, photo.name)
+      }
       const response = await fetch('/api/people', {
         method: 'POST',
         credentials: 'same-origin',
@@ -388,9 +394,9 @@ export default function HouseholdProfilePicker({ switchRequest, peopleRevision, 
             </fieldset>
             <label htmlFor="household-new-profile-photo">Profile photo (optional)</label>
             <input id="household-new-profile-photo" type="file"
-              accept="image/jpeg,image/png,image/webp" disabled={creatingProfile}
+              accept="image/*" disabled={creatingProfile}
               onChange={(event) => setNewProfilePhoto(event.target.files?.[0] ?? null)} />
-            <p className="household-profile-photo-help">JPG, PNG or WebP, up to 20 MB. You can add a photo later.</p>
+            <p className="household-profile-photo-help">Your photo will be resized automatically. You can also add one later.</p>
             {createError && <p className="household-profile-form-error" role="alert">{createError}</p>}
             <div className="household-profile-form-buttons">
               <button type="button" disabled={creatingProfile} className="household-profile-back"
