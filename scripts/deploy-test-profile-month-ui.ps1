@@ -29,6 +29,12 @@ function Head([string]$folder) {
     return ([string]$v).Trim()
 }
 function Hash([string]$file) { (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash }
+function GitHash([string]$folder,[string]$path) {
+    $file = Join-Path $folder $path
+    $value = & git -C $folder hash-object "--path=$path" -- $file
+    Assert ($LASTEXITCODE -eq 0) "Cannot verify protected file: $path"
+    return ([string]$value).Trim()
+}
 function Manifest([string]$folder) {
     Assert (Test-Path -LiteralPath $folder -PathType Container) 'Frontend directory missing.'
     $rows = @(Get-ChildItem -LiteralPath $folder -File -Recurse -Force | ForEach-Object {
@@ -94,7 +100,9 @@ try {
     & git -C $stage diff --quiet $original $CandidateSha -- Server package.json package-lock.json
     Assert ($LASTEXITCODE -eq 0) 'Backend/auth/dependency changes are forbidden.'
     foreach ($path in @('Server\index.mjs','Server\family-auth.mjs','package.json','package-lock.json')) {
-        Assert ((Hash (Join-Path $test $path)) -eq (Hash (Join-Path $stage $path))) 'Installed protected files differ from candidate.'
+        $installedHash = GitHash $test $path
+        $candidateHash = GitHash $stage $path
+        Assert ($installedHash -ceq $candidateHash) "Installed protected file differs from candidate: $path"
     }
     Health
     $testProcess = ProcessStamp 13002 $test
