@@ -5,5 +5,5 @@
   "to_sha": "0a3a0f49420819622b5f0bf1ec5e02c0bf05e7a7",
   "build_run_id": 41875561816,
   "files": [],
-  "approval_note": "Secure LIVE deployment passed 2026-11-04 14:13:48 America/Chicago. SQLite online backup integrity_check=ok. Recovery: C:\\ProgramData\\FamilyCalendar\\SecureLiveAutoDeploy\\backup-20261104-141337-42ae5ece. Large iPhone photo verified on TEST; LIVE phone verification pending."
+  "approval_note": "Secure LIVE deployment passed 2026-11-04 14:13:48 America/Chicago. SQLite online backup integrity_check=ok. Recovery: C:\\ProgramData\\FamilyCalendar\\SecureLiveAutoDeploy\\backup-20261104-141337-42ae5ece. Large iPhone photo verified on TEST; owner confirmed the large iPhone photo saves and persists on LIVE."
 }
