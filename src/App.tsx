@@ -2266,6 +2266,7 @@ type MobileNavId =
   (typeof mobileNavItems)[number]['id']
 
 const mobileNavSliderWidth = 148
+const [mobileNavMenuOpen, setMobileNavMenuOpen] = useState(false)
 
 const [mobileNavDragX, setMobileNavDragX] =
   useState(0)
@@ -2388,6 +2389,8 @@ const mobileNavNextItem =
 function openMobileNavItem(
   id: MobileNavId
 ) {
+  setMobileNavMenuOpen(false)
+
   if (id === 'today') {
     setPage('home')
     return
@@ -2529,9 +2532,18 @@ function finishMobileNavGesture(
   const deltaX =
     gesture.deltaX
 
+  const deltaY =
+    event.clientY - gesture.startY
+
   const shouldChange =
     gesture.horizontal &&
     Math.abs(deltaX) >= 42
+
+  const shouldOpenMenu =
+    !gesture.horizontal &&
+    !gesture.vertical &&
+    Math.abs(deltaX) < 10 &&
+    Math.abs(deltaY) < 10
 
   mobileNavGestureRef.current = {
     pointerId: -1,
@@ -2543,6 +2555,12 @@ function finishMobileNavGesture(
   }
 
   if (!shouldChange) {
+    if (shouldOpenMenu) {
+      setMobileNavMenuOpen(
+        (current) => !current
+      )
+    }
+
     setMobileNavSettling(true)
     setMobileNavDragX(0)
 
@@ -3215,6 +3233,7 @@ const [
   const [eventLocation, setEventLocation] = useState('')
   const [repeatUnit, setRepeatUnit] = useState('none')
 const [repeatInterval, setRepeatInterval] = useState(1)
+const [repeatIntervalInput, setRepeatIntervalInput] = useState('')
 const [repeatEndType, setRepeatEndType] = useState('never')
 const [repeatEndDate, setRepeatEndDate] = useState('')
 const [repeatEndDateText, setRepeatEndDateText] = useState('')
@@ -9320,7 +9339,14 @@ setEventEndDateText(
   setEventNotes(calendarEvent.notes ?? '')
   setEventLocation(calendarEvent.location ?? '')
   setRepeatUnit(calendarEvent.repeatUnit ?? 'none')
-  setRepeatInterval(calendarEvent.repeatInterval ?? 1)
+  const nextRepeatInterval =
+    calendarEvent.repeatInterval ?? 1
+  setRepeatInterval(nextRepeatInterval)
+  setRepeatIntervalInput(
+    nextRepeatInterval === 1
+      ? ''
+      : String(nextRepeatInterval)
+  )
   setRepeatEndType(calendarEvent.repeatEndType ?? 'never')
  setRepeatEndDate(calendarEvent.repeatEndDate ?? '')
 setRepeatEndDateText(
@@ -9356,6 +9382,11 @@ function startDuplicatingEvent(calendarEvent: CalendarEvent, occurrenceDate: str
   setSelectedPersonIds(draft.personIds)
   setRepeatUnit(draft.repeatUnit)
   setRepeatInterval(draft.repeatInterval)
+  setRepeatIntervalInput(
+    draft.repeatInterval === 1
+      ? ''
+      : String(draft.repeatInterval)
+  )
   setRepeatEndType(draft.repeatEndType)
   setRepeatEndDate('')
   setRepeatEndDateText('')
@@ -10181,6 +10212,7 @@ setEventNotes('')
 setEventLocation('')
   setRepeatUnit('none')
   setRepeatInterval(1)
+  setRepeatIntervalInput('')
   setRepeatEndType('never')
   setRepeatEndDate('')
   setRepeatEndDateText('')
@@ -14165,14 +14197,70 @@ return (
 </nav>
       </header>
       <div className="mobile-bottom-controls">
+  {mobileNavMenuOpen && (
+    <>
+      <button
+        type="button"
+        className="mobile-page-menu-backdrop"
+        aria-label="Close page menu"
+        onClick={() =>
+          setMobileNavMenuOpen(false)
+        }
+      />
+
+      <div
+        id="mobile-page-menu"
+        className="mobile-page-menu"
+        role="dialog"
+        aria-label="Choose a page"
+      >
+        {mobileNavItems.map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            className={`mobile-page-menu-option ${
+              item.id === mobileNavActiveId
+                ? 'mobile-page-menu-option-active'
+                : ''
+            }`}
+            aria-current={
+              item.id === mobileNavActiveId
+                ? 'page'
+                : undefined
+            }
+            onClick={() =>
+              openMobileNavItem(item.id)
+            }
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </>
+  )}
+
   <div
     className={`mobile-page-slider ${
       mobileNavSettling
         ? 'mobile-page-slider-settling'
         : ''
     }`}
-    role="navigation"
-    aria-label="Mobile page navigation"
+    role="button"
+    tabIndex={0}
+    aria-label="Open page menu; swipe to change pages"
+    aria-expanded={mobileNavMenuOpen}
+    aria-controls="mobile-page-menu"
+    onKeyDown={(event) => {
+      if (
+        event.key === 'Enter' ||
+        event.key === ' '
+      ) {
+        event.preventDefault()
+        setMobileNavMenuOpen(
+          (current) => !current
+        )
+      }
+    }}
     onPointerDown={
       handleMobileNavPointerDown
     }
@@ -18961,7 +19049,7 @@ const occurrenceEndDate =
   </h2>
 
   {people.length > 0 && (
-    <div className="event-header-people">
+    <div className="event-header-people event-header-people-desktop">
   <div className="family-slider event-header-family-slider">
     {people.map((person) => {
       const isSelected =
@@ -19566,6 +19654,54 @@ const occurrenceEndDate =
 )}
 </div>
 
+{people.length > 0 && (
+  <div
+    className="event-form-people"
+    aria-label="Assign people"
+  >
+    <div className="family-slider event-form-family-slider">
+      {people.map((person) => {
+        const isSelected =
+          selectedPersonIds.includes(person.id)
+
+        return (
+          <button
+            type="button"
+            key={person.id}
+            className={`family-slider-card ${
+              isSelected
+                ? 'family-slider-card-selected'
+                : ''
+            }`}
+            style={{
+              background:
+                softenEventColor(person.color),
+              border: isSelected
+                ? `3px solid color-mix(in srgb, ${person.color} 55%, black)`
+                : '1px solid rgba(0, 0, 0, 0.05)',
+              outline: 'none',
+            }}
+            aria-label={`Assign ${person.name}`}
+            aria-pressed={isSelected}
+            onClick={() =>
+              togglePersonForEvent(person.id)
+            }
+          >
+            {renderPersonAvatar(
+              person,
+              'family-slider-avatar'
+            )}
+
+            <span className="family-slider-name">
+              {person.name}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  </div>
+)}
+
                     
                     <div className="event-field">
                       <label>
@@ -19582,6 +19718,8 @@ const occurrenceEndDate =
   setRepeatEndDateText('')
   setRepeatEndDateError(false)
   setRepeatCount(10)
+  setRepeatInterval(1)
+  setRepeatIntervalInput('')
 }
                           }}
                         >
@@ -19606,15 +19744,49 @@ const occurrenceEndDate =
                               type="number"
                               min="1"
                               max="365"
-                              value={repeatInterval}
-                              onChange={(event) =>
-                                setRepeatInterval(
-                                  Math.max(
-                                    1,
-                                    Number(event.target.value)
-                                  )
+                              value={repeatIntervalInput}
+                              onChange={(event) => {
+                                const nextValue =
+                                  event.target.value
+
+                                setRepeatIntervalInput(
+                                  nextValue
                                 )
-                              }
+
+                                if (nextValue.trim() === '') {
+                                  setRepeatInterval(1)
+                                  return
+                                }
+
+                                const parsedValue =
+                                  Number(nextValue)
+
+                                if (Number.isFinite(parsedValue)) {
+                                  setRepeatInterval(
+                                    Math.min(
+                                      365,
+                                      Math.max(
+                                        1,
+                                        Math.trunc(parsedValue)
+                                      )
+                                    )
+                                  )
+                                }
+                              }}
+                              onBlur={() => {
+                                if (
+                                  repeatIntervalInput.trim() === '' ||
+                                  repeatInterval === 1
+                                ) {
+                                  setRepeatInterval(1)
+                                  setRepeatIntervalInput('')
+                                  return
+                                }
+
+                                setRepeatIntervalInput(
+                                  String(repeatInterval)
+                                )
+                              }}
                             />
 
                             <span>
