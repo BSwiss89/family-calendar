@@ -2,14 +2,12 @@
   "schema": 1,
   "kind": "frontend-only",
   "repository": "BSwiss89/family-calendar",
-  "from_sha": "0a3a0f49420819622b5f0bf1ec5e02c0bf05e7a7",
-  "to_sha": "e22ccd86dd611943ea34a9b33fdd90a62625254a",
-  "build_run_id": 41930941106,
-  "safety_run_id": 41931670803,
+  "from_sha": "e22ccd86dd611943ea34a9b33fdd90a62625254a",
+  "to_sha": "5d7ac035f12ddbfe4513de1bfb7eb24f0a0ada2a",
+  "build_run_id": 41941170453,
+  "safety_run_id": 41959831642,
   "files": [
-    "src/App.tsx",
-    "src/HouseholdProfilePicker.tsx",
-    "src/normalizePersonPhoto.ts"
+    "src/App.tsx"
   ],
-  "approval_note": "Owner verified both fixes on TEST at 2026-11-04 16:42:30 America/Chicago and explicitly authorized LIVE deployment. The first deployment attempt failed safely at 2026-11-04 17:05:09 America/Chicago before changing LIVE because the controller rejected test scripts. Corrected candidate excludes both test scripts and contains only three allowed frontend source files. Exact corrected SHA passed the production build and deployment safety workflow. The earlier updated browser regression run passed these same source changes; the corrected branch's legacy browser script is intentionally restored to the deployed baseline and therefore still expects the removed custom keyboard. No backend, authentication, database, dependency, or deployment-controller changes. Preserve the existing secure backup, SQLite integrity verification, health checks, review hold, and automatic rollback process."
+  "approval_note": "Owner verified mobile month-view double-tap Add Event on TEST and explicitly authorized LIVE deployment. LIVE preflight passed at 2026-11-04 18:24:27 America/Chicago with deployed SHA e22ccd86dd611943ea34a9b33fdd90a62625254a, clean checkout, healthy task and listener, HTTP 200, no hold, no journal, and recovery backup present. Exact candidate 5d7ac035f12ddbfe4513de1bfb7eb24f0a0ada2a passed production build run 41941170453 and deployment safety run 41959831642. The candidate changes only src/App.tsx; the separate legacy profile-picker regression failure is unrelated and expects the intentionally removed custom mobile keyboard. No backend, authentication, database, dependency, or deployment-controller changes. Preserve the existing secure backup, SQLite integrity verification, health checks, review hold, and automatic rollback process."
 }
