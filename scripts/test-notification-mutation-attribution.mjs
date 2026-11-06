@@ -109,7 +109,7 @@ test('upgrade existing TEST pilot without clearing outbox, acknowledgements, bas
     'CREATE TABLE test_assignment_acknowledgements(',
     'notification_id INTEGER PRIMARY KEY REFERENCES assignment_notification_outbox(id),',
     'acknowledged_at INTEGER NOT NULL) STRICT;',
-  ].join('\\n'))
+  ].join('\n'))
   db.prepare('INSERT INTO notification_event_baselines VALUES(?,?,?)')
     .run(1,'a'.repeat(64),'[7,9]')
   db.prepare('INSERT INTO notification_dirty_events VALUES(?,?,?)').run(1,3,2000)
