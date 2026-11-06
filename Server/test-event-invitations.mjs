@@ -3,6 +3,7 @@
 // Existing events/assignments are never silently converted into invitations.
 // This module must be mounted after required family-auth and stays off by default.
 import path from 'node:path'
+import { captureEventMutationAttribution } from './notification-mutation-attribution.mjs'
 
 const goodId = id => Number.isSafeInteger(id) && id > 0
 
@@ -143,6 +144,8 @@ export function installTestEventInvitations(app,db,{
         db.exec('ROLLBACK')
         return response.status(404).json({error:'Invitation is no longer pending.'})
       }
+      const attribution = decision === 'declined'
+        ? captureEventMutationAttribution(db,request,[entry.eventId]) : null
       db.prepare([
         'UPDATE test_event_invitations SET status=?,responded_at=? WHERE id=?',
       ].join(' ')).run(decision,now(),id)
@@ -150,6 +153,7 @@ export function installTestEventInvitations(app,db,{
         db.prepare('DELETE FROM event_people WHERE event_id=? AND person_id=?')
           .run(entry.eventId,profile.personId)
       }
+      attribution?.finish()
       db.exec('COMMIT')
       response.set('Cache-Control','no-store')
       response.json({decision,eventId:entry.eventId,joined:decision==='accepted'})

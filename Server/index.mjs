@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import { installTestNotificationInboxPilot } from './test-notification-inbox-pilot.mjs'
+import {
+  applyAttributedEventMutation, captureEventMutationAttribution, attributeNewEvent,
+} from './notification-mutation-attribution.mjs'
 import { installTestHouseholdEventJoin } from './test-household-event-join.mjs'
 import { installTestInformationalPush } from './test-informational-push.mjs'
 import { installTestEventInvitations } from './test-event-invitations.mjs'
@@ -2210,18 +2213,17 @@ app.post('/api/ai/cancel-confirmed', (request, response) => {
       })
     }
 
-    database
-      .prepare(`
-        INSERT OR IGNORE INTO event_exceptions (
-          event_id,
-          occurrence_date
-        )
-        VALUES (?, ?)
-      `)
-      .run(
-        eventId,
-        occurrenceDate
-      )
+    applyAttributedEventMutation(database, request, [eventId], () =>
+      database
+        .prepare(`
+          INSERT OR IGNORE INTO event_exceptions (
+            event_id,
+            occurrence_date
+          )
+          VALUES (?, ?)
+        `)
+        .run(eventId, occurrenceDate)
+    )
 
     return response.json({
       success: true,
@@ -2238,12 +2240,9 @@ app.post('/api/ai/cancel-confirmed', (request, response) => {
     })
   }
 
-  const result = database
-    .prepare(`
-      DELETE FROM events
-      WHERE id = ?
-    `)
-    .run(eventId)
+  const result = applyAttributedEventMutation(database, request, [eventId], () =>
+    database.prepare('DELETE FROM events WHERE id = ?').run(eventId)
+  )
 
   return response.json({
     success: result.changes === 1,
@@ -5810,15 +5809,17 @@ app.post(
       })
     }
 
-    database
-      .prepare(`
-        INSERT OR IGNORE INTO event_exceptions (
-          event_id,
-          occurrence_date
-        )
-        VALUES (?, ?)
-      `)
-      .run(id, occurrenceDate)
+    applyAttributedEventMutation(database, request, [id], () =>
+      database
+        .prepare(`
+          INSERT OR IGNORE INTO event_exceptions (
+            event_id,
+            occurrence_date
+          )
+          VALUES (?, ?)
+        `)
+        .run(id, occurrenceDate)
+    )
 
     response.status(201).json({
       success: true,
@@ -5954,6 +5955,7 @@ cleanBatchId,
     }
 
     testEventInvitations.recordAssignments(request,eventId,[],requestedPeople.map(person=>person.id))
+    attributeNewEvent(database, request, eventId)
     database.exec('COMMIT')
 
    response.status(201).json({
@@ -5998,13 +6000,15 @@ app.delete(
       })
     }
 
-    const result = database
-      .prepare(`
-        DELETE FROM event_exceptions
-        WHERE event_id = ?
-          AND occurrence_date = ?
-      `)
-      .run(id, occurrenceDate)
+    const result = applyAttributedEventMutation(database, request, [id], () =>
+      database
+        .prepare(`
+          DELETE FROM event_exceptions
+          WHERE event_id = ?
+            AND occurrence_date = ?
+        `)
+        .run(id, occurrenceDate)
+    )
 
     response.json({
       success: true,
@@ -6103,6 +6107,7 @@ if (
   database.exec('BEGIN')
 
   try {
+    const attribution = captureEventMutationAttribution(database, request, [id])
     const previousPersonIds = database.prepare('SELECT person_id FROM event_people WHERE event_id=?').all(id).map(row=>row.person_id)
     database
       .prepare(`
@@ -6163,6 +6168,7 @@ if (
     }
 
     testEventInvitations.recordAssignments(request,id,previousPersonIds,requestedPeople.map(person=>person.id))
+    attribution.finish()
     database.exec('COMMIT')
 
    response.json({
@@ -6292,13 +6298,10 @@ app.post('/api/ai/reschedule-confirmed', (request, response) => {
     })
   }
 
-  database
-    .prepare(`
-      UPDATE events
-      SET date = ?, time = ?
-      WHERE id = ?
-    `)
-    .run(newDate, newTime, eventId)
+  applyAttributedEventMutation(database, request, [eventId], () =>
+    database.prepare('UPDATE events SET date = ?, time = ? WHERE id = ?')
+      .run(newDate, newTime, eventId)
+  )
 
   response.json({
     success: true,
@@ -6327,12 +6330,11 @@ app.delete('/api/event-batches/:batchId', (request, response) => {
     })
   }
 
-  const result = database
-    .prepare(`
-      DELETE FROM events
-      WHERE batch_id = ?
-    `)
-    .run(batchId.trim())
+  const result = applyAttributedEventMutation(database, request,
+    () => database.prepare('SELECT id FROM events WHERE batch_id=?')
+      .all(batchId.trim()).map(row => row.id),
+    () => database.prepare('DELETE FROM events WHERE batch_id=?').run(batchId.trim())
+  )
 
   if (result.changes === 0) {
     return response.status(404).json({
@@ -6359,7 +6361,9 @@ app.delete('/api/events/:id', (request, response) => {
     WHERE id = ?
   `)
 
-  const result = statement.run(id)
+  const result = applyAttributedEventMutation(
+    database, request, [id], () => statement.run(id)
+  )
 
   if (result.changes === 0) {
     return response.status(404).json({
