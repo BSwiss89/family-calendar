@@ -2,6 +2,7 @@
 // selected shared device profile, NOT proof that a person owns an account.
 // Do not enable in LIVE or a multi-household gateway without identity linkage.
 import path from 'node:path'
+import { captureEventMutationAttribution } from './notification-mutation-attribution.mjs'
 
 function isSafeTestScope({flag,port,authMode,rootFolder}) {
   return flag === 'enabled' && String(port) === '13002' &&
@@ -61,9 +62,11 @@ export function installTestHouseholdEventJoin(app,db,{
         db.exec('ROLLBACK')
         return res.status(404).json({error:'Event not found.'})
       }
+      const attribution = captureEventMutationAttribution(db,req,[eventId])
       const result = db.prepare(
         'INSERT OR IGNORE INTO event_people(event_id,person_id) VALUES (?,?)'
       ).run(eventId,personId)
+      attribution.finish()
       db.exec('COMMIT')
       res.set('Cache-Control','no-store')
       res.json({joined:true,alreadyJoined:result.changes===0})
@@ -89,8 +92,10 @@ export function installTestHouseholdEventJoin(app,db,{
         db.exec('ROLLBACK')
         return res.status(404).json({error:'Event not found.'})
       }
+      const attribution = captureEventMutationAttribution(db,req,[eventId])
       const result = db.prepare('DELETE FROM event_people WHERE event_id=? AND person_id=?')
         .run(eventId,personId)
+      attribution.finish()
       db.exec('COMMIT')
       res.set('Cache-Control','no-store')
       res.json({joined:false,alreadyLeft:result.changes===0})
