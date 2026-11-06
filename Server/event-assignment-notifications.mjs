@@ -28,7 +28,10 @@ function eventRecipients(event) {
 // Removing one person is not a cancellation for everybody else. A metadata-only
 // change notifies current assignees, but a no-op/reordered assignment does not.
 // Recurring instance exceptions are deliberately NOT handled here.
-export function planEventAssignmentNotifications(before, after) {
+export function planEventAssignmentNotifications(before, after, { excludePersonId = null } = {}) {
+  if (excludePersonId !== null && !validId(excludePersonId)) {
+    throw new Error('Invalid notification exclusion person ID.')
+  }
   if (before === null && after === null) throw new Error('Event transition required.')
   const prior = eventRecipients(before)
   const current = eventRecipients(after)
@@ -50,7 +53,8 @@ export function planEventAssignmentNotifications(before, after) {
   for (const personId of current) {
     if (!priorSet.has(personId)) intents.push({ eventId, personId, kind: 'assigned' })
   }
-  return intents.sort((a, b) => a.personId - b.personId)
+  return intents.filter(intent => intent.personId !== excludePersonId)
+    .sort((a, b) => a.personId - b.personId)
 }
 
 export function installAssignmentNotificationOutbox(database) {
@@ -73,9 +77,9 @@ export function installAssignmentNotificationOutbox(database) {
 // The caller must invoke this inside the SAME SQLite transaction as the
 // corresponding event mutation. Rollback then removes both event and intent.
 // It does not transmit anything, disclose event details or grant device access.
-export function queueEventAssignmentNotifications(database, before, after, at = Date.now()) {
+export function queueEventAssignmentNotifications(database, before, after, at = Date.now(), options = {}) {
   if (!Number.isSafeInteger(at) || at <= 0) throw new Error('Invalid notification timestamp.')
-  const intents = planEventAssignmentNotifications(before, after)
+  const intents = planEventAssignmentNotifications(before, after, options)
   const insert = database.prepare(`
     INSERT INTO assignment_notification_outbox(event_id, person_id, kind, created_at)
     VALUES (?, ?, ?, ?)
