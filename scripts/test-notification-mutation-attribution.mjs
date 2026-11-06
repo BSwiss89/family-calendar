@@ -95,6 +95,43 @@ test('pilot-disabled: no attribution migration and normal event creation remains
   assert.equal(db.prepare('SELECT count(*) AS n FROM events').get().n,1)
 })
 
+
+test('upgrade existing TEST pilot without clearing outbox, acknowledgements, baselines or dirty queue',t=>{
+  const db=setup(t,{preExisting:true,pilot:false})
+  installAssignmentNotificationOutbox(db)
+  db.exec([
+    'CREATE TABLE notification_event_baselines(',
+    'event_id INTEGER PRIMARY KEY CHECK(event_id>0),',
+    'material_hash TEXT NOT NULL, person_ids_json TEXT NOT NULL) STRICT;',
+    'CREATE TABLE notification_dirty_events(',
+    'event_id INTEGER PRIMARY KEY CHECK(event_id>0),',
+    'revision INTEGER NOT NULL CHECK(revision>0), queued_at INTEGER NOT NULL) STRICT;',
+    'CREATE TABLE test_assignment_acknowledgements(',
+    'notification_id INTEGER PRIMARY KEY REFERENCES assignment_notification_outbox(id),',
+    'acknowledged_at INTEGER NOT NULL) STRICT;',
+  ].join('\\n'))
+  db.prepare('INSERT INTO notification_event_baselines VALUES(?,?,?)')
+    .run(1,'a'.repeat(64),'[7,9]')
+  db.prepare('INSERT INTO notification_dirty_events VALUES(?,?,?)').run(1,3,2000)
+  db.prepare('INSERT INTO assignment_notification_outbox(event_id,person_id,kind,created_at) VALUES(?,?,?,?)')
+    .run(1,9,'assigned',1000)
+  db.prepare('INSERT INTO test_assignment_acknowledgements VALUES(?,?)').run(1,1200)
+
+  installNotificationMutationCapture(db)
+  installNotificationMutationCapture(db) // Safe restart/idempotent
+  assert.equal(db.prepare('SELECT material_hash AS h FROM notification_event_baselines WHERE event_id=1').get().h,'a'.repeat(64))
+  assert.equal(db.prepare('SELECT revision FROM notification_dirty_events WHERE event_id=1').get().revision,3)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM assignment_notification_outbox').get().n,1)
+  assert.equal(db.prepare('SELECT acknowledged_at AS at FROM test_assignment_acknowledgements WHERE notification_id=1').get().at,1200)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM notification_dirty_event_attribution').get().n,0)
+  assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok')
+  assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0)
+  // A queued change from the OLD capture has no actor. Neither person is
+  // silently suppressed, but old acknowledged history remains preserved.
+  assert.equal(reconcile(db).queued,2)
+  assert.equal(db.prepare('SELECT acknowledged_at AS at FROM test_assignment_acknowledgements WHERE notification_id=1').get().at,1200)
+})
+
 test('creator does not acknowledge their own new event; other assignee still notified',t=>{
   const db=setup(t)
   createdBy(db,owner,2)
