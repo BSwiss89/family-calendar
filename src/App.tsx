@@ -19030,11 +19030,18 @@ const occurrenceEndDate =
     <input
       type="checkbox"
       checked={eventAllDay}
-      onChange={(event) =>
-        setEventAllDay(
+      onChange={(event) => {
+        const checked =
           event.target.checked
-        )
-      }
+
+        setEventAllDay(checked)
+
+        if (checked) {
+          setEventTime('')
+          setEventEndTime('')
+          setEventTimeError(false)
+        }
+      }}
     />
     <span>All Day</span>
   </span>
