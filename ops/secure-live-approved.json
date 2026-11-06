@@ -2,12 +2,13 @@
   "schema": 1,
   "kind": "frontend-only",
   "repository": "BSwiss89/family-calendar",
-  "from_sha": "e22ccd86dd611943ea34a9b33fdd90a62625254a",
-  "to_sha": "5d7ac035f12ddbfe4513de1bfb7eb24f0a0ada2a",
-  "build_run_id": 41941170453,
-  "safety_run_id": 41959831642,
+  "from_sha": "5d7ac035f12ddbfe4513de1bfb7eb24f0a0ada2a",
+  "to_sha": "61397b2b44f5ef6d1595b59ea8149e523c5a3acc",
+  "build_run_id": 42134206868,
+  "safety_run_id": 42233538241,
   "files": [
-    "src/App.tsx"
+    "src/App.tsx",
+    "src/App.css"
   ],
-  "approval_note": "Owner verified mobile month-view double-tap Add Event on TEST and explicitly authorized LIVE deployment. LIVE preflight passed at 2026-11-04 18:24:27 America/Chicago with deployed SHA e22ccd86dd611943ea34a9b33fdd90a62625254a, clean checkout, healthy task and listener, HTTP 200, no hold, no journal, and recovery backup present. Exact candidate 5d7ac035f12ddbfe4513de1bfb7eb24f0a0ada2a passed production build run 41941170453 and deployment safety run 41959831642. The candidate changes only src/App.tsx; the separate legacy profile-picker regression failure is unrelated and expects the intentionally removed custom mobile keyboard. No backend, authentication, database, dependency, or deployment-controller changes. Preserve the existing secure backup, SQLite integrity verification, health checks, review hold, and automatic rollback process."
+  "approval_note": "Owner verified both bundled mobile UI batches on TEST and explicitly authorized LIVE deployment: the themed tappable page menu; Add Event people placement and compact spacing; blank default Repeat Every field; and clearing Start Time and End Time when All Day is selected. Exact candidate 61397b2b44f5ef6d1595b59ea8149e523c5a3acc passed production build run 42134206868 and deployment safety run 42233538241. The candidate changes only src/App.tsx and src/App.css. The separate legacy profile-picker browser failure is unrelated and expects the intentionally removed custom mobile keyboard; profile lifecycle coverage passed. No backend, authentication, database, dependency, or deployment-controller changes. Preserve the existing secure backup, SQLite integrity verification, health checks, review hold, and automatic rollback process."
 }
