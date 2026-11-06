@@ -80,7 +80,9 @@ function notices(db) {
   return db.prepare([
     'SELECT event_id AS eventId,person_id AS personId,kind',
     'FROM assignment_notification_outbox ORDER BY id',
-  ].join(' ')).all()
+  ].join(' ')).all().map(row => ({
+    eventId: row.eventId, personId: row.personId, kind: row.kind,
+  }))
 }
 const notice=(eventId,personId,kind)=>({eventId,personId,kind})
 
