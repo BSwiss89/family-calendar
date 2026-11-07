@@ -1,14 +1,9 @@
 {
   "schema": 1,
-  "kind": "frontend-only",
+  "kind": "deployed-baseline",
   "repository": "BSwiss89/family-calendar",
-  "from_sha": "5d7ac035f12ddbfe4513de1bfb7eb24f0a0ada2a",
-  "to_sha": "61397b2b44f5ef6d1595b59ea8149e523c5a3acc",
-  "build_run_id": 42134206868,
-  "safety_run_id": 42233538241,
-  "files": [
-    "src/App.tsx",
-    "src/App.css"
-  ],
-  "approval_note": "Owner verified both bundled mobile UI batches on TEST and explicitly authorized LIVE deployment: the themed tappable page menu; Add Event people placement and compact spacing; blank default Repeat Every field; and clearing Start Time and End Time when All Day is selected. Exact candidate 61397b2b44f5ef6d1595b59ea8149e523c5a3acc passed production build run 42134206868 and deployment safety run 42233538241. The candidate changes only src/App.tsx and src/App.css. The separate legacy profile-picker browser failure is unrelated and expects the intentionally removed custom mobile keyboard; profile lifecycle coverage passed. No backend, authentication, database, dependency, or deployment-controller changes. Preserve the existing secure backup, SQLite integrity verification, health checks, review hold, and automatic rollback process."
+  "to_sha": "6683fd722a4fbbecbf5a1207f49bb0409832caf2",
+  "build_run_id": 42395345955,
+  "files": [],
+  "approval_note": "Owner explicitly authorized Issue #144 to LIVE. Controlled backend deployment completed November 7, 2026 16:14:06 America/Chicago, with LIVE SHA 6683fd722a4fbbecbf5a1207f49bb0409832caf2, successful SQLite backup/isolated restore and data integrity checks, authenticated LIVE health, preserved uploads and TEST SHA 181d80befa02ef24dace9212ab140ea3f33e528a, and watchdog restored. Exact Windows Build Family Calendar run 42395345955 passed. This receipt acknowledges only the ALREADY DEPLOYED baseline. It authorizes ZERO changes, restarts, or automatic backend/database deployments. Future frontend-only releases require a new explicitly approved exact-commit receipt and existing safety gates. The older frontend-only controller remains limited to that scope."
 }
