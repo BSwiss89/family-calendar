@@ -26,7 +26,6 @@ $liveLocked=$false; $testLocked=$false; $paused=$false; $autoPaused=$false
 $touched=$false; $changed=$false; $oldMoved=$false; $opened=$false
 $success=$false; $rollbackOk=$false; $backup=$null; $plan=$null
 $oldDist=$null; $newDist=$null
-. (Join-Path $stage 'scripts\live-profile-launcher-plan.ps1')
 
 function Report([string]$message) {
     $now = [TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow,$tz)
@@ -182,6 +181,8 @@ try {
     Assert ($stage -ine $live -and $stage -ine $test -and $stage -ne (Split-Path $PSScriptRoot -Parent)) 'Use isolated candidate source.'
     Assert (-not (Get-Item -LiteralPath $stage -Force).LinkType) 'Candidate checkout must not be a link.'
     Assert (([string](& git -C $stage branch --show-current)).Trim() -eq 'fix/live-profile-photo-normalization-20261104') 'Candidate must be checked out from reviewed LIVE release branch.'
+    # Import only after the exact candidate SHA, branch, and isolated path were verified.
+    . (Join-Path $stage 'scripts\live-profile-launcher-plan.ps1')
     foreach ($folder in @($stage,$live,$test)) {
         $dirty=@(& git -C $folder status --porcelain --untracked-files=no)
         Assert ($LASTEXITCODE -eq 0 -and $dirty.Count -eq 0) 'Tracked source is dirty.'
