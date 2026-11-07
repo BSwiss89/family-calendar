@@ -67,8 +67,9 @@ jobs:
             throw 'Release script attempts unsupported approval shortcut or forced reset'
           }
           Write-Host 'ISSUE_144_LIVE_BACKEND_RELEASE_SCRIPT_AUDIT=PASS'
-          .\scripts\test-issue144-launcher-plan.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'Issue 144 backend-only launcher rollback rehearsal failed.' }
+          & .\scripts\test-issue144-launcher-plan.ps1
+          # Native-process LASTEXITCODE is not set by PowerShell scripts.
+          # The rehearsal throws under ErrorActionPreference Stop if it fails.
       - name: Check LIVE release database verifier syntax
         run: node --check scripts/live-profile-db-check.mjs
       - name: Check backend JavaScript syntax
