@@ -139,6 +139,12 @@ export function installNotificationMutationCapture(db) {
       ') STRICT;',
       'CREATE INDEX IF NOT EXISTS notification_dirty_events_order',
       'ON notification_dirty_events(queued_at,event_id);',
+      // The table is additive for an already-migrated LIVE pilot. Missing or
+      // mixed actor attribution never suppresses a notification.
+      'CREATE TABLE IF NOT EXISTS notification_dirty_event_attribution(',
+      'event_id INTEGER PRIMARY KEY CHECK(event_id > 0),',
+      'person_id INTEGER,revision INTEGER NOT NULL CHECK(revision > 0)',
+      ') STRICT;',
     ].join('\n'))
     if (!previous.size) {
       for (const {id} of db.prepare('SELECT id FROM events ORDER BY id').all()) {
@@ -182,13 +188,23 @@ export function reconcileNotificationMutations(db, { limit = 100, at = Date.now(
       }
       const before = baselineSnapshot(db,eventId)
       const after = currentSnapshot(db,eventId)
+      const origin = db.prepare([
+        'SELECT person_id AS personId,revision',
+        'FROM notification_dirty_event_attribution WHERE event_id=?',
+      ].join(' ')).get(eventId)
+      // An exact revision match proves that no unrecorded change happened
+      // between the attributed mutation and this reconciliation.
+      const excludePersonId = origin?.revision === revision &&
+        isId(origin.personId) ? origin.personId : null
       if (before || after) {
         queued += queueEventAssignmentNotifications(
-          db,plannerInput(before),plannerInput(after),at
+          db,plannerInput(before),plannerInput(after),at,{excludePersonId}
         )
       }
       if (after) storeBaseline(db,after)
       else db.prepare('DELETE FROM notification_event_baselines WHERE event_id = ?')
+        .run(eventId)
+      db.prepare('DELETE FROM notification_dirty_event_attribution WHERE event_id=?')
         .run(eventId)
       // Compare revision even though BEGIN IMMEDIATE serializes SQLite writers:
       // a future caller may reuse these semantics with cross-process workers.
