@@ -1,3 +1,4 @@
+import { normalizePersonPhoto } from './normalizePersonPhoto'
 import {
   Fragment,
   useCallback,
@@ -2257,6 +2258,7 @@ type MobileNavId =
   (typeof mobileNavItems)[number]['id']
 
 const mobileNavSliderWidth = 148
+const [mobileNavMenuOpen, setMobileNavMenuOpen] = useState(false)
 
 const [mobileNavDragX, setMobileNavDragX] =
   useState(0)
@@ -2379,6 +2381,8 @@ const mobileNavNextItem =
 function openMobileNavItem(
   id: MobileNavId
 ) {
+  setMobileNavMenuOpen(false)
+
   if (id === 'today') {
     setPage('home')
     return
@@ -2520,9 +2524,18 @@ function finishMobileNavGesture(
   const deltaX =
     gesture.deltaX
 
+  const deltaY =
+    event.clientY - gesture.startY
+
   const shouldChange =
     gesture.horizontal &&
     Math.abs(deltaX) >= 42
+
+  const shouldOpenMenu =
+    !gesture.horizontal &&
+    !gesture.vertical &&
+    Math.abs(deltaX) < 10 &&
+    Math.abs(deltaY) < 10
 
   mobileNavGestureRef.current = {
     pointerId: -1,
@@ -2534,6 +2547,12 @@ function finishMobileNavGesture(
   }
 
   if (!shouldChange) {
+    if (shouldOpenMenu) {
+      setMobileNavMenuOpen(
+        (current) => !current
+      )
+    }
+
     setMobileNavSettling(true)
     setMobileNavDragX(0)
 
@@ -2628,6 +2647,14 @@ const mobileScheduleEmptyTapRef = useRef({
   hour: -1,
   x: 0,
   y: 0,
+})
+
+const mobileMonthDayTapRef = useRef({
+  time: 0,
+  dateKey: '',
+  x: 0,
+  y: 0,
+  singleTapTimer: null as number | null,
 })
 
 const mobileScheduleSuppressClickUntilRef =
@@ -3198,6 +3225,7 @@ const [
   const [eventLocation, setEventLocation] = useState('')
   const [repeatUnit, setRepeatUnit] = useState('none')
 const [repeatInterval, setRepeatInterval] = useState(1)
+const [repeatIntervalInput, setRepeatIntervalInput] = useState('')
 const [repeatEndType, setRepeatEndType] = useState('never')
 const [repeatEndDate, setRepeatEndDate] = useState('')
 const [repeatEndDateText, setRepeatEndDateText] = useState('')
@@ -9259,7 +9287,14 @@ setEventEndDateText(
   setEventNotes(calendarEvent.notes ?? '')
   setEventLocation(calendarEvent.location ?? '')
   setRepeatUnit(calendarEvent.repeatUnit ?? 'none')
-  setRepeatInterval(calendarEvent.repeatInterval ?? 1)
+  const nextRepeatInterval =
+    calendarEvent.repeatInterval ?? 1
+  setRepeatInterval(nextRepeatInterval)
+  setRepeatIntervalInput(
+    nextRepeatInterval === 1
+      ? ''
+      : String(nextRepeatInterval)
+  )
   setRepeatEndType(calendarEvent.repeatEndType ?? 'never')
  setRepeatEndDate(calendarEvent.repeatEndDate ?? '')
 setRepeatEndDateText(
@@ -9295,6 +9330,11 @@ function startDuplicatingEvent(calendarEvent: CalendarEvent, occurrenceDate: str
   setSelectedPersonIds(draft.personIds)
   setRepeatUnit(draft.repeatUnit)
   setRepeatInterval(draft.repeatInterval)
+  setRepeatIntervalInput(
+    draft.repeatInterval === 1
+      ? ''
+      : String(draft.repeatInterval)
+  )
   setRepeatEndType(draft.repeatEndType)
   setRepeatEndDate('')
   setRepeatEndDateText('')
@@ -10120,6 +10160,7 @@ setEventNotes('')
 setEventLocation('')
   setRepeatUnit('none')
   setRepeatInterval(1)
+  setRepeatIntervalInput('')
   setRepeatEndType('never')
   setRepeatEndDate('')
   setRepeatEndDateText('')
@@ -10187,7 +10228,13 @@ setRepeatEndDateError(false)
     formData.append('color', personColor)
 
     if (personImageFile) {
-      formData.append('image', personImageFile)
+      try {
+        const normalizedPhoto = await normalizePersonPhoto(personImageFile)
+        formData.append('image', normalizedPhoto, normalizedPhoto.name)
+      } catch {
+        showAppNotification('This photo could not be prepared for upload. Please choose a different image.')
+        return
+      }
     } else if (personPhotoRemoved && editingPersonId !== null) {
       formData.append('removeImage', 'true')
     }
@@ -10202,17 +10249,24 @@ setRepeatEndDateError(false)
         ? 'POST'
         : 'PUT'
 
-    const response = await fetch(url, {
-      method,
-      body: formData,
-    })
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method,
+        body: formData,
+      })
+    } catch {
+      showAppNotification('The calendar could not be reached. Your profile was not saved; please try again.')
+      return
+    }
 
     if (!response.ok) {
-      const errorData = await response.json()
-
-     showAppNotification(
-  errorData.error ?? 'Could not save person.'
-)
+      let errorMessage = `Could not save person (HTTP ${response.status}).`
+      try {
+        const errorData = await response.json()
+        if (typeof errorData.error === 'string') errorMessage = errorData.error
+      } catch {}
+      showAppNotification(errorMessage)
       return
     }
 
@@ -13783,35 +13837,13 @@ const personEditor = (
       : ''
   }`}
   type="text"
-  readOnly
+  maxLength={50}
+  autoComplete="name"
   placeholder="Family member name"
   value={personName}
- onClick={(event) => {
-  const nextPosition =
-    event.currentTarget.selectionStart ??
-    personName.length
-
-  personCursorPositionRef.current =
-    nextPosition
-
-  setPersonCursorPosition(
-    nextPosition
-  )
-
-  setPersonKeyboardOpen(true)
-}}
-onSelect={(event) => {
-  const nextPosition =
-    event.currentTarget.selectionStart ??
-    personName.length
-
-  personCursorPositionRef.current =
-    nextPosition
-
-  setPersonCursorPosition(
-    nextPosition
-  )
-}}
+  onChange={(event) => {
+    setPersonName(event.target.value)
+  }}
 />
 </div>
 
@@ -13876,7 +13908,7 @@ onSelect={(event) => {
                     key={personFileInputKey}
                     className="person-file-input"
                     type="file"
-                    accept="image/png,image/jpeg,image/webp"
+                    accept="image/*"
                     onChange={handlePersonImageChange}
                   />
                 </label>
@@ -14059,14 +14091,70 @@ return (
 </nav>
       </header>
       <div className="mobile-bottom-controls">
+  {mobileNavMenuOpen && (
+    <>
+      <button
+        type="button"
+        className="mobile-page-menu-backdrop"
+        aria-label="Close page menu"
+        onClick={() =>
+          setMobileNavMenuOpen(false)
+        }
+      />
+
+      <div
+        id="mobile-page-menu"
+        className="mobile-page-menu"
+        role="dialog"
+        aria-label="Choose a page"
+      >
+        {mobileNavItems.map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            className={`mobile-page-menu-option ${
+              item.id === mobileNavActiveId
+                ? 'mobile-page-menu-option-active'
+                : ''
+            }`}
+            aria-current={
+              item.id === mobileNavActiveId
+                ? 'page'
+                : undefined
+            }
+            onClick={() =>
+              openMobileNavItem(item.id)
+            }
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </>
+  )}
+
   <div
     className={`mobile-page-slider ${
       mobileNavSettling
         ? 'mobile-page-slider-settling'
         : ''
     }`}
-    role="navigation"
-    aria-label="Mobile page navigation"
+    role="button"
+    tabIndex={0}
+    aria-label="Open page menu; swipe to change pages"
+    aria-expanded={mobileNavMenuOpen}
+    aria-controls="mobile-page-menu"
+    onKeyDown={(event) => {
+      if (
+        event.key === 'Enter' ||
+        event.key === ' '
+      ) {
+        event.preventDefault()
+        setMobileNavMenuOpen(
+          (current) => !current
+        )
+      }
+    }}
     onPointerDown={
       handleMobileNavPointerDown
     }
@@ -16500,7 +16588,7 @@ const visibleDayEventCount =
                     ? 'selected-day'
                     : ''
                 }`}
-                onClick={() => {
+                onClick={(event) => {
   const openEventsForDay = () => {
     setSelectedDay(day)
     clearEventForm()
@@ -16516,6 +16604,93 @@ const visibleDayEventCount =
     }
 
     setMonthEventsOpen(true)
+  }
+
+  const isMobileMonth =
+    !window.matchMedia(
+      '(min-width: 761px)'
+    ).matches
+
+  if (isMobileMonth) {
+    const now = performance.now()
+    const dateKey = getDateKeyForMonth(
+      targetYear,
+      targetMonth,
+      day
+    )
+    const previousTap =
+      mobileMonthDayTapRef.current
+    const tapDistance = Math.hypot(
+      event.clientX - previousTap.x,
+      event.clientY - previousTap.y
+    )
+    const isDoubleTap =
+      now - previousTap.time <= 325 &&
+      previousTap.dateKey === dateKey &&
+      tapDistance <= 40
+
+    if (isDoubleTap) {
+      if (previousTap.singleTapTimer !== null) {
+        window.clearTimeout(
+          previousTap.singleTapTimer
+        )
+      }
+
+      mobileMonthDayTapRef.current = {
+        time: 0,
+        dateKey: '',
+        x: 0,
+        y: 0,
+        singleTapTimer: null,
+      }
+
+      clearEventForm()
+      setViewDate(
+        new Date(
+          targetYear,
+          targetMonth,
+          1
+        )
+      )
+      setSelectedDay(day)
+      setEventStartDate(dateKey)
+      setEventStartDateText(
+        formatDateKeyForText(dateKey)
+      )
+      setMonthEventsOpen(true)
+      setIsAddingEvent(true)
+
+      window.setTimeout(() => {
+        document
+          .querySelector<HTMLInputElement>(
+            '.event-form .event-input[type="text"]'
+          )
+          ?.focus()
+      }, 0)
+      return
+    }
+
+    if (previousTap.singleTapTimer !== null) {
+      window.clearTimeout(
+        previousTap.singleTapTimer
+      )
+    }
+
+    const singleTapTimer =
+      window.setTimeout(() => {
+        openEventsForDay()
+        mobileMonthDayTapRef.current.singleTapTimer =
+          null
+      }, 325)
+
+    mobileMonthDayTapRef.current = {
+      time: now,
+      dateKey,
+      x: event.clientX,
+      y: event.clientY,
+      singleTapTimer,
+    }
+    return
   }
 
   if (showCalendarSidebar) {
@@ -18652,7 +18827,7 @@ const occurrenceEndDate =
   </h2>
 
   {people.length > 0 && (
-    <div className="event-header-people">
+    <div className="event-header-people event-header-people-desktop">
   <div className="family-slider event-header-family-slider">
     {people.map((person) => {
       const isSelected =
@@ -18855,11 +19030,18 @@ const occurrenceEndDate =
     <input
       type="checkbox"
       checked={eventAllDay}
-      onChange={(event) =>
-        setEventAllDay(
+      onChange={(event) => {
+        const checked =
           event.target.checked
-        )
-      }
+
+        setEventAllDay(checked)
+
+        if (checked) {
+          setEventTime('')
+          setEventEndTime('')
+          setEventTimeError(false)
+        }
+      }}
     />
     <span>All Day</span>
   </span>
@@ -19257,6 +19439,54 @@ const occurrenceEndDate =
 )}
 </div>
 
+{people.length > 0 && (
+  <div
+    className="event-form-people"
+    aria-label="Assign people"
+  >
+    <div className="family-slider event-form-family-slider">
+      {people.map((person) => {
+        const isSelected =
+          selectedPersonIds.includes(person.id)
+
+        return (
+          <button
+            type="button"
+            key={person.id}
+            className={`family-slider-card ${
+              isSelected
+                ? 'family-slider-card-selected'
+                : ''
+            }`}
+            style={{
+              background:
+                softenEventColor(person.color),
+              border: isSelected
+                ? `3px solid color-mix(in srgb, ${person.color} 55%, black)`
+                : '1px solid rgba(0, 0, 0, 0.05)',
+              outline: 'none',
+            }}
+            aria-label={`Assign ${person.name}`}
+            aria-pressed={isSelected}
+            onClick={() =>
+              togglePersonForEvent(person.id)
+            }
+          >
+            {renderPersonAvatar(
+              person,
+              'family-slider-avatar'
+            )}
+
+            <span className="family-slider-name">
+              {person.name}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  </div>
+)}
+
                     
                     <div className="event-field">
                       <label>
@@ -19273,6 +19503,8 @@ const occurrenceEndDate =
   setRepeatEndDateText('')
   setRepeatEndDateError(false)
   setRepeatCount(10)
+  setRepeatInterval(1)
+  setRepeatIntervalInput('')
 }
                           }}
                         >
@@ -19297,15 +19529,49 @@ const occurrenceEndDate =
                               type="number"
                               min="1"
                               max="365"
-                              value={repeatInterval}
-                              onChange={(event) =>
-                                setRepeatInterval(
-                                  Math.max(
-                                    1,
-                                    Number(event.target.value)
-                                  )
+                              value={repeatIntervalInput}
+                              onChange={(event) => {
+                                const nextValue =
+                                  event.target.value
+
+                                setRepeatIntervalInput(
+                                  nextValue
                                 )
-                              }
+
+                                if (nextValue.trim() === '') {
+                                  setRepeatInterval(1)
+                                  return
+                                }
+
+                                const parsedValue =
+                                  Number(nextValue)
+
+                                if (Number.isFinite(parsedValue)) {
+                                  setRepeatInterval(
+                                    Math.min(
+                                      365,
+                                      Math.max(
+                                        1,
+                                        Math.trunc(parsedValue)
+                                      )
+                                    )
+                                  )
+                                }
+                              }}
+                              onBlur={() => {
+                                if (
+                                  repeatIntervalInput.trim() === '' ||
+                                  repeatInterval === 1
+                                ) {
+                                  setRepeatInterval(1)
+                                  setRepeatIntervalInput('')
+                                  return
+                                }
+
+                                setRepeatIntervalInput(
+                                  String(repeatInterval)
+                                )
+                              }}
                             />
 
                             <span>
