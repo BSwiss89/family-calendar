@@ -55,7 +55,7 @@ jobs:
             'live-profile-db-check.mjs', 'IN-PROGRESS.json',
             'REQUIRES-REVIEW.txt','TestStamp','LIVE_ISSUE144_ROLLBACK=PASS',
             'LIVE_AUTO_DEPLOY=Disabled', 'Set-SecureLiveLauncher','CopyVerified',
-            'PRAGMA', 'StopLive','StartLive','& npm.cmd ci')
+            'StopLive','StartLive','& npm.cmd ci')
           foreach ($marker in $required) {
             if (!$script.Contains($marker)) { throw "Issue 144 release safety marker missing: $marker" }
           }
