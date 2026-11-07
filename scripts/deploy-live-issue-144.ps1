@@ -181,8 +181,10 @@ try {
     Assert ($stage -ine $live -and $stage -ine $test -and $stage -ne (Split-Path $PSScriptRoot -Parent)) 'Use isolated candidate source.'
     Assert (-not (Get-Item -LiteralPath $stage -Force).LinkType) 'Candidate checkout must not be a link.'
     Assert (([string](& git -C $stage branch --show-current)).Trim() -eq 'fix/live-profile-photo-normalization-20261104') 'Candidate must be checked out from reviewed LIVE release branch.'
-    # Import only after the exact candidate SHA, branch, and isolated path were verified.
-    . (Join-Path $stage 'scripts\live-profile-launcher-plan.ps1')
+    # Import only after exact candidate and path verification. The tailored
+    # planner changes only the backend hash; frontend and secrets stay pinned.
+    . (Join-Path $stage 'scripts\secure-live-launcher-pins.ps1')
+    . (Join-Path $PSScriptRoot 'issue144-launcher-plan.ps1')
     foreach ($folder in @($stage,$live,$test)) {
         $dirty=@(& git -C $folder status --porcelain --untracked-files=no)
         Assert ($LASTEXITCODE -eq 0 -and $dirty.Count -eq 0) 'Tracked source is dirty.'
@@ -261,7 +263,7 @@ try {
         Export-ScheduledTask -TaskName $name | Set-Content (Join-Path $backup "$name.xml") -Encoding UTF8
     }
     Copy-Item "$live\Server\index.mjs" "$backup\previous-index.mjs"
-    $plan=New-LiveProfileLauncherPlan $launcher $live $stage $backup
+    $plan=New-Issue144LauncherPlan $launcher $live $stage $backup
     $newIndex=Hash "$stage\Server\index.mjs"
     $newDist=Join-Path $live "dist-profiles-$tag"
     CopyVerified "$stage\dist" $newDist
