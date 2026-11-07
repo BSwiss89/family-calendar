@@ -46,12 +46,16 @@ jobs:
           $null = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
           if ($errors.Count -gt 0) { throw ("Issue 144 release script PowerShell parse failed: "+($errors -join '; ')) }
           $script = Get-Content -LiteralPath $file -Raw
+          $planFile = 'scripts/issue144-launcher-plan.ps1'
+          $planErrors = $null; $planTokens = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $planFile).Path,[ref]$planTokens,[ref]$planErrors)
+          if ($planErrors.Count -gt 0) { throw 'Issue 144 backend-only launcher plan parse failed.' }
           $required = @('61397b2b44f5ef6d1595b59ea8149e523c5a3acc',
             '6683fd722a4fbbecbf5a1207f49bb0409832caf2',
             '181d80befa02ef24dace9212ab140ea3f33e528a',
             '42395345955', 'Server/notification-mutation-attribution.mjs',
             'test-notification-mutation-attribution.mjs',
-            'Assert-SecureLiveLauncherPins', 'New-LiveProfileLauncherPlan',
+            'Assert-SecureLiveLauncherPins', 'New-Issue144LauncherPlan',
             'live-profile-db-check.mjs', 'IN-PROGRESS.json',
             'REQUIRES-REVIEW.txt','TestStamp','LIVE_ISSUE144_ROLLBACK=PASS',
             'LIVE_AUTO_DEPLOY=Disabled', 'Set-SecureLiveLauncher','CopyVerified',
@@ -63,6 +67,8 @@ jobs:
             throw 'Release script attempts unsupported approval shortcut or forced reset'
           }
           Write-Host 'ISSUE_144_LIVE_BACKEND_RELEASE_SCRIPT_AUDIT=PASS'
+          .\scripts\test-issue144-launcher-plan.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Issue 144 backend-only launcher rollback rehearsal failed.' }
       - name: Check LIVE release database verifier syntax
         run: node --check scripts/live-profile-db-check.mjs
       - name: Check backend JavaScript syntax
