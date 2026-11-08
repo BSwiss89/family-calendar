@@ -13,7 +13,8 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
-import { arneySpeechAvailable, beginArneySpeech } from './arneySpeech'
+import { arneySpeechAvailable, beginArneySpeech, speakArneyReply, stopArneyReply } from './arneySpeech'
+import { describeArneyError, describeArneyIntent, describeArneyPreview, shouldSpeakArneyReply, type ArneyReply } from './arneyResponses'
 import { readArneyPreferences } from './arneyPreferences'
 import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
@@ -3279,6 +3280,19 @@ const [aiCommandLoading, setAiCommandLoading] =
 const [aiCommandResult, setAiCommandResult] =
   useState('')
 
+function announceArneyReply(reply: ArneyReply) {
+  setAiCommandResult(reply.text)
+  if (shouldSpeakArneyReply(readArneyPreferences().responseMode, reply.kind)) {
+    speakArneyReply(reply.text)
+  }
+}
+
+function speakArneySuccess(message: string) {
+  if (shouldSpeakArneyReply(readArneyPreferences().responseMode, 'success')) {
+    speakArneyReply(message)
+  }
+}
+
 const [
   aiCancellationPreview,
   setAiCancellationPreview,
@@ -3913,12 +3927,11 @@ async function confirmAiCancellation() {
     setAiCommandText('')
     setAiCommandOpen(false)
 
-    showAppNotification(
-      match.matchType ===
-        'recurring_occurrence'
-        ? 'Recurring event occurrence canceled.'
-        : 'Event canceled.'
-    )
+    const confirmedMessage = match.matchType === 'recurring_occurrence'
+      ? 'Recurring event occurrence canceled.'
+      : 'Event canceled.'
+    showAppNotification(confirmedMessage)
+    speakArneySuccess(confirmedMessage)
   } catch (error) {
     showAppNotification(
       error instanceof Error
@@ -4001,6 +4014,7 @@ async function confirmAiReschedule() {
     setAiCommandOpen(false)
 
     showAppNotification('Event rescheduled successfully.')
+    speakArneySuccess('Event rescheduled successfully.')
   } catch (error) {
     showAppNotification(
       error instanceof Error
@@ -4077,16 +4091,7 @@ async function chooseAiCancellationPerson(
 
     setAiCancellationPreview(updatedPreview)
 
-    setAiCommandResult(
-      JSON.stringify(
-        {
-          intent: 'cancel_event',
-          preview: updatedPreview,
-        },
-        null,
-        2
-      )
-    )
+    announceArneyReply(describeArneyPreview('cancel_event', updatedPreview))
   } catch (error) {
     showAppNotification(
       error instanceof Error
@@ -4132,6 +4137,8 @@ async function submitAiCommand(
   }
 
  setAiCommandLoading(true)
+stopArneyReply()
+setArneyVoiceStatus('')
 setAiCommandResult('')
 setAiCancellationPreview(null)
 setAiReschedulePreview(null)
@@ -4166,18 +4173,7 @@ setAiReschedulePreview(null)
       intentData.intent !== 'cancel_event' &&
       intentData.intent !== 'move_event'
     ) {
-      setAiCommandResult(
-        JSON.stringify(
-          {
-            intent:
-              intentData.intent,
-            status:
-              'not_wired_yet',
-          },
-          null,
-          2
-        )
-      )
+      announceArneyReply(describeArneyIntent(intentData.intent))
 
       return
     }
@@ -4221,31 +4217,9 @@ setAiReschedulePreview(null)
       setAiReschedulePreview(previewData)
     } 
 
-setAiCommandResult(
-  JSON.stringify(
-    {
-      intent:
-        intentData.intent,
-      preview:
-        previewData,
-    },
-    null,
-    2
-  )
-)
-  } catch (error) {
-    setAiCommandResult(
-      JSON.stringify(
-        {
-          error:
-            error instanceof Error
-              ? error.message
-              : 'AI command failed.',
-        },
-        null,
-        2
-      )
-    )
+announceArneyReply(describeArneyPreview(intentData.intent, previewData))
+  } catch {
+    announceArneyReply(describeArneyError())
   } finally {
     setAiCommandLoading(false)
   }
@@ -4258,6 +4232,7 @@ function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
   const controller = createArneyPlusHoldController({
     delayMs: 375,
     onHold: () => {
+      stopArneyReply()
       setArneyPlusListening(true)
       setArneyVoiceStatus('Listening… release to finish.')
     },
@@ -14362,6 +14337,7 @@ return (
     <div
       className="ai-command-overlay"
       onClick={() => {
+        stopArneyReply()
         setAiCommandOpen(false)
       }}
     >
@@ -14385,6 +14361,7 @@ return (
             className="ai-command-close"
             aria-label="Close AI command"
             onClick={() => {
+              stopArneyReply()
               setAiCommandOpen(false)
             }}
           >
@@ -14811,9 +14788,15 @@ return (
   )}
 
 {aiCommandResult !== '' && (
-  <pre className="ai-command-debug">
-    {aiCommandResult}
-  </pre>
+  <section className="arney-conversation-result" role="status" aria-live="polite">
+    <p>{aiCommandResult}</p>
+    <div className="arney-conversation-audio-controls">
+      <button type="button" onClick={() => speakArneyReply(aiCommandResult)}
+        aria-label="Hear Arney's reply">Hear reply</button>
+      <button type="button" onClick={stopArneyReply}
+        aria-label="Stop Arney speaking">Stop speaking</button>
+    </div>
+  </section>
 )}
 
 
@@ -14822,6 +14805,7 @@ return (
               type="button"
               className="ai-command-cancel"
               onClick={() => {
+                stopArneyReply()
                 setAiCommandOpen(false)
               }}
             >
