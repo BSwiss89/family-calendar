@@ -3293,6 +3293,14 @@ function speakArneySuccess(message: string) {
   }
 }
 
+useEffect(() => {
+  const onPreferencesChanged = () => {
+    if (readArneyPreferences().responseMode === 'silent') stopArneyReply()
+  }
+  window.addEventListener('arney:preferences-changed', onPreferencesChanged)
+  return () => window.removeEventListener('arney:preferences-changed', onPreferencesChanged)
+}, [])
+
 const [
   aiCancellationPreview,
   setAiCancellationPreview,
@@ -14791,8 +14799,11 @@ return (
   <section className="arney-conversation-result" role="status" aria-live="polite">
     <p>{aiCommandResult}</p>
     <div className="arney-conversation-audio-controls">
-      <button type="button" onClick={() => speakArneyReply(aiCommandResult)}
-        aria-label="Hear Arney's reply">Hear reply</button>
+      <button type="button" onClick={() => {
+        if (!speakArneyReply(aiCommandResult)) {
+          setArneyVoiceStatus('Audio playback is not available here. You can read the reply below.')
+        }
+      }} aria-label="Hear Arney's reply">Hear reply</button>
       <button type="button" onClick={stopArneyReply}
         aria-label="Stop Arney speaking">Stop speaking</button>
     </div>
