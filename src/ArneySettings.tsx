@@ -29,6 +29,7 @@ export default function ArneySettings({ onChange }: Props) {
     setError(false)
     setPreferences(next)
     onChange?.(next)
+    window.dispatchEvent(new Event('arney:preferences-changed'))
   }
 
   return (
@@ -49,6 +50,14 @@ export default function ArneySettings({ onChange }: Props) {
           </label>
         ))}
       </fieldset>
+      <label style={{ display: 'flex', gap: 10 }}>
+        <input
+          type="checkbox"
+          checked={preferences.browserSpeechEnabled}
+          onChange={(event) => update({ browserSpeechEnabled: event.target.checked })}
+        />
+        <span><strong>Allow browser speech recognition</strong><span style={{ display: 'block' }}>Off by default. Depending on your browser, speech may be sent to the browser provider for transcription. The calendar does not control that service. This is optional and no microphone starts until you press and hold Talk. Leave off for local-only use.</span></span>
+      </label>
       <label style={{ display: 'flex', gap: 10 }}>
         <input
           type="checkbox"
