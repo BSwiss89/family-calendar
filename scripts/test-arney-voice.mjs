@@ -259,3 +259,89 @@ test('empty result ends safely and never creates a transcript', async () => {
     globalThis.window = original
   }
 })
+
+test('a second Safari recording still produces a transcript when no audio interference occurs', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  const recognizers = []
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognizers.push(this) }
+      start() { this.onstart?.() }
+      stop() { this.onend?.() }
+      abort() { this.onend?.() }
+    },
+  }
+  try {
+    const results = []
+    for (const phrase of ['First command', 'Second command']) {
+      const session = beginArneySpeech(result => results.push(result))
+      assert.ok(session)
+      const instance = recognizers.at(-1)
+      instance.onresult?.({results: [[{transcript: phrase}]]})
+      session.stop()
+    }
+    assert.equal(recognizers.length, 2, 'every press-to-talk uses a fresh recognizer')
+    assert.deepEqual(results, [
+      {kind: 'transcript', text: 'First command'},
+      {kind: 'transcript', text: 'Second command'},
+    ])
+  } finally {
+    globalThis.window = original
+  }
+})
+
+test('Safari aborted after obtaining speech preserves existing words only for review', async () => {
+  const { beginArneySpeech, getArneySpeechDiagnostics } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognizer
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognizer = this }
+      start() { this.onstart?.() }
+      stop() {
+        this.onerror?.({error: 'aborted'})
+        this.onend?.()
+      }
+      abort() { this.onend?.() }
+    },
+  }
+  try {
+    const results = []
+    const session = beginArneySpeech(result => results.push(result))
+    recognizer.onresult?.({results: [[{transcript: 'Review this safely'}]]})
+    session.stop()
+    assert.deepEqual(results, [{kind: 'transcript', text: 'Review this safely'}])
+    assert.doesNotMatch(getArneySpeechDiagnostics().join(' '), /Review this safely/)
+    assert.match(getArneySpeechDiagnostics().join(' '), /recovered existing transcript/)
+  } finally {
+    globalThis.window = original
+  }
+})
+
+test('Safari aborted before returning words remains a safe error without retry or submission', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognizer
+  let starts = 0
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognizer = this }
+      start() { starts += 1; this.onstart?.() }
+      stop() {
+        this.onerror?.({error: 'aborted'})
+        this.onend?.()
+      }
+      abort() { this.onend?.() }
+    },
+  }
+  try {
+    const results = []
+    const session = beginArneySpeech(result => results.push(result))
+    session.stop()
+    assert.equal(starts, 1, 'do not auto retry microphone after a browser abort')
+    assert.deepEqual(results, [{kind: 'error', reason: 'aborted'}])
+  } finally {
+    globalThis.window = original
+  }
+})
