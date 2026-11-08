@@ -20390,3 +20390,36 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* Arney conversational results stay readable even if speech playback is blocked. */
+.arney-conversation-result {
+  margin-top: 12px;
+  border: 1px solid #93c5fd;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  padding: 12px 14px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.arney-conversation-result p { margin: 0 0 10px; }
+.arney-conversation-audio-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.arney-conversation-audio-controls button {
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  background: #fff;
+  color: #1d4ed8;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.arney-conversation-audio-controls button:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
