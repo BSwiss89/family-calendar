@@ -4269,6 +4269,8 @@ function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
           ? 'To use hold-to-talk, enable browser speech recognition in Arney Voice Settings.'
           : result.kind === 'error' && result.reason === 'speech-unavailable'
             ? 'This browser does not support speech recognition. You can still type below.'
+            : result.kind === 'error' && result.reason === 'aborted'
+              ? 'Safari stopped recording before returning words. Nothing was sent. Try again after Arney finishes speaking; if it repeats, test Silent voice response mode.'
             : result.kind === 'error'
               ? 'Speech recognition failed (' + result.reason + '). Nothing was sent.'
               : 'No words were recognized. Nothing was sent.')
