@@ -13,7 +13,9 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
-import ArneyVoiceInput from './ArneyVoiceInput'
+import { arneySpeechAvailable, beginArneySpeech } from './arneySpeech'
+import { readArneyPreferences } from './arneyPreferences'
+import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
 import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
@@ -3256,11 +3258,14 @@ const [viewingOccurrenceDate, setViewingOccurrenceDate] =
   const [isAddingEvent, setIsAddingEvent] = useState(false)
 const [quickAddOpen, setQuickAddOpen] = useState(false)
 
-const calendarAddHoldTimerRef =
-  useRef<number | null>(null)
+const calendarPlusHoldRef = useRef<ArneyPlusHoldController | null>(null)
+const [arneyPlusListening, setArneyPlusListening] = useState(false)
+const [arneyVoiceStatus, setArneyVoiceStatus] = useState('')
 
-const calendarAddLongPressRef =
-  useRef(false)
+useEffect(() => () => {
+  calendarPlusHoldRef.current?.destroy()
+  calendarPlusHoldRef.current = null
+}, [])
 
 const [aiCommandOpen, setAiCommandOpen] =
   useState(false)
@@ -4247,48 +4252,65 @@ setAiCommandResult(
 }
 
 
-function startCalendarAddHold() {
-  calendarAddLongPressRef.current = false
-
-  if (
-    calendarAddHoldTimerRef.current !== null
-  ) {
-    window.clearTimeout(
-      calendarAddHoldTimerRef.current
-    )
-  }
-
-  calendarAddHoldTimerRef.current =
-    window.setTimeout(() => {
-      calendarAddHoldTimerRef.current = null
-      calendarAddLongPressRef.current = true
-
-            setAiCommandText('')
+function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
+  if (!event.isPrimary || event.button !== 0) return
+  calendarPlusHoldRef.current?.destroy()
+  const controller = createArneyPlusHoldController({
+    delayMs: 375,
+    onHold: () => {
+      setArneyPlusListening(true)
+      setArneyVoiceStatus('Listening… release to finish.')
+    },
+    begin: onResult => {
+      if (!readArneyPreferences().browserSpeechEnabled) {
+        onResult({ kind: 'error', reason: 'speech-consent-required' })
+        return null
+      }
+      if (!arneySpeechAvailable()) {
+        onResult({ kind: 'error', reason: 'speech-unavailable' })
+        return null
+      }
+      return beginArneySpeech(onResult)
+    },
+    onFinished: result => {
+      setArneyPlusListening(false)
       setQuickAddOpen(false)
+      setAiCommandResult('')
+      setAiCancellationPreview(null)
+      setAiReschedulePreview(null)
+      const transcript = result.kind === 'transcript' ? result.text.trim().slice(0, 2000) : ''
+      setAiCommandText(transcript)
+      setArneyVoiceStatus(transcript
+        ? 'Voice captured. Review the words and tap Send when ready.'
+        : result.kind === 'error' && result.reason === 'speech-consent-required'
+          ? 'To use hold-to-talk, enable browser speech recognition in Arney Voice Settings.'
+          : result.kind === 'error' && result.reason === 'speech-unavailable'
+            ? 'This browser does not support speech recognition. You can still type below.'
+            : result.kind === 'error'
+              ? 'Speech recognition failed (' + result.reason + '). Nothing was sent.'
+              : 'No words were recognized. Nothing was sent.')
       setAiCommandOpen(true)
-    }, 800)
+    },
+    onCanceled: () => {
+      setArneyPlusListening(false)
+      setArneyVoiceStatus('')
+    },
+  })
+  calendarPlusHoldRef.current = controller
+  controller.down(event.pointerId)
+  try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* browser may decline */ }
 }
 
-function cancelCalendarAddHold() {
-  if (
-    calendarAddHoldTimerRef.current !== null
-  ) {
-    window.clearTimeout(
-      calendarAddHoldTimerRef.current
-    )
+function cancelCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
+  calendarPlusHoldRef.current?.up(event.pointerId)
+}
 
-    calendarAddHoldTimerRef.current = null
-  }
+function abortCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
+  calendarPlusHoldRef.current?.cancel(event.pointerId)
 }
 
 function consumeCalendarAddLongPress() {
-  if (!calendarAddLongPressRef.current) {
-    return false
-  }
-
-  calendarAddLongPressRef.current = false
-
-  return true
+  return calendarPlusHoldRef.current?.consumeClick() ?? false
 }
 
 
@@ -14313,11 +14335,13 @@ return (
 
   <button
   type="button"
-  className="mobile-capture-button"
-  aria-label="Open Quick Add"
+  className={`mobile-capture-button ${arneyPlusListening ? 'arney-plus-listening' : ''}`}
+  aria-label="Tap for Quick Add; hold to talk to Arney"
+  aria-pressed={arneyPlusListening}
+  style={{ touchAction: 'none' }}
   onPointerDown={startCalendarAddHold}
   onPointerUp={cancelCalendarAddHold}
-  onPointerCancel={cancelCalendarAddHold}
+  onPointerCancel={abortCalendarAddHold}
   onContextMenu={(event) => {
     event.preventDefault()
   }}
@@ -14329,7 +14353,7 @@ return (
     setQuickAddOpen(true)
   }}
 >
-  +
+  {arneyPlusListening ? '🎙' : '+'}
 </button>
 </div>
 
@@ -14375,15 +14399,16 @@ return (
     void submitAiCommand()
   }}
 >
-          <ArneyVoiceInput
-            busy={aiCommandLoading}
-            onTranscript={(text) => {
-              setAiCommandText(text)
-              setAiCommandResult('')
-              setAiCancellationPreview(null)
-              setAiReschedulePreview(null)
-            }}
-          />
+          {arneyVoiceStatus && (
+            <p className="arney-voice-review-status" role="status">
+              {arneyVoiceStatus}
+              {arneyVoiceStatus.includes('Voice Settings') && (
+                <> <button type="button" onClick={() => window.dispatchEvent(
+                  new Event('family-calendar:open-arney-settings')
+                )}>Open Arney Voice Settings</button></>
+              )}
+            </p>
+          )}
           <textarea
             className="ai-command-input"
             value={aiCommandText}
@@ -20153,7 +20178,7 @@ const occurrenceEndDate =
                               type="button"
                   onPointerDown={startCalendarAddHold}
                   onPointerUp={cancelCalendarAddHold}
-                  onPointerCancel={cancelCalendarAddHold}
+                  onPointerCancel={abortCalendarAddHold}
                   onContextMenu={(event) => {
                     event.preventDefault()
                   }}
@@ -20240,7 +20265,7 @@ const occurrenceEndDate =
                 type="button"
         onPointerDown={startCalendarAddHold}
         onPointerUp={cancelCalendarAddHold}
-        onPointerCancel={cancelCalendarAddHold}
+        onPointerCancel={abortCalendarAddHold}
 onContextMenu={(event) => {
           event.preventDefault()
         }}

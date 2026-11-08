@@ -20366,3 +20366,27 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
     display: none;
   }
 }
+
+/* Arney: the existing blue + becomes a hold-to-talk control without a new button. */
+.mobile-capture-button.arney-plus-listening {
+  background: #1e40af;
+  font-size: 25px;
+  box-shadow: 0 0 0 6px rgba(37, 99, 235, .22), 0 8px 22px rgba(30, 64, 175, .35);
+}
+.arney-voice-review-status {
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid #93c5fd;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  line-height: 1.45;
+}
+.arney-voice-review-status button {
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
