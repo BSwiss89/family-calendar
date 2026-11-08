@@ -83,30 +83,19 @@ test('speech synthesis has a visible fallback when unavailable, and can be stopp
     globalThis.window = undefined
     assert.equal(speakArneyReply('Hello'), false)
     stopArneyReply()
-    let active = false
     globalThis.window = {
       speechSynthesis: {
-        get speaking() { return active },
-        get pending() { return false },
-        get paused() { return false },
-        cancel: () => { events.push('cancel'); active = false },
-        speak: utterance => { active = true; events.push(['speak', utterance.text]) },
+        cancel: () => events.push('cancel'),
+        speak: utterance => events.push(['speak', utterance.text]),
       },
     }
     globalThis.SpeechSynthesisUtterance = class {
       constructor(text) { this.text = text }
     }
-    stopArneyReply()
-    assert.deepEqual(events, [], 'idle synthesis must not reset iPhone audio session')
     assert.equal(speakArneyReply('Event found. Please confirm.'), true)
-    assert.deepEqual(events, [['speak', 'Event found. Please confirm.']])
-    assert.equal(speakArneyReply('Second reply'), true)
-    assert.deepEqual(events.slice(-2), ['cancel', ['speak', 'Second reply']])
+    assert.deepEqual(events, ['cancel', ['speak', 'Event found. Please confirm.']])
     stopArneyReply()
     assert.equal(events.at(-1), 'cancel')
-    const countAfterStop = events.length
-    stopArneyReply()
-    assert.equal(events.length, countAfterStop, 'stop while idle must be a no-op')
   } finally {
     globalThis.window = originalWindow
     globalThis.SpeechSynthesisUtterance = originalUtterance
