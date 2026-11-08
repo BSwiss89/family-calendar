@@ -190,13 +190,24 @@ export function arneyReplyAudioActive(): boolean {
   return synthesis.speaking || synthesis.pending || synthesis.paused
 }
 
-/** Speech replies never send text to a paid API. */
-export function speakArneyReply(text: string): void {
+/** Browser speech synthesis; may be limited by iOS autoplay and voice availability. */
+export function stopArneyReply(): void {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
-  if (typeof SpeechSynthesisUtterance === 'undefined') return
-  window.speechSynthesis.cancel()
-  const message = new SpeechSynthesisUtterance(text)
-  message.lang = navigator.language || 'en-US'
-  message.rate = 1
-  window.speechSynthesis.speak(message)
+  try { window.speechSynthesis.cancel() } catch { /* Keep visual UI functional. */ }
+}
+
+/** Reply stays visible even if the browser does not permit speech playback. */
+export function speakArneyReply(text: string): boolean {
+  if (!text.trim() || typeof window === 'undefined' || !('speechSynthesis' in window)) return false
+  if (typeof SpeechSynthesisUtterance === 'undefined') return false
+  try {
+    window.speechSynthesis.cancel()
+    const message = new SpeechSynthesisUtterance(text.slice(0, 600))
+    message.lang = typeof navigator !== 'undefined' ? navigator.language || 'en-US' : 'en-US'
+    message.rate = 1
+    window.speechSynthesis.speak(message)
+    return true
+  } catch {
+    return false
+  }
 }
