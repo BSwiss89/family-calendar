@@ -147,9 +147,8 @@ export function beginArneySpeech(
   recognition.onerror = event => {
     record('browser error: ' + (event.error || 'unknown'))
     if (event.error === 'aborted' && transcript.trim()) {
-      // Safari can emit "aborted" after stop() even though it already supplied
-      // useful speech. Keep the words for the user's explicit review, rather
-      // than discarding them. This never submits a command automatically.
+      // Safari can abort an otherwise useful session after delivering text.
+      // Preserve only already-recognized words for explicit user review.
       record('recovered existing transcript after browser abort')
       finish({ kind: 'transcript', text: transcript })
       return
@@ -201,10 +200,6 @@ export function arneyReplyAudioActive(): boolean {
 /** Browser speech synthesis; may be limited by iOS autoplay and voice availability. */
 export function stopArneyReply(): void {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
-  // WebKit can disrupt a later microphone session when the audio session is
-  // reset unnecessarily. Avoid cancel() unless speech is actually active.
-  // This cannot fix every iOS SpeechRecognition bug, but avoids extra churn.
-  if (!arneyReplyAudioActive()) return
   try { window.speechSynthesis.cancel() } catch { /* Keep visual UI functional. */ }
 }
 
@@ -213,7 +208,7 @@ export function speakArneyReply(text: string): boolean {
   if (!text.trim() || typeof window === 'undefined' || !('speechSynthesis' in window)) return false
   if (typeof SpeechSynthesisUtterance === 'undefined') return false
   try {
-    stopArneyReply()
+    window.speechSynthesis.cancel()
     const message = new SpeechSynthesisUtterance(text.slice(0, 600))
     message.lang = typeof navigator !== 'undefined' ? navigator.language || 'en-US' : 'en-US'
     message.rate = 1
