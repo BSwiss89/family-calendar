@@ -42,7 +42,7 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
       - name: Verify Arney speech consent, voice lifecycle and safe commands
-        run: node --experimental-strip-types --test scripts/test-arney-speech-consent.mjs scripts/test-arney-voice.mjs scripts/test-arney-commands.mjs scripts/test-arney-plus-hold.mjs
+        run: node --experimental-strip-types --test scripts/test-arney-speech-consent.mjs scripts/test-arney-voice.mjs scripts/test-arney-commands.mjs scripts/test-arney-plus-hold.mjs scripts/test-arney-spoken-replies.mjs
       - name: Check TypeScript and build frontend
         run: npm run build
       - name: Verify Duplicate Event drafts are independent of their source
