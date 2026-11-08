@@ -13,7 +13,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
-import { arneySpeechAvailable, beginArneySpeech, speakArneyReply, stopArneyReply } from './arneySpeech'
+import { arneySpeechAvailable, beginArneySpeech, getArneySpeechDiagnostics, speakArneyReply, stopArneyReply } from './arneySpeech'
 import { describeArneyError, describeArneyIntent, describeArneyPreview, shouldSpeakArneyReply, type ArneyReply } from './arneyResponses'
 import { readArneyPreferences } from './arneyPreferences'
 import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
@@ -3262,6 +3262,7 @@ const [quickAddOpen, setQuickAddOpen] = useState(false)
 const calendarPlusHoldRef = useRef<ArneyPlusHoldController | null>(null)
 const [arneyPlusListening, setArneyPlusListening] = useState(false)
 const [arneyVoiceStatus, setArneyVoiceStatus] = useState('')
+const [arneyMicDiagnostics, setArneyMicDiagnostics] = useState<string[]>([])
 
 useEffect(() => () => {
   calendarPlusHoldRef.current?.destroy()
@@ -4241,6 +4242,7 @@ function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
     delayMs: 375,
     onHold: () => {
       stopArneyReply()
+      setArneyMicDiagnostics([])
       setArneyPlusListening(true)
       setArneyVoiceStatus('Listening… release to finish.')
     },
@@ -4262,6 +4264,9 @@ function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
       setAiCancellationPreview(null)
       setAiReschedulePreview(null)
       const transcript = result.kind === 'transcript' ? result.text.trim().slice(0, 2000) : ''
+      setArneyMicDiagnostics(result.kind === 'error' && result.reason === 'aborted'
+        ? getArneySpeechDiagnostics()
+        : [])
       setAiCommandText(transcript)
       setArneyVoiceStatus(transcript
         ? 'Voice captured. Review the words and tap Send when ready.'
@@ -4270,7 +4275,7 @@ function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
           : result.kind === 'error' && result.reason === 'speech-unavailable'
             ? 'This browser does not support speech recognition. You can still type below.'
             : result.kind === 'error' && result.reason === 'aborted'
-              ? 'Safari stopped recording before returning words. Nothing was sent. Try again after Arney finishes speaking; if it repeats, test Silent voice response mode.'
+              ? 'Safari stopped microphone recognition without returning words. Nothing was sent. For now, tap the text box and use your iPhone keyboard microphone to dictate. Details below can help us diagnose repeated attempts.'
             : result.kind === 'error'
               ? 'Speech recognition failed (' + result.reason + '). Nothing was sent.'
               : 'No words were recognized. Nothing was sent.')
@@ -14395,6 +14400,12 @@ return (
                 )}>Open Arney Voice Settings</button></>
               )}
             </p>
+          )}
+          {arneyMicDiagnostics.length > 0 && (
+            <details className="arney-mic-diagnostics">
+              <summary>Microphone diagnostics (no audio or spoken words)</summary>
+              <pre>{arneyMicDiagnostics.join('\n')}</pre>
+            </details>
           )}
           <textarea
             className="ai-command-input"
