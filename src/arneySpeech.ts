@@ -146,6 +146,13 @@ export function beginArneySpeech(
   }
   recognition.onerror = event => {
     record('browser error: ' + (event.error || 'unknown'))
+    if (event.error === 'aborted' && transcript.trim()) {
+      // Safari can abort an otherwise useful session after delivering text.
+      // Preserve only already-recognized words for explicit user review.
+      record('recovered existing transcript after browser abort')
+      finish({ kind: 'transcript', text: transcript })
+      return
+    }
     finish({ kind: 'error', reason: event.error || 'unknown' })
   }
   recognition.onend = () => {
@@ -193,6 +200,9 @@ export function arneyReplyAudioActive(): boolean {
 /** Browser speech synthesis; may be limited by iOS autoplay and voice availability. */
 export function stopArneyReply(): void {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+  // Even in Silent mode the blue + calls this before starting recognition.
+  // Avoid an unnecessary audio-session reset when there is no active reply.
+  if (!arneyReplyAudioActive()) return
   try { window.speechSynthesis.cancel() } catch { /* Keep visual UI functional. */ }
 }
 
