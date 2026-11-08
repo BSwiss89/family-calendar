@@ -13,6 +13,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import ArneyVoiceInput from './ArneyVoiceInput'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
 import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
@@ -14374,6 +14375,15 @@ return (
     void submitAiCommand()
   }}
 >
+          <ArneyVoiceInput
+            busy={aiCommandLoading}
+            onTranscript={(text) => {
+              setAiCommandText(text)
+              setAiCommandResult('')
+              setAiCancellationPreview(null)
+              setAiReschedulePreview(null)
+            }}
+          />
           <textarea
             className="ai-command-input"
             value={aiCommandText}
