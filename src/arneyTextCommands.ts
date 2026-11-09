@@ -4,8 +4,11 @@ export type ArneyListInfo = {
   items?: Array<{ text: string }>
 }
 
+export type ArneyMealType = 'breakfast' | 'lunch' | 'dinner' | 'snack'
+
 export type ArneySimpleCommand =
   | { kind: 'add-list-item'; listId: number; listName: string; item: string }
+  | { kind: 'add-meal'; title: string; date: string; mealType: ArneyMealType }
   | { kind: 'list-query'; listId: number; listName: string; items: string[] }
   | { kind: 'calendar-query'; when: 'today' | 'tomorrow' }
   | { kind: 'create-event'; title: string; date: string; time: string | null }
@@ -26,6 +29,14 @@ function validIsoDate(value: string): boolean {
   return localDayKey(date) === value
 }
 
+function resolveDay(value: string, now: Date): string | null {
+  const day = value.toLowerCase()
+  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  if (day === 'tomorrow') target.setDate(target.getDate() + 1)
+  const date = day === 'today' || day === 'tomorrow' ? localDayKey(target) : day
+  return validIsoDate(date) ? date : null
+}
+
 function arneyTime(value: string | undefined): string | null | undefined {
   if (!value) return null
   const match = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(value.trim())
@@ -44,9 +55,18 @@ function arneyTime(value: string | undefined): string | null | undefined {
   return String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0')
 }
 
+function comparableListName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\bgroceries\b/g, 'grocery')
+    .replace(/\bshopping\b/g, 'grocery')
+    .replace(/\blist\b/g, '')
+    .replace(/[^a-z0-9]/g, '')
+}
+
 /**
- * Deliberately conservative local patterns. Unrecognized or ambiguous requests
- * go to local Ollama classification; no mutations occur from this function.
+ * Deliberately conservative local patterns. Recognized writes return only a
+ * draft for an existing review form. They never call an API or save anything.
  */
 export function parseArneySimpleCommand(
   input: string,
@@ -69,22 +89,52 @@ export function parseArneySimpleCommand(
     }
   }
 
+  const genericListAdd = /^(?:add|put)\s+(.+?)\s+(?:to|on|in)\s+(?:(?:my|the)\s+)?(.+?)$/i.exec(text)
+  if (genericListAdd && genericListAdd[1].trim().length <= 200) {
+    const requested = comparableListName(genericListAdd[2])
+    const target = lists.find(list => comparableListName(list.name) === requested) ??
+      (requested === 'grocery' ? lists.find(list => comparableListName(list.name) === 'grocery') : undefined)
+    if (target) {
+      return {
+        kind: 'add-list-item',
+        listId: target.id,
+        listName: target.name,
+        item: genericListAdd[1].trim(),
+      }
+    }
+  }
+
+  const meal = /^(?:add|put|plan|schedule)\s+(.+?)\s+(?:to|for)\s+(breakfast|lunch|dinner|snack)\s+(?:(?:on|for)\s+)?(today|tomorrow|\d{4}-\d{2}-\d{2})$/i.exec(text)
+  if (meal) {
+    const date = resolveDay(meal[3], now)
+    const title = meal[1].trim()
+    if (date && title && title.length <= 200) {
+      return {
+        kind: 'add-meal',
+        title,
+        date,
+        mealType: meal[2].toLowerCase() as ArneyMealType,
+      }
+    }
+  }
+
   if (/^(?:what(?:'s| is)|what do i have|show|tell me|read)(?:.*?)(?:calendar|schedule|events?|appointments?|on today|on tomorrow|for today|for tomorrow)/i.test(text)) {
     if (/\btomorrow\b/i.test(text)) return { kind: 'calendar-query', when: 'tomorrow' }
     if (/\btoday\b/i.test(text)) return { kind: 'calendar-query', when: 'today' }
   }
 
-  const create = /^(?:add|create|schedule|put)\s+(?:an?\s+)?(?:event\s+|appointment\s+)?(.+?)\s+(?:(?:on|for)\s+)?(today|tomorrow|\d{4}-\d{2}-\d{2})(?:\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?$/i.exec(text)
-  if (create) {
-    const title = create[1].trim()
-    const day = create[2].toLowerCase()
-    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    if (day === 'tomorrow') target.setDate(target.getDate() + 1)
-    const date = day === 'today' || day === 'tomorrow' ? localDayKey(target) : day
-    const time = arneyTime(create[3])
-    if (title && title.length <= 200 && validIsoDate(date) && time !== undefined) {
+  const dateThenTime = /^(?:add|create|schedule|put)\s+(?:an?\s+)?(?:event\s+|appointment\s+)?(.+?)\s+(?:(?:on|for)\s+)?(today|tomorrow|\d{4}-\d{2}-\d{2})(?:\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?$/i.exec(text)
+  const timeThenDate = /^(?:add|create|schedule|put)\s+(?:an?\s+)?(?:event\s+|appointment\s+)?(.+?)\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+(?:(?:on|for)\s+)?(today|tomorrow|\d{4}-\d{2}-\d{2})$/i.exec(text)
+  const title = (dateThenTime?.[1] ?? timeThenDate?.[1])?.trim()
+  const rawDate = dateThenTime?.[2] ?? timeThenDate?.[3]
+  const rawTime = dateThenTime?.[3] ?? timeThenDate?.[2]
+  if (title && rawDate && title.length <= 200) {
+    const date = resolveDay(rawDate, now)
+    const time = arneyTime(rawTime)
+    if (date && time !== undefined) {
       return { kind: 'create-event', title, date, time }
     }
   }
+
   return null
 }
