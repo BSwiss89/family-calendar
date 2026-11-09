@@ -120,8 +120,12 @@ try {
     try { $random.GetBytes($bytes) }
     finally { $random.Dispose() }
     $token = [Convert]::ToBase64String($bytes)
-    @{enabled=$true;serviceUrl='http://127.0.0.1:13981/transcribe';serviceToken=$token} |
-        ConvertTo-Json -Compress | Set-Content -LiteralPath $configFile -Encoding UTF8
+    $configJson = @{enabled=$true;serviceUrl='http://127.0.0.1:13981/transcribe';serviceToken=$token} |
+        ConvertTo-Json -Compress
+    # Windows PowerShell 5.1's Set-Content -Encoding UTF8 writes a BOM. Use
+    # the .NET UTF-8 encoder so Node and PowerShell read the same JSON bytes.
+    $utf8NoBom = New-Object Text.UTF8Encoding
+    [IO.File]::WriteAllText($configFile,$configJson,$utf8NoBom)
     & icacls.exe $state /inheritance:r /grant:r "$($identity.Name):(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Local STT directory ACL failed.' }
     $env:HF_HOME = Join-Path $state 'models'
