@@ -113,7 +113,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Pinned local STT package installation failed.' }
     New-Item -ItemType Directory -Path (Join-Path $state 'models') -Force | Out-Null
     $bytes = New-Object byte[] 48
-    [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    # Windows PowerShell 5.1 runs on .NET Framework, which does not provide
+    # the newer static RandomNumberGenerator.Fill API. Create/GetBytes is
+    # cryptographically secure and works on both Windows PowerShell and pwsh.
+    $random = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $random.GetBytes($bytes) }
+    finally { $random.Dispose() }
     $token = [Convert]::ToBase64String($bytes)
     @{enabled=$true;serviceUrl='http://127.0.0.1:13981/transcribe';serviceToken=$token} |
         ConvertTo-Json -Compress | Set-Content -LiteralPath $configFile -Encoding UTF8
