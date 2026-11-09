@@ -8,6 +8,7 @@ $state = 'C:\ProgramData\FamilyCalendar\LocalSTT'
 $taskName = 'Family Calendar Local STT'
 $testTask = 'Family Calendar Secure TEST'
 $autoTask = 'Family Calendar Secure TEST Auto Deploy'
+$node = 'C:\ProgramData\FamilyCalendar\Runtime\node-v24.22.1\node.exe'
 $configFile = Join-Path $state 'config.json'
 $serviceFile = Join-Path $state 'arney_local_stt_service.py'
 $requirementsFile = Join-Path $state 'requirements.txt'
@@ -48,6 +49,26 @@ function Wait-TestHealthy {
         Start-Sleep -Seconds 2
     }
     throw 'TEST calendar did not become healthy after local STT installation.'
+}
+function Stop-OnlyTest {
+    Stop-ScheduledTask -TaskName $testTask -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    $listeners = @(Get-NetTCPConnection -State Listen -LocalPort 13002 -ErrorAction SilentlyContinue)
+    if ($listeners.Count -gt 1) { throw 'Multiple TEST listeners found.' }
+    if ($listeners.Count -eq 1) {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($listeners[0].OwningProcess)" -ErrorAction Stop
+        if ($null -eq $process -or
+            -not [string]::Equals($process.ExecutablePath,$node,[StringComparison]::OrdinalIgnoreCase) -or
+            $process.CommandLine -notlike '*family-calendar-test-security-stage*') {
+            throw 'Refusing to terminate an unexpected TEST process.'
+        }
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+    }
+    for ($i=0; $i -lt 20; $i++) {
+        if (!(Get-NetTCPConnection -State Listen -LocalPort 13002 -ErrorAction SilentlyContinue)) { return }
+        Start-Sleep -Milliseconds 400
+    }
+    throw 'TEST listener did not stop for configuration reload.'
 }
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -150,15 +171,8 @@ try {
     }
     Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
     Wait-Http $token
-    Stop-ScheduledTask -TaskName $testTask -ErrorAction SilentlyContinue
+    Stop-OnlyTest
     $testStopped = $true
-    for ($i=0; $i -lt 30; $i++) {
-        if (!(Get-NetTCPConnection -State Listen -LocalPort 13002 -ErrorAction SilentlyContinue)) { break }
-        Start-Sleep -Milliseconds 500
-    }
-    if (Get-NetTCPConnection -State Listen -LocalPort 13002 -ErrorAction SilentlyContinue) {
-        throw 'TEST listener did not stop for configuration reload.'
-    }
     Start-ScheduledTask -TaskName $testTask -ErrorAction Stop
     $testStopped = $false
     Wait-TestHealthy
@@ -181,11 +195,7 @@ try {
     }
     if (Test-Path -LiteralPath $state) { Remove-Item -LiteralPath $state -Recurse -Force -ErrorAction SilentlyContinue }
     try {
-        Stop-ScheduledTask -TaskName $testTask -ErrorAction SilentlyContinue
-        for ($i=0; $i -lt 30; $i++) {
-            if (!(Get-NetTCPConnection -State Listen -LocalPort 13002 -ErrorAction SilentlyContinue)) { break }
-            Start-Sleep -Milliseconds 500
-        }
+        Stop-OnlyTest
         Start-ScheduledTask -TaskName $testTask -ErrorAction Stop
         Wait-TestHealthy
     } catch {}
