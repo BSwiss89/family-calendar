@@ -95,7 +95,7 @@ export function createArneyPlusHoldController(handlers: PlusHoldHandlers): Arney
       } catch {
         pending = { kind: 'error', reason: 'start-failed' }
       }
-    }, handlers.delayMs ?? 375)
+    }, handlers.delayMs ?? 225)
   }
 
   function up(pointerId: number) {

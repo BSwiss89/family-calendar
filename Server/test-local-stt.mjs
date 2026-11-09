@@ -182,7 +182,9 @@ export function installTestLocalStt(app, {
       const transcript = typeof data?.transcript === 'string'
         ? data.transcript.trim().slice(0, 2000) : ''
       if (!transcript) return response.status(422).json({ error: 'No speech was recognized.' })
-      response.json({ transcript })
+      const elapsedMs = Number.isFinite(data?.elapsedMs) && data.elapsedMs >= 0
+        ? Math.round(data.elapsedMs) : undefined
+      response.json({ transcript, ...(elapsedMs !== undefined ? { elapsedMs } : {}) })
     } catch (error) {
       console.error('TEST local transcription unavailable:',
         error instanceof Error ? error.name : 'unknown error')

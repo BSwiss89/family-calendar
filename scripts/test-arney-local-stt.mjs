@@ -79,7 +79,7 @@ test('authenticated TEST recording is forwarded only to the configured loopback 
   const calls=[]
   const x=await fixture(async(url,options)=>{
     calls.push({url,options})
-    return new Response(JSON.stringify({transcript:'  Add milk tomorrow  '}),{
+    return new Response(JSON.stringify({transcript:'  Add milk tomorrow  ',elapsedMs:321}),{
       status:200,headers:{'Content-Type':'application/json'},
     })
   })
@@ -89,7 +89,7 @@ test('authenticated TEST recording is forwarded only to the configured loopback 
       method:'POST',body:recording(),headers:{Origin:x.base},
     })
     assert.equal(response.status,200)
-    assert.deepEqual(await response.json(),{transcript:'Add milk tomorrow'})
+    assert.deepEqual(await response.json(),{transcript:'Add milk tomorrow',elapsedMs:321})
     assert.equal(calls.length,1)
     assert.equal(calls[0].url,target)
     assert.equal(calls[0].options.headers.Authorization,'Bearer '+token)
@@ -152,6 +152,7 @@ test('busy, upstream failure and no-speech responses fail closed without transcr
 test('Windows installer keeps STT loopback-only, TEST-gated and rollback-capable',()=>{
   const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..')
   const installer=fs.readFileSync(path.join(root,'scripts/install-arney-local-stt-test.ps1'),'utf8')
+  const upgrade=fs.readFileSync(path.join(root,'scripts/upgrade-arney-local-stt-performance-test.ps1'),'utf8')
   const launcher=fs.readFileSync(path.join(root,'scripts/start-arney-local-stt.ps1'),'utf8')
   const service=fs.readFileSync(path.join(root,'stt/arney_local_stt_service.py'),'utf8')
   for(const required of [
@@ -175,5 +176,17 @@ test('Windows installer keeps STT loopback-only, TEST-gated and rollback-capable
   assert.match(service,/HOST = "127\.0\.0\.1"/)
   assert.doesNotMatch(service,/HOST = "0\.0\.0\.0"/)
   assert.match(service,/audio_bytes = b""/)
+  assert.match(service,/MODEL_NAME = os\.environ\.get\("FAMILY_CALENDAR_LOCAL_STT_MODEL", "base\.en"\)/)
+  assert.match(service,/cpu_threads=8/)
+  assert.match(launcher,/FAMILY_CALENDAR_LOCAL_STT_MODEL = 'base\.en'/)
+  assert.match(installer,/WhisperModel\('base\.en'.*cpu_threads=8/)
+  for(const required of [
+    'LOCAL_STT_PERFORMANCE_PREFLIGHT=PASS','ARNEY_LOCAL_STT_PERFORMANCE_UPGRADE=PASS',
+    'Refusing to terminate an unexpected Local STT process','LOCAL_STT_CPU_THREADS=8',
+    'TEST auto-deploy must remain disabled','LIVE_UNCHANGED=PASS',
+  ]) assert.match(upgrade,new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')))
+  assert.match(upgrade,/Get-CimInstance Win32_Process/)
+  assert.match(upgrade,/Stop-Process -Id \$process\.ProcessId -Force/)
+  assert.doesNotMatch(upgrade,/Stop-Process\s+-Name/)
 })
 

@@ -5,13 +5,14 @@ import {
   normalizeArneyPreferences, readArneyPreferences, saveArneyPreferences,
 } from '../src/arneyPreferences.ts'
 
-test('browser microphone speech remains off unless explicitly enabled', () => {
+test('private local speech is built in while browser speech remains opt-in', () => {
   assert.equal(DEFAULT_ARNEY_PREFERENCES.browserSpeechEnabled, false)
-  assert.equal(DEFAULT_ARNEY_PREFERENCES.localSpeechEnabled, false)
+  assert.equal(DEFAULT_ARNEY_PREFERENCES.localSpeechEnabled, true)
   const migrated = normalizeArneyPreferences({
     responseMode: 'always', wakeWordsEnabled: true, confirmBeforeChanges: true,
   })
   assert.equal(migrated.browserSpeechEnabled, false)
+  assert.equal(migrated.localSpeechEnabled, true)
   assert.equal(migrated.wakeWordsEnabled, true)
   assert.equal(migrated.confirmBeforeChanges, true)
 })
@@ -24,9 +25,10 @@ test('invalid consent never becomes consent', () => {
   }
   assert.equal(normalizeArneyPreferences({browserSpeechEnabled: true}).browserSpeechEnabled, true)
   assert.equal(normalizeArneyPreferences({localSpeechEnabled: true}).localSpeechEnabled, true)
+  assert.equal(normalizeArneyPreferences({localSpeechEnabled: false}).localSpeechEnabled, true)
 })
 
-test('device storage stays opt-in and handles invalid saved values', () => {
+test('device storage keeps browser speech opt-in and handles invalid saved values', () => {
   const previous = globalThis.window
   const saved = new Map()
   globalThis.window = {

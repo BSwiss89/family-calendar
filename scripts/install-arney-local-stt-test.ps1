@@ -150,7 +150,7 @@ try {
     & icacls.exe $state /inheritance:r /grant:r "$($identity.Name):(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Local STT directory ACL failed.' }
     $env:HF_HOME = Join-Path $state 'models'
-    & $venvPython -c "from faster_whisper import WhisperModel; WhisperModel('small.en',device='cpu',compute_type='int8'); print('LOCAL_STT_MODEL_READY')"
+    & $venvPython -c "from faster_whisper import WhisperModel; WhisperModel('base.en',device='cpu',compute_type='int8',cpu_threads=8,num_workers=1); print('LOCAL_STT_MODEL_READY')"
     if ($LASTEXITCODE -ne 0) { throw 'Local STT model preparation failed.' }
     $action = New-ScheduledTaskAction -Execute (Join-Path $PSHOME 'powershell.exe') -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $launcherFile + '"') -WorkingDirectory $state
     $trigger = New-ScheduledTaskTrigger -AtStartup

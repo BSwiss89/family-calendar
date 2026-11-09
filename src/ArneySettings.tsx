@@ -50,14 +50,10 @@ export default function ArneySettings({ onChange }: Props) {
           </label>
         ))}
       </fieldset>
-      <label style={{ display: 'flex', gap: 10 }}>
-        <input
-          type="checkbox"
-          checked={preferences.localSpeechEnabled}
-          onChange={(event) => update({ localSpeechEnabled: event.target.checked })}
-        />
-        <span><strong>Use private local transcription</strong><span style={{ display: 'block' }}>Recommended for iPhone hold-to-talk. Short recordings go through this authenticated calendar to Whisper on the family laptop, are transcribed locally, and are not retained. Nothing is sent until you review the words and tap Send.</span></span>
-      </label>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <span aria-hidden="true">✓</span>
+        <span><strong>Private local transcription is built in</strong><span style={{ display: 'block' }}>iPhone hold-to-talk uses Whisper on the family laptop automatically. Short recordings are transcribed locally and are not retained. Nothing is sent until you review the words and tap Send.</span></span>
+      </div>
       <label style={{ display: 'flex', gap: 10 }}>
         <input
           type="checkbox"
