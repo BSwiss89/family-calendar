@@ -10,6 +10,11 @@ const lists = [
   { id: 7, name: 'Groceries', items: [{ text: 'Eggs' }, { text: 'Milk' }] },
   { id: 8, name: 'To-Do', items: [] },
 ]
+const people = [
+  { id: 2, name: 'Robert' },
+  { id: 3, name: 'Haylee' },
+  { id: 4, name: 'Morgan' },
+]
 
 test('simple list write is a preview, not an API mutation', () => {
   assert.deepEqual(parseArneySimpleCommand('Add bananas to my Groceries list', lists, now), {
@@ -56,6 +61,21 @@ test('event creation supports natural time/date order and stays a draft', () => 
   assert.equal(parseArneySimpleCommand('Schedule dentist someday', lists, now), null)
 })
 
+test('spoken people preselect existing profiles and me means the active profile', () => {
+  assert.deepEqual(
+    parseArneySimpleCommand('Me and Haylee have a date tomorrow at 7 p.m.', lists, now, people, 2),
+    {
+      kind: 'create-event', title: 'date', date: '2026-10-14', time: '19:00', personIds: [2, 3],
+    },
+  )
+  assert.deepEqual(
+    parseArneySimpleCommand('Morgan and Haylee have a movie at 8pm tomorrow', lists, now, people, 2),
+    {
+      kind: 'create-event', title: 'movie', date: '2026-10-14', time: '20:00', personIds: [4, 3],
+    },
+  )
+})
+
 test('cannot infer a list that is not known', () => {
   assert.equal(parseArneySimpleCommand('Add bananas to my Unknown list', lists, now), null)
 })
@@ -67,6 +87,9 @@ test('voice write routing opens review forms and never auto-saves', () => {
   assert.match(app, /setIsAddingEvent\(true\)/)
   assert.match(app, /setQuickListOpen\(true\)/)
   assert.match(app, /setMealPlanFormOpen\(true\)/)
+  assert.match(app, /activeHouseholdPersonId/)
+  assert.match(app, /setSelectedPersonIds\(\[\.\.\.voicePersonIds\]\)/)
+  assert.match(app, /setSelectedPersonIds\(getDefaultEventPersonIds\(\)\)/)
   assert.match(app, /new AbortController\(\)/)
   assert.match(app, /15_000/)
   assert.match(app, /signal: requestController\.signal/)
