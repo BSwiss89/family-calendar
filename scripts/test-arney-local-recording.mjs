@@ -78,6 +78,22 @@ test('two consecutive local recordings use fresh recorders and both transcribe',
   assert.equal(x.uploads.length,2)
 })
 
+test('local transcript includes safe service and round-trip timing',async()=>{
+  const x=setup()
+  x.dependencies.fetchImpl=async()=>{
+    x.advance(640)
+    return new Response(JSON.stringify({transcript:'Timed command',elapsedMs:410}),{
+      status:200,headers:{'Content-Type':'application/json'},
+    })
+  }
+  const results=[]
+  const session=beginArneyLocalSpeech(result=>results.push(result),undefined,x.dependencies)
+  await tick();x.advance(900);session.stop();await tick()
+  assert.deepEqual(results,[{
+    kind:'transcript',text:'Timed command',timing:{totalMs:640,transcriptionMs:410},
+  }])
+})
+
 test('cancel stops microphone tracks, discards audio and never uploads',async()=>{
   const x=setup()
   const results=[]
