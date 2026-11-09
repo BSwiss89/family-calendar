@@ -157,6 +157,10 @@ test('Windows installer keeps STT loopback-only, TEST-gated and rollback-capable
     'family-calendar-test-security-stage','family-calendar-live-auth-candidate',
     'LIVE_UNCHANGED=PASS','Local STT installation failed and was rolled back',
   ]) assert.match(installer,new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')))
+  assert.match(installer,/RandomNumberGenerator\]::Create\(\)/)
+  assert.match(installer,/\.GetBytes\(\$bytes\)/)
+  assert.match(installer,/\.Dispose\(\)/)
+  assert.doesNotMatch(installer,/RandomNumberGenerator\]::Fill\(/)
   assert.match(launcher,/127\.0\.0\.1:13981\/transcribe/)
   assert.match(service,/HOST = "127\.0\.0\.1"/)
   assert.doesNotMatch(service,/HOST = "0\.0\.0\.0"/)
