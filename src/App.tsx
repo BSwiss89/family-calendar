@@ -18,6 +18,7 @@ import { arneyLocalSpeechAvailable, beginArneyLocalSpeech } from './arneyLocalSp
 import { describeArneyError, describeArneyIntent, describeArneyPreview, shouldSpeakArneyReply, type ArneyReply } from './arneyResponses'
 import { readArneyPreferences } from './arneyPreferences'
 import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
+import { parseArneySimpleCommand } from './arneyTextCommands'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
 import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
@@ -3276,6 +3277,9 @@ const [aiCommandOpen, setAiCommandOpen] =
 const [aiCommandText, setAiCommandText] =
   useState('')
 
+const [aiVoiceDirect, setAiVoiceDirect] =
+  useState(false)
+
 const [aiCommandLoading, setAiCommandLoading] =
   useState(false)
 
@@ -4236,6 +4240,81 @@ announceArneyReply(describeArneyPreview(intentData.intent, previewData))
 }
 
 
+function openArneyVoiceDraft(transcript: string): boolean {
+  const command = parseArneySimpleCommand(
+    transcript,
+    lists
+  )
+
+  if (!command) {
+    return false
+  }
+
+  if (command.kind === 'create-event') {
+    const [year, month, day] =
+      command.date.split('-').map(Number)
+    const targetDate =
+      new Date(year, month - 1, day)
+
+    clearEventForm()
+    setAiCommandOpen(false)
+    setPage('calendar')
+    setCalendarView('month')
+    setViewDate(
+      new Date(year, month - 1, 1)
+    )
+    setWeekDate(targetDate)
+    setSelectedDay(day)
+    setEventTitle(command.title)
+    setEventStartDate(command.date)
+    setEventStartDateText(
+      formatDateKeyForText(command.date)
+    )
+    setEventAllDay(command.time === null)
+    setEventTime(command.time ?? '')
+    setEventEndTime('')
+    setIsAddingEvent(true)
+    showAppNotification(
+      'Event details ready. Review before saving.'
+    )
+    return true
+  }
+
+  if (command.kind === 'add-list-item') {
+    setAiCommandOpen(false)
+    setQuickListId(command.listId)
+    setQuickListText(command.item)
+    setQuickListOpen(true)
+    showAppNotification(
+      `Ready to add ${command.item} to ${command.listName}. Review before adding.`
+    )
+    return true
+  }
+
+  if (command.kind === 'add-meal') {
+    setAiCommandOpen(false)
+    setPage('meals')
+    setMealsView('planner')
+    setMealPlanFormSource('planner')
+    setEditingMealPlanItemId(null)
+    setMealPlanDeleteConfirmOpen(false)
+    setMealPlanFormDate(command.date)
+    setMealPlanFormMealType(command.mealType)
+    setMealPlanEntryMode('custom')
+    setMealPlanRecipeId('')
+    setMealPlanCustomTitle(command.title)
+    setMealPlanNotes('')
+    setMealPlanFormOpen(true)
+    showAppNotification(
+      'Meal details ready. Review before saving.'
+    )
+    return true
+  }
+
+  return false
+}
+
+
 function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
   if (!event.isPrimary || event.button !== 0) return
   calendarPlusHoldRef.current?.destroy()
@@ -4273,37 +4352,62 @@ function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
       setAiCommandResult('')
       setAiCancellationPreview(null)
       setAiReschedulePreview(null)
-      const transcript = result.kind === 'transcript' ? result.text.trim().slice(0, 2000) : ''
-      const totalMs = result.kind === 'transcript' ? result.timing?.totalMs : undefined
-      const capturedStatus = typeof totalMs === 'number' && totalMs > 0
-        ? `Voice captured locally in ${(totalMs / 1000).toFixed(1)}s.`
-        : 'Voice captured.'
-      setArneyMicDiagnostics(result.kind === 'error' && result.reason === 'aborted'
-        ? getArneySpeechDiagnostics()
-        : [])
+      const transcript = result.kind === 'transcript'
+        ? result.text.trim().slice(0, 2000)
+        : ''
+      const totalMs = result.kind === 'transcript'
+        ? result.timing?.totalMs
+        : undefined
+      const capturedStatus =
+        typeof totalMs === 'number' && totalMs > 0
+          ? `Voice captured locally in ${(totalMs / 1000).toFixed(1)}s.`
+          : 'Voice captured.'
+
+      setArneyMicDiagnostics(
+        result.kind === 'error' &&
+        result.reason === 'aborted'
+          ? getArneySpeechDiagnostics()
+          : []
+      )
       setAiCommandText(transcript)
-      setArneyVoiceStatus(transcript
-        ? capturedStatus + ' Review the words and tap Send when ready.'
-        : result.kind === 'error' && result.reason === 'speech-consent-required'
-          ? 'To use hold-to-talk, enable private local transcription or browser speech recognition in Arney Voice Settings.'
-          : result.kind === 'error' && result.reason === 'microphone-permission-denied'
+
+      if (
+        transcript &&
+        openArneyVoiceDraft(transcript)
+      ) {
+        setAiCommandText('')
+        setArneyVoiceStatus('')
+        return
+      }
+
+      setAiVoiceDirect(true)
+      setArneyVoiceStatus(
+        transcript
+          ? capturedStatus + ' Arney is understanding your request…'
+          : result.kind === 'error' &&
+              result.reason === 'microphone-permission-denied'
             ? 'Microphone permission was denied. Allow microphone access for this calendar and try again.'
-            : result.kind === 'error' && result.reason === 'local-recording-unavailable'
-              ? 'Private local recording is unavailable in this browser. You can still type below.'
-              : result.kind === 'error' && result.reason === 'local-rate-limited'
+            : result.kind === 'error' &&
+                result.reason === 'local-recording-unavailable'
+              ? 'Private local recording is unavailable in this browser.'
+              : result.kind === 'error' &&
+                  result.reason === 'local-rate-limited'
                 ? 'Too many voice attempts were made. Wait a moment and try again. Nothing was sent.'
-                : result.kind === 'error' && result.reason === 'local-transcription-unavailable'
-                  ? 'The private transcription service is unavailable. Nothing was sent; you can still type below.'
-                  : result.kind === 'error' && result.reason === 'local-recording-failed'
+                : result.kind === 'error' &&
+                    result.reason === 'local-transcription-unavailable'
+                  ? 'The private transcription service is unavailable. Nothing was sent.'
+                  : result.kind === 'error' &&
+                      result.reason === 'local-recording-failed'
                     ? 'The microphone recording could not be completed. Nothing was sent.'
-          : result.kind === 'error' && result.reason === 'speech-unavailable'
-            ? 'This browser does not support speech recognition. You can still type below.'
-            : result.kind === 'error' && result.reason === 'aborted'
-              ? 'Safari stopped microphone recognition without returning words. Nothing was sent. For now, tap the text box and use your iPhone keyboard microphone to dictate. Details below can help us diagnose repeated attempts.'
-            : result.kind === 'error'
-              ? 'Speech recognition failed (' + result.reason + '). Nothing was sent.'
-              : 'No words were recognized. Nothing was sent.')
+                    : result.kind === 'error'
+                      ? 'Speech recognition failed (' + result.reason + '). Nothing was sent.'
+                      : 'No words were recognized. Nothing was sent.'
+      )
       setAiCommandOpen(true)
+
+      if (transcript) {
+        void submitAiCommand(transcript)
+      }
     },
     onCanceled: () => {
       setArneyPlusListening(false)
@@ -14392,7 +14496,7 @@ return (
               Calendar Assistant
             </span>
 
-            <h2>What would you like to do?</h2>
+            <h2>{aiVoiceDirect ? 'Review Arney\'s result' : 'What would you like to do?'}</h2>
           </div>
 
           <button
@@ -14431,17 +14535,19 @@ return (
               <pre>{arneyMicDiagnostics.join('\n')}</pre>
             </details>
           )}
-          <textarea
-            className="ai-command-input"
-            value={aiCommandText}
-            onChange={(event) => {
-              setAiCommandText(
-                event.target.value
-              )
-            }}
-            placeholder="Try: Cancel my dentist appointment tomorrow at 2 PM"
-            autoFocus
-          />
+          {!aiVoiceDirect && (
+            <textarea
+              className="ai-command-input"
+              value={aiCommandText}
+              onChange={(event) => {
+                setAiCommandText(
+                  event.target.value
+                )
+              }}
+              placeholder="Try: Cancel my dentist appointment tomorrow at 2 PM"
+              autoFocus
+            />
+          )}
 {aiCancellationPreview?.status ===
   'needs_clarification' &&
   aiCancellationPreview.matches?.length === 0 && (
@@ -14860,18 +14966,20 @@ return (
               Cancel
             </button>
 
-            <button
-              type="submit"
-              className="ai-command-send"
-              disabled={
-  aiCommandText.trim() === '' ||
-  aiCommandLoading
-}
-            >
-              {aiCommandLoading
-  ? 'Thinking...'
-  : 'Send'}
-            </button>
+            {!aiVoiceDirect && (
+              <button
+                type="submit"
+                className="ai-command-send"
+                disabled={
+                  aiCommandText.trim() === '' ||
+                  aiCommandLoading
+                }
+              >
+                {aiCommandLoading
+                  ? 'Thinking...'
+                  : 'Send'}
+              </button>
+            )}
           </div>
         </form>
       </div>
