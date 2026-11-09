@@ -42,7 +42,7 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
       - name: Verify Arney speech consent, voice lifecycle and safe commands
-        run: node --experimental-strip-types --test scripts/test-arney-speech-consent.mjs scripts/test-arney-voice.mjs scripts/test-arney-commands.mjs scripts/test-arney-plus-hold.mjs scripts/test-arney-spoken-replies.mjs
+        run: node --experimental-strip-types --test scripts/test-arney-speech-consent.mjs scripts/test-arney-voice.mjs scripts/test-arney-commands.mjs scripts/test-arney-plus-hold.mjs scripts/test-arney-spoken-replies.mjs scripts/test-arney-local-recording.mjs scripts/test-arney-local-stt.mjs
       - name: Check TypeScript and build frontend
         run: npm run build
       - name: Verify Duplicate Event drafts are independent of their source
@@ -142,6 +142,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Notification reconcile syntax failed' }
           node --check Server/notification-mutation-attribution.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Actor attribution syntax failed' }
+          node --check Server/test-local-stt.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Local STT bridge syntax failed' }
       - name: Check recovery test JavaScript syntax
         run: node --check scripts/verify-sqlite-recovery.mjs
       - name: Check migration preflight JavaScript syntax

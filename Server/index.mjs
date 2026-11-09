@@ -14,6 +14,7 @@ import {
 import { installTestHouseholdEventJoin } from './test-household-event-join.mjs'
 import { installTestInformationalPush } from './test-informational-push.mjs'
 import { installTestEventInvitations } from './test-event-invitations.mjs'
+import { installTestLocalStt } from './test-local-stt.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { acquirePrivateHouseholdBackendWriterLock } from './private-gateway-writer-lock.mjs'
 import { installPrivateEventIdentity } from './private-event-identity.mjs'
@@ -665,6 +666,8 @@ installTestHouseholdEventJoin(app, database, { port: PORT, rootFolder: path.reso
 const testEventInvitations = installTestEventInvitations(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 // Informational Web Push: explicitly disabled unless authenticated TEST startup opts in.
 installTestInformationalPush(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
+// Private loopback Whisper bridge; disabled unless authenticated TEST opts in.
+installTestLocalStt(app, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 
 function isValidDate(date) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date)

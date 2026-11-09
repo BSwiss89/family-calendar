@@ -14,6 +14,7 @@ import {
 import { createPortal } from 'react-dom'
 import './App.css'
 import { arneySpeechAvailable, beginArneySpeech, getArneySpeechDiagnostics, speakArneyReply, stopArneyReply } from './arneySpeech'
+import { arneyLocalSpeechAvailable, beginArneyLocalSpeech } from './arneyLocalSpeech'
 import { describeArneyError, describeArneyIntent, describeArneyPreview, shouldSpeakArneyReply, type ArneyReply } from './arneyResponses'
 import { readArneyPreferences } from './arneyPreferences'
 import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
@@ -4247,7 +4248,15 @@ function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
       setArneyVoiceStatus('Listening… release to finish.')
     },
     begin: onResult => {
-      if (!readArneyPreferences().browserSpeechEnabled) {
+      const preferences = readArneyPreferences()
+      if (preferences.localSpeechEnabled) {
+        if (!arneyLocalSpeechAvailable()) {
+          onResult({ kind: 'error', reason: 'local-recording-unavailable' })
+          return null
+        }
+        return beginArneyLocalSpeech(onResult)
+      }
+      if (!preferences.browserSpeechEnabled) {
         onResult({ kind: 'error', reason: 'speech-consent-required' })
         return null
       }
@@ -4271,7 +4280,17 @@ function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
       setArneyVoiceStatus(transcript
         ? 'Voice captured. Review the words and tap Send when ready.'
         : result.kind === 'error' && result.reason === 'speech-consent-required'
-          ? 'To use hold-to-talk, enable browser speech recognition in Arney Voice Settings.'
+          ? 'To use hold-to-talk, enable private local transcription or browser speech recognition in Arney Voice Settings.'
+          : result.kind === 'error' && result.reason === 'microphone-permission-denied'
+            ? 'Microphone permission was denied. Allow microphone access for this calendar and try again.'
+            : result.kind === 'error' && result.reason === 'local-recording-unavailable'
+              ? 'Private local recording is unavailable in this browser. You can still type below.'
+              : result.kind === 'error' && result.reason === 'local-rate-limited'
+                ? 'Too many voice attempts were made. Wait a moment and try again. Nothing was sent.'
+                : result.kind === 'error' && result.reason === 'local-transcription-unavailable'
+                  ? 'The private transcription service is unavailable. Nothing was sent; you can still type below.'
+                  : result.kind === 'error' && result.reason === 'local-recording-failed'
+                    ? 'The microphone recording could not be completed. Nothing was sent.'
           : result.kind === 'error' && result.reason === 'speech-unavailable'
             ? 'This browser does not support speech recognition. You can still type below.'
             : result.kind === 'error' && result.reason === 'aborted'
