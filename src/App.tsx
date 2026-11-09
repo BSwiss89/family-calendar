@@ -4240,24 +4240,25 @@ function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
   if (!event.isPrimary || event.button !== 0) return
   calendarPlusHoldRef.current?.destroy()
   const controller = createArneyPlusHoldController({
-    delayMs: 375,
+    delayMs: 225,
     onHold: () => {
       stopArneyReply()
       setArneyMicDiagnostics([])
       setArneyPlusListening(true)
-      setArneyVoiceStatus('Listening… release to finish.')
+      setArneyVoiceStatus('Starting microphone…')
     },
     begin: onResult => {
       const preferences = readArneyPreferences()
-      if (preferences.localSpeechEnabled) {
-        if (!arneyLocalSpeechAvailable()) {
-          onResult({ kind: 'error', reason: 'local-recording-unavailable' })
-          return null
-        }
-        return beginArneyLocalSpeech(onResult)
+      if (arneyLocalSpeechAvailable()) {
+        return beginArneyLocalSpeech(onResult, listening => {
+          setArneyPlusListening(listening)
+          setArneyVoiceStatus(listening
+            ? 'Listening… release to finish.'
+            : 'Transcribing locally…')
+        })
       }
       if (!preferences.browserSpeechEnabled) {
-        onResult({ kind: 'error', reason: 'speech-consent-required' })
+        onResult({ kind: 'error', reason: 'local-recording-unavailable' })
         return null
       }
       if (!arneySpeechAvailable()) {
@@ -4273,12 +4274,16 @@ function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
       setAiCancellationPreview(null)
       setAiReschedulePreview(null)
       const transcript = result.kind === 'transcript' ? result.text.trim().slice(0, 2000) : ''
+      const totalMs = result.kind === 'transcript' ? result.timing?.totalMs : undefined
+      const capturedStatus = typeof totalMs === 'number' && totalMs > 0
+        ? `Voice captured locally in ${(totalMs / 1000).toFixed(1)}s.`
+        : 'Voice captured.'
       setArneyMicDiagnostics(result.kind === 'error' && result.reason === 'aborted'
         ? getArneySpeechDiagnostics()
         : [])
       setAiCommandText(transcript)
       setArneyVoiceStatus(transcript
-        ? 'Voice captured. Review the words and tap Send when ready.'
+        ? capturedStatus + ' Review the words and tap Send when ready.'
         : result.kind === 'error' && result.reason === 'speech-consent-required'
           ? 'To use hold-to-talk, enable private local transcription or browser speech recognition in Arney Voice Settings.'
           : result.kind === 'error' && result.reason === 'microphone-permission-denied'
