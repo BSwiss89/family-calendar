@@ -8,7 +8,7 @@ function setup(beginOverride) {
   const calls = { begin: 0, hold: 0, finished: [], canceled: 0, stop: 0, abort: 0 }
   let speechResult = null
   const controller = createArneyPlusHoldController({
-    delayMs: 375,
+    delayMs: 225,
     schedule: callback => {
       const id = ++timerId
       timers.set(id, callback)
@@ -32,6 +32,17 @@ function setup(beginOverride) {
   }
   return { controller, calls, advance, timers, result: r => speechResult?.(r) }
 }
+
+test('default deliberate-hold threshold is 225ms', () => {
+  let delay=null
+  const controller=createArneyPlusHoldController({
+    schedule:(_callback,value)=>{delay=value;return 1},clear:()=>{},
+    begin:()=>null,onHold:()=>{},onFinished:()=>{},onCanceled:()=>{},
+  })
+  controller.down(1)
+  assert.equal(delay,225)
+  controller.destroy()
+})
 
 test('short tap keeps normal Quick Add and never starts microphone', () => {
   const t = setup()
