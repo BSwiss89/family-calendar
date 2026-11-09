@@ -20,7 +20,7 @@ from faster_whisper.audio import decode_audio
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("FAMILY_CALENDAR_LOCAL_STT_PORT", "13981"))
 TOKEN = os.environ.get("FAMILY_CALENDAR_LOCAL_STT_TOKEN", "")
-MODEL_NAME = os.environ.get("FAMILY_CALENDAR_LOCAL_STT_MODEL", "small.en")
+MODEL_NAME = os.environ.get("FAMILY_CALENDAR_LOCAL_STT_MODEL", "base.en")
 MAX_BYTES = 2 * 1024 * 1024
 MAX_SECONDS = 20
 SAMPLE_RATE = 16_000
@@ -35,7 +35,13 @@ if len(TOKEN) < 32:
 
 # CPU INT8 keeps Ollama's GPU memory available. The model remains warm after
 # startup, avoiding a load penalty for every blue-plus recording.
-MODEL = WhisperModel(MODEL_NAME, device="cpu", compute_type="int8")
+MODEL = WhisperModel(
+    MODEL_NAME,
+    device="cpu",
+    compute_type="int8",
+    cpu_threads=8,
+    num_workers=1,
+)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -65,7 +71,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health" or not self.authorized():
             self.send_json(404, {"error": "Not found"})
             return
-        self.send_json(200, {"status": "ok", "modelReady": True})
+        self.send_json(200, {"status": "ok", "modelReady": True, "model": MODEL_NAME})
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path != "/transcribe" or not self.authorized():
