@@ -4,7 +4,7 @@
  * No microphone is accessed by importing this module.
  */
 export type ArneySpeechResult =
-  | { kind: 'transcript'; text: string }
+  | { kind: 'transcript'; text: string; timing?: { totalMs?: number; transcriptionMs?: number } }
   | { kind: 'error'; reason: string }
   | { kind: 'empty' }
 
