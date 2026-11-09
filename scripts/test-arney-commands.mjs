@@ -45,6 +45,12 @@ test('event creation supports natural time/date order and stays a draft', () => 
   assert.deepEqual(parseArneySimpleCommand('Create a dentist appointment at 2pm tomorrow', lists, now), {
     kind: 'create-event', title: 'dentist appointment', date: '2026-10-14', time: '14:00',
   })
+  assert.deepEqual(parseArneySimpleCommand('Add a dentist appointment tomorrow at 2pm', lists, now), {
+    kind: 'create-event', title: 'dentist appointment', date: '2026-10-14', time: '14:00',
+  })
+  assert.deepEqual(parseArneySimpleCommand('Add a dentist appointment, tomorrow at 2 p.m.', lists, now), {
+    kind: 'create-event', title: 'dentist appointment', date: '2026-10-14', time: '14:00',
+  })
   assert.equal(parseArneySimpleCommand('Schedule dentist 2026-02-30 at 2 PM', lists, now), null)
   assert.equal(parseArneySimpleCommand('Schedule dentist tomorrow at 3', lists, now), null)
   assert.equal(parseArneySimpleCommand('Schedule dentist someday', lists, now), null)
@@ -61,6 +67,10 @@ test('voice write routing opens review forms and never auto-saves', () => {
   assert.match(app, /setIsAddingEvent\(true\)/)
   assert.match(app, /setQuickListOpen\(true\)/)
   assert.match(app, /setMealPlanFormOpen\(true\)/)
+  assert.match(app, /new AbortController\(\)/)
+  assert.match(app, /15_000/)
+  assert.match(app, /signal: requestController\.signal/)
+  assert.match(app, /Arney took too long to respond/)
   const routerStart = app.indexOf('function openArneyVoiceDraft')
   const routerEnd = app.indexOf('function startCalendarAddHold', routerStart)
   assert.ok(routerStart >= 0 && routerEnd > routerStart)

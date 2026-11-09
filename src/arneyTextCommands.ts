@@ -73,7 +73,12 @@ export function parseArneySimpleCommand(
   lists: ArneyListInfo[],
   now: Date = new Date(),
 ): ArneySimpleCommand | null {
-  const text = input.trim().replace(/[.!?]+$/, '')
+  const text = input
+    .trim()
+    .replace(/\b([ap])\s*\.\s*m\s*\.?/gi, '$1m')
+    .replace(/[,;]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[.!?]+$/, '')
   if (!text || text.length > 500) return null
 
   for (const list of [...lists].sort((a, b) => b.name.length - a.name.length)) {

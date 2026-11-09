@@ -4157,6 +4157,12 @@ setAiCommandResult('')
 setAiCancellationPreview(null)
 setAiReschedulePreview(null)
 
+  const requestController = new AbortController()
+  const requestTimeout = window.setTimeout(
+    () => requestController.abort(),
+    15_000
+  )
+
   try {
     const intentResponse =
       await fetch(
@@ -4170,6 +4176,7 @@ setAiReschedulePreview(null)
           body: JSON.stringify({
             text: command,
           }),
+          signal: requestController.signal,
         }
       )
 
@@ -4212,6 +4219,7 @@ setAiReschedulePreview(null)
             currentUser:
               'Robert',
           }),
+          signal: requestController.signal,
         }
       )
 
@@ -4232,9 +4240,18 @@ setAiReschedulePreview(null)
     } 
 
 announceArneyReply(describeArneyPreview(intentData.intent, previewData))
-  } catch {
-    announceArneyReply(describeArneyError())
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      announceArneyReply({
+        text: 'Arney took too long to respond. Nothing was changed. Please try again.',
+        kind: 'error',
+      })
+    } else {
+      announceArneyReply(describeArneyError())
+    }
   } finally {
+    window.clearTimeout(requestTimeout)
+    setArneyVoiceStatus('')
     setAiCommandLoading(false)
   }
 }
