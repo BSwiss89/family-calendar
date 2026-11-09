@@ -54,22 +54,24 @@ test('local STT is disabled by default and refuses LIVE or non-loopback configur
   }))
 })
 
-test('ACL-protected installed configuration can enable only authenticated TEST',()=>{
+test('installed configuration accepts Windows UTF-8 BOM and enables only authenticated TEST',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'arney-stt-config-'))
   const configFile=path.join(root,'config.json')
-  fs.writeFileSync(configFile,JSON.stringify({
-    enabled:true,serviceUrl:target,serviceToken:token,
-  }))
   const methods={get(){},post(){}}
   try {
-    assert.equal(installTestLocalStt(methods,{
-      port:13002,authMode:'required',rootFolder:'/tmp/family-calendar-test-installed',
-      configFile,fetchImpl:async()=>{},
-    }).enabled,true)
-    assert.equal(installTestLocalStt(methods,{
-      port:3001,authMode:'required',rootFolder:'/tmp/family-calendar-live',
-      configFile,fetchImpl:async()=>{},
-    }).enabled,false)
+    for(const prefix of ['', '\ufeff']) {
+      fs.writeFileSync(configFile,prefix+JSON.stringify({
+        enabled:true,serviceUrl:target,serviceToken:token,
+      }))
+      assert.equal(installTestLocalStt(methods,{
+        port:13002,authMode:'required',rootFolder:'/tmp/family-calendar-test-installed',
+        configFile,fetchImpl:async()=>{},
+      }).enabled,true)
+      assert.equal(installTestLocalStt(methods,{
+        port:3001,authMode:'required',rootFolder:'/tmp/family-calendar-live',
+        configFile,fetchImpl:async()=>{},
+      }).enabled,false)
+    }
   } finally {fs.rmSync(root,{recursive:true,force:true})}
 })
 
@@ -161,6 +163,9 @@ test('Windows installer keeps STT loopback-only, TEST-gated and rollback-capable
   assert.match(installer,/\.GetBytes\(\$bytes\)/)
   assert.match(installer,/\.Dispose\(\)/)
   assert.doesNotMatch(installer,/RandomNumberGenerator\]::Fill\(/)
+  assert.match(installer,/New-Object Text\.UTF8Encoding/)
+  assert.match(installer,/\[IO\.File\]::WriteAllText\(\$configFile,\$configJson,\$utf8NoBom\)/)
+  assert.doesNotMatch(installer,/Set-Content -LiteralPath \$configFile -Encoding UTF8/)
   assert.match(launcher,/127\.0\.0\.1:13981\/transcribe/)
   assert.match(service,/HOST = "127\.0\.0\.1"/)
   assert.doesNotMatch(service,/HOST = "0\.0\.0\.0"/)
