@@ -125,9 +125,9 @@ export function parseArneySimpleCommand(
 
   const dateThenTime = /^(?:add|create|schedule|put)\s+(?:an?\s+)?(?:event\s+|appointment\s+)?(.+?)\s+(?:(?:on|for)\s+)?(today|tomorrow|\d{4}-\d{2}-\d{2})(?:\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?$/i.exec(text)
   const timeThenDate = /^(?:add|create|schedule|put)\s+(?:an?\s+)?(?:event\s+|appointment\s+)?(.+?)\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+(?:(?:on|for)\s+)?(today|tomorrow|\d{4}-\d{2}-\d{2})$/i.exec(text)
-  const title = (dateThenTime?.[1] ?? timeThenDate?.[1])?.trim()
-  const rawDate = dateThenTime?.[2] ?? timeThenDate?.[3]
-  const rawTime = dateThenTime?.[3] ?? timeThenDate?.[2]
+  const title = (timeThenDate?.[1] ?? dateThenTime?.[1])?.trim()
+  const rawDate = timeThenDate?.[3] ?? dateThenTime?.[2]
+  const rawTime = timeThenDate?.[2] ?? dateThenTime?.[3]
   if (title && rawDate && title.length <= 200) {
     const date = resolveDay(rawDate, now)
     const time = arneyTime(rawTime)
