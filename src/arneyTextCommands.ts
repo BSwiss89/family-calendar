@@ -4,6 +4,11 @@ export type ArneyListInfo = {
   items?: Array<{ text: string }>
 }
 
+export type ArneyPersonInfo = {
+  id: number
+  name: string
+}
+
 export type ArneyMealType = 'breakfast' | 'lunch' | 'dinner' | 'snack'
 
 export type ArneySimpleCommand =
@@ -11,7 +16,7 @@ export type ArneySimpleCommand =
   | { kind: 'add-meal'; title: string; date: string; mealType: ArneyMealType }
   | { kind: 'list-query'; listId: number; listName: string; items: string[] }
   | { kind: 'calendar-query'; when: 'today' | 'tomorrow' }
-  | { kind: 'create-event'; title: string; date: string; time: string | null }
+  | { kind: 'create-event'; title: string; date: string; time: string | null; personIds?: number[] }
 
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -64,6 +69,38 @@ function comparableListName(value: string): string {
     .replace(/[^a-z0-9]/g, '')
 }
 
+function mentionedPersonIds(
+  value: string,
+  people: ArneyPersonInfo[],
+  activePersonId: number | null,
+): number[] {
+  const result: number[] = []
+  const add = (personId: number | null | undefined) => {
+    if (personId && !result.includes(personId)) result.push(personId)
+  }
+  const activePerson = activePersonId === null
+    ? null
+    : people.find(person => person.id === activePersonId)
+
+  for (const part of value.split(/\s+(?:and|&)\s+/i)) {
+    const mention = part.trim()
+    if (!mention) continue
+    if (/^(?:i|me|myself)$/i.test(mention)) {
+      add(activePerson?.id)
+      continue
+    }
+    const matches = people.filter(person =>
+      person.id > 0 && person.name.trim().localeCompare(mention, undefined, {
+        sensitivity: 'accent',
+        usage: 'search',
+      }) === 0
+    )
+    if (matches.length === 1) add(matches[0].id)
+  }
+
+  return result
+}
+
 /**
  * Deliberately conservative local patterns. Recognized writes return only a
  * draft for an existing review form. They never call an API or save anything.
@@ -72,6 +109,8 @@ export function parseArneySimpleCommand(
   input: string,
   lists: ArneyListInfo[],
   now: Date = new Date(),
+  people: ArneyPersonInfo[] = [],
+  activePersonId: number | null = null,
 ): ArneySimpleCommand | null {
   const text = input
     .trim()
@@ -126,6 +165,21 @@ export function parseArneySimpleCommand(
   if (/^(?:what(?:'s| is)|what do i have|show|tell me|read)(?:.*?)(?:calendar|schedule|events?|appointments?|on today|on tomorrow|for today|for tomorrow)/i.test(text)) {
     if (/\btomorrow\b/i.test(text)) return { kind: 'calendar-query', when: 'tomorrow' }
     if (/\btoday\b/i.test(text)) return { kind: 'calendar-query', when: 'today' }
+  }
+
+  const peopleDateThenTime = /^(.+?)\s+(?:have|has)\s+(?:an?\s+)?(.+?)\s+(?:(?:on|for)\s+)?(today|tomorrow|\d{4}-\d{2}-\d{2})(?:\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?$/i.exec(text)
+  const peopleTimeThenDate = /^(.+?)\s+(?:have|has)\s+(?:an?\s+)?(.+?)\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+(?:(?:on|for)\s+)?(today|tomorrow|\d{4}-\d{2}-\d{2})$/i.exec(text)
+  const peopleTitle = (peopleTimeThenDate?.[2] ?? peopleDateThenTime?.[2])?.trim()
+  const peopleDate = peopleTimeThenDate?.[4] ?? peopleDateThenTime?.[3]
+  const peopleTime = peopleTimeThenDate?.[3] ?? peopleDateThenTime?.[4]
+  const peopleSubject = peopleTimeThenDate?.[1] ?? peopleDateThenTime?.[1]
+  if (peopleTitle && peopleDate && peopleSubject && peopleTitle.length <= 200) {
+    const date = resolveDay(peopleDate, now)
+    const time = arneyTime(peopleTime)
+    const personIds = mentionedPersonIds(peopleSubject, people, activePersonId)
+    if (date && time !== undefined && personIds.length > 0) {
+      return { kind: 'create-event', title: peopleTitle, date, time, personIds }
+    }
   }
 
   const dateThenTime = /^(?:add|create|schedule|put)\s+(?:an?\s+)?(?:event\s+|appointment\s+)?(.+?)\s+(?:(?:on|for)\s+)?(today|tomorrow|\d{4}-\d{2}-\d{2})(?:\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?$/i.exec(text)
