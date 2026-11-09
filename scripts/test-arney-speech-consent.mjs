@@ -7,6 +7,7 @@ import {
 
 test('browser microphone speech remains off unless explicitly enabled', () => {
   assert.equal(DEFAULT_ARNEY_PREFERENCES.browserSpeechEnabled, false)
+  assert.equal(DEFAULT_ARNEY_PREFERENCES.localSpeechEnabled, false)
   const migrated = normalizeArneyPreferences({
     responseMode: 'always', wakeWordsEnabled: true, confirmBeforeChanges: true,
   })
@@ -22,6 +23,7 @@ test('invalid consent never becomes consent', () => {
     assert.equal(normalizeArneyPreferences(value).browserSpeechEnabled, false)
   }
   assert.equal(normalizeArneyPreferences({browserSpeechEnabled: true}).browserSpeechEnabled, true)
+  assert.equal(normalizeArneyPreferences({localSpeechEnabled: true}).localSpeechEnabled, true)
 })
 
 test('device storage stays opt-in and handles invalid saved values', () => {
