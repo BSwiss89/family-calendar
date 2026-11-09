@@ -28,7 +28,10 @@ function installedConfiguration(configFile) {
     throw new Error('Invalid local speech configuration file.')
   }
   let value
-  try { value = JSON.parse(fs.readFileSync(configFile, 'utf8')) } catch {
+  try {
+    const text = fs.readFileSync(configFile, 'utf8')
+    value = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text)
+  } catch {
     throw new Error('Invalid local speech configuration file.')
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
