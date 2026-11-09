@@ -4260,7 +4260,10 @@ announceArneyReply(describeArneyPreview(intentData.intent, previewData))
 function openArneyVoiceDraft(transcript: string): boolean {
   const command = parseArneySimpleCommand(
     transcript,
-    lists
+    lists,
+    new Date(),
+    people,
+    activeHouseholdPersonId
   )
 
   if (!command) {
@@ -4290,6 +4293,15 @@ function openArneyVoiceDraft(transcript: string): boolean {
     setEventAllDay(command.time === null)
     setEventTime(command.time ?? '')
     setEventEndTime('')
+    const voicePersonIds = new Set(
+      getDefaultEventPersonIds()
+    )
+    for (const personId of command.personIds ?? []) {
+      if (people.some(person => person.id === personId)) {
+        voicePersonIds.add(personId)
+      }
+    }
+    setSelectedPersonIds([...voicePersonIds])
     setIsAddingEvent(true)
     showAppNotification(
       'Event details ready. Review before saving.'
@@ -10343,6 +10355,12 @@ function closeEventModal() {
     setEventModalClosing(false)
   }, 220)
 }
+function getDefaultEventPersonIds(): number[] {
+  return activeHouseholdPersonId !== null &&
+    people.some(person => person.id === activeHouseholdPersonId)
+    ? [activeHouseholdPersonId]
+    : []
+}
  function clearEventForm() {
 setEditingEventId(null)
 setDuplicateSourceEventId(null)
@@ -10376,7 +10394,7 @@ setEventLocation('')
   setRepeatEndDateText('')
 setRepeatEndDateError(false)
   setRepeatCount(10)
-  setSelectedPersonIds([])
+  setSelectedPersonIds(getDefaultEventPersonIds())
 }
 
   function handlePersonImageChange(
