@@ -100,6 +100,7 @@ export function beginArneyLocalSpeech(
         : mimeType.includes('wav') ? 'wav' : 'webm'
     body.append('durationMs', String(durationMs))
     body.append('audio', blob, `arney-recording.${extension}`)
+    const uploadStartedAt = now()
     try {
       const response = await fetchImpl('/api/arney/local-transcription', {
         method: 'POST',
@@ -111,7 +112,18 @@ export function beginArneyLocalSpeech(
       const transcript = data && typeof data === 'object' &&
         typeof (data as { transcript?: unknown }).transcript === 'string'
         ? (data as { transcript: string }).transcript.trim().slice(0, 2000) : ''
-      if (response.ok && transcript) finish({ kind: 'transcript', text: transcript })
+      const rawElapsedMs = data && typeof data === 'object'
+        ? (data as { elapsedMs?: unknown }).elapsedMs : undefined
+      const transcriptionMs = typeof rawElapsedMs === 'number' &&
+        Number.isFinite(rawElapsedMs) && rawElapsedMs >= 0
+        ? Math.round(rawElapsedMs) : undefined
+      const totalMs = Math.max(0, Math.round(now() - uploadStartedAt))
+      const timing = totalMs > 0 || transcriptionMs !== undefined
+        ? { totalMs, ...(transcriptionMs !== undefined ? { transcriptionMs } : {}) }
+        : undefined
+      if (response.ok && transcript) finish({
+        kind: 'transcript', text: transcript, ...(timing ? { timing } : {}),
+      })
       else if (response.status === 422) finish({ kind: 'empty' })
       else if (response.status === 429) finish({ kind: 'error', reason: 'local-rate-limited' })
       else finish({ kind: 'error', reason: 'local-transcription-unavailable' })
