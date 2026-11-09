@@ -16,7 +16,7 @@ $listeners = @(Get-NetTCPConnection -State Listen -LocalPort 13981 -ErrorAction 
 if ($listeners.Count -gt 0) { throw 'Local STT port is already occupied.' }
 $env:FAMILY_CALENDAR_LOCAL_STT_TOKEN = $config.serviceToken
 $env:FAMILY_CALENDAR_LOCAL_STT_PORT = '13981'
-$env:FAMILY_CALENDAR_LOCAL_STT_MODEL = 'small.en'
+$env:FAMILY_CALENDAR_LOCAL_STT_MODEL = 'base.en'
 $env:HF_HOME = Join-Path $state 'models'
 & $python -u $service
 if ($LASTEXITCODE -ne 0) { throw "Local STT service exited with code $LASTEXITCODE" }
