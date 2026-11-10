@@ -98,6 +98,55 @@ test('spoken People matching refuses an equally close ambiguous name', () => {
   )
 })
 
+test('whole-family holiday ranges select every current profile in an editable draft', () => {
+  for (const phrase of [
+    'The whole family are going on a trip Christmas to New Years',
+    "All of us are going on a trip Christmas through New Year's Day",
+    'Everyone is going on a trip from Christmas until New Year Day',
+  ]) {
+    assert.deepEqual(
+      parseArneySimpleCommand(phrase, lists, now, people, 2),
+      {
+        kind: 'create-event',
+        title: 'trip',
+        date: '2026-12-25',
+        endDate: '2027-01-01',
+        time: null,
+        personIds: [2, 3, 4],
+      },
+    )
+  }
+
+  assert.deepEqual(
+    parseArneySimpleCommand(
+      'Everybody is going on vacation Christmas to New Years',
+      lists,
+      new Date(2026, 11, 26, 12),
+      people,
+      2,
+    ),
+    {
+      kind: 'create-event',
+      title: 'vacation',
+      date: '2027-12-25',
+      endDate: '2028-01-01',
+      time: null,
+      personIds: [2, 3, 4],
+    },
+  )
+
+  assert.equal(
+    parseArneySimpleCommand(
+      'The whole family is going on a trip Christmas to New Year’s Day',
+      lists,
+      new Date(2026, 11, 25, 18),
+      people,
+      2,
+    )?.date,
+    '2026-12-25',
+  )
+})
+
 test('cannot infer a list that is not known', () => {
   assert.equal(parseArneySimpleCommand('Add bananas to my Unknown list', lists, now), null)
 })
@@ -112,6 +161,8 @@ test('voice write routing opens review forms and never auto-saves', () => {
   assert.match(app, /activeHouseholdPersonId/)
   assert.match(app, /setSelectedPersonIds\(\[\.\.\.voicePersonIds\]\)/)
   assert.match(app, /setSelectedPersonIds\(getDefaultEventPersonIds\(\)\)/)
+  assert.match(app, /setEventEndDate\(command\.endDate \?\? ''\)/)
+  assert.match(app, /formatDateKeyForText\(command\.endDate\)/)
   assert.match(app, /new AbortController\(\)/)
   assert.match(app, /15_000/)
   assert.match(app, /signal: requestController\.signal/)
