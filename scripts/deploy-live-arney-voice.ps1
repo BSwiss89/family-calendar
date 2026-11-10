@@ -132,8 +132,8 @@ function LocalSttStamp {
     $listeners=@(Listeners 13981)
     Assert ($listeners.Count -eq 1) 'Local STT must have exactly one loopback listener.'
     $process=Get-CimInstance Win32_Process -Filter "ProcessId=$($listeners[0].OwningProcess)" -ErrorAction Stop
-    Assert ($process -and [string]::Equals($process.ExecutablePath,$sttPython,[StringComparison]::OrdinalIgnoreCase) -and
-        $process.CommandLine -like '*arney_local_stt_service.py*') 'Local STT process identity changed.'
+    Assert ($process -and $process.Name -eq 'python.exe' -and
+        $process.CommandLine -like "*$sttService*") 'Local STT process identity changed.'
     $health=Invoke-RestMethod -Uri 'http://127.0.0.1:13981/health' -Headers @{Authorization="Bearer $($config.serviceToken)"} -TimeoutSec 5
     Assert ($health.status -eq 'ok' -and $health.modelReady -eq $true -and $health.model -eq 'base.en') 'Local STT health/model check failed.'
     return "$($process.ProcessId)|$($process.CreationDate.ToUniversalTime().Ticks)|$(Hash $sttConfig)|$(Hash $sttService)|$(Hash $sttLauncher)"
