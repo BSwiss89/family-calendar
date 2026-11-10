@@ -4238,6 +4238,12 @@ function openArneyVoiceDraft(transcript: string): boolean {
     setEventStartDateText(
       formatDateKeyForText(command.date)
     )
+    setEventEndDate(command.endDate ?? '')
+    setEventEndDateText(
+      command.endDate
+        ? formatDateKeyForText(command.endDate)
+        : ''
+    )
     setEventAllDay(command.time === null)
     setEventTime(command.time ?? '')
     setEventEndTime('')
