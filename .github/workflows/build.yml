@@ -61,6 +61,7 @@ jobs:
             '76384ee3004c627dc64a05af05311f767e659a1a',
             '515d07a45f4d98f1d267d5b9b398ba8d36cf8ffe',
             'LocalSttStamp',
+            'NormalizedText',
             'LIVE_ARNEY_VOICE_DEPLOYMENT=PASS',
             'SecureLiveAutoDeploy\REQUIRES-REVIEW.txt'
           )) {

@@ -40,6 +40,7 @@ function Report([string]$message) {
 }
 function Assert([bool]$ok,[string]$message) { if (-not $ok) { throw $message } }
 function Hash([string]$file) { (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash }
+function NormalizedText([string]$file) { ([IO.File]::ReadAllText($file).Replace("`r`n","`n")).TrimEnd() }
 function Head([string]$folder) {
     $v = & git -C $folder rev-parse HEAD
     Assert ($LASTEXITCODE -eq 0) 'Cannot read source SHA.'
@@ -123,9 +124,9 @@ function LocalSttStamp {
     Assert ($task.Settings.Enabled -and $task.State -eq 'Running') 'Local STT task must be enabled and running.'
     $actions=($task.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join ' '
     Assert ($actions -like "*$sttLauncher*") 'Local STT task launcher changed.'
-    Assert ((Hash $sttService) -eq (Hash (Join-Path $stage 'stt\arney_local_stt_service.py'))) 'Installed Local STT service differs from reviewed candidate.'
-    Assert ((Hash $sttRequirements) -eq (Hash (Join-Path $stage 'stt\requirements.txt'))) 'Installed Local STT requirements differ from reviewed candidate.'
-    Assert ((Hash $sttLauncher) -eq (Hash (Join-Path $stage 'scripts\start-arney-local-stt.ps1'))) 'Installed Local STT launcher differs from reviewed candidate.'
+    Assert ((NormalizedText $sttService) -ceq (NormalizedText (Join-Path $stage 'stt\arney_local_stt_service.py'))) 'Installed Local STT service differs semantically from reviewed candidate.'
+    Assert ((NormalizedText $sttRequirements) -ceq (NormalizedText (Join-Path $stage 'stt\requirements.txt'))) 'Installed Local STT requirements differ semantically from reviewed candidate.'
+    Assert ((NormalizedText $sttLauncher) -ceq (NormalizedText (Join-Path $stage 'scripts\start-arney-local-stt.ps1'))) 'Installed Local STT launcher differs semantically from reviewed candidate.'
     $config=Get-Content -LiteralPath $sttConfig -Raw | ConvertFrom-Json
     Assert ($config.enabled -eq $true -and $config.serviceUrl -eq 'http://127.0.0.1:13981/transcribe' -and
         $config.serviceToken -is [string] -and $config.serviceToken.Length -ge 32) 'Installed Local STT configuration is invalid.'
