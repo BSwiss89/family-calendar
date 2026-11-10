@@ -142,6 +142,27 @@ function upcomingChristmasRange(now: Date): { date: string; endDate: string } {
   }
 }
 
+function personMentionWithoutLeadIn(value: string): string {
+  let result = value.trim()
+
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    const next = result
+      .replace(
+        /^(?:(?:hey|okay|ok)\s+)?(?:arney|arnie|calendar|computer)\b[\s,.:;!?-]*/i,
+        '',
+      )
+      .replace(
+        /^(?:hey|okay|ok|please|so|they)\b[\s,.:;!?-]*/i,
+        '',
+      )
+      .trim()
+    if (!next || next === result) break
+    result = next
+  }
+
+  return result
+}
+
 function mentionedPersonIds(
   value: string,
   people: ArneyPersonInfo[],
@@ -162,7 +183,16 @@ function mentionedPersonIds(
       add(activePerson?.id)
       continue
     }
-    add(uniquelyMatchedPersonId(mention, people))
+    const directPersonId = uniquelyMatchedPersonId(mention, people)
+    if (directPersonId) {
+      add(directPersonId)
+      continue
+    }
+
+    const mentionWithoutLeadIn = personMentionWithoutLeadIn(mention)
+    if (mentionWithoutLeadIn !== mention) {
+      add(uniquelyMatchedPersonId(mentionWithoutLeadIn, people))
+    }
   }
 
   return result
