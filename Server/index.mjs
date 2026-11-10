@@ -14,6 +14,7 @@ import {
 import { installLiveHouseholdEventJoin } from './live-household-event-join.mjs'
 import { installLiveEventInvitations } from './live-event-invitations.mjs'
 import { installLiveInformationalPush } from './live-informational-push.mjs'
+import { installLocalStt } from './local-stt.mjs'
 import {
   normalizeListCategory,
   ensureListItemCategories,
@@ -625,6 +626,7 @@ installLiveNotificationInboxPilot(app, database, { port: PORT, rootFolder: path.
 installLiveHouseholdEventJoin(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 const liveEventInvitations = installLiveEventInvitations(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 installLiveInformationalPush(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
+installLocalStt(app, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 
 function isValidDate(date) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date)
@@ -7185,3 +7187,4 @@ app.get(/.*/, (request, response) => {
 app.listen(PORT, HOST, () => {
   console.log(`Family Calendar server running at http://127.0.0.1:${PORT}`)
 })
+

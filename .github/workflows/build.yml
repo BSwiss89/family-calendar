@@ -24,6 +24,16 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Check TypeScript and build frontend
         run: npm run build
+      - name: Verify Arney voice, local transcription, review-only writes, and People matching
+        run: |
+          node --check Server/local-stt.mjs
+          node --test scripts/test-arney-commands.mjs
+          node --test scripts/test-arney-local-recording.mjs
+          node --test scripts/test-arney-local-stt.mjs
+          node --test scripts/test-arney-plus-hold.mjs
+          node --test scripts/test-arney-speech-consent.mjs
+          node --test scripts/test-arney-spoken-replies.mjs
+          node --test scripts/test-arney-voice.mjs
       - name: Verify Duplicate Event drafts are independent of their source
         run: node --test scripts/test-duplicate-event.mjs
       - name: Test list categories and additive migration
@@ -201,4 +211,5 @@ jobs:
               throw "PowerShell syntax error in $($_.Name)"
             }
           }
+
 

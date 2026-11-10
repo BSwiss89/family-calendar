@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+__pycache__/
+*.pyc
 
 # Editor directories and files
 .vscode/*
@@ -72,3 +74,4 @@ src/App-before-people-remove.tsx
 /public/apple-touch-icon.png
 /public/calendar-icon-192.png
 /public/calendar-icon-512.png
+

@@ -13,6 +13,12 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import { arneySpeechAvailable, beginArneySpeech, getArneySpeechDiagnostics, speakArneyReply, stopArneyReply } from './arneySpeech'
+import { arneyLocalSpeechAvailable, beginArneyLocalSpeech } from './arneyLocalSpeech'
+import { describeArneyError, describeArneyIntent, describeArneyPreview, shouldSpeakArneyReply, type ArneyReply } from './arneyResponses'
+import { readArneyPreferences } from './arneyPreferences'
+import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
+import { parseArneySimpleCommand } from './arneyTextCommands'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
 import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
 import { useAssignmentInbox } from './useAssignmentInbox'
@@ -3247,11 +3253,15 @@ const [viewingOccurrenceDate, setViewingOccurrenceDate] =
   const [isAddingEvent, setIsAddingEvent] = useState(false)
 const [quickAddOpen, setQuickAddOpen] = useState(false)
 
-const calendarAddHoldTimerRef =
-  useRef<number | null>(null)
+const calendarPlusHoldRef = useRef<ArneyPlusHoldController | null>(null)
+const [arneyPlusListening, setArneyPlusListening] = useState(false)
+const [arneyVoiceStatus, setArneyVoiceStatus] = useState('')
+const [arneyMicDiagnostics, setArneyMicDiagnostics] = useState<string[]>([])
 
-const calendarAddLongPressRef =
-  useRef(false)
+useEffect(() => () => {
+  calendarPlusHoldRef.current?.destroy()
+  calendarPlusHoldRef.current = null
+}, [])
 
 const [aiCommandOpen, setAiCommandOpen] =
   useState(false)
@@ -3259,11 +3269,35 @@ const [aiCommandOpen, setAiCommandOpen] =
 const [aiCommandText, setAiCommandText] =
   useState('')
 
+const [aiVoiceDirect, setAiVoiceDirect] =
+  useState(false)
+
 const [aiCommandLoading, setAiCommandLoading] =
   useState(false)
 
 const [aiCommandResult, setAiCommandResult] =
   useState('')
+
+function announceArneyReply(reply: ArneyReply) {
+  setAiCommandResult(reply.text)
+  if (shouldSpeakArneyReply(readArneyPreferences().responseMode, reply.kind)) {
+    speakArneyReply(reply.text)
+  }
+}
+
+function speakArneySuccess(message: string) {
+  if (shouldSpeakArneyReply(readArneyPreferences().responseMode, 'success')) {
+    speakArneyReply(message)
+  }
+}
+
+useEffect(() => {
+  const onPreferencesChanged = () => {
+    if (readArneyPreferences().responseMode === 'silent') stopArneyReply()
+  }
+  window.addEventListener('arney:preferences-changed', onPreferencesChanged)
+  return () => window.removeEventListener('arney:preferences-changed', onPreferencesChanged)
+}, [])
 
 const [
   aiCancellationPreview,
@@ -3855,12 +3889,11 @@ async function confirmAiCancellation() {
     setAiCommandText('')
     setAiCommandOpen(false)
 
-    showAppNotification(
-      match.matchType ===
-        'recurring_occurrence'
-        ? 'Recurring event occurrence canceled.'
-        : 'Event canceled.'
-    )
+    const confirmedMessage = match.matchType === 'recurring_occurrence'
+      ? 'Recurring event occurrence canceled.'
+      : 'Event canceled.'
+    showAppNotification(confirmedMessage)
+    speakArneySuccess(confirmedMessage)
   } catch (error) {
     showAppNotification(
       error instanceof Error
@@ -3943,6 +3976,7 @@ async function confirmAiReschedule() {
     setAiCommandOpen(false)
 
     showAppNotification('Event rescheduled successfully.')
+    speakArneySuccess('Event rescheduled successfully.')
   } catch (error) {
     showAppNotification(
       error instanceof Error
@@ -4019,16 +4053,7 @@ async function chooseAiCancellationPerson(
 
     setAiCancellationPreview(updatedPreview)
 
-    setAiCommandResult(
-      JSON.stringify(
-        {
-          intent: 'cancel_event',
-          preview: updatedPreview,
-        },
-        null,
-        2
-      )
-    )
+    announceArneyReply(describeArneyPreview('cancel_event', updatedPreview))
   } catch (error) {
     showAppNotification(
       error instanceof Error
@@ -4074,9 +4099,17 @@ async function submitAiCommand(
   }
 
  setAiCommandLoading(true)
+stopArneyReply()
+setArneyVoiceStatus('')
 setAiCommandResult('')
 setAiCancellationPreview(null)
 setAiReschedulePreview(null)
+
+  const requestController = new AbortController()
+  const requestTimeout = window.setTimeout(
+    () => requestController.abort(),
+    15_000
+  )
 
   try {
     const intentResponse =
@@ -4091,6 +4124,7 @@ setAiReschedulePreview(null)
           body: JSON.stringify({
             text: command,
           }),
+          signal: requestController.signal,
         }
       )
 
@@ -4108,18 +4142,7 @@ setAiReschedulePreview(null)
       intentData.intent !== 'cancel_event' &&
       intentData.intent !== 'move_event'
     ) {
-      setAiCommandResult(
-        JSON.stringify(
-          {
-            intent:
-              intentData.intent,
-            status:
-              'not_wired_yet',
-          },
-          null,
-          2
-        )
-      )
+      announceArneyReply(describeArneyIntent(intentData.intent))
 
       return
     }
@@ -4144,6 +4167,7 @@ setAiReschedulePreview(null)
             currentUser:
               'Robert',
           }),
+          signal: requestController.signal,
         }
       )
 
@@ -4163,79 +4187,231 @@ setAiReschedulePreview(null)
       setAiReschedulePreview(previewData)
     } 
 
-setAiCommandResult(
-  JSON.stringify(
-    {
-      intent:
-        intentData.intent,
-      preview:
-        previewData,
-    },
-    null,
-    2
-  )
-)
+announceArneyReply(describeArneyPreview(intentData.intent, previewData))
   } catch (error) {
-    setAiCommandResult(
-      JSON.stringify(
-        {
-          error:
-            error instanceof Error
-              ? error.message
-              : 'AI command failed.',
-        },
-        null,
-        2
-      )
-    )
+    if (error instanceof Error && error.name === 'AbortError') {
+      announceArneyReply({
+        text: 'Arney took too long to respond. Nothing was changed. Please try again.',
+        kind: 'error',
+      })
+    } else {
+      announceArneyReply(describeArneyError())
+    }
   } finally {
+    window.clearTimeout(requestTimeout)
+    setArneyVoiceStatus('')
     setAiCommandLoading(false)
   }
 }
 
 
-function startCalendarAddHold() {
-  calendarAddLongPressRef.current = false
+function openArneyVoiceDraft(transcript: string): boolean {
+  const command = parseArneySimpleCommand(
+    transcript,
+    lists,
+    new Date(),
+    people,
+    activeHouseholdPersonId
+  )
 
-  if (
-    calendarAddHoldTimerRef.current !== null
-  ) {
-    window.clearTimeout(
-      calendarAddHoldTimerRef.current
-    )
-  }
-
-  calendarAddHoldTimerRef.current =
-    window.setTimeout(() => {
-      calendarAddHoldTimerRef.current = null
-      calendarAddLongPressRef.current = true
-
-            setAiCommandText('')
-      setQuickAddOpen(false)
-      setAiCommandOpen(true)
-    }, 800)
-}
-
-function cancelCalendarAddHold() {
-  if (
-    calendarAddHoldTimerRef.current !== null
-  ) {
-    window.clearTimeout(
-      calendarAddHoldTimerRef.current
-    )
-
-    calendarAddHoldTimerRef.current = null
-  }
-}
-
-function consumeCalendarAddLongPress() {
-  if (!calendarAddLongPressRef.current) {
+  if (!command) {
     return false
   }
 
-  calendarAddLongPressRef.current = false
+  if (command.kind === 'create-event') {
+    const [year, month, day] =
+      command.date.split('-').map(Number)
+    const targetDate =
+      new Date(year, month - 1, day)
 
-  return true
+    clearEventForm()
+    setAiCommandOpen(false)
+    setPage('calendar')
+    setCalendarView('month')
+    setViewDate(
+      new Date(year, month - 1, 1)
+    )
+    setWeekDate(targetDate)
+    setSelectedDay(day)
+    setEventTitle(command.title)
+    setEventStartDate(command.date)
+    setEventStartDateText(
+      formatDateKeyForText(command.date)
+    )
+    setEventEndDate(command.endDate ?? '')
+    setEventEndDateText(
+      command.endDate
+        ? formatDateKeyForText(command.endDate)
+        : ''
+    )
+    setEventAllDay(command.time === null)
+    setEventTime(command.time ?? '')
+    setEventEndTime('')
+    const voicePersonIds = new Set(
+      getDefaultEventPersonIds()
+    )
+    for (const personId of command.personIds ?? []) {
+      if (people.some(person => person.id === personId)) {
+        voicePersonIds.add(personId)
+      }
+    }
+    setSelectedPersonIds([...voicePersonIds])
+    setIsAddingEvent(true)
+    showAppNotification(
+      'Event details ready. Review before saving.'
+    )
+    return true
+  }
+
+  if (command.kind === 'add-list-item') {
+    setAiCommandOpen(false)
+    setQuickListId(command.listId)
+    setQuickListText(command.item)
+    setQuickListOpen(true)
+    showAppNotification(
+      `Ready to add ${command.item} to ${command.listName}. Review before adding.`
+    )
+    return true
+  }
+
+  if (command.kind === 'add-meal') {
+    setAiCommandOpen(false)
+    setPage('meals')
+    setMealsView('planner')
+    setMealPlanFormSource('planner')
+    setEditingMealPlanItemId(null)
+    setMealPlanDeleteConfirmOpen(false)
+    setMealPlanFormDate(command.date)
+    setMealPlanFormMealType(command.mealType)
+    setMealPlanEntryMode('custom')
+    setMealPlanRecipeId('')
+    setMealPlanCustomTitle(command.title)
+    setMealPlanNotes('')
+    setMealPlanFormOpen(true)
+    showAppNotification(
+      'Meal details ready. Review before saving.'
+    )
+    return true
+  }
+
+  return false
+}
+
+
+function startCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
+  if (!event.isPrimary || event.button !== 0) return
+  calendarPlusHoldRef.current?.destroy()
+  const controller = createArneyPlusHoldController({
+    delayMs: 225,
+    onHold: () => {
+      stopArneyReply()
+      setArneyMicDiagnostics([])
+      setArneyPlusListening(true)
+      setArneyVoiceStatus('Starting microphone…')
+    },
+    begin: onResult => {
+      const preferences = readArneyPreferences()
+      if (arneyLocalSpeechAvailable()) {
+        return beginArneyLocalSpeech(onResult, listening => {
+          setArneyPlusListening(listening)
+          setArneyVoiceStatus(listening
+            ? 'Listening… release to finish.'
+            : 'Transcribing locally…')
+        })
+      }
+      if (!preferences.browserSpeechEnabled) {
+        onResult({ kind: 'error', reason: 'local-recording-unavailable' })
+        return null
+      }
+      if (!arneySpeechAvailable()) {
+        onResult({ kind: 'error', reason: 'speech-unavailable' })
+        return null
+      }
+      return beginArneySpeech(onResult)
+    },
+    onFinished: result => {
+      setArneyPlusListening(false)
+      setQuickAddOpen(false)
+      setAiCommandResult('')
+      setAiCancellationPreview(null)
+      setAiReschedulePreview(null)
+      const transcript = result.kind === 'transcript'
+        ? result.text.trim().slice(0, 2000)
+        : ''
+      const totalMs = result.kind === 'transcript'
+        ? result.timing?.totalMs
+        : undefined
+      const capturedStatus =
+        typeof totalMs === 'number' && totalMs > 0
+          ? `Voice captured locally in ${(totalMs / 1000).toFixed(1)}s.`
+          : 'Voice captured.'
+
+      setArneyMicDiagnostics(
+        result.kind === 'error' &&
+        result.reason === 'aborted'
+          ? getArneySpeechDiagnostics()
+          : []
+      )
+      setAiCommandText(transcript)
+
+      if (
+        transcript &&
+        openArneyVoiceDraft(transcript)
+      ) {
+        setAiCommandText('')
+        setArneyVoiceStatus('')
+        return
+      }
+
+      setAiVoiceDirect(true)
+      setArneyVoiceStatus(
+        transcript
+          ? capturedStatus + ' Arney is understanding your request…'
+          : result.kind === 'error' &&
+              result.reason === 'microphone-permission-denied'
+            ? 'Microphone permission was denied. Allow microphone access for this calendar and try again.'
+            : result.kind === 'error' &&
+                result.reason === 'local-recording-unavailable'
+              ? 'Private local recording is unavailable in this browser.'
+              : result.kind === 'error' &&
+                  result.reason === 'local-rate-limited'
+                ? 'Too many voice attempts were made. Wait a moment and try again. Nothing was sent.'
+                : result.kind === 'error' &&
+                    result.reason === 'local-transcription-unavailable'
+                  ? 'The private transcription service is unavailable. Nothing was sent.'
+                  : result.kind === 'error' &&
+                      result.reason === 'local-recording-failed'
+                    ? 'The microphone recording could not be completed. Nothing was sent.'
+                    : result.kind === 'error'
+                      ? 'Speech recognition failed (' + result.reason + '). Nothing was sent.'
+                      : 'No words were recognized. Nothing was sent.'
+      )
+      setAiCommandOpen(true)
+
+      if (transcript) {
+        void submitAiCommand(transcript)
+      }
+    },
+    onCanceled: () => {
+      setArneyPlusListening(false)
+      setArneyVoiceStatus('')
+    },
+  })
+  calendarPlusHoldRef.current = controller
+  controller.down(event.pointerId)
+  try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* browser may decline */ }
+}
+
+function cancelCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
+  calendarPlusHoldRef.current?.up(event.pointerId)
+}
+
+function abortCalendarAddHold(event: PointerEvent<HTMLButtonElement>) {
+  calendarPlusHoldRef.current?.cancel(event.pointerId)
+}
+
+function consumeCalendarAddLongPress() {
+  return calendarPlusHoldRef.current?.consumeClick() ?? false
 }
 
 
@@ -10133,6 +10309,12 @@ function closeEventModal() {
     setEventModalClosing(false)
   }, 220)
 }
+function getDefaultEventPersonIds(): number[] {
+  return activeHouseholdPersonId !== null &&
+    people.some(person => person.id === activeHouseholdPersonId)
+    ? [activeHouseholdPersonId]
+    : []
+}
  function clearEventForm() {
 setEditingEventId(null)
 setDuplicateSourceEventId(null)
@@ -10166,7 +10348,7 @@ setEventLocation('')
   setRepeatEndDateText('')
 setRepeatEndDateError(false)
   setRepeatCount(10)
-  setSelectedPersonIds([])
+  setSelectedPersonIds(getDefaultEventPersonIds())
 }
 
   function handlePersonImageChange(
@@ -14206,11 +14388,13 @@ return (
 
   <button
   type="button"
-  className="mobile-capture-button"
-  aria-label="Open Quick Add"
+  className={`mobile-capture-button ${arneyPlusListening ? 'arney-plus-listening' : ''}`}
+  aria-label="Tap for Quick Add; hold to talk to Arney"
+  aria-pressed={arneyPlusListening}
+  style={{ touchAction: 'none' }}
   onPointerDown={startCalendarAddHold}
   onPointerUp={cancelCalendarAddHold}
-  onPointerCancel={cancelCalendarAddHold}
+  onPointerCancel={abortCalendarAddHold}
   onContextMenu={(event) => {
     event.preventDefault()
   }}
@@ -14222,7 +14406,7 @@ return (
     setQuickAddOpen(true)
   }}
 >
-  +
+  {arneyPlusListening ? '🎙' : '+'}
 </button>
 </div>
 
@@ -14231,6 +14415,7 @@ return (
     <div
       className="ai-command-overlay"
       onClick={() => {
+        stopArneyReply()
         setAiCommandOpen(false)
       }}
     >
@@ -14246,7 +14431,7 @@ return (
               Calendar Assistant
             </span>
 
-            <h2>What would you like to do?</h2>
+            <h2>{aiVoiceDirect ? 'Review Arney\'s result' : 'What would you like to do?'}</h2>
           </div>
 
           <button
@@ -14254,6 +14439,7 @@ return (
             className="ai-command-close"
             aria-label="Close AI command"
             onClick={() => {
+              stopArneyReply()
               setAiCommandOpen(false)
             }}
           >
@@ -14268,17 +14454,35 @@ return (
     void submitAiCommand()
   }}
 >
-          <textarea
-            className="ai-command-input"
-            value={aiCommandText}
-            onChange={(event) => {
-              setAiCommandText(
-                event.target.value
-              )
-            }}
-            placeholder="Try: Cancel my dentist appointment tomorrow at 2 PM"
-            autoFocus
-          />
+          {arneyVoiceStatus && (
+            <p className="arney-voice-review-status" role="status">
+              {arneyVoiceStatus}
+              {arneyVoiceStatus.includes('Voice Settings') && (
+                <> <button type="button" onClick={() => window.dispatchEvent(
+                  new Event('family-calendar:open-arney-settings')
+                )}>Open Arney Voice Settings</button></>
+              )}
+            </p>
+          )}
+          {arneyMicDiagnostics.length > 0 && (
+            <details className="arney-mic-diagnostics">
+              <summary>Microphone diagnostics (no audio or spoken words)</summary>
+              <pre>{arneyMicDiagnostics.join('\n')}</pre>
+            </details>
+          )}
+          {!aiVoiceDirect && (
+            <textarea
+              className="ai-command-input"
+              value={aiCommandText}
+              onChange={(event) => {
+                setAiCommandText(
+                  event.target.value
+                )
+              }}
+              placeholder="Try: Cancel my dentist appointment tomorrow at 2 PM"
+              autoFocus
+            />
+          )}
 {aiCancellationPreview?.status ===
   'needs_clarification' &&
   aiCancellationPreview.matches?.length === 0 && (
@@ -14670,9 +14874,18 @@ return (
   )}
 
 {aiCommandResult !== '' && (
-  <pre className="ai-command-debug">
-    {aiCommandResult}
-  </pre>
+  <section className="arney-conversation-result" role="status" aria-live="polite">
+    <p>{aiCommandResult}</p>
+    <div className="arney-conversation-audio-controls">
+      <button type="button" onClick={() => {
+        if (!speakArneyReply(aiCommandResult)) {
+          setArneyVoiceStatus('Audio playback is not available here. You can read the reply below.')
+        }
+      }} aria-label="Hear Arney's reply">Hear reply</button>
+      <button type="button" onClick={stopArneyReply}
+        aria-label="Stop Arney speaking">Stop speaking</button>
+    </div>
+  </section>
 )}
 
 
@@ -14681,24 +14894,27 @@ return (
               type="button"
               className="ai-command-cancel"
               onClick={() => {
+                stopArneyReply()
                 setAiCommandOpen(false)
               }}
             >
               Cancel
             </button>
 
-            <button
-              type="submit"
-              className="ai-command-send"
-              disabled={
-  aiCommandText.trim() === '' ||
-  aiCommandLoading
-}
-            >
-              {aiCommandLoading
-  ? 'Thinking...'
-  : 'Send'}
-            </button>
+            {!aiVoiceDirect && (
+              <button
+                type="submit"
+                className="ai-command-send"
+                disabled={
+                  aiCommandText.trim() === '' ||
+                  aiCommandLoading
+                }
+              >
+                {aiCommandLoading
+                  ? 'Thinking...'
+                  : 'Send'}
+              </button>
+            )}
           </div>
         </form>
       </div>
@@ -19921,7 +20137,7 @@ const occurrenceEndDate =
                               type="button"
                   onPointerDown={startCalendarAddHold}
                   onPointerUp={cancelCalendarAddHold}
-                  onPointerCancel={cancelCalendarAddHold}
+                  onPointerCancel={abortCalendarAddHold}
                   onContextMenu={(event) => {
                     event.preventDefault()
                   }}
@@ -20008,7 +20224,7 @@ const occurrenceEndDate =
                 type="button"
         onPointerDown={startCalendarAddHold}
         onPointerUp={cancelCalendarAddHold}
-        onPointerCancel={cancelCalendarAddHold}
+        onPointerCancel={abortCalendarAddHold}
 onContextMenu={(event) => {
           event.preventDefault()
         }}
