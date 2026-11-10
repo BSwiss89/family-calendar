@@ -4257,8 +4257,12 @@ function openArneyVoiceDraft(transcript: string): boolean {
     }
     setSelectedPersonIds([...voicePersonIds])
     setIsAddingEvent(true)
+    const heardTranscript = transcript.length > 120
+      ? transcript.slice(0, 117) + '…'
+      : transcript
     showAppNotification(
-      'Event details ready. Review before saving.'
+      `Heard: “${heardTranscript}” Event details ready. Review before saving.`,
+      6500
     )
     return true
   }
