@@ -3,6 +3,8 @@ export type ArneyVoiceResponseMode = 'always' | 'needed' | 'silent'
 export type ArneyPreferences = {
   responseMode: ArneyVoiceResponseMode
   wakeWordsEnabled: boolean
+  localSpeechEnabled: boolean
+  browserSpeechEnabled: boolean
   confirmBeforeChanges: boolean
 }
 
@@ -11,6 +13,8 @@ export const ARNEY_PREFERENCES_KEY = 'family-calendar:arney-preferences:v1'
 export const DEFAULT_ARNEY_PREFERENCES: ArneyPreferences = {
   responseMode: 'always',
   wakeWordsEnabled: false,
+  localSpeechEnabled: true,
+  browserSpeechEnabled: false,
   confirmBeforeChanges: true,
 }
 
@@ -36,6 +40,13 @@ export function normalizeArneyPreferences(value: unknown): ArneyPreferences {
       typeof input.wakeWordsEnabled === 'boolean'
         ? input.wakeWordsEnabled
         : DEFAULT_ARNEY_PREFERENCES.wakeWordsEnabled,
+    // Holding the blue + is the explicit microphone action. Private local
+    // transcription is the built-in provider and never needs a device opt-in.
+    localSpeechEnabled: true,
+    browserSpeechEnabled:
+      typeof input.browserSpeechEnabled === 'boolean'
+        ? input.browserSpeechEnabled
+        : DEFAULT_ARNEY_PREFERENCES.browserSpeechEnabled,
     confirmBeforeChanges:
       typeof input.confirmBeforeChanges === 'boolean'
         ? input.confirmBeforeChanges
@@ -65,3 +76,4 @@ export function saveArneyPreferences(value: ArneyPreferences): boolean {
     return false
   }
 }
+
