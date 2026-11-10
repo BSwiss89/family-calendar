@@ -16,7 +16,7 @@ export type ArneySimpleCommand =
   | { kind: 'add-meal'; title: string; date: string; mealType: ArneyMealType }
   | { kind: 'list-query'; listId: number; listName: string; items: string[] }
   | { kind: 'calendar-query'; when: 'today' | 'tomorrow' }
-  | { kind: 'create-event'; title: string; date: string; time: string | null; personIds?: number[] }
+  | { kind: 'create-event'; title: string; date: string; endDate?: string; time: string | null; personIds?: number[] }
 
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -130,6 +130,18 @@ function uniquelyMatchedPersonId(
   return closest.length === 1 ? closest[0].id : undefined
 }
 
+function upcomingChristmasRange(now: Date): { date: string; endDate: string } {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const thisChristmas = new Date(now.getFullYear(), 11, 25)
+  const startYear = today.getTime() <= thisChristmas.getTime()
+    ? now.getFullYear()
+    : now.getFullYear() + 1
+  return {
+    date: localDayKey(new Date(startYear, 11, 25)),
+    endDate: localDayKey(new Date(startYear + 1, 0, 1)),
+  }
+}
+
 function mentionedPersonIds(
   value: string,
   people: ArneyPersonInfo[],
@@ -220,6 +232,25 @@ export function parseArneySimpleCommand(
   if (/^(?:what(?:'s| is)|what do i have|show|tell me|read)(?:.*?)(?:calendar|schedule|events?|appointments?|on today|on tomorrow|for today|for tomorrow)/i.test(text)) {
     if (/\btomorrow\b/i.test(text)) return { kind: 'calendar-query', when: 'tomorrow' }
     if (/\btoday\b/i.test(text)) return { kind: 'calendar-query', when: 'today' }
+  }
+
+  const familyHolidayRange = /^(?:(?:the)\s+)?(?:whole\s+family|entire\s+family|all\s+of\s+us|everyone|everybody)\s+(?:is|are)\s+(?:going\s+)?(?:on\s+)?(?:an?\s+)?(.+?)\s+(?:from\s+)?christmas(?:\s+day)?\s+(?:to|through|until)\s+new\s+year(?:['’]s|s)?(?:\s+day)?$/i.exec(text)
+  if (familyHolidayRange) {
+    const title = familyHolidayRange[1].trim()
+    const personIds = people
+      .filter(person => person.id > 0 && person.name.trim().length > 0)
+      .map(person => person.id)
+    if (title && title.length <= 200 && personIds.length > 0) {
+      const range = upcomingChristmasRange(now)
+      return {
+        kind: 'create-event',
+        title,
+        date: range.date,
+        endDate: range.endDate,
+        time: null,
+        personIds,
+      }
+    }
   }
 
   const peopleDateThenTime = /^(.+?)\s+(?:have|has)\s+(?:an?\s+)?(.+?)\s+(?:(?:on|for)\s+)?(today|tomorrow|\d{4}-\d{2}-\d{2})(?:\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?$/i.exec(text)
