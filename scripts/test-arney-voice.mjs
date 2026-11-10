@@ -1,0 +1,348 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { extractArneyWakeCommand, shouldOfferArneyTextFallback } from '../src/arneyWakePhrase.ts'
+
+test('wake words accept Arney, Chrome-transcribed Arnie, and Computer', () => {
+  assert.equal(extractArneyWakeCommand('Hey Arney, what is tomorrow?'), 'what is tomorrow?')
+  assert.equal(extractArneyWakeCommand('arney'), '')
+  assert.equal(extractArneyWakeCommand("hey Arnie what's on my calendar today"), "what's on my calendar today")
+  assert.equal(extractArneyWakeCommand('ARNIE, read my calendar'), 'read my calendar')
+  assert.equal(extractArneyWakeCommand('hey arnie'), '')
+  assert.equal(extractArneyWakeCommand('Computer, cancel my meeting'), 'cancel my meeting')
+  assert.equal(extractArneyWakeCommand('Calendar'), '')
+  assert.equal(extractArneyWakeCommand('calendar, add milk to groceries'), 'add milk to groceries')
+  assert.equal(extractArneyWakeCommand('Hey Calendar, what is on today?'), 'what is on today?')
+  assert.equal(extractArneyWakeCommand('HEY CALENDAR'), '')
+})
+test('wake words do not trigger on incidental mentions', () => {
+  assert.equal(extractArneyWakeCommand('I met Arney yesterday'), null)
+  assert.equal(extractArneyWakeCommand('computerize this'), null)
+  assert.equal(extractArneyWakeCommand('hey Barney'), null)
+  assert.equal(extractArneyWakeCommand('hey Ernie'), null)
+  assert.equal(extractArneyWakeCommand('arnies'), null)
+  assert.equal(extractArneyWakeCommand('I said Arnie'), null)
+  assert.equal(extractArneyWakeCommand('hey Armie'), null)
+  assert.equal(extractArneyWakeCommand('calendarize this'), null)
+  assert.equal(extractArneyWakeCommand('I opened the calendar'), null)
+  assert.equal(extractArneyWakeCommand('hey calendaring'), null)
+})
+test('text fallback appears on the third failure', () => {
+  assert.equal(shouldOfferArneyTextFallback(0), false)
+  assert.equal(shouldOfferArneyTextFallback(2), false)
+  assert.equal(shouldOfferArneyTextFallback(3), true)
+})
+
+test('speech adapter waits for end and emits once after stop', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  class MockRecognition {
+    onresult = null
+    onerror = null
+    onend = null
+    lang = ''
+    continuous = false
+    interimResults = false
+    start() {}
+    stop() { this.onend?.() }
+    abort() { this.onend?.() }
+  }
+  let instance
+  const original = globalThis.window
+  globalThis.window = {
+    SpeechRecognition: class extends MockRecognition {
+      constructor() { super(); instance = this }
+    },
+  }
+  try {
+    const results = []
+    const session = beginArneySpeech(result => results.push(result))
+    assert.ok(session)
+    assert.equal(instance.interimResults, true)
+    instance.onresult?.({ results: [[{ transcript: 'Add milk to groceries' }]] })
+    session.stop()
+    instance.onend?.()
+    assert.deepEqual(results, [{ kind: 'transcript', text: 'Add milk to groceries' }])
+  } finally {
+    globalThis.window = original
+  }
+})
+
+test('canceled browser recognition cannot submit late transcripts', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  let instance
+  const original = globalThis.window
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { instance = this }
+      start() {}
+      stop() { this.onend?.() }
+      abort() { this.onend?.() }
+    },
+  }
+  try {
+    const results = []
+    const session = beginArneySpeech(result => results.push(result))
+    session.cancel()
+    instance.onend?.()
+    assert.deepEqual(results, [])
+  } finally {
+    globalThis.window = original
+  }
+})
+
+
+test('interim Safari transcript survives stop and diagnostic contains no spoken words', async () => {
+  const { beginArneySpeech, getArneySpeechDiagnostics } = await import('../src/arneySpeech.ts')
+  let instance
+  const original = globalThis.window
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { instance = this }
+      start() { this.onstart?.() }
+      stop() { this.onend?.() }
+      abort() { this.onend?.() }
+    },
+  }
+  try {
+    const results = []
+    const session = beginArneySpeech(result => results.push(result))
+    assert.ok(session)
+    assert.equal(instance.interimResults, true)
+    instance.onaudiostart?.()
+    instance.onspeechstart?.()
+    instance.onresult?.({ results: [[{ transcript: 'private words' }]] })
+    session.stop()
+    instance.onresult?.({ results: [[{ transcript: 'ignored duplicate' }]] })
+    assert.deepEqual(results, [{ kind: 'transcript', text: 'private words' }])
+    const diagnostic = getArneySpeechDiagnostics().join('\n')
+    assert.match(diagnostic, /audio start/)
+    assert.match(diagnostic, /speech detected/)
+    assert.match(diagnostic, /result received \(nonempty\)/)
+    assert.match(diagnostic, /completed with transcript/)
+    assert.doesNotMatch(diagnostic, /private words|ignored duplicate/)
+  } finally {
+    globalThis.window = original
+  }
+})
+
+
+test('wake mode submits once on final result even if the browser never ends', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognition
+  let aborts = 0
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognition = this }
+      start() {}
+      stop() { throw Error('wake mode must not need stop') }
+      abort() { aborts++ }
+    },
+  }
+  try {
+    const received = []
+    const session = beginArneySpeech(
+      result => received.push(result),
+      undefined,
+      { finishOnFinalResult: true },
+    )
+    assert.ok(session)
+    assert.equal(recognition.continuous, true)
+    recognition.onresult?.({
+      results: [Object.assign([{ transcript: 'Hey Arney, add milk' }], { isFinal: false })],
+    })
+    assert.deepEqual(received, [], 'interim speech must not submit commands')
+    recognition.onresult?.({
+      results: [Object.assign([{ transcript: 'Hey Arney, add milk to groceries' }], { isFinal: true })],
+    })
+    assert.deepEqual(received, [{ kind: 'transcript', text: 'Hey Arney, add milk to groceries' }])
+    assert.equal(aborts, 1)
+    recognition.onend?.()
+    assert.equal(received.length, 1, 'a late browser end cannot resubmit')
+  } finally {
+    globalThis.window = original
+  }
+})
+
+test('push-to-talk still waits for release when Chrome reports a final result', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognition
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognition = this }
+      start() {}
+      stop() { this.onend?.() }
+      abort() {}
+    },
+  }
+  try {
+    const received = []
+    const session = beginArneySpeech(result => received.push(result))
+    assert.equal(recognition.continuous, false)
+    recognition.onresult?.({
+      results: [Object.assign([{ transcript: 'What is on the calendar today?' }], { isFinal: true })],
+    })
+    assert.deepEqual(received, [], 'push-to-talk must wait for release')
+    session.stop()
+    assert.deepEqual(received, [{ kind: 'transcript', text: 'What is on the calendar today?' }])
+  } finally {
+    globalThis.window = original
+  }
+})
+
+
+test('wake recovery waits until browser speech synthesis is quiet', async () => {
+  const { arneyReplyAudioActive } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  try {
+    globalThis.window = {}
+    assert.equal(arneyReplyAudioActive(), false, 'no synthesis API is safe to resume')
+    globalThis.window.speechSynthesis = { speaking: true, pending: false, paused: false }
+    assert.equal(arneyReplyAudioActive(), true, 'never listen over current speech')
+    globalThis.window.speechSynthesis = { speaking: false, pending: true, paused: false }
+    assert.equal(arneyReplyAudioActive(), true, 'queued speech also blocks listening')
+    globalThis.window.speechSynthesis = { speaking: false, pending: false, paused: true }
+    assert.equal(arneyReplyAudioActive(), true, 'paused speech is not finished')
+    globalThis.window.speechSynthesis = { speaking: false, pending: false, paused: false }
+    assert.equal(arneyReplyAudioActive(), false, 'resume only when reply is finished')
+  } finally {
+    globalThis.window = original
+  }
+})
+
+
+test('permission denial ends recognition once and cannot submit late speech', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognition
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognition = this }
+      start() {}
+      stop() {}
+      abort() {}
+    },
+  }
+  try {
+    const received = []
+    const session = beginArneySpeech(result => received.push(result))
+    assert.ok(session)
+    recognition.onerror?.({ error: 'not-allowed' })
+    recognition.onresult?.({ results: [[{ transcript: 'should not execute' }]] })
+    recognition.onend?.()
+    assert.deepEqual(received, [{ kind: 'error', reason: 'not-allowed' }])
+  } finally {
+    globalThis.window = original
+  }
+})
+
+test('empty result ends safely and never creates a transcript', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognition
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognition = this }
+      start() {}
+      stop() { this.onend?.() }
+      abort() {}
+    },
+  }
+  try {
+    const received = []
+    const session = beginArneySpeech(result => received.push(result))
+    assert.ok(session)
+    session.stop()
+    recognition.onend?.()
+    assert.deepEqual(received, [{ kind: 'empty' }])
+  } finally {
+    globalThis.window = original
+  }
+})
+
+test('a second Safari recording still produces a transcript when no audio interference occurs', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  const recognizers = []
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognizers.push(this) }
+      start() { this.onstart?.() }
+      stop() { this.onend?.() }
+      abort() { this.onend?.() }
+    },
+  }
+  try {
+    const results = []
+    for (const phrase of ['First command', 'Second command']) {
+      const session = beginArneySpeech(result => results.push(result))
+      assert.ok(session)
+      const instance = recognizers.at(-1)
+      instance.onresult?.({results: [[{transcript: phrase}]]})
+      session.stop()
+    }
+    assert.equal(recognizers.length, 2, 'every press-to-talk uses a fresh recognizer')
+    assert.deepEqual(results, [
+      {kind: 'transcript', text: 'First command'},
+      {kind: 'transcript', text: 'Second command'},
+    ])
+  } finally {
+    globalThis.window = original
+  }
+})
+
+test('Safari aborted after obtaining speech preserves existing words only for review', async () => {
+  const { beginArneySpeech, getArneySpeechDiagnostics } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognizer
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognizer = this }
+      start() { this.onstart?.() }
+      stop() {
+        this.onerror?.({error: 'aborted'})
+        this.onend?.()
+      }
+      abort() { this.onend?.() }
+    },
+  }
+  try {
+    const results = []
+    const session = beginArneySpeech(result => results.push(result))
+    recognizer.onresult?.({results: [[{transcript: 'Review this safely'}]]})
+    session.stop()
+    assert.deepEqual(results, [{kind: 'transcript', text: 'Review this safely'}])
+    assert.doesNotMatch(getArneySpeechDiagnostics().join(' '), /Review this safely/)
+    assert.match(getArneySpeechDiagnostics().join(' '), /recovered existing transcript/)
+  } finally {
+    globalThis.window = original
+  }
+})
+
+test('Safari aborted before returning words remains a safe error without retry or submission', async () => {
+  const { beginArneySpeech } = await import('../src/arneySpeech.ts')
+  const original = globalThis.window
+  let recognizer
+  let starts = 0
+  globalThis.window = {
+    SpeechRecognition: class {
+      constructor() { recognizer = this }
+      start() { starts += 1; this.onstart?.() }
+      stop() {
+        this.onerror?.({error: 'aborted'})
+        this.onend?.()
+      }
+      abort() { this.onend?.() }
+    },
+  }
+  try {
+    const results = []
+    const session = beginArneySpeech(result => results.push(result))
+    session.stop()
+    assert.equal(starts, 1, 'do not auto retry microphone after a browser abort')
+    assert.deepEqual(results, [{kind: 'error', reason: 'aborted'}])
+  } finally {
+    globalThis.window = original
+  }
+})
+
