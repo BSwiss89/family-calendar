@@ -74,6 +74,28 @@ test('spoken people preselect existing profiles and me means the active profile'
       kind: 'create-event', title: 'movie', date: '2026-10-14', time: '20:00', personIds: [4, 3],
     },
   )
+  for (const spokenName of ['Haley', 'Hailey', 'Hayley', 'Hay Lee']) {
+    assert.deepEqual(
+      parseArneySimpleCommand(`Me and ${spokenName} have a date tomorrow at 7pm`, lists, now, people, 2),
+      {
+        kind: 'create-event', title: 'date', date: '2026-10-14', time: '19:00', personIds: [2, 3],
+      },
+    )
+  }
+})
+
+test('spoken People matching refuses an equally close ambiguous name', () => {
+  const similarPeople = [
+    { id: 2, name: 'Robert' },
+    { id: 5, name: 'Maya' },
+    { id: 6, name: 'Mia' },
+  ]
+  assert.deepEqual(
+    parseArneySimpleCommand('Me and Mya have a meeting tomorrow at 9am', lists, now, similarPeople, 2),
+    {
+      kind: 'create-event', title: 'meeting', date: '2026-10-14', time: '09:00', personIds: [2],
+    },
+  )
 })
 
 test('cannot infer a list that is not known', () => {

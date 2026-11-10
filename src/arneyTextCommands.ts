@@ -69,6 +69,67 @@ function comparableListName(value: string): string {
     .replace(/[^a-z0-9]/g, '')
 }
 
+function comparablePersonName(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function personNameDistance(left: string, right: string): number {
+  const previous = Array.from(
+    { length: right.length + 1 },
+    (_, index) => index,
+  )
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex]
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] +
+          (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      )
+    }
+    previous.splice(0, previous.length, ...current)
+  }
+  return previous[right.length]
+}
+
+function uniquelyMatchedPersonId(
+  mention: string,
+  people: ArneyPersonInfo[],
+): number | undefined {
+  const requested = comparablePersonName(mention)
+  if (!requested) return undefined
+  const validPeople = people.filter(person =>
+    person.id > 0 && comparablePersonName(person.name).length > 0
+  )
+  const exact = validPeople.filter(person =>
+    comparablePersonName(person.name) === requested
+  )
+  if (exact.length === 1) return exact[0].id
+  if (exact.length > 1 || requested.length < 4) return undefined
+
+  const maximumDistance = requested.length >= 5 ? 2 : 1
+  const candidates = validPeople
+    .map(person => ({
+      id: person.id,
+      distance: personNameDistance(
+        requested,
+        comparablePersonName(person.name),
+      ),
+    }))
+    .filter(candidate => candidate.distance <= maximumDistance)
+    .sort((left, right) => left.distance - right.distance)
+  if (candidates.length === 0) return undefined
+  const closest = candidates.filter(candidate =>
+    candidate.distance === candidates[0].distance
+  )
+  return closest.length === 1 ? closest[0].id : undefined
+}
+
 function mentionedPersonIds(
   value: string,
   people: ArneyPersonInfo[],
@@ -89,13 +150,7 @@ function mentionedPersonIds(
       add(activePerson?.id)
       continue
     }
-    const matches = people.filter(person =>
-      person.id > 0 && person.name.trim().localeCompare(mention, undefined, {
-        sensitivity: 'accent',
-        usage: 'search',
-      }) === 0
-    )
-    if (matches.length === 1) add(matches[0].id)
+    add(uniquelyMatchedPersonId(mention, people))
   }
 
   return result
