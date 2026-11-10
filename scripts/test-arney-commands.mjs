@@ -68,6 +68,19 @@ test('spoken people preselect existing profiles and me means the active profile'
       kind: 'create-event', title: 'date', date: '2026-10-14', time: '19:00', personIds: [2, 3],
     },
   )
+  for (const phrase of [
+    'Haylee and I have a date tomorrow',
+    'Hey, Haylee and I have a date tomorrow',
+    'Hey Arney, Haylee and I have a date tomorrow',
+    'They Haylee and I have a date tomorrow',
+  ]) {
+    assert.deepEqual(
+      parseArneySimpleCommand(phrase, lists, now, people, 2),
+      {
+        kind: 'create-event', title: 'date', date: '2026-10-14', time: null, personIds: [3, 2],
+      },
+    )
+  }
   assert.deepEqual(
     parseArneySimpleCommand('Morgan and Haylee have a movie at 8pm tomorrow', lists, now, people, 2),
     {
@@ -90,12 +103,17 @@ test('spoken People matching refuses an equally close ambiguous name', () => {
     { id: 5, name: 'Maya' },
     { id: 6, name: 'Mia' },
   ]
-  assert.deepEqual(
-    parseArneySimpleCommand('Me and Mya have a meeting tomorrow at 9am', lists, now, similarPeople, 2),
-    {
-      kind: 'create-event', title: 'meeting', date: '2026-10-14', time: '09:00', personIds: [2],
-    },
-  )
+  for (const phrase of [
+    'Me and Mya have a meeting tomorrow at 9am',
+    'Hey, Mya and me have a meeting tomorrow at 9am',
+  ]) {
+    assert.deepEqual(
+      parseArneySimpleCommand(phrase, lists, now, similarPeople, 2),
+      {
+        kind: 'create-event', title: 'meeting', date: '2026-10-14', time: '09:00', personIds: [2],
+      },
+    )
+  }
 })
 
 test('whole-family holiday ranges select every current profile in an editable draft', () => {
@@ -163,6 +181,9 @@ test('voice write routing opens review forms and never auto-saves', () => {
   assert.match(app, /setSelectedPersonIds\(getDefaultEventPersonIds\(\)\)/)
   assert.match(app, /setEventEndDate\(command\.endDate \?\? ''\)/)
   assert.match(app, /formatDateKeyForText\(command\.endDate\)/)
+  assert.match(app, /Heard: “\$\{heardTranscript\}”/)
+  assert.match(app, /transcript\.slice\(0, 117\)/)
+  assert.match(app, /6500/)
   assert.match(app, /new AbortController\(\)/)
   assert.match(app, /15_000/)
   assert.match(app, /signal: requestController\.signal/)
