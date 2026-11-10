@@ -3,8 +3,8 @@
 param([Parameter(Mandatory=$true)][string]$CandidateSha,[Parameter(Mandatory=$true)][string]$CandidatePath,[switch]$Apply)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$from='6683fd722a4fbbecbf5a1207f49bb0409832caf2'
-$expectedTest='515d07a45f4d98f1d267d5b9b398ba8d36cf8ffe'
+$from='76384ee3004c627dc64a05af05311f767e659a1a'
+$expectedTest='23bb8343a502ac8e4968aa8798fb9750679f21ce'
 $stage=(Resolve-Path -LiteralPath $CandidatePath -ErrorAction Stop).Path
 $live='C:\Users\bobby\Projects\family-calendar-live-auth-candidate'
 $test='C:\Users\bobby\Projects\family-calendar-test-security-stage'
@@ -207,11 +207,11 @@ try {
     $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
     Assert (([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -and
         $identity.Name -ne 'NT AUTHORITY\SYSTEM') 'Use Administrator PowerShell as Bobby.'
-    Assert ($CandidateSha -ceq '76384ee3004c627dc64a05af05311f767e659a1a' -and (Head $stage) -eq $CandidateSha -and
+    Assert ($CandidateSha -ceq '0e51ad1ee2157dee8220dd529749ccac43f23149' -and (Head $stage) -eq $CandidateSha -and
         (Head $live) -eq $from -and (Head $test) -eq $expectedTest) 'Installed or candidate source baseline changed.'
     Assert ($stage -ine $live -and $stage -ine $test -and $stage -ne (Split-Path $PSScriptRoot -Parent)) 'Use isolated candidate source.'
     Assert (-not (Get-Item -LiteralPath $stage -Force).LinkType) 'Candidate checkout must not be a link.'
-    Assert (([string](& git -C $stage branch --show-current)).Trim() -eq 'release/live-baseline-6683-20261110') 'Candidate must be checked out from reviewed LIVE release branch.'
+    Assert (([string](& git -C $stage branch --show-current)).Trim() -eq 'release/live-arney-voice-20261110') 'Candidate must be checked out from reviewed LIVE release branch.'
     # Import only after exact candidate and path verification. The tailored
     # planner changes only backend and frontend hashes; auth, dependencies and secrets stay pinned.
     . (Join-Path $stage 'scripts\secure-live-launcher-pins.ps1')
@@ -223,16 +223,7 @@ try {
     & git -C $stage merge-base --is-ancestor $from $CandidateSha
     Assert ($LASTEXITCODE -eq 0) 'Candidate is not based on installed LIVE.'
     $allowed=@(
-        '.github/workflows/build.yml','.gitignore','Server/index.mjs','Server/local-stt.mjs',
-        'scripts/start-arney-local-stt.ps1','scripts/test-arney-commands.mjs',
-        'scripts/test-arney-local-recording.mjs','scripts/test-arney-local-stt.mjs',
-        'scripts/test-arney-plus-hold.mjs','scripts/test-arney-speech-consent.mjs',
-        'scripts/test-arney-spoken-replies.mjs','scripts/test-arney-voice.mjs',
-        'scripts/test-mobile-profile-editor.mjs','src/App.css','src/App.tsx',
-        'src/ArneySettings.tsx','src/ArneyVoiceInput.tsx','src/arneyLocalSpeech.ts',
-        'src/arneyPlusHold.ts','src/arneyPreferences.ts','src/arneyResponses.ts',
-        'src/arneySpeech.ts','src/arneyTextCommands.ts','src/arneyWakePhrase.ts',
-        'stt/arney_local_stt_service.py','stt/requirements.txt'
+        'scripts/test-arney-commands.mjs','src/App.tsx','src/arneyTextCommands.ts'
     )
     $files=@(& git -C $stage diff --name-only $from $CandidateSha | Sort-Object)
     Assert ($LASTEXITCODE -eq 0 -and ($files -join '|') -ceq (($allowed | Sort-Object) -join '|')) 'Candidate scope differs from the reviewed release.'
@@ -254,7 +245,7 @@ try {
     Assert ($actions -like "*$launcher*") 'LIVE task launcher changed.'
     Assert (-not (Get-ScheduledTask -TaskName $testAuto).Settings.Enabled) 'TEST updater must remain disabled.'
     $updater=Get-ScheduledTask -TaskName $auto
-    Assert ($updater.Settings.Enabled -and $updater.State -eq 'Ready') 'LIVE updater must be enabled and idle before manual release.'
+    Assert (-not $updater.Settings.Enabled -and $updater.State -ne 'Running') 'LIVE updater must remain disabled and idle before manual release.'
     $wd=Get-ScheduledTask -TaskName $watchdog
     Assert ($wd.Settings.Enabled -and $wd.State -eq 'Ready') 'Watchdog must be enabled and idle.'
     Assert (-not (Get-Item -LiteralPath "$live\dist" -Force).LinkType) 'LIVE frontend cannot be a link.'
@@ -270,7 +261,7 @@ try {
     Assert (-not $oldLocalSttExists) 'Installed LIVE baseline unexpectedly already contains Local STT bridge.'
     $oldProcess=OwnedProcess 3001 $live
     $processStamp="$($oldProcess.ProcessId)|$($oldProcess.CreationDate.ToUniversalTime().Ticks)"
-    $ci=Invoke-RestMethod 'https://api.github.com/repos/BSwiss89/family-calendar/actions/runs/42860615103' -Headers @{'User-Agent'='FamilyCalendar-ArneyVoiceLiveRelease'} -TimeoutSec 25
+    $ci=Invoke-RestMethod 'https://api.github.com/repos/BSwiss89/family-calendar/actions/runs/42912804709' -Headers @{'User-Agent'='FamilyCalendar-ArneyVoiceLiveRelease'} -TimeoutSec 25
     Assert ($ci.head_sha -eq $CandidateSha -and $ci.name -eq 'Build Family Calendar' -and
         $ci.status -eq 'completed' -and $ci.conclusion -eq 'success') 'Exact LIVE candidate Windows build failed.'
     # Confirm TEST acceptance target and unchanged dependency manifests.
@@ -322,7 +313,7 @@ try {
     New-Item -ItemType Directory -Path $state -Force | Out-Null
     WriteJournal @{from=$from;to=$CandidateSha;backup=$backup;stage=$stage;oldDist=$oldDist;newDist=$newDist;launcher=$launcher;phase='prepared'}
     $opened=$true
-    $autoPaused=$true
+    $autoPaused=(Get-ScheduledTask -TaskName $auto).Settings.Enabled
     Disable-ScheduledTask -TaskName $auto | Out-Null
     $paused=$true
     Disable-ScheduledTask -TaskName $watchdog | Out-Null
