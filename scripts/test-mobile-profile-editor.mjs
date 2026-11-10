@@ -110,10 +110,12 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
               assert.equal(await editor.getAttribute('role'),'dialog')
               assert.equal(await editor.getAttribute('aria-modal'),'true')
               assert.equal(await page.evaluate(()=>document.body.style.overflow),'hidden')
-              await editor.locator('.person-name-display')[touch?'tap':'click']()
-              await page.locator('.person-keyboard-overlay').waitFor()
-              await page.mouse.click(2,2)
-              await page.locator('.person-keyboard-overlay').waitFor({state:'hidden'})
+              const nameInput=editor.locator('input.person-name-display')
+              await nameInput[touch?'tap':'click']()
+              assert.equal(await nameInput.getAttribute('type'),'text')
+              assert.equal(await page.locator('.person-keyboard-overlay').count(),0)
+              await nameInput.fill('Person 1 updated')
+              assert.equal(await nameInput.inputValue(),'Person 1 updated')
               await editor.getByRole('button',{name:'Cancel',exact:true})[touch?'tap':'click']()
               assert.equal(writes.length,0)
               await page.locator('.person-editor-overlay').waitFor({state:'hidden'})
@@ -152,3 +154,4 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
     }
   } finally {await Promise.all(Object.values(browsers).map(browser=>browser.close()))}
 })
+
