@@ -1741,18 +1741,22 @@ function SortableHomeWidget({
         className="home-widget-grip"
         {...attributes}
         {...(enabled ? listeners : {})}
-        onPointerDown={enabled ? listeners?.onPointerDown : beginHold}
+        onPointerDown={enabled
+          ? (event) => { listeners?.onPointerDown?.(event) }
+          : beginHold}
         onPointerMove={enabled ? undefined : moveHold}
         onPointerUp={cancelHold}
         onPointerCancel={cancelHold}
         onPointerLeave={cancelHold}
         onContextMenu={(event) => event.preventDefault()}
-        onKeyDown={enabled ? listeners?.onKeyDown : (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            onEnterEdit()
-          }
-        }}
+        onKeyDown={enabled
+          ? (event) => { listeners?.onKeyDown?.(event) }
+          : (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              onEnterEdit()
+            }
+          }}
         aria-label={enabled
           ? `Drag ${id} card to reorder`
           : `Hold to edit Home layout: ${id}`}
