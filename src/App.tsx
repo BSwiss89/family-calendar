@@ -21,6 +21,10 @@ import { createArneyPlusHoldController, type ArneyPlusHoldController } from './a
 import { parseArneySimpleCommand } from './arneyTextCommands'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
 import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
+import {
+  eventMatchesCalendarPersonFilter,
+  toggleCalendarPersonFilterIds,
+} from './calendarPersonFilter'
 import { useAssignmentInbox } from './useAssignmentInbox'
 import { useFamilyEventInvitations } from './useFamilyEventInvitations'
 import { useFamilyPush, PushNotificationsControl } from './FamilyPushNotifications'
@@ -3598,12 +3602,12 @@ const handleProfileCreated = useCallback((person: Person) => {
 }, [])
   const [draggedPersonId, setDraggedPersonId] =
   useState<number | null>(null)
-const [calendarPersonFilterId, setCalendarPersonFilterId] =
-  useState<number | null>(null)
+const [calendarPersonFilterIds, setCalendarPersonFilterIds] =
+  useState<number[]>([])
 const handleHouseholdProfileChange = useCallback((name: string | null, personId: number | null) => {
   setActiveHouseholdProfile(name)
   setActiveHouseholdPersonId(personId)
-  if (name === 'Home') setCalendarPersonFilterId(null)
+  if (name === 'Home') setCalendarPersonFilterIds([])
 }, [])
 const [lists, setLists] = useState<CalendarList[]>([])
 const [shoppingStores, setShoppingStores] = useState<ShoppingStore[]>([])
@@ -8210,10 +8214,9 @@ function doesEventOccurOnDate(
   targetDate: string
 ) {
   if (
-    calendarPersonFilterId !== null &&
-    !calendarEvent.people.some(
-      (person) =>
-        person.id === calendarPersonFilterId
+    !eventMatchesCalendarPersonFilter(
+      calendarEvent.people.map((person) => person.id),
+      calendarPersonFilterIds,
     )
   ) {
     return false
@@ -8252,10 +8255,9 @@ function getMonthWeekMultiDaySegments(
 
 for (const calendarEvent of events) {
   if (
-    calendarPersonFilterId !== null &&
-    !calendarEvent.people.some(
-      (person) =>
-        person.id === calendarPersonFilterId
+    !eventMatchesCalendarPersonFilter(
+      calendarEvent.people.map((person) => person.id),
+      calendarPersonFilterIds,
     )
   ) {
     continue
@@ -8427,11 +8429,9 @@ function getWeekMultiDaySegments(
 
   for (const calendarEvent of events) {
     if (
-      calendarPersonFilterId !== null &&
-      !calendarEvent.people.some(
-        (person) =>
-          person.id ===
-          calendarPersonFilterId
+      !eventMatchesCalendarPersonFilter(
+        calendarEvent.people.map((person) => person.id),
+        calendarPersonFilterIds,
       )
     ) {
       continue
@@ -11506,7 +11506,7 @@ useLayoutEffect(() => {
   calendarView,
   weekDate,
   events,
-  calendarPersonFilterId,
+  calendarPersonFilterIds,
 ])
 
 function softlySnapScheduleToDay(
@@ -16452,8 +16452,7 @@ createPortal(
         .toUpperCase() || '?'
 
     const isSelected =
-      calendarPersonFilterId ===
-      person.id
+      calendarPersonFilterIds.includes(person.id)
 
     return (
       <button
@@ -16465,11 +16464,8 @@ createPortal(
             : ''
         }`}
         onClick={() =>
-          setCalendarPersonFilterId(
-            (current) =>
-              current === person.id
-                ? null
-                : person.id
+          setCalendarPersonFilterIds((currentIds) =>
+            toggleCalendarPersonFilterIds(currentIds, person.id)
           )
         }
         aria-label={person.name}
@@ -16572,7 +16568,7 @@ createPortal(
     {people.map((person) => (
       <div
   className={`family-slider-card ${
-    calendarPersonFilterId === person.id
+    calendarPersonFilterIds.includes(person.id)
       ? 'family-slider-card-selected'
       : ''
   }`}
@@ -16581,7 +16577,7 @@ createPortal(
   background:
     softenEventColor(person.color),
   border:
-    calendarPersonFilterId === person.id
+    calendarPersonFilterIds.includes(person.id)
       ? `3px solid color-mix(in srgb, ${person.color} 55%, black)`
       : '1px solid rgba(0, 0, 0, 0.05)',
   outline: 'none',
@@ -16593,11 +16589,8 @@ createPortal(
       return
     }
 
-    setCalendarPersonFilterId(
-      (currentPersonId) =>
-        currentPersonId === person.id
-          ? null
-          : person.id
+    setCalendarPersonFilterIds((currentIds) =>
+      toggleCalendarPersonFilterIds(currentIds, person.id)
     )
   }}
 >

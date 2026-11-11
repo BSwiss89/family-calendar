@@ -18918,8 +18918,11 @@ max-height:
   .calendar-mobile-avatar-button-active,
   .calendar-app:has(.month-swipe-surface) .calendar-mobile-avatar-button-active {
     transform: none;
-    border-color: rgba(33, 41, 52, 0.5);
-    box-shadow: inset 0 0 0 1px rgba(33, 41, 52, 0.14);
+    /* Draw the selected state inside the fixed-size oval so it remains
+       unmistakable without shifting or clipping the mobile toolbar. */
+    outline: 3px solid #1f2937;
+    outline-offset: -3px;
+    box-shadow: none;
   }
 
   /* In the compact Month cells prioritize the event title, not its time.

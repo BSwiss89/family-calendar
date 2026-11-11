@@ -24,6 +24,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Check TypeScript and build frontend
         run: npm run build
+      - name: Verify Calendar person multi-select filtering
+        run: node --experimental-strip-types --test scripts/test-calendar-person-filter.mjs
       - name: Verify Arney voice, local transcription, review-only writes, and People matching
         run: |
           node --check Server/local-stt.mjs
