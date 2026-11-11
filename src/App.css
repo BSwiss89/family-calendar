@@ -21116,3 +21116,23 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
     font-size: 36px;
   }
 }
+
+/* A short card gets the compact illustration even when it spans both columns;
+   all weather facts should fit without scrolling through a giant cloud. */
+.home-widget-grid > .home-widget-weather.home-widget-size-small .home-weather-artwork {
+  display: none;
+}
+
+.home-widget-grid > .home-widget-weather.home-widget-size-small .home-weather-compact-icon {
+  display: block;
+  font-size: 32px;
+  line-height: 1;
+}
+
+.home-widget-grid > .home-widget-weather.home-widget-size-small .home-weather-active .home-weather-main {
+  justify-content: space-around;
+}
+
+.home-widget-grid > .home-widget-weather.home-widget-size-small .home-weather-active .home-weather-temperature {
+  font-size: clamp(38px, 6vw, 52px);
+}
