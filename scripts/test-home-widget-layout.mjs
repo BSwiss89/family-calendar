@@ -52,7 +52,8 @@ test('invalid, duplicate, or missing widget IDs reset the order and invalid size
 test('Home editor is entered from a long-held visible three-line card handle', () => {
   assert.match(app, /className="home-widget-grip"/)
   assert.match(app, /setActivatorNodeRef/)
-  assert.match(app, /onPointerDown=\{enabled \? listeners\?\.onPointerDown : beginHold\}/)
+  assert.match(app, /onPointerDown=\{enabled[\s\S]*?listeners\?\.onPointerDown\?\.\(event\)/)
+  assert.match(app, /onKeyDown=\{enabled[\s\S]*?listeners\?\.onKeyDown\?\.\(event\)/)
   assert.match(app, /onEnterEdit\(\)/)
   assert.match(app, /\}, 650\)/)
   assert.equal((app.match(/onEnterEdit=\{\(\) => setIsEditingHome\(true\)\}/g) || []).length, 6)
