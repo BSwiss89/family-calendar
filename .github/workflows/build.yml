@@ -58,10 +58,10 @@ jobs:
           .\scripts\test-arney-live-launcher-plan.ps1
           $deploy=Get-Content '.\scripts\deploy-live-arney-voice.ps1' -Raw
           foreach ($marker in @(
-            '0e51ad1ee2157dee8220dd529749ccac43f23149',
+            '8eec878e5e6f0e6bedd64b04aae458a46490bb69',
             '76384ee3004c627dc64a05af05311f767e659a1a',
-            '23bb8343a502ac8e4968aa8798fb9750679f21ce',
-            '42912804709',
+            'abcb188f22afea0db985aff16fe37a7edd7694e6',
+            '42931884762',
             'LocalSttStamp',
             'NormalizedText',
             'LIVE_ARNEY_VOICE_DEPLOYMENT=PASS',
