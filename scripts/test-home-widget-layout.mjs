@@ -49,24 +49,68 @@ test('invalid, duplicate, or missing widget IDs reset the order and invalid size
   assert.equal(layout.sizes.lists, 'small')
 })
 
-test('Home editor is entered from a long-held visible three-line card handle', () => {
-  assert.match(app, /className="home-widget-grip"/)
-  assert.match(app, /setActivatorNodeRef/)
-  assert.match(app, /onPointerDown=\{enabled[\s\S]*?listeners\?\.onPointerDown\?\.\(event\)/)
-  assert.match(app, /onKeyDown=\{enabled[\s\S]*?listeners\?\.onKeyDown\?\.\(event\)/)
-  assert.match(app, /onEnterEdit\(\)/)
+test('press and hold any noninteractive card area to edit; grips mount only in edit mode', () => {
+  assert.match(app, /function beginHold\(event: PointerEvent<HTMLElement>\)/)
+  assert.match(app, /target\.closest\('button, a, input, textarea, select/)
+  assert.match(app, /onPointerDown=\{enabled \? undefined : beginHold\}/)
+  assert.match(app, /onPointerMove=\{enabled \? undefined : moveHold\}/)
+  assert.match(app, /onPointerCancel=\{cancelHold\}/)
+  assert.match(app, /onPointerLeave=\{cancelHold\}/)
   assert.match(app, /\}, 650\)/)
-  assert.equal((app.match(/onEnterEdit=\{\(\) => setIsEditingHome\(true\)\}/g) || []).length, 6)
+  assert.match(app, /\{enabled && \(\s*<>[\s\S]*?className="home-widget-grip"/)
+  assert.match(app, /setActivatorNodeRef/)
   assert.match(css, /home-widget-grip-bars > span:nth-child\(3\)/)
   assert.match(app, /Done Editing/)
 })
 
-test('small mobile cards can occupy one of two columns and narrow weather scales down', () => {
-  assert.match(css, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/)
-  assert.match(css, /home-widget\.home-widget-size-small\s*\{\s*grid-column: span 1;/)
-  assert.match(css, /@container \(max-width: 235px\)/)
-  assert.match(css, /home-weather-active \.home-weather-temperature\s*\{[\s\S]*?font-size: 36px;/)
+test('all six cards independently choose height and width during editing', () => {
+  assert.equal((app.match(/onEnterEdit=\{\(\) => setIsEditingHome\(true\)\}/g) ?? []).length, 6)
+  assert.equal((app.match(/onCycleHeight=\{\(\) =>/g) ?? []).length, 6)
+  assert.equal((app.match(/onToggleWidth=\{\(\) =>/g) ?? []).length, 6)
+  assert.match(app, /Height: \{height\}/)
+  assert.match(app, /Width: \{width\}/)
+  assert.match(app, /widths: homeWidgetWidths/)
   assert.match(app, /saveHomeWidgetLayout\(\{/)
+})
+
+test('three distinct heights and both widths work independently on desktop and mobile', () => {
+  const rules = css.slice(css.lastIndexOf('/* Home editor v2:'))
+  assert.match(rules, /grid-auto-rows: 100px;/)
+  assert.match(rules, /home-widget\.home-widget-size-small \{ grid-row: span 2; \}/)
+  assert.match(rules, /home-widget\.home-widget-size-medium \{ grid-row: span 3; \}/)
+  assert.match(rules, /home-widget\.home-widget-size-large \{ grid-row: span 4; \}/)
+  assert.match(rules, /home-widget\.home-widget-width-half \{ grid-column: span 2; \}/)
+  assert.match(rules, /home-widget\.home-widget-width-full \{ grid-column: span 4; \}/)
+  assert.match(rules, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/)
+  assert.match(rules, /home-widget\.home-widget-width-half \{\s*grid-column: span 1;/)
+  assert.match(rules, /home-widget\.home-widget-width-full \{\s*grid-column: span 2;/)
+  assert.match(rules, /home-widget-layout-controls/)
+  assert.match(css, /@container \(max-width: 235px\)/)
+})
+
+test('all combinations of vertical size and horizontal width persist independently', () => {
+  for (const height of ['small', 'medium', 'large']) {
+    for (const width of ['half', 'full']) {
+      const layout = normalizeHomeWidgetLayout({
+        sizes: Object.fromEntries(HOME_WIDGET_IDS.map((id) => [id, height])),
+        widths: Object.fromEntries(HOME_WIDGET_IDS.map((id) => [id, width])),
+      })
+      for (const id of HOME_WIDGET_IDS) {
+        assert.equal(layout.sizes[id], height)
+        assert.equal(layout.widths[id], width)
+      }
+    }
+  }
+})
+
+test('v1 layout settings are migrated with their original mobile width behavior', () => {
+  const layout = normalizeHomeWidgetLayout({
+    order: [...HOME_WIDGET_IDS].reverse(),
+    sizes: { weather: 'small', today: 'large', upcoming: 'medium' },
+  })
+  assert.equal(layout.widths.weather, 'half')
+  assert.equal(layout.widths.today, 'full')
+  assert.equal(layout.widths.upcoming, 'full')
 })
 
 test('device layout survives refresh and tolerates missing browser storage', () => {
@@ -82,11 +126,12 @@ test('device layout survives refresh and tolerates missing browser storage', () 
     const saved = normalizeHomeWidgetLayout({
       order: [...HOME_WIDGET_IDS].reverse(),
       sizes: { weather: 'small', meals: 'large' },
+      widths: { weather: 'full', meals: 'half' },
     })
     saveHomeWidgetLayout(saved)
     assert.deepEqual(readHomeWidgetLayout(), saved)
 
-    values.set('family-calendar-home-widget-layout-v1', '{broken json')
+    values.set('family-calendar-home-widget-layout-v2', '{broken json')
     assert.deepEqual(readHomeWidgetLayout().order, [...HOME_WIDGET_IDS])
     globalThis.window = {
       localStorage: {
@@ -96,6 +141,37 @@ test('device layout survives refresh and tolerates missing browser storage', () 
     }
     assert.doesNotThrow(() => saveHomeWidgetLayout(saved))
     assert.deepEqual(readHomeWidgetLayout().order, [...HOME_WIDGET_IDS])
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window
+    else globalThis.window = originalWindow
+  }
+})
+
+test('legacy storage is read only when v2 has not been saved', () => {
+  const originalWindow = globalThis.window
+  const values = new Map([[
+    'family-calendar-home-widget-layout-v1',
+    JSON.stringify({
+      sizes: { notes: 'small', lists: 'large' },
+      order: [...HOME_WIDGET_IDS].reverse(),
+    }),
+  ]])
+  try {
+    globalThis.window = {
+      localStorage: {
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => values.set(key, value),
+      },
+    }
+    assert.equal(readHomeWidgetLayout().widths.notes, 'half')
+    assert.deepEqual(readHomeWidgetLayout().order, [...HOME_WIDGET_IDS].reverse())
+    const layout = normalizeHomeWidgetLayout({
+      sizes: { notes: 'large' },
+      widths: { notes: 'half' },
+    })
+    saveHomeWidgetLayout(layout)
+    assert.ok(values.has('family-calendar-home-widget-layout-v2'))
+    assert.deepEqual(readHomeWidgetLayout(), layout)
   } finally {
     if (originalWindow === undefined) delete globalThis.window
     else globalThis.window = originalWindow

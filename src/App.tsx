@@ -4,6 +4,7 @@ import {
   saveHomeWidgetLayout,
   type HomeWidgetId,
   type HomeWidgetSize,
+  type HomeWidgetWidth,
 } from './homeWidgetLayout'
 import {
   Fragment,
@@ -1665,7 +1666,11 @@ type SortableHomeWidgetProps = {
   enabled: boolean
   order: number
   className: string
+  height: HomeWidgetSize
+  width: HomeWidgetWidth
   onEnterEdit: () => void
+  onCycleHeight: () => void
+  onToggleWidth: () => void
   children: import('react').ReactNode
 }
 
@@ -1674,7 +1679,11 @@ function SortableHomeWidget({
   enabled,
   order,
   className,
+  height,
+  width,
   onEnterEdit,
+  onCycleHeight,
+  onToggleWidth,
   children,
 }: SortableHomeWidgetProps) {
   const {
@@ -1697,11 +1706,15 @@ function SortableHomeWidget({
       holdTimerRef.current = null
     }
   }, [])
-
   useEffect(() => cancelHold, [cancelHold])
 
-  function beginHold(event: PointerEvent<HTMLButtonElement>) {
+  function beginHold(event: PointerEvent<HTMLElement>) {
     if (event.button !== 0 || !event.isPrimary) return
+    // Normal card links, forms, and actions keep their regular tap/press behavior.
+    const target = event.target as Element
+    if (target.closest('button, a, input, textarea, select, [role="button"], [contenteditable], [data-home-no-hold]')) {
+      return
+    }
     cancelHold()
     pointerStartRef.current = {
       x: event.clientX,
@@ -1714,7 +1727,7 @@ function SortableHomeWidget({
     }, 650)
   }
 
-  function moveHold(event: PointerEvent<HTMLButtonElement>) {
+  function moveHold(event: PointerEvent<HTMLElement>) {
     if (holdTimerRef.current === null ||
         event.pointerId !== pointerStartRef.current.pointerId) return
     if (Math.hypot(
@@ -1727,6 +1740,22 @@ function SortableHomeWidget({
     <section
       ref={setNodeRef}
       className={className}
+      tabIndex={enabled ? undefined : 0}
+      onPointerDown={enabled ? undefined : beginHold}
+      onPointerMove={enabled ? undefined : moveHold}
+      onPointerUp={cancelHold}
+      onPointerCancel={cancelHold}
+      onPointerLeave={cancelHold}
+      onContextMenu={(event) => {
+        if (holdTimerRef.current !== null) event.preventDefault()
+      }}
+      onKeyDown={enabled ? undefined : (event) => {
+        if (event.target !== event.currentTarget) return
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onEnterEdit()
+        }
+      }}
       style={{
         order,
         transform: CSS.Transform.toString(transform),
@@ -1735,37 +1764,43 @@ function SortableHomeWidget({
         zIndex: isDragging ? 30 : undefined,
       }}
     >
-      <button
-        type="button"
-        ref={setActivatorNodeRef}
-        className="home-widget-grip"
-        {...attributes}
-        {...(enabled ? listeners : {})}
-        onPointerDown={enabled
-          ? (event) => { listeners?.onPointerDown?.(event) }
-          : beginHold}
-        onPointerMove={enabled ? undefined : moveHold}
-        onPointerUp={cancelHold}
-        onPointerCancel={cancelHold}
-        onPointerLeave={cancelHold}
-        onContextMenu={(event) => event.preventDefault()}
-        onKeyDown={enabled
-          ? (event) => { listeners?.onKeyDown?.(event) }
-          : (event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault()
-              onEnterEdit()
-            }
-          }}
-        aria-label={enabled
-          ? `Drag ${id} card to reorder`
-          : `Hold to edit Home layout: ${id}`}
-        title={enabled ? 'Drag to rearrange' : 'Hold to edit Home'}
-      >
-        <span className="home-widget-grip-bars" aria-hidden="true">
-          <span /><span /><span />
-        </span>
-      </button>
+      {enabled && (
+        <>
+          <button
+            type="button"
+            ref={setActivatorNodeRef}
+            className="home-widget-grip"
+            {...attributes}
+            {...listeners}
+            aria-label={`Drag ${id} card to reorder`}
+            title="Drag to rearrange"
+          >
+            <span className="home-widget-grip-bars" aria-hidden="true">
+              <span /><span /><span />
+            </span>
+          </button>
+          <div className="home-widget-layout-controls">
+            <button
+              type="button"
+              className="home-widget-resize-button"
+              onClick={onCycleHeight}
+              aria-label={`Change ${id} card height; currently ${height}`}
+              title="Change card height"
+            >
+              Height: {height}
+            </button>
+            <button
+              type="button"
+              className="home-widget-width-button"
+              onClick={onToggleWidth}
+              aria-label={`Change ${id} card width; currently ${width}`}
+              title="Toggle half or full card width"
+            >
+              Width: {width}
+            </button>
+          </div>
+        </>
+      )}
       {children}
     </section>
   )
@@ -2109,6 +2144,8 @@ useEffect(() => {
     useState<HomeWidgetSize>(initialHomeLayout.sizes.lists)
   const [homeWidgetOrder, setHomeWidgetOrder] =
     useState<HomeWidgetId[]>(initialHomeLayout.order)
+  const [homeWidgetWidths, setHomeWidgetWidths] =
+    useState(initialHomeLayout.widths)
 
   useEffect(() => {
     saveHomeWidgetLayout({
@@ -2121,6 +2158,7 @@ useEffect(() => {
         meals: homeMealsSize,
         lists: homeListsSize,
       },
+      widths: homeWidgetWidths,
     })
   }, [
     homeWidgetOrder,
@@ -2130,6 +2168,7 @@ useEffect(() => {
     homeNotesSize,
     homeMealsSize,
     homeListsSize,
+    homeWidgetWidths,
   ])
 
 const [mealsView, setMealsView] =
@@ -15807,30 +15846,18 @@ createPortal(
   order={homeWidgetOrder.indexOf(
     'weather'
   )}
-  className={`home-widget home-widget-weather home-widget-size-${homeWeatherSize}`}
+  height={homeWeatherSize}
+  width={homeWidgetWidths.weather}
+  onCycleHeight={() => setHomeWeatherSize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
+  )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    weather: current.weather === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-weather home-widget-size-${homeWeatherSize} home-widget-width-${homeWidgetWidths.weather}`}
 >
 
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeWeatherSize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeWeatherSize}
-    </button>
-  )}
 
   <HomeWeather />
 </SortableHomeWidget>
@@ -15842,29 +15869,18 @@ createPortal(
   order={homeWidgetOrder.indexOf(
     'today'
   )}
-  className={`home-widget home-widget-today home-widget-size-${homeTodaySize}`}
->
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeTodaySize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeTodaySize}
-    </button>
+  height={homeTodaySize}
+  width={homeWidgetWidths.today}
+  onCycleHeight={() => setHomeTodaySize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
   )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    today: current.today === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-today home-widget-size-${homeTodaySize} home-widget-width-${homeWidgetWidths.today}`}
+>
+
         <div className="home-widget-heading">
           <span>Today</span>
 
@@ -15956,29 +15972,18 @@ createPortal(
   order={homeWidgetOrder.indexOf(
     'upcoming'
   )}
-  className={`home-widget home-widget-upcoming home-widget-size-${homeUpcomingSize}`}
->
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeUpcomingSize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeUpcomingSize}
-    </button>
+  height={homeUpcomingSize}
+  width={homeWidgetWidths.upcoming}
+  onCycleHeight={() => setHomeUpcomingSize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
   )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    upcoming: current.upcoming === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-upcoming home-widget-size-${homeUpcomingSize} home-widget-width-${homeWidgetWidths.upcoming}`}
+>
+
         <div className="home-widget-heading">
           <span>Upcoming</span>
 
@@ -16076,29 +16081,18 @@ createPortal(
   order={homeWidgetOrder.indexOf(
     'notes'
   )}
-  className={`home-widget home-widget-notes home-widget-size-${homeNotesSize}`}
->
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeNotesSize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeNotesSize}
-    </button>
+  height={homeNotesSize}
+  width={homeWidgetWidths.notes}
+  onCycleHeight={() => setHomeNotesSize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
   )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    notes: current.notes === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-notes home-widget-size-${homeNotesSize} home-widget-width-${homeWidgetWidths.notes}`}
+>
+
         <div className="home-widget-heading">
           <span>Notes</span>
         </div>
@@ -16115,29 +16109,18 @@ createPortal(
   order={homeWidgetOrder.indexOf(
     'meals'
   )}
-  className={`home-widget home-widget-meals home-widget-size-${homeMealsSize}`}
->
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeMealsSize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeMealsSize}
-    </button>
+  height={homeMealsSize}
+  width={homeWidgetWidths.meals}
+  onCycleHeight={() => setHomeMealsSize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
   )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    meals: current.meals === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-meals home-widget-size-${homeMealsSize} home-widget-width-${homeWidgetWidths.meals}`}
+>
+
         <div className="home-widget-heading">
           <span>Today's Meals</span>
 
@@ -16226,29 +16209,18 @@ createPortal(
   order={homeWidgetOrder.indexOf(
     'lists'
   )}
-  className={`home-widget home-widget-lists home-widget-size-${homeListsSize}`}
->
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeListsSize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeListsSize}
-    </button>
+  height={homeListsSize}
+  width={homeWidgetWidths.lists}
+  onCycleHeight={() => setHomeListsSize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
   )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    lists: current.lists === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-lists home-widget-size-${homeListsSize} home-widget-width-${homeWidgetWidths.lists}`}
+>
+
         <div className="home-widget-heading">
           <span>Lists</span>
 
