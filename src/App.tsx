@@ -1228,34 +1228,28 @@ function HomeWeather() {
             </div>
 
             <div className="home-weather-main">
-              <HomeWeatherArtwork
-  theme={weather.theme}
-/>
-              <span className="home-weather-compact-icon" aria-hidden="true">{weather.icon}</span>
-
-              <strong className="home-weather-temperature">
-                {weather.temperature}
-                {'\u00B0'}
-              </strong>
+              <div className="home-weather-art-panel" aria-hidden="true">
+                <HomeWeatherArtwork theme={weather.theme} />
+              </div>
+              <div className="home-weather-temperature-panel">
+                <strong className="home-weather-temperature">
+                  {weather.temperature}{'\u00B0'}
+                </strong>
+              </div>
             </div>
 
             <div className="home-weather-details">
-              <span>
-                Feels like{' '}
-                {weather.feelsLike}
-                {'\u00B0'}
+              <span className="home-weather-detail-pill">
+                <span className="home-weather-detail-label">Feels like</span>
+                <strong>{weather.feelsLike}{'\u00B0'}</strong>
               </span>
-
-              <span>
-                H {weather.high}
-                {'\u00B0'} · L{' '}
-                {weather.low}
-                {'\u00B0'}
+              <span className="home-weather-detail-pill">
+                <span className="home-weather-detail-label">High / Low</span>
+                <strong>H {weather.high}{'\u00B0'} · L {weather.low}{'\u00B0'}</strong>
               </span>
-
-              <span>
-                Rain{' '}
-                {weather.precipitationChance}%
+              <span className="home-weather-detail-pill">
+                <span className="home-weather-detail-label">Rain</span>
+                <strong>{weather.precipitationChance}%</strong>
               </span>
             </div>
           </div>
