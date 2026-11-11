@@ -28,18 +28,14 @@ try {
     $encoding=[Text.UTF8Encoding]::new($true)
     $bytes=$encoding.GetPreamble()+$encoding.GetBytes(($lines -join "`r`n")+"`r`n")
     [IO.File]::WriteAllBytes($launcher,$bytes)
-    [IO.File]::WriteAllText((Join-Path $candidate 'Server/index.mjs'),'Arney backend bridge')
-    [IO.File]::WriteAllText((Join-Path $candidate 'dist/index.html'),'Arney voice frontend')
+    [IO.File]::WriteAllText((Join-Path $candidate 'dist/index.html'),'Arney People frontend')
     $plan=New-ArneyVoiceLauncherPlan $launcher $current $candidate $backup
     $expected=[Text.Encoding]::GetEncoding(28591).GetString($bytes)
-    $expected=$expected.Replace(
-        (Get-FileHash (Join-Path $current 'Server/index.mjs')).Hash,
-        (Get-FileHash (Join-Path $candidate 'Server/index.mjs')).Hash)
     $expected=$expected.Replace(
         (Get-FileHash (Join-Path $current 'dist/index.html')).Hash,
         (Get-FileHash (Join-Path $candidate 'dist/index.html')).Hash)
     $actual=[Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($plan.Candidate))
-    if ($actual -cne $expected) { throw 'Planner changed more than the two approved launcher pins.' }
+    if ($actual -cne $expected) { throw 'Planner changed more than the approved frontend launcher pin.' }
     Set-SecureLiveLauncher $plan.Candidate $launcher
     Assert-SecureLiveLauncherPins $launcher $candidate
     Reject { Assert-SecureLiveLauncherPins $launcher $current }
@@ -55,9 +51,16 @@ try {
         Reject { New-ArneyVoiceLauncherPlan $launcher $current $candidate $backup }
         [IO.File]::WriteAllBytes($file,$original)
     }
-    [IO.File]::WriteAllBytes((Join-Path $candidate 'Server/index.mjs'),[IO.File]::ReadAllBytes((Join-Path $current 'Server/index.mjs')))
+    [IO.File]::WriteAllText((Join-Path $candidate 'Server/index.mjs'),'unexpected backend change')
     Reject { New-ArneyVoiceLauncherPlan $launcher $current $candidate $backup }
-    Write-Host 'ARNEY_LIVE_BACKEND_FRONTEND_LAUNCHER_AND_ROLLBACK=PASS'
+    [IO.File]::WriteAllBytes(
+        (Join-Path $candidate 'Server/index.mjs'),
+        [IO.File]::ReadAllBytes((Join-Path $current 'Server/index.mjs')))
+    [IO.File]::WriteAllBytes(
+        (Join-Path $candidate 'dist/index.html'),
+        [IO.File]::ReadAllBytes((Join-Path $current 'dist/index.html')))
+    Reject { New-ArneyVoiceLauncherPlan $launcher $current $candidate $backup }
+    Write-Host 'ARNEY_LIVE_FRONTEND_LAUNCHER_AND_ROLLBACK=PASS'
 } finally {
     if (Test-Path $temp) { Remove-Item $temp -Recurse -Force }
 }
