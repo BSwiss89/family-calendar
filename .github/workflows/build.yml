@@ -50,7 +50,8 @@ jobs:
             'src/App.css', 'src/App.tsx', 'src/calendarPersonFilter.ts',
             'scripts/test-calendar-person-filter.mjs',
             'Assert-SecureLiveLauncherPins', 'CopyVerified',
-            'LIVE_AUTO_DEPLOY=Disabled'
+            'LIVE_AUTO_DEPLOY=Disabled',
+            'LiveHttpsUrl', 'TestHttpsUrl'
           )) {
             if (-not $script.Contains($marker)) { throw "Missing release guard marker: $marker" }
           }
