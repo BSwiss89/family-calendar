@@ -258,7 +258,9 @@ try {
     $keyHash=Hash $key
     $oldIndex=Hash "$live\Server\index.mjs"
     $oldLocalSttExists=Test-Path -LiteralPath "$live\Server\local-stt.mjs"
-    Assert (-not $oldLocalSttExists) 'Installed LIVE baseline unexpectedly already contains Local STT bridge.'
+    Assert ($oldLocalSttExists) 'Installed LIVE baseline is missing Local STT bridge.'
+    $oldLocalStt=Hash "$live\Server\local-stt.mjs"
+    Assert ($oldLocalStt -eq (Hash "$stage\Server\local-stt.mjs")) 'Installed LIVE baseline Local STT bridge differs from reviewed candidate.'
     $oldProcess=OwnedProcess 3001 $live
     $processStamp="$($oldProcess.ProcessId)|$($oldProcess.CreationDate.ToUniversalTime().Ticks)"
     $ci=Invoke-RestMethod 'https://api.github.com/repos/BSwiss89/family-calendar/actions/runs/42931884762' -Headers @{'User-Agent'='FamilyCalendar-ArneyVoiceLiveRelease'} -TimeoutSec 25
@@ -371,6 +373,7 @@ try {
             }
             Assert ((Head $live) -eq $from -and (Hash "$live\Server\index.mjs") -eq $oldIndex -and
                 (Test-Path -LiteralPath "$live\Server\local-stt.mjs") -eq $oldLocalSttExists -and
+                (Hash "$live\Server\local-stt.mjs") -eq $oldLocalStt -and
                 (Hash $launcher) -eq $launcherHash -and (Manifest "$live\dist") -ceq $oldManifest) 'Rollback baseline verification failed.'
             # Preserve the newest LIVE data, events and sessions rather than overwriting
             # them with the earlier recovery snapshot.
