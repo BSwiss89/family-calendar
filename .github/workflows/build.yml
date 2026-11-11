@@ -34,6 +34,26 @@ jobs:
           node --test scripts/test-arney-speech-consent.mjs
           node --test scripts/test-arney-spoken-replies.mjs
           node --test scripts/test-arney-voice.mjs
+      - name: Verify guarded LIVE Calendar multi-person release syntax and safety pins
+        shell: powershell
+        run: |
+          $file = '.\scripts\deploy-live-calendar-filter.ps1'
+          $tokens = $null; $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors) | Out-Null
+          if (@($errors).Count) { throw "PowerShell syntax failed: $file" }
+          $script = Get-Content $file -Raw
+          foreach ($marker in @(
+            '8eec878e5e6f0e6bedd64b04aae458a46490bb69',
+            'a1ab3503f61416ca0f15bed64b2d5236d4a28cd3',
+            '26c9402ef322af42a80e4de539d87bb70126cb92',
+            '43084395915', '43084395771',
+            'src/App.css', 'src/App.tsx', 'src/calendarPersonFilter.ts',
+            'scripts/test-calendar-person-filter.mjs',
+            'Assert-SecureLiveLauncherPins', 'CopyVerified',
+            'LIVE_AUTO_DEPLOY=Disabled'
+          )) {
+            if (-not $script.Contains($marker)) { throw "Missing release guard marker: $marker" }
+          }
       - name: Verify Duplicate Event drafts are independent of their source
         run: node --test scripts/test-duplicate-event.mjs
       - name: Test list categories and additive migration
