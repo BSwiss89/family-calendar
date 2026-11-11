@@ -4,6 +4,8 @@ import test from 'node:test'
 import {
   HOME_WIDGET_IDS,
   normalizeHomeWidgetLayout,
+  readHomeWidgetLayout,
+  saveHomeWidgetLayout,
 } from '../src/homeWidgetLayout.ts'
 
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
@@ -64,4 +66,37 @@ test('small mobile cards can occupy one of two columns and narrow weather scales
   assert.match(css, /@container \(max-width: 235px\)/)
   assert.match(css, /home-weather-active \.home-weather-temperature\s*\{[\s\S]*?font-size: 36px;/)
   assert.match(app, /saveHomeWidgetLayout\(\{/)
+})
+
+test('device layout survives refresh and tolerates missing browser storage', () => {
+  const originalWindow = globalThis.window
+  const values = new Map()
+  try {
+    globalThis.window = {
+      localStorage: {
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => values.set(key, value),
+      },
+    }
+    const saved = normalizeHomeWidgetLayout({
+      order: [...HOME_WIDGET_IDS].reverse(),
+      sizes: { weather: 'small', meals: 'large' },
+    })
+    saveHomeWidgetLayout(saved)
+    assert.deepEqual(readHomeWidgetLayout(), saved)
+
+    values.set('family-calendar-home-widget-layout-v1', '{broken json')
+    assert.deepEqual(readHomeWidgetLayout().order, [...HOME_WIDGET_IDS])
+    globalThis.window = {
+      localStorage: {
+        getItem: () => { throw new Error('Storage disabled') },
+        setItem: () => { throw new Error('Storage disabled') },
+      },
+    }
+    assert.doesNotThrow(() => saveHomeWidgetLayout(saved))
+    assert.deepEqual(readHomeWidgetLayout().order, [...HOME_WIDGET_IDS])
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window
+    else globalThis.window = originalWindow
+  }
 })
