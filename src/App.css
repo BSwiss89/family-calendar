@@ -21145,3 +21145,25 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 .home-widget-grid-editing > .home-widget-weather > .home-weather {
   overflow-y: auto;
 }
+
+/* Explicit dark-theme contrast overrides the more specific active-theme
+   text rules; keeps small and full-size weather equally legible. */
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm {
+  color: #fff;
+}
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night .home-weather-title,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night .home-weather-location,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night .home-weather-temperature,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night .home-weather-details,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain .home-weather-title,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain .home-weather-location,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain .home-weather-temperature,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain .home-weather-details,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm .home-weather-title,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm .home-weather-location,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm .home-weather-temperature,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm .home-weather-details {
+  color: #fff;
+}
