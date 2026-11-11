@@ -20875,9 +20875,9 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 .home-widget-grid > .home-widget-weather .weather-theme-sunny { color: #47320c; }
 .home-widget-grid > .home-widget-weather .weather-theme-fog { color: #123b32; }
 .home-widget-grid > .home-widget-weather .weather-theme-snow { color: #17394c; }
-.home-widget-grid > .home-widget-weather .weather-theme-night,
-.home-widget-grid > .home-widget-weather .weather-theme-rain,
-.home-widget-grid > .home-widget-weather .weather-theme-storm {
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm {
   color: #fff;
 }
 
