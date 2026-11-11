@@ -9,6 +9,7 @@ on:
       - 'src/App.css'
       - 'src/homeWidgetLayout.ts'
       - 'scripts/test-home-widget-layout.mjs'
+      - 'scripts/test-home-weather-browser.mjs'
       - 'scripts/test-profile-picker-browser.mjs'
       - 'scripts/test-mobile-profile-editor.mjs'
       - '.github/workflows/profile-picker-browser.yml'
@@ -40,3 +41,7 @@ jobs:
         env:
           FAMILY_CALENDAR_PLAYWRIGHT_MODULE: ${{ runner.temp }}/profile-browser-tools/node_modules/playwright/index.mjs
         run: node --test scripts/test-mobile-profile-editor.mjs
+      - name: Verify weather card readability across widths and heights in Chromium and WebKit
+        env:
+          FAMILY_CALENDAR_PLAYWRIGHT_MODULE: ${{ runner.temp }}/profile-browser-tools/node_modules/playwright/index.mjs
+        run: node --test scripts/test-home-weather-browser.mjs

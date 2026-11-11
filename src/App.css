@@ -20857,3 +20857,313 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   .home-widget-grid > .home-widget.home-widget-width-half { grid-column: span 1; }
   .home-widget-grid > .home-widget.home-widget-width-full { grid-column: span 2; }
 }
+
+/* Home weather readability — the card's inline width, not device width,
+   determines whether we use illustrated or compact weather. */
+.home-widget-grid > .home-widget-weather > .home-weather {
+  padding: 15px;
+  gap: 5px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active {
+  color: #163b51;
+}
+
+.home-widget-grid > .home-widget-weather .weather-theme-sunny { color: #47320c; }
+.home-widget-grid > .home-widget-weather .weather-theme-fog { color: #123b32; }
+.home-widget-grid > .home-widget-weather .weather-theme-snow { color: #17394c; }
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm {
+  color: #fff;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-title,
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-location,
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-temperature,
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-details,
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-source {
+  color: inherit;
+  opacity: 1;
+  text-shadow: none;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-title {
+  flex: 0 0 auto;
+  padding-right: 42px;
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-settings-button {
+  width: 32px;
+  height: 32px;
+  top: 9px;
+  right: 9px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-current {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  padding: 0;
+  justify-content: center;
+  gap: 7px;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-location {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.3;
+  font-weight: 800;
+  opacity: 0.9 !important;
+  letter-spacing: 0.055em;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-main {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  gap: 6px;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-artwork {
+  position: relative;
+  display: block;
+  inset: auto;
+  flex: 0 1 125px;
+  width: 125px;
+  max-width: 50%;
+  min-width: 0;
+  height: 120px;
+  margin: 0;
+  transform: none;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-compact-icon {
+  display: none;
+  flex: 0 0 auto;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-temperature {
+  position: relative;
+  inset: auto;
+  display: block;
+  flex: 0 0 auto;
+  align-self: center;
+  margin: 0;
+  padding: 0;
+  z-index: 2;
+  font-size: clamp(40px, 5vw, 64px);
+  line-height: 1;
+  letter-spacing: -0.055em;
+  white-space: nowrap;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 0 0 auto;
+  gap: 4px;
+  margin: 0;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.38);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.25;
+  overflow-wrap: normal;
+}
+
+.home-widget-grid > .home-widget-weather .weather-theme-night .home-weather-details,
+.home-widget-grid > .home-widget-weather .weather-theme-rain .home-weather-details,
+.home-widget-grid > .home-widget-weather .weather-theme-storm .home-weather-details {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-details > span {
+  min-width: 0;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-source {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: auto;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  opacity: 0.8 !important;
+}
+
+/* A half-width phone widget has ~170px of content space. Keep the icon,
+   temperature and facts as distinct blocks without collision or clipping. */
+@container (max-width: 300px) {
+  .home-widget-grid > .home-widget-weather > .home-weather {
+    padding: 12px 10px;
+    gap: 5px;
+  }
+
+  .home-widget-grid > .home-widget-weather .home-weather-title {
+    font-size: 15px;
+    padding-right: 34px;
+  }
+
+  .home-widget-grid > .home-widget-weather .home-weather-settings-button {
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
+    top: 7px;
+    right: 7px;
+  }
+
+  .home-widget-grid > .home-widget-weather .home-weather-location {
+    font-size: 10px;
+    letter-spacing: 0.02em;
+  }
+
+  .home-widget-grid > .home-widget-weather .home-weather-active .home-weather-main {
+    gap: 3px;
+    justify-content: space-between;
+  }
+
+  .home-widget-grid > .home-widget-weather .home-weather-artwork {
+    display: none;
+  }
+
+  .home-widget-grid > .home-widget-weather .home-weather-compact-icon {
+    display: block;
+    font-size: 32px;
+    line-height: 1;
+  }
+
+  .home-widget-grid > .home-widget-weather .home-weather-active .home-weather-temperature {
+    font-size: clamp(36px, 10cqi, 50px);
+  }
+
+  .home-widget-grid > .home-widget-weather .home-weather-active .home-weather-details {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3px 6px;
+    padding: 5px 6px;
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
+  .home-widget-grid > .home-widget-weather .home-weather-details > span:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .home-widget-grid > .home-widget-weather .home-weather-active .home-weather-source {
+    font-size: 9px;
+  }
+}
+
+/* When a short weather widget is being edited, reserve the top for the
+   grip and height/width controls; never put weather data underneath them. */
+.home-widget-grid-editing > .home-widget-weather > .home-weather {
+  padding-top: 84px;
+}
+
+.home-widget-grid-editing > .home-widget-weather .home-weather-title,
+.home-widget-grid-editing > .home-widget-weather .home-weather-location,
+.home-widget-grid-editing > .home-widget-weather .home-weather-source {
+  display: none;
+}
+
+.home-widget-grid-editing > .home-widget-weather .home-weather-active .home-weather-current {
+  justify-content: flex-start;
+}
+
+.home-widget-grid-editing > .home-widget-weather .home-weather-artwork {
+  height: 78px;
+  max-width: 42%;
+}
+
+.home-widget-grid-editing > .home-widget-weather .home-weather-active .home-weather-temperature {
+  font-size: clamp(34px, 5vw, 48px);
+}
+
+.home-widget-grid-editing > .home-widget-weather .home-weather-active .home-weather-details {
+  font-size: 10px;
+}
+
+@container (max-width: 300px) {
+  .home-widget-grid-editing > .home-widget-weather > .home-weather {
+    padding-top: 81px;
+  }
+
+  .home-widget-grid-editing > .home-widget-weather .home-weather-compact-icon {
+    font-size: 25px;
+  }
+
+  .home-widget-grid-editing > .home-widget-weather .home-weather-active .home-weather-temperature {
+    font-size: 36px;
+  }
+}
+
+/* A short card gets the compact illustration even when it spans both columns;
+   all weather facts should fit without scrolling through a giant cloud. */
+.home-widget-grid > .home-widget-weather.home-widget-size-small .home-weather-artwork {
+  display: none;
+}
+
+.home-widget-grid > .home-widget-weather.home-widget-size-small .home-weather-compact-icon {
+  display: block;
+  font-size: 32px;
+  line-height: 1;
+}
+
+.home-widget-grid > .home-widget-weather.home-widget-size-small .home-weather-active .home-weather-main {
+  justify-content: space-around;
+}
+
+.home-widget-grid > .home-widget-weather.home-widget-size-small .home-weather-active .home-weather-temperature {
+  font-size: clamp(38px, 6vw, 52px);
+}
+
+/* Decorative weather circles must not create accidental nested scrolling. */
+.home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather > .home-weather {
+  overflow-y: hidden;
+}
+
+.home-widget-grid-editing > .home-widget-weather > .home-weather {
+  overflow-y: auto;
+}
+
+/* Explicit dark-theme contrast overrides the more specific active-theme
+   text rules; keeps small and full-size weather equally legible. */
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm {
+  color: #fff;
+}
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night .home-weather-title,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night .home-weather-location,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night .home-weather-temperature,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night .home-weather-details,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain .home-weather-title,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain .home-weather-location,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain .home-weather-temperature,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain .home-weather-details,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm .home-weather-title,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm .home-weather-location,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm .home-weather-temperature,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm .home-weather-details {
+  color: #fff;
+}

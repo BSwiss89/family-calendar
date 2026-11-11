@@ -1231,6 +1231,7 @@ function HomeWeather() {
               <HomeWeatherArtwork
   theme={weather.theme}
 />
+              <span className="home-weather-compact-icon" aria-hidden="true">{weather.icon}</span>
 
               <strong className="home-weather-temperature">
                 {weather.temperature}
