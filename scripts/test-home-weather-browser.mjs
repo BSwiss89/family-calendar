@@ -101,7 +101,10 @@ test('weather stays readable at half/full width and all three vertical heights i
             }
             assert.ok(result.source.bottom <= result.card.bottom + 4, `${info}: source outside the card`)
             assert.ok(result.details.bottom <= result.card.bottom + 3, `${info}: facts below card`)
-            if (height === 'small') assert.equal(result.innerScroll, false, `${info}: small card hides facts below a scroll`)
+            if (height === 'small') {
+              assert.ok(result.details.bottom <= result.card.bottom - 6, `${info}: small card hides weather facts`)
+              assert.ok(result.source.bottom <= result.card.bottom - 6, `${info}: small card hides source text`)
+            }
             if (width === 'half') assert.ok(Math.abs(result.card.width-result.neighbor.width) < 5, `${info}: neighbors not equal half widths`)
           }
         }
