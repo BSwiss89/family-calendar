@@ -1,8 +1,18 @@
 # Controlled LIVE Calendar multi-person filter candidate. Default mode is read-only.
 # Independent exact-SHA backend/frontend release; never use the frontend-only auto controller.
-param([Parameter(Mandatory=$true)][string]$CandidateSha,[Parameter(Mandatory=$true)][string]$CandidatePath,[switch]$Apply)
+param([Parameter(Mandatory=$true)][string]$CandidateSha,[Parameter(Mandatory=$true)][string]$CandidatePath,[Parameter(Mandatory=$true)][string]$LiveHttpsUrl,[Parameter(Mandatory=$true)][string]$TestHttpsUrl,[switch]$Apply)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+foreach ($endpoint in @($LiveHttpsUrl,$TestHttpsUrl)) {
+    $parsed=$null
+    if (-not [Uri]::TryCreate($endpoint,[UriKind]::Absolute,[ref]$parsed) -or
+        $parsed.Scheme -cne 'https' -or $parsed.AbsolutePath -cne '/' -or
+        $parsed.Query.Length -gt 0 -or $parsed.Fragment.Length -gt 0 -or
+        $parsed.UserInfo.Length -gt 0) { throw 'Both explicit site URLs must be distinct HTTPS origins without path, query, or credentials.' }
+}
+$LiveHttpsUrl=$LiveHttpsUrl.TrimEnd('/')
+$TestHttpsUrl=$TestHttpsUrl.TrimEnd('/')
+if ($LiveHttpsUrl -eq $TestHttpsUrl) { throw 'LIVE and TEST must use distinct HTTPS origins.' }
 $from='8eec878e5e6f0e6bedd64b04aae458a46490bb69'
 $expectedTest='a1ab3503f61416ca0f15bed64b2d5236d4a28cd3'
 $stage=(Resolve-Path -LiteralPath $CandidatePath -ErrorAction Stop).Path
@@ -141,14 +151,13 @@ function LocalSttStamp {
 }
 function Healthy {
     $null=OwnedProcess 3001 $live
-    foreach ($url in @('http://127.0.0.1:3001/api/health','https://laptop1502.tail3a2e53.ts.net:8443/api/health',
-        'https://laptop1502.tail3a2e53.ts.net/api/health')) {
+    foreach ($url in @('http://127.0.0.1:3001/api/health',"$LiveHttpsUrl/api/health","$TestHttpsUrl/api/health")) {
         Assert ((Status $url) -eq 200) "Health failed: $url"
     }
     foreach ($route in @('events','live-event-invitations','live-push/config','arney/local-transcribe')) {
-        Assert ((Status "https://laptop1502.tail3a2e53.ts.net:8443/api/$route") -eq 401) "LIVE anonymous gate failed: $route"
+        Assert ((Status "$LiveHttpsUrl/api/$route") -eq 401) "LIVE anonymous gate failed: $route"
     }
-    Assert ((Status 'https://laptop1502.tail3a2e53.ts.net/api/events') -eq 401) 'TEST anonymous gate failed.'
+    Assert ((Status "$TestHttpsUrl/api/events") -eq 401) 'TEST anonymous gate failed.'
     $auth=Invoke-RestMethod 'http://127.0.0.1:3001/api/auth/status' -TimeoutSec 5
     Assert ($auth.enabled -eq $true) 'LIVE authentication is not enabled.'
 }
