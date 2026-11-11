@@ -4,7 +4,7 @@ param([Parameter(Mandatory=$true)][string]$CandidateSha,[Parameter(Mandatory=$tr
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $from='76384ee3004c627dc64a05af05311f767e659a1a'
-$expectedTest='23bb8343a502ac8e4968aa8798fb9750679f21ce'
+$expectedTest='abcb188f22afea0db985aff16fe37a7edd7694e6'
 $stage=(Resolve-Path -LiteralPath $CandidatePath -ErrorAction Stop).Path
 $live='C:\Users\bobby\Projects\family-calendar-live-auth-candidate'
 $test='C:\Users\bobby\Projects\family-calendar-test-security-stage'
@@ -207,7 +207,7 @@ try {
     $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
     Assert (([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -and
         $identity.Name -ne 'NT AUTHORITY\SYSTEM') 'Use Administrator PowerShell as Bobby.'
-    Assert ($CandidateSha -ceq '0e51ad1ee2157dee8220dd529749ccac43f23149' -and (Head $stage) -eq $CandidateSha -and
+    Assert ($CandidateSha -ceq '8eec878e5e6f0e6bedd64b04aae458a46490bb69' -and (Head $stage) -eq $CandidateSha -and
         (Head $live) -eq $from -and (Head $test) -eq $expectedTest) 'Installed or candidate source baseline changed.'
     Assert ($stage -ine $live -and $stage -ine $test -and $stage -ne (Split-Path $PSScriptRoot -Parent)) 'Use isolated candidate source.'
     Assert (-not (Get-Item -LiteralPath $stage -Force).LinkType) 'Candidate checkout must not be a link.'
@@ -223,7 +223,7 @@ try {
     & git -C $stage merge-base --is-ancestor $from $CandidateSha
     Assert ($LASTEXITCODE -eq 0) 'Candidate is not based on installed LIVE.'
     $allowed=@(
-        'scripts/test-arney-commands.mjs','src/App.tsx','src/arneyTextCommands.ts'
+        'scripts/test-arney-commands.mjs','src/arneyTextCommands.ts'
     )
     $files=@(& git -C $stage diff --name-only $from $CandidateSha | Sort-Object)
     Assert ($LASTEXITCODE -eq 0 -and ($files -join '|') -ceq (($allowed | Sort-Object) -join '|')) 'Candidate scope differs from the reviewed release.'
@@ -261,7 +261,7 @@ try {
     Assert (-not $oldLocalSttExists) 'Installed LIVE baseline unexpectedly already contains Local STT bridge.'
     $oldProcess=OwnedProcess 3001 $live
     $processStamp="$($oldProcess.ProcessId)|$($oldProcess.CreationDate.ToUniversalTime().Ticks)"
-    $ci=Invoke-RestMethod 'https://api.github.com/repos/BSwiss89/family-calendar/actions/runs/42912804709' -Headers @{'User-Agent'='FamilyCalendar-ArneyVoiceLiveRelease'} -TimeoutSec 25
+    $ci=Invoke-RestMethod 'https://api.github.com/repos/BSwiss89/family-calendar/actions/runs/42931884762' -Headers @{'User-Agent'='FamilyCalendar-ArneyVoiceLiveRelease'} -TimeoutSec 25
     Assert ($ci.head_sha -eq $CandidateSha -and $ci.name -eq 'Build Family Calendar' -and
         $ci.status -eq 'completed' -and $ci.conclusion -eq 'success') 'Exact LIVE candidate Windows build failed.'
     # Confirm TEST acceptance target and unchanged dependency manifests.
