@@ -5,7 +5,7 @@ import test from 'node:test'
 const { chromium, webkit } = await import(process.env.FAMILY_CALENDAR_PLAYWRIGHT_MODULE || 'playwright')
 const css = readFileSync(new URL('../src/App.css', import.meta.url), 'utf8')
 const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>${css}</style></head><body>
+<style>${css}</style><style>.home-widget-layout-controls[hidden]{display:none!important}</style></head><body>
 <div class="calendar-app"><section class="home-dashboard">
 <div class="home-widget-grid" id="grid">
 <section class="home-widget home-widget-weather home-widget-size-small home-widget-width-half" id="card">
@@ -67,11 +67,13 @@ test('weather stays readable at half/full width and all three vertical heights i
               const art = document.querySelector('.home-weather-artwork')
               const details = document.querySelector('.home-weather-details')
               const title = document.querySelector('.home-weather-title')
+              const titleRange = document.createRange()
+              titleRange.selectNodeContents(title)
               return {
                 card:get('#card'),icon:get('.home-weather-compact-icon'),
                 art:get('.home-weather-artwork'),temp:get('.home-weather-temperature'),
                 main:get('.home-weather-main'),details:get('.home-weather-details'),
-                source:get('.home-weather-source'),title:get('.home-weather-title'),
+                source:get('.home-weather-source'),title:{right:titleRange.getBoundingClientRect().right},
                 gear:get('.home-weather-settings-button'),
                 textColor:getComputedStyle(title).color,
                 iconDisplay:getComputedStyle(icon).display,
@@ -86,7 +88,7 @@ test('weather stays readable at half/full width and all three vertical heights i
             assert.ok(result.temp.right <= result.card.right - 5, `${info}: temperature clipped horizontally`)
             assert.ok(result.temp.left >= result.card.left + 5, `${info}: temperature clipped at left`)
             assert.ok(result.details.top >= result.temp.bottom - 3, `${info}: weather facts overlap temperature`)
-            assert.ok(result.title.right <= result.gear.left + 15 || height === 'small', `${info}: settings overlaps title`)
+            assert.ok(result.title.right <= result.gear.left + 3, `${info}: settings overlaps title`)
             assert.equal(result.textColor, 'rgb(22, 59, 81)', `${info}: cloudy label should be high-contrast navy`)
             if (width === 'half' || height === 'small') {
               assert.notEqual(result.iconDisplay, 'none', `${info}: compact icon missing`)
