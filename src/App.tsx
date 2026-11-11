@@ -1,5 +1,11 @@
 import { normalizePersonPhoto } from './normalizePersonPhoto'
 import {
+  readHomeWidgetLayout,
+  saveHomeWidgetLayout,
+  type HomeWidgetId,
+  type HomeWidgetSize,
+} from './homeWidgetLayout'
+import {
   Fragment,
   useEffect,
   useCallback,
@@ -1654,19 +1660,12 @@ type SortableListItemProps = {
   onSwipeChange: (side: 'edit' | 'delete' | null) => void
 }
 
-type HomeWidgetId =
-  | 'weather'
-  | 'today'
-  | 'upcoming'
-  | 'notes'
-  | 'meals'
-  | 'lists'
-
 type SortableHomeWidgetProps = {
   id: HomeWidgetId
   enabled: boolean
   order: number
   className: string
+  onEnterEdit: () => void
   children: import('react').ReactNode
 }
 
@@ -1675,12 +1674,14 @@ function SortableHomeWidget({
   enabled,
   order,
   className,
+  onEnterEdit,
   children,
 }: SortableHomeWidgetProps) {
   const {
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -1688,25 +1689,83 @@ function SortableHomeWidget({
     id,
     disabled: !enabled,
   })
+  const holdTimerRef = useRef<number | null>(null)
+  const pointerStartRef = useRef({ x: 0, y: 0, pointerId: -1 })
+  const cancelHold = useCallback(() => {
+    if (holdTimerRef.current !== null) {
+      window.clearTimeout(holdTimerRef.current)
+      holdTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => cancelHold, [cancelHold])
+
+  function beginHold(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0 || !event.isPrimary) return
+    cancelHold()
+    pointerStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      pointerId: event.pointerId,
+    }
+    holdTimerRef.current = window.setTimeout(() => {
+      holdTimerRef.current = null
+      onEnterEdit()
+    }, 650)
+  }
+
+  function moveHold(event: PointerEvent<HTMLButtonElement>) {
+    if (holdTimerRef.current === null ||
+        event.pointerId !== pointerStartRef.current.pointerId) return
+    if (Math.hypot(
+      event.clientX - pointerStartRef.current.x,
+      event.clientY - pointerStartRef.current.y,
+    ) > 12) cancelHold()
+  }
 
   return (
     <section
       ref={setNodeRef}
-      {...attributes}
-      {...listeners}
       className={className}
       style={{
         order,
-        transform:
-          CSS.Transform.toString(transform),
+        transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.72 : 1,
         zIndex: isDragging ? 30 : undefined,
-        touchAction: enabled
-          ? 'none'
-          : undefined,
       }}
     >
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        className="home-widget-grip"
+        {...attributes}
+        {...(enabled ? listeners : {})}
+        onPointerDown={enabled
+          ? (event) => { listeners?.onPointerDown?.(event) }
+          : beginHold}
+        onPointerMove={enabled ? undefined : moveHold}
+        onPointerUp={cancelHold}
+        onPointerCancel={cancelHold}
+        onPointerLeave={cancelHold}
+        onContextMenu={(event) => event.preventDefault()}
+        onKeyDown={enabled
+          ? (event) => { listeners?.onKeyDown?.(event) }
+          : (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              onEnterEdit()
+            }
+          }}
+        aria-label={enabled
+          ? `Drag ${id} card to reorder`
+          : `Hold to edit Home layout: ${id}`}
+        title={enabled ? 'Drag to rearrange' : 'Hold to edit Home'}
+      >
+        <span className="home-widget-grip-bars" aria-hidden="true">
+          <span /><span /><span />
+        </span>
+      </button>
       {children}
     </section>
   )
@@ -2035,51 +2094,43 @@ useEffect(() => {
   return () => { cancelled = true }
 }, [])
 
+  const [initialHomeLayout] = useState(readHomeWidgetLayout)
   const [homeWeatherSize, setHomeWeatherSize] =
-  useState<'small' | 'medium' | 'large'>(
-    'medium'
-  )
-
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.weather)
   const [homeTodaySize, setHomeTodaySize] =
-  useState<'small' | 'medium' | 'large'>(
-    'medium'
-  )
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.today)
+  const [homeUpcomingSize, setHomeUpcomingSize] =
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.upcoming)
+  const [homeNotesSize, setHomeNotesSize] =
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.notes)
+  const [homeMealsSize, setHomeMealsSize] =
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.meals)
+  const [homeListsSize, setHomeListsSize] =
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.lists)
+  const [homeWidgetOrder, setHomeWidgetOrder] =
+    useState<HomeWidgetId[]>(initialHomeLayout.order)
 
-const [homeUpcomingSize, setHomeUpcomingSize] =
-  useState<'small' | 'medium' | 'large'>(
-    'small'
-  )
-
-const [homeNotesSize, setHomeNotesSize] =
-  useState<'small' | 'medium' | 'large'>(
-    'medium'
-  )
-
-const [homeMealsSize, setHomeMealsSize] =
-  useState<'small' | 'medium' | 'large'>(
-    'medium'
-  )
-
-const [homeListsSize, setHomeListsSize] =
-  useState<'small' | 'medium' | 'large'>(
-    'large'
-  )
-
-const [homeWidgetOrder, setHomeWidgetOrder] =
-  useState<HomeWidgetId[]>([
-    'weather',
-    'today',
-    'upcoming',
-    'notes',
-    'meals',
-    'lists',
+  useEffect(() => {
+    saveHomeWidgetLayout({
+      order: homeWidgetOrder,
+      sizes: {
+        weather: homeWeatherSize,
+        today: homeTodaySize,
+        upcoming: homeUpcomingSize,
+        notes: homeNotesSize,
+        meals: homeMealsSize,
+        lists: homeListsSize,
+      },
+    })
+  }, [
+    homeWidgetOrder,
+    homeWeatherSize,
+    homeTodaySize,
+    homeUpcomingSize,
+    homeNotesSize,
+    homeMealsSize,
+    homeListsSize,
   ])
-
-  const homeEditHoldRef = useRef({
-  timer: null as number | null,
-  startX: 0,
-  startY: 0,
-})
 
 const [mealsView, setMealsView] =
   useState<'recipes' | 'planner'>(() =>
@@ -15726,7 +15777,7 @@ createPortal(
       setIsEditingHome(false)
     }}
   >
-    Done
+    Done Editing
   </button>
 )}
 
@@ -15746,103 +15797,13 @@ createPortal(
       ? 'home-widget-grid-editing'
       : ''
   }`}
-  onPointerDown={(event) => {
-    if (isEditingHome) {
-      return
-    }
 
-    const target =
-      event.target as HTMLElement
-
-    if (
-      target.closest(
-        'button, input, textarea, select, a'
-      )
-    ) {
-      return
-    }
-
-    if (
-      homeEditHoldRef.current.timer !==
-      null
-    ) {
-      window.clearTimeout(
-        homeEditHoldRef.current.timer
-      )
-    }
-
-    homeEditHoldRef.current.startX =
-      event.clientX
-
-    homeEditHoldRef.current.startY =
-      event.clientY
-
-    homeEditHoldRef.current.timer =
-      window.setTimeout(() => {
-        homeEditHoldRef.current.timer =
-          null
-
-        setIsEditingHome(true)
-      }, 1200)
-  }}
-  onPointerMove={(event) => {
-    if (
-      homeEditHoldRef.current.timer ===
-      null
-    ) {
-      return
-    }
-
-    const deltaX =
-      event.clientX -
-      homeEditHoldRef.current.startX
-
-    const deltaY =
-      event.clientY -
-      homeEditHoldRef.current.startY
-
-    if (
-      Math.hypot(deltaX, deltaY) > 12
-    ) {
-      window.clearTimeout(
-        homeEditHoldRef.current.timer
-      )
-
-      homeEditHoldRef.current.timer =
-        null
-    }
-  }}
-  onPointerUp={() => {
-    if (
-      homeEditHoldRef.current.timer !==
-      null
-    ) {
-      window.clearTimeout(
-        homeEditHoldRef.current.timer
-      )
-
-      homeEditHoldRef.current.timer =
-        null
-    }
-  }}
-  onPointerCancel={() => {
-    if (
-      homeEditHoldRef.current.timer !==
-      null
-    ) {
-      window.clearTimeout(
-        homeEditHoldRef.current.timer
-      )
-
-      homeEditHoldRef.current.timer =
-        null
-    }
-  }}
 >
      
   <SortableHomeWidget
   id="weather"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'weather'
   )}
@@ -15877,6 +15838,7 @@ createPortal(
      <SortableHomeWidget
   id="today"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'today'
   )}
@@ -15990,6 +15952,7 @@ createPortal(
       <SortableHomeWidget
   id="upcoming"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'upcoming'
   )}
@@ -16109,6 +16072,7 @@ createPortal(
       <SortableHomeWidget
   id="notes"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'notes'
   )}
@@ -16147,6 +16111,7 @@ createPortal(
       <SortableHomeWidget
   id="meals"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'meals'
   )}
@@ -16257,6 +16222,7 @@ createPortal(
       <SortableHomeWidget
   id="lists"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'lists'
   )}

@@ -47,6 +47,8 @@ jobs:
         run: npm run build
       - name: Verify Calendar person multi-select filtering
         run: node --experimental-strip-types --test scripts/test-calendar-person-filter.mjs
+      - name: Verify Home layout editor and responsive widget sizing
+        run: node --experimental-strip-types --test scripts/test-home-widget-layout.mjs
       - name: Verify Duplicate Event drafts are independent of their source
         run: node --test scripts/test-duplicate-event.mjs
       - name: Test list categories and additive migration
