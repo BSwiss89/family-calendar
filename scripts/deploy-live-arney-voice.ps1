@@ -213,7 +213,7 @@ try {
     Assert (-not (Get-Item -LiteralPath $stage -Force).LinkType) 'Candidate checkout must not be a link.'
     Assert (([string](& git -C $stage branch --show-current)).Trim() -eq 'release/live-arney-voice-20261110') 'Candidate must be checked out from reviewed LIVE release branch.'
     # Import only after exact candidate and path verification. The tailored
-    # planner changes only backend and frontend hashes; auth, dependencies and secrets stay pinned.
+    # planner changes only the frontend hash; backend, auth, dependencies and secrets stay pinned.
     . (Join-Path $stage 'scripts\secure-live-launcher-pins.ps1')
     . (Join-Path $PSScriptRoot 'arney-live-launcher-plan.ps1')
     foreach ($folder in @($stage,$live,$test)) {
@@ -337,7 +337,7 @@ try {
     Move-Item $newDist "$live\dist"
     Set-SecureLiveLauncher $plan.Candidate $launcher
     Assert-SecureLiveLauncherPins $launcher $live
-    Report 'LIVE_ARNEY_BACKEND_FRONTEND_AND_ALL_FOUR_STARTUP_PINS=PASS'
+    Report 'LIVE_ARNEY_FRONTEND_AND_ALL_FOUR_STARTUP_PINS=PASS'
     StartLive
     & $node --no-warnings "$stage\scripts\live-profile-db-check.mjs" verify "$live\Server\data\calendar.db" $backup "$test\Server\data\calendar.db" "$live\Server\uploads" "$test\Server\uploads"
     Assert ($LASTEXITCODE -eq 0) 'Post-start LIVE data verification failed.'
