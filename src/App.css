@@ -21136,3 +21136,12 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 .home-widget-grid > .home-widget-weather.home-widget-size-small .home-weather-active .home-weather-temperature {
   font-size: clamp(38px, 6vw, 52px);
 }
+
+/* Decorative weather circles must not create accidental nested scrolling. */
+.home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather > .home-weather {
+  overflow-y: hidden;
+}
+
+.home-widget-grid-editing > .home-widget-weather > .home-weather {
+  overflow-y: auto;
+}
