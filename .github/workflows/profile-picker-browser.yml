@@ -6,7 +6,7 @@ on:
       - 'src/HouseholdProfilePicker*'
       - 'src/householdProfileSelection*'
       - 'src/ReleaseHighlights*'
-      - 'src/releaseHighlights*'
+      - 'src/releaseNoticeModel*'
       - 'scripts/test-release-highlights-browser.mjs'
       - 'src/App.tsx'
       - 'src/App.css'
