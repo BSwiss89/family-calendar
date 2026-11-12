@@ -3,9 +3,10 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const { chromium, webkit } = await import(process.env.FAMILY_CALENDAR_PLAYWRIGHT_MODULE || 'playwright')
-const css = readFileSync(new URL('../src/App.css', import.meta.url), 'utf8')
+const css = readFileSync(new URL('../src/App.css', import.meta.url), 'utf8') + '\n' +
+  readFileSync(new URL('../src/homeWeatherAtmosphere.css', import.meta.url), 'utf8')
 const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>${css}</style><style>.home-widget-layout-controls[hidden]{display:none!important}</style></head><body>
+<style>${css}</style><style>.home-widget-layout-controls[hidden]{display:none!important}#weather{transition:none!important}</style></head><body>
 <div class="calendar-app"><section class="home-dashboard">
 <div class="home-widget-grid" id="grid">
 <section class="home-widget home-widget-weather home-widget-size-small home-widget-width-half" id="card">
@@ -13,7 +14,7 @@ const html = `<!doctype html><html><head><meta name="viewport" content="width=de
     <button class="home-widget-resize-button" type="button">Height: Small</button>
     <button class="home-widget-width-button" type="button">Width: Half</button>
   </div>
-  <div class="home-weather home-weather-active weather-theme-cloudy" id="weather">
+  <div class="home-weather home-weather-active weather-period-day weather-theme-cloudy" id="weather">
     <div class="home-weather-title">Weather</div>
     <button class="home-weather-settings-button" type="button" aria-label="Weather settings">⚙</button>
     <div class="home-weather-current">
@@ -51,7 +52,7 @@ function overlap(a,b) {
          Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top))
 }
 
-test('original weather illustration stays in a soft panel and all forecast panels reflow', {timeout:120000}, async () => {
+test('original weather illustration and invisible layout regions keep all details readable', {timeout:120000}, async () => {
   for (const [engine,driver] of [['chromium',chromium],['webkit',webkit]]) {
     const browser=await driver.launch({headless:true})
     try {
@@ -87,6 +88,12 @@ test('original weather illustration stays in a soft panel and all forecast panel
                 titleRight:range.getBoundingClientRect().right,
                 gear:box('.home-weather-settings-button'),
                 color:getComputedStyle(document.querySelector('.home-weather-title')).color,
+                artBg:getComputedStyle(document.querySelector('.home-weather-art-panel')).backgroundColor,
+                artBorder:getComputedStyle(document.querySelector('.home-weather-art-panel')).borderTopStyle,
+                artShadow:getComputedStyle(document.querySelector('.home-weather-art-panel')).boxShadow,
+                tempBg:getComputedStyle(document.querySelector('.home-weather-temperature-panel')).backgroundColor,
+                pillBg:getComputedStyle(document.querySelector('.home-weather-detail-pill')).backgroundColor,
+                pillBorder:getComputedStyle(document.querySelector('.home-weather-detail-pill')).borderTopStyle,
                 tempFont:parseFloat(getComputedStyle(document.querySelector('.home-weather-temperature')).fontSize),
                 scrollExcess:document.querySelector('#weather').scrollHeight-document.querySelector('#weather').clientHeight,
               }
@@ -123,7 +130,13 @@ test('original weather illustration stays in a soft panel and all forecast panel
               assert.ok(result.pills[0].top<result.pills[1].top&&result.pills[1].top<result.pills[2].top,
                 info+': compact glass panels must stack vertically')
             }
-            assert.equal(result.color,'rgb(23, 59, 83)',info+': cloudy theme text must be dark enough')
+            assert.equal(result.color,'rgb(245, 251, 255)',info+': cloudy sky should use readable white text')
+            assert.equal(result.artBg,'rgba(0, 0, 0, 0)',info+': artwork layout panel is visible')
+            assert.equal(result.artBorder,'none',info+': artwork panel border is visible')
+            assert.equal(result.artShadow,'none',info+': artwork panel shadow is visible')
+            assert.equal(result.tempBg,'rgba(0, 0, 0, 0)',info+': temperature layout panel is visible')
+            assert.equal(result.pillBg,'rgba(0, 0, 0, 0)',info+': forecast layout region is visible')
+            assert.equal(result.pillBorder,'none',info+': forecast border is visible')
             // Decorative sun/cloud pseudo-elements can extend outside their
             // clipped panel, so scrollHeight is not a reliable readability test.
             // Assert the actual text and glass panels stay within the card above.
@@ -133,9 +146,60 @@ test('original weather illustration stays in a soft panel and all forecast panel
             document.querySelector('#weather').className='home-weather home-weather-active weather-theme-rain'
             return getComputedStyle(document.querySelector('.home-weather-title')).color
           })
-          assert.equal(dark,'rgb(255, 255, 255)',engine+' '+viewportWidth+': dark storm theme should keep white text')
+          assert.equal(dark,'rgb(245, 251, 255)',engine+' '+viewportWidth+': dark storm theme should keep bright white text')
         }finally{await page.close()}
       }
+    }finally{await browser.close()}
+  }
+})
+
+test('weather condition and night skies layer without restoring visible inner panels', {timeout:120000}, async () => {
+  const scenarios = [
+    ['sunny','day'], ['cloudy','day'], ['cloudy','night'],
+    ['rain','day'], ['rain','night'], ['storm','night'],
+    ['snow','day'], ['snow','night'], ['sleet','day'],
+    ['sleet','night'], ['fog','night'], ['night','night'],
+  ]
+  for (const [engine,driver] of [['chromium',chromium],['webkit',webkit]]) {
+    const browser=await driver.launch({headless:true})
+    try {
+      const page=await browser.newPage({viewport:{width:390,height:900},isMobile:true,hasTouch:true})
+      try {
+        await page.setContent(html,{waitUntil:'domcontentloaded'})
+        const backgrounds=new Map()
+        for (const [theme,period] of scenarios) {
+          const v=await page.evaluate(({theme,period})=>{
+            const root=document.querySelector('#weather')
+            root.className='home-weather home-weather-active weather-period-'+period+' weather-theme-'+theme
+            const get=(sel)=>getComputedStyle(document.querySelector(sel))
+            const base=getComputedStyle(root)
+            return {background:base.backgroundImage,color:get('.home-weather-title').color,
+              haze:getComputedStyle(root,'::before').backgroundImage,
+              particles:getComputedStyle(root,'::after').backgroundImage,
+              artBg:get('.home-weather-art-panel').backgroundColor,
+              artBorder:get('.home-weather-art-panel').borderTopStyle,
+              tempBg:get('.home-weather-temperature-panel').backgroundColor,
+              pillBg:get('.home-weather-detail-pill').backgroundColor}
+          },{theme,period})
+          const info=engine+' '+theme+' '+period
+          assert.ok(v.background.includes('gradient'),info+': missing full-card atmospheric sky')
+          assert.ok(v.haze.includes('gradient'),info+': missing condition atmosphere')
+          assert.equal(v.artBg,'rgba(0, 0, 0, 0)',info+': artwork region became visible')
+          assert.equal(v.artBorder,'none',info+': visible panel border')
+          assert.equal(v.tempBg,'rgba(0, 0, 0, 0)',info+': visible temperature panel')
+          assert.equal(v.pillBg,'rgba(0, 0, 0, 0)',info+': visible detail panel')
+          assert.equal(v.color,period==='night'||!['snow','fog'].includes(theme)
+            ? 'rgb(245, 251, 255)' : 'rgb(23, 58, 79)',info+': inadequate theme contrast')
+          if (['rain','storm','snow','sleet'].includes(theme)) {
+            assert.ok(v.particles.includes('gradient'),info+': no precipitation layer')
+          }
+          backgrounds.set(theme+'-'+period,v.background)
+        }
+        for(const theme of ['cloudy','rain','snow','sleet']) {
+          assert.notEqual(backgrounds.get(theme+'-day'),backgrounds.get(theme+'-night'),
+            engine+' '+theme+': day and night backgrounds must differ')
+        }
+      }finally{await page.close()}
     }finally{await browser.close()}
   }
 })

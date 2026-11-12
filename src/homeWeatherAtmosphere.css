@@ -1,0 +1,174 @@
+/* Weather scene refinements, TEST-only candidate.
+   Layout panels remain normal grid items; they are completely invisible.
+   Scene atmosphere belongs to the single weather card, never to each child. */
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active {
+  --weather-day-sky: linear-gradient(145deg, #2b659d, #6eacd6);
+  --weather-night-sky: linear-gradient(150deg, #102541, #284a70);
+  --weather-haze: radial-gradient(ellipse at 75% 28%, rgba(236,247,255,.3), transparent 48%);
+  --weather-particles: none;
+  --weather-particle-size: auto;
+  --weather-particle-opacity: 0;
+  position: relative;
+  isolation: isolate;
+  background: var(--weather-day-sky);
+  color: #f5fbff;
+  text-shadow: 0 1px 2px rgba(5,25,48,.15);
+}
+
+/* Sunny blue sky with broad light bloom and small lens flare, not an orange panel. */
+.home-widget-grid > .home-widget-weather > .home-weather.weather-theme-sunny {
+  --weather-day-sky: linear-gradient(150deg, #1f5893 0%, #387fc0 58%, #75b0e2 100%);
+  --weather-haze:
+    radial-gradient(circle at 87% 27%, rgba(255,247,195,.76) 0, rgba(255,239,170,.25) 14%, transparent 45%),
+    radial-gradient(circle at 70% 73%, rgba(219,240,255,.26), transparent 40%);
+}
+/* Cloud decks: the highlight and darker cloud shadows fill the whole card. */
+.home-widget-grid > .home-widget-weather > .home-weather.weather-theme-cloudy {
+  --weather-day-sky: linear-gradient(155deg, #123751 0%, #285c7d 58%, #6695aa 100%);
+  --weather-night-sky: linear-gradient(155deg, #101f36 0%, #243f5a 70%, #385a72 100%);
+  --weather-haze:
+    radial-gradient(ellipse at 92% 18%, rgba(204,225,237,.55) 0, transparent 47%),
+    radial-gradient(ellipse at 13% 67%, rgba(161,196,210,.34) 0, transparent 53%),
+    radial-gradient(ellipse at 63% 100%, rgba(4,36,60,.34) 0, transparent 47%);
+}
+.home-widget-grid > .home-widget-weather > .home-weather.weather-theme-rain {
+  --weather-day-sky: linear-gradient(155deg, #153954 0%, #34678c 68%, #47799b 100%);
+  --weather-night-sky: linear-gradient(155deg, #091c31 0%, #213b59 70%, #314f69 100%);
+  --weather-haze:
+    radial-gradient(ellipse at 88% 22%, rgba(180,207,220,.38), transparent 54%),
+    radial-gradient(ellipse at 24% 89%, rgba(10,37,65,.36), transparent 60%);
+  --weather-particles: repeating-linear-gradient(110deg, transparent 0 19px, rgba(228,243,255,.36) 20px 21px, transparent 22px 41px);
+  --weather-particle-size: 90px 100px;
+  --weather-particle-opacity: .34;
+}
+.home-widget-grid > .home-widget-weather > .home-weather.weather-theme-storm {
+  --weather-day-sky: linear-gradient(150deg, #1a2844 0%, #485574 70%, #687d97 100%);
+  --weather-night-sky: linear-gradient(155deg, #0b1527 0%, #28324a 72%, #3e4d67 100%);
+  --weather-haze:
+    radial-gradient(ellipse at 84% 19%, rgba(230,234,255,.44), transparent 45%),
+    radial-gradient(ellipse at 27% 85%, rgba(11,22,52,.58), transparent 66%);
+  --weather-particles: repeating-linear-gradient(110deg, transparent 0 15px, rgba(227,237,255,.32) 16px 17px, transparent 18px 33px);
+  --weather-particle-size: 110px 105px;
+  --weather-particle-opacity: .37;
+}
+.home-widget-grid > .home-widget-weather > .home-weather.weather-theme-snow {
+  --weather-day-sky: linear-gradient(150deg, #c8e4ed 0%, #acd0e6 65%, #81b5d0 100%);
+  --weather-night-sky: linear-gradient(155deg, #1b3b59 0%, #365c7d 65%, #567a95 100%);
+  --weather-haze:
+    radial-gradient(ellipse at 86% 22%, rgba(255,255,255,.65), transparent 49%),
+    radial-gradient(ellipse at 15% 89%, rgba(242,251,255,.55), transparent 55%);
+  --weather-particles:
+    radial-gradient(circle, rgba(255,255,255,.85) 0 1.5px, transparent 2px),
+    radial-gradient(circle, rgba(255,255,255,.72) 0 1px, transparent 2px);
+  --weather-particle-size: 47px 61px, 68px 53px;
+  --weather-particle-opacity: .64;
+  color: #173a4f;
+}
+/* Freezing drizzle/rain or ice pellets: colder steel sky, icy flecks plus rain. */
+.home-widget-grid > .home-widget-weather > .home-weather.weather-theme-sleet {
+  --weather-day-sky: linear-gradient(155deg, #324b65 0%, #5b7a93 65%, #829fb2 100%);
+  --weather-night-sky: linear-gradient(155deg, #13273c 0%, #30475f 70%, #4b667a 100%);
+  --weather-haze:
+    radial-gradient(ellipse at 86% 16%, rgba(203,226,239,.5), transparent 50%),
+    radial-gradient(ellipse at 12% 87%, rgba(35,66,87,.35), transparent 60%);
+  --weather-particles:
+    repeating-linear-gradient(111deg, transparent 0 19px, rgba(226,243,255,.27) 20px 21px, transparent 22px 41px),
+    radial-gradient(circle, rgba(246,252,255,.92) 0 1.35px, transparent 1.8px);
+  --weather-particle-size: 100px 110px, 53px 63px;
+  --weather-particle-opacity: .52;
+}
+.home-widget-grid > .home-widget-weather > .home-weather.weather-theme-fog {
+  --weather-day-sky: linear-gradient(155deg, #799ead 0%, #adc9d0 70%, #d5e1df 100%);
+  --weather-night-sky: linear-gradient(155deg, #203a50 0%, #4d6b7a 70%, #76939d 100%);
+  --weather-haze:
+    radial-gradient(ellipse at 66% 34%, rgba(238,248,247,.65), transparent 59%),
+    linear-gradient(0deg, rgba(217,231,231,.45), transparent 75%);
+  color: #12394b;
+}
+.home-widget-grid > .home-widget-weather > .home-weather.weather-theme-night {
+  --weather-night-sky: linear-gradient(155deg, #0b1f3a 0%, #193758 70%, #274969 100%);
+  --weather-haze:
+    radial-gradient(circle at 85% 20%, rgba(197,218,252,.18), transparent 47%),
+    radial-gradient(ellipse at 18% 95%, rgba(83,117,160,.18), transparent 58%);
+}
+
+/* Night is a separate dimension: it darkens every current condition, with moon
+   or cloud light behind precipitation rather than replacing precipitation. */
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active.weather-period-night {
+  --weather-night-mask: #172f4b;
+  background: var(--weather-night-sky);
+  color: #f5fbff;
+}
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active.weather-period-day.weather-theme-snow,
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active.weather-period-day.weather-theme-fog {
+  color: #173a4f;
+}
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active::before,
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: auto;
+  height: auto;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+}
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active::before {
+  background: var(--weather-haze);
+  opacity: .88;
+  filter: blur(9px);
+  transform: scale(1.09);
+}
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active::after {
+  background: var(--weather-particles);
+  background-size: var(--weather-particle-size);
+  opacity: var(--weather-particle-opacity);
+}
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active.weather-period-night::before {
+  opacity: .58;
+}
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active > .home-weather-current,
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active > .home-weather-title,
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active > .home-weather-source {
+  position: relative;
+  z-index: 2;
+}
+
+/* Keep the responsive grid areas; remove all visible inner panels, including
+   the extra tint previously applied only to dark themes. */
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active .home-weather-art-panel,
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active .home-weather-temperature-panel,
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active .home-weather-detail-pill {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active .home-weather-artwork .weather-art-moon::after {
+  background: var(--weather-night-mask, #334e74);
+}
+/* Use background-safe contrast, keeping tiny detail pills legible on every sky. */
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active
+  :is(.home-weather-title, .home-weather-location, .home-weather-temperature, .home-weather-details, .home-weather-source) {
+  color: inherit;
+  text-shadow: 0 1px 2px rgba(8,22,41,.2);
+}
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active .home-weather-art-panel,
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active .home-weather-temperature-panel {
+  position: relative;
+  z-index: 2;
+}
+
+/* The old illustrated-card rules target individual labels as well as the
+   weather root. Explicitly win those rules on pale daytime snow/fog skies. */
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active.weather-period-day:is(.weather-theme-snow,.weather-theme-fog),
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active.weather-period-day:is(.weather-theme-snow,.weather-theme-fog)
+  :is(.home-weather-title,.home-weather-location,.home-weather-temperature,.home-weather-details,.home-weather-source) {
+  color: #173a4f;
+}
