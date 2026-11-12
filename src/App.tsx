@@ -41,6 +41,7 @@ import { useSharedEventFeed } from './useSharedEventFeed'
 import { sharedEventsInRange, formatSharedTime, type AcceptedSharedEvent } from './sharedEventOverlay'
 import FamilyEventSharing from './FamilyEventSharing'
 import { DesktopInvitations, MobileInvitationReminder } from './InvitationCenter'
+import ReleaseHighlights from './ReleaseHighlights'
 import { useInvitationInbox } from './useInvitationInbox'
 import { useAssignmentInbox } from './useAssignmentInbox'
 import { useFamilyPush, PushNotificationsControl } from './FamilyPushNotifications'
@@ -2013,6 +2014,7 @@ const [profileSwitchRequest, setProfileSwitchRequest] = useState(0)
 const [profilePeopleRevision, setProfilePeopleRevision] = useState(0)
 const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | null>(null)
 const [activeHouseholdPersonId, setActiveHouseholdPersonId] = useState<number | null>(null)
+const [activeHouseholdAccountKey, setActiveHouseholdAccountKey] = useState<string | null>(null)
 const invitationInbox = useInvitationInbox()
 const assignmentInbox = useAssignmentInbox(activeHouseholdPersonId)
 const familyPush = useFamilyPush(activeHouseholdPersonId)
@@ -3608,9 +3610,10 @@ const handleProfileCreated = useCallback((person: Person) => {
   useState<number | null>(null)
 const [calendarPersonFilterIds, setCalendarPersonFilterIds] =
   useState<number[]>([])
-const handleHouseholdProfileChange = useCallback((name: string | null, personId: number | null) => {
+const handleHouseholdProfileChange = useCallback((name: string | null, personId: number | null, accountKey: string | null) => {
   setActiveHouseholdProfile(name)
   setActiveHouseholdPersonId(personId)
+  setActiveHouseholdAccountKey(accountKey)
   // A shared Home display always starts with the complete family calendar.
   if (name === 'Home') setCalendarPersonFilterIds([])
 }, [])
@@ -16240,6 +16243,7 @@ createPortal(
           type="button"
           onClick={() => {
             setMobileSettingsOpen(false)
+            setActiveHouseholdAccountKey(null)
             setProfileSwitchRequest((request) => request + 1)
           }}
         >
@@ -24486,6 +24490,16 @@ capture.captureType !== 'other' && (
   </div>, document.body
 )}
       <MobileInvitationReminder {...invitationInbox} {...notificationDisplayProps} suppress={page === 'invitations'} />
+      <ReleaseHighlights
+        accountKey={activeHouseholdAccountKey}
+        personId={activeHouseholdPersonId}
+        suppress={
+          page !== 'home' || isEditingHome || mobileSettingsOpen || showEventModal ||
+          invitationInbox.invitations.length > 0 ||
+          familyEventInvites.familyInvitations.length > 0 ||
+          assignmentInbox.notifications.length > 0
+        }
+      />
       <HouseholdProfilePicker
         switchRequest={profileSwitchRequest}
         peopleRevision={profilePeopleRevision} onProfileCreated={handleProfileCreated}
