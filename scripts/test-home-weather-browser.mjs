@@ -62,6 +62,7 @@ test('original weather illustration and invisible layout regions keep all detail
         })
         try {
           await page.setContent(html,{waitUntil:'domcontentloaded'})
+          const sizeReadings=new Map()
           for (const width of ['half','full']) for (const height of ['small','medium','large']) for (const editing of [false,true]) {
             const result=await page.evaluate(({width,height,editing})=>{
               const grid=document.querySelector('#grid')
@@ -95,10 +96,14 @@ test('original weather illustration and invisible layout regions keep all detail
                 pillBg:getComputedStyle(document.querySelector('.home-weather-detail-pill')).backgroundColor,
                 pillBorder:getComputedStyle(document.querySelector('.home-weather-detail-pill')).borderTopStyle,
                 tempFont:parseFloat(getComputedStyle(document.querySelector('.home-weather-temperature')).fontSize),
+                artRequestedScale:parseFloat(getComputedStyle(document.querySelector('.home-weather-artwork')).getPropertyValue('--weather-art-scale')),
+                detailLabelFont:parseFloat(getComputedStyle(document.querySelector('.home-weather-detail-label')).fontSize),
+                detailValueFont:parseFloat(getComputedStyle(document.querySelector('.home-weather-detail-pill strong')).fontSize),
                 scrollExcess:document.querySelector('#weather').scrollHeight-document.querySelector('#weather').clientHeight,
               }
             },{width,height,editing})
             const info=engine+' '+viewportWidth+'px '+width+'/'+height+' edit='+editing
+            if(!editing) sizeReadings.set(width+'-'+height,result)
             assert.ok(result.card.width>=130,info+': card too narrow')
             assert.ok(result.art.width>=25&&result.art.height>=25,info+': illustrated panel collapsed')
             assert.ok(result.tempPanel.width>=25&&result.tempPanel.height>=25,info+': temperature panel collapsed')
@@ -140,6 +145,29 @@ test('original weather illustration and invisible layout regions keep all detail
             // Decorative sun/cloud pseudo-elements can extend outside their
             // clipped panel, so scrollHeight is not a reliable readability test.
             // Assert the actual text and glass panels stay within the card above.
+          }
+          // Generous Full/Large widgets should use their extra room, while
+          // compact or editing sizes retain the safe original layout.
+          const fullLarge=sizeReadings.get('full-large')
+          const fullSmall=sizeReadings.get('full-small')
+          const halfLarge=sizeReadings.get('half-large')
+          if(fullLarge.card.width>=330) {
+            assert.ok(fullLarge.tempFont>fullSmall.tempFont,
+              engine+' '+viewportWidth+': large Full temperature did not grow')
+            assert.ok(fullLarge.tempFont>halfLarge.tempFont,
+              engine+' '+viewportWidth+': wider card temperature did not grow')
+            assert.ok(fullLarge.artRequestedScale>fullSmall.artRequestedScale,
+              engine+' '+viewportWidth+': large Full illustration did not grow')
+            assert.ok(fullLarge.detailLabelFont>=11,
+              engine+' '+viewportWidth+': detail labels did not grow with card')
+            assert.ok(fullLarge.detailValueFont>=13,
+              engine+' '+viewportWidth+': detail values did not grow with card')
+          }
+          if(fullLarge.card.width>=540) {
+            assert.ok(fullLarge.detailValueFont>=16,
+              engine+' '+viewportWidth+': desktop weather detail text stayed small')
+            assert.ok(fullLarge.artRequestedScale>=1,
+              engine+' '+viewportWidth+': spacious artwork did not use card width')
           }
           const dark=await page.evaluate(()=>{
             document.querySelector('#grid').classList.remove('home-widget-grid-editing')
