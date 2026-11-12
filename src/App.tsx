@@ -1,4 +1,12 @@
 import { normalizePersonPhoto } from './normalizePersonPhoto'
+import { getHomeWeatherScene, type HomeWeatherPeriod } from './homeWeatherScene'
+import {
+  readHomeWidgetLayout,
+  saveHomeWidgetLayout,
+  type HomeWidgetId,
+  type HomeWidgetSize,
+  type HomeWidgetWidth,
+} from './homeWidgetLayout'
 import {
   Fragment,
   useCallback,
@@ -13,6 +21,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import './homeWeatherAtmosphere.css'
 import { arneySpeechAvailable, beginArneySpeech, getArneySpeechDiagnostics, speakArneyReply, stopArneyReply } from './arneySpeech'
 import { arneyLocalSpeechAvailable, beginArneyLocalSpeech } from './arneyLocalSpeech'
 import { describeArneyError, describeArneyIntent, describeArneyPreview, shouldSpeakArneyReply, type ArneyReply } from './arneyResponses'
@@ -26,6 +35,7 @@ import {
   toggleCalendarPersonFilterIds,
 } from './calendarPersonFilter'
 import { useAssignmentInbox } from './useAssignmentInbox'
+import ReleaseHighlights from './ReleaseHighlights'
 import { useFamilyEventInvitations } from './useFamilyEventInvitations'
 import { useFamilyPush, PushNotificationsControl } from './FamilyPushNotifications'
 import { LiveInvitationsPage, LiveInvitationReminder } from './LiveInvitations'
@@ -577,138 +587,43 @@ type HomeWeatherData = {
   low: number
   precipitationChance: number
   theme: string
-}
-
-function getHomeWeatherTheme(
-  weatherCode: number,
-  isDay: boolean
-) {
-  if (weatherCode === 0) {
-    return isDay
-      ? 'weather-theme-sunny'
-      : 'weather-theme-night'
-  }
-
-  if (
-    weatherCode === 1 ||
-    weatherCode === 2 ||
-    weatherCode === 3
-  ) {
-    return 'weather-theme-cloudy'
-  }
-
-  if (
-    weatherCode === 45 ||
-    weatherCode === 48
-  ) {
-    return 'weather-theme-fog'
-  }
-
-  if (
-    (weatherCode >= 51 &&
-      weatherCode <= 67) ||
-    (weatherCode >= 80 &&
-      weatherCode <= 82)
-  ) {
-    return 'weather-theme-rain'
-  }
-
-  if (
-    (weatherCode >= 71 &&
-      weatherCode <= 77) ||
-    weatherCode === 85 ||
-    weatherCode === 86
-  ) {
-    return 'weather-theme-snow'
-  }
-
-  if (
-    weatherCode >= 95 &&
-    weatherCode <= 99
-  ) {
-    return 'weather-theme-storm'
-  }
-
-  return 'weather-theme-cloudy'
+  period: HomeWeatherPeriod
 }
 
 function HomeWeatherArtwork({
   theme,
+  period,
 }: {
   theme: string
+  period: HomeWeatherPeriod
 }) {
+  const isNight = period === 'night'
+  const isCloudy = theme === 'weather-theme-cloudy'
+  const isRain = theme === 'weather-theme-rain'
+  const isStorm = theme === 'weather-theme-storm'
+  const isSnow = theme === 'weather-theme-snow'
+  const isSleet = theme === 'weather-theme-sleet'
+  const showCloud = isCloudy || isRain || isStorm || isSnow || isSleet
   return (
-    <div
-      className={`home-weather-artwork ${theme}`}
-      aria-hidden="true"
-    >
-      {theme === 'weather-theme-sunny' && (
-        <>
-          <div className="weather-art-sun" />
-        </>
+    <div className={`home-weather-artwork ${theme}`} aria-hidden="true">
+      {isNight && <div className="weather-art-moon" />}
+      {!isNight && (theme === 'weather-theme-sunny' || isCloudy) && (
+        <div className={isCloudy ? 'weather-art-sun weather-art-sun-behind' : 'weather-art-sun'} />
       )}
-
-      {theme === 'weather-theme-night' && (
-        <>
-          <div className="weather-art-moon" />
-          <div className="weather-art-cloud weather-art-cloud-small" />
-        </>
-      )}
-
-      {theme === 'weather-theme-cloudy' && (
-        <>
-          <div className="weather-art-sun weather-art-sun-behind" />
-          <div className="weather-art-cloud weather-art-cloud-main" />
-        </>
-      )}
-
-      {theme === 'weather-theme-rain' && (
-        <>
-          <div className="weather-art-cloud weather-art-cloud-main" />
-
-          <div className="weather-art-rain">
-            <span />
-            <span />
-            <span />
-            <span />
-          </div>
-        </>
-      )}
-
-      {theme === 'weather-theme-storm' && (
-        <>
-          <div className="weather-art-cloud weather-art-cloud-main" />
-
-          <div className="weather-art-lightning">
-            ⚡
-          </div>
-
-          <div className="weather-art-rain">
-            <span />
-            <span />
-            <span />
-          </div>
-        </>
-      )}
-
-      {theme === 'weather-theme-snow' && (
-        <>
-          <div className="weather-art-cloud weather-art-cloud-main" />
-
-          <div className="weather-art-snow">
-            <span>❄</span>
-            <span>❄</span>
-            <span>❄</span>
-          </div>
-        </>
-      )}
-
-      {theme === 'weather-theme-fog' && (
-        <div className="weather-art-fog">
-          <span />
-          <span />
-          <span />
+      {showCloud && <div className="weather-art-cloud weather-art-cloud-main" />}
+      {(isRain || isStorm || isSleet) && (
+        <div className="weather-art-rain">
+          <span /><span /><span /><span />
         </div>
+      )}
+      {(isSnow || isSleet) && (
+        <div className="weather-art-snow">
+          <span>❄</span><span>❄</span><span>❄</span>
+        </div>
+      )}
+      {isStorm && <div className="weather-art-lightning">⚡</div>}
+      {theme === 'weather-theme-fog' && (
+        <div className="weather-art-fog"><span /><span /><span /></div>
       )}
     </div>
   )
@@ -1054,15 +969,15 @@ function HomeWeather() {
           return
         }
 
+        const scene = getHomeWeatherScene(weatherCode, isDay)
+
         setWeather({
           icon: getWeatherIcon(
             weatherCode,
             isDay
           ),
-          theme: getHomeWeatherTheme(
-  weatherCode,
-  isDay
-),
+          theme: scene.theme,
+          period: scene.period,
           temperature:
             Math.round(temperature),
           feelsLike:
@@ -1124,7 +1039,7 @@ function HomeWeather() {
       ? `home-weather-active ${
           weather?.theme ??
           'weather-theme-cloudy'
-        }`
+        } ${weather?.period === 'night' ? 'weather-period-night' : 'weather-period-day'}`
       : 'home-weather-setup'
   }`}
 >
@@ -1215,33 +1130,28 @@ function HomeWeather() {
             </div>
 
             <div className="home-weather-main">
-              <HomeWeatherArtwork
-  theme={weather.theme}
-/>
-
-              <strong className="home-weather-temperature">
-                {weather.temperature}
-                {'\u00B0'}
-              </strong>
+              <div className="home-weather-art-panel" aria-hidden="true">
+                <HomeWeatherArtwork theme={weather.theme} period={weather.period} />
+              </div>
+              <div className="home-weather-temperature-panel">
+                <strong className="home-weather-temperature">
+                  {weather.temperature}{'\u00B0'}
+                </strong>
+              </div>
             </div>
 
             <div className="home-weather-details">
-              <span>
-                Feels like{' '}
-                {weather.feelsLike}
-                {'\u00B0'}
+              <span className="home-weather-detail-pill">
+                <span className="home-weather-detail-label">Feels like</span>
+                <strong>{weather.feelsLike}{'\u00B0'}</strong>
               </span>
-
-              <span>
-                H {weather.high}
-                {'\u00B0'} · L{' '}
-                {weather.low}
-                {'\u00B0'}
+              <span className="home-weather-detail-pill">
+                <span className="home-weather-detail-label">High / Low</span>
+                <strong>H {weather.high}{'\u00B0'} · L {weather.low}{'\u00B0'}</strong>
               </span>
-
-              <span>
-                Rain{' '}
-                {weather.precipitationChance}%
+              <span className="home-weather-detail-pill">
+                <span className="home-weather-detail-label">Rain</span>
+                <strong>{weather.precipitationChance}%</strong>
               </span>
             </div>
           </div>
@@ -1648,19 +1558,16 @@ type SortableListItemProps = {
   onSwipeChange: (side: 'edit' | 'delete' | null) => void
 }
 
-type HomeWidgetId =
-  | 'weather'
-  | 'today'
-  | 'upcoming'
-  | 'notes'
-  | 'meals'
-  | 'lists'
-
 type SortableHomeWidgetProps = {
   id: HomeWidgetId
   enabled: boolean
   order: number
   className: string
+  height: HomeWidgetSize
+  width: HomeWidgetWidth
+  onEnterEdit: () => void
+  onCycleHeight: () => void
+  onToggleWidth: () => void
   children: import('react').ReactNode
 }
 
@@ -1669,12 +1576,18 @@ function SortableHomeWidget({
   enabled,
   order,
   className,
+  height,
+  width,
+  onEnterEdit,
+  onCycleHeight,
+  onToggleWidth,
   children,
 }: SortableHomeWidgetProps) {
   const {
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -1682,25 +1595,109 @@ function SortableHomeWidget({
     id,
     disabled: !enabled,
   })
+  const holdTimerRef = useRef<number | null>(null)
+  const pointerStartRef = useRef({ x: 0, y: 0, pointerId: -1 })
+  const cancelHold = useCallback(() => {
+    if (holdTimerRef.current !== null) {
+      window.clearTimeout(holdTimerRef.current)
+      holdTimerRef.current = null
+    }
+  }, [])
+  useEffect(() => cancelHold, [cancelHold])
+
+  function beginHold(event: PointerEvent<HTMLElement>) {
+    if (event.button !== 0 || !event.isPrimary) return
+    // Normal card links, forms, and actions keep their regular tap/press behavior.
+    const target = event.target as Element
+    if (target.closest('button, a, input, textarea, select, [role="button"], [contenteditable], [data-home-no-hold]')) {
+      return
+    }
+    cancelHold()
+    pointerStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      pointerId: event.pointerId,
+    }
+    holdTimerRef.current = window.setTimeout(() => {
+      holdTimerRef.current = null
+      onEnterEdit()
+    }, 650)
+  }
+
+  function moveHold(event: PointerEvent<HTMLElement>) {
+    if (holdTimerRef.current === null ||
+        event.pointerId !== pointerStartRef.current.pointerId) return
+    if (Math.hypot(
+      event.clientX - pointerStartRef.current.x,
+      event.clientY - pointerStartRef.current.y,
+    ) > 12) cancelHold()
+  }
 
   return (
     <section
       ref={setNodeRef}
-      {...attributes}
-      {...listeners}
       className={className}
+      tabIndex={enabled ? undefined : 0}
+      onPointerDown={enabled ? undefined : beginHold}
+      onPointerMove={enabled ? undefined : moveHold}
+      onPointerUp={cancelHold}
+      onPointerCancel={cancelHold}
+      onPointerLeave={cancelHold}
+      onContextMenu={(event) => {
+        if (holdTimerRef.current !== null) event.preventDefault()
+      }}
+      onKeyDown={enabled ? undefined : (event) => {
+        if (event.target !== event.currentTarget) return
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onEnterEdit()
+        }
+      }}
       style={{
         order,
-        transform:
-          CSS.Transform.toString(transform),
+        transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.72 : 1,
         zIndex: isDragging ? 30 : undefined,
-        touchAction: enabled
-          ? 'none'
-          : undefined,
       }}
     >
+      {enabled && (
+        <>
+          <button
+            type="button"
+            ref={setActivatorNodeRef}
+            className="home-widget-grip"
+            {...attributes}
+            {...listeners}
+            aria-label={`Drag ${id} card to reorder`}
+            title="Drag to rearrange"
+          >
+            <span className="home-widget-grip-bars" aria-hidden="true">
+              <span /><span /><span />
+            </span>
+          </button>
+          <div className="home-widget-layout-controls">
+            <button
+              type="button"
+              className="home-widget-resize-button"
+              onClick={onCycleHeight}
+              aria-label={`Change ${id} card height; currently ${height}`}
+              title="Change card height"
+            >
+              Height: {height}
+            </button>
+            <button
+              type="button"
+              className="home-widget-width-button"
+              onClick={onToggleWidth}
+              aria-label={`Change ${id} card width; currently ${width}`}
+              title="Toggle half or full card width"
+            >
+              Width: {width}
+            </button>
+          </div>
+        </>
+      )}
       {children}
     </section>
   )
@@ -2010,6 +2007,7 @@ const [profileSwitchRequest, setProfileSwitchRequest] = useState(0)
 const [profilePeopleRevision, setProfilePeopleRevision] = useState(0)
 const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | null>(null)
 const [activeHouseholdPersonId,setActiveHouseholdPersonId] = useState<number|null>(null)
+const [activeHouseholdAccountKey, setActiveHouseholdAccountKey] = useState<string | null>(null)
 const assignmentInbox=useAssignmentInbox(activeHouseholdPersonId)
 const familyInvites=useFamilyEventInvitations(activeHouseholdPersonId)
 const familyPush=useFamilyPush(activeHouseholdPersonId)
@@ -2027,51 +2025,47 @@ useEffect(() => {
   return () => { cancelled = true }
 }, [])
 
+  const [initialHomeLayout] = useState(readHomeWidgetLayout)
   const [homeWeatherSize, setHomeWeatherSize] =
-  useState<'small' | 'medium' | 'large'>(
-    'medium'
-  )
-
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.weather)
   const [homeTodaySize, setHomeTodaySize] =
-  useState<'small' | 'medium' | 'large'>(
-    'medium'
-  )
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.today)
+  const [homeUpcomingSize, setHomeUpcomingSize] =
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.upcoming)
+  const [homeNotesSize, setHomeNotesSize] =
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.notes)
+  const [homeMealsSize, setHomeMealsSize] =
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.meals)
+  const [homeListsSize, setHomeListsSize] =
+    useState<HomeWidgetSize>(initialHomeLayout.sizes.lists)
+  const [homeWidgetOrder, setHomeWidgetOrder] =
+    useState<HomeWidgetId[]>(initialHomeLayout.order)
+  const [homeWidgetWidths, setHomeWidgetWidths] =
+    useState(initialHomeLayout.widths)
 
-const [homeUpcomingSize, setHomeUpcomingSize] =
-  useState<'small' | 'medium' | 'large'>(
-    'small'
-  )
-
-const [homeNotesSize, setHomeNotesSize] =
-  useState<'small' | 'medium' | 'large'>(
-    'medium'
-  )
-
-const [homeMealsSize, setHomeMealsSize] =
-  useState<'small' | 'medium' | 'large'>(
-    'medium'
-  )
-
-const [homeListsSize, setHomeListsSize] =
-  useState<'small' | 'medium' | 'large'>(
-    'large'
-  )
-
-const [homeWidgetOrder, setHomeWidgetOrder] =
-  useState<HomeWidgetId[]>([
-    'weather',
-    'today',
-    'upcoming',
-    'notes',
-    'meals',
-    'lists',
+  useEffect(() => {
+    saveHomeWidgetLayout({
+      order: homeWidgetOrder,
+      sizes: {
+        weather: homeWeatherSize,
+        today: homeTodaySize,
+        upcoming: homeUpcomingSize,
+        notes: homeNotesSize,
+        meals: homeMealsSize,
+        lists: homeListsSize,
+      },
+      widths: homeWidgetWidths,
+    })
+  }, [
+    homeWidgetOrder,
+    homeWeatherSize,
+    homeTodaySize,
+    homeUpcomingSize,
+    homeNotesSize,
+    homeMealsSize,
+    homeListsSize,
+    homeWidgetWidths,
   ])
-
-  const homeEditHoldRef = useRef({
-  timer: null as number | null,
-  startX: 0,
-  startY: 0,
-})
 
 const [mealsView, setMealsView] =
   useState<'recipes' | 'planner'>(() =>
@@ -3604,9 +3598,10 @@ const handleProfileCreated = useCallback((person: Person) => {
   useState<number | null>(null)
 const [calendarPersonFilterIds, setCalendarPersonFilterIds] =
   useState<number[]>([])
-const handleHouseholdProfileChange = useCallback((name: string | null, personId: number | null) => {
+const handleHouseholdProfileChange = useCallback((name: string | null, personId: number | null, accountKey: string | null) => {
   setActiveHouseholdProfile(name)
   setActiveHouseholdPersonId(personId)
+  setActiveHouseholdAccountKey(accountKey)
   if (name === 'Home') setCalendarPersonFilterIds([])
 }, [])
 const [lists, setLists] = useState<CalendarList[]>([])
@@ -15598,7 +15593,7 @@ createPortal(
       setIsEditingHome(false)
     }}
   >
-    Done
+    Done Editing
   </button>
 )}
 
@@ -15618,130 +15613,28 @@ createPortal(
       ? 'home-widget-grid-editing'
       : ''
   }`}
-  onPointerDown={(event) => {
-    if (isEditingHome) {
-      return
-    }
 
-    const target =
-      event.target as HTMLElement
-
-    if (
-      target.closest(
-        'button, input, textarea, select, a'
-      )
-    ) {
-      return
-    }
-
-    if (
-      homeEditHoldRef.current.timer !==
-      null
-    ) {
-      window.clearTimeout(
-        homeEditHoldRef.current.timer
-      )
-    }
-
-    homeEditHoldRef.current.startX =
-      event.clientX
-
-    homeEditHoldRef.current.startY =
-      event.clientY
-
-    homeEditHoldRef.current.timer =
-      window.setTimeout(() => {
-        homeEditHoldRef.current.timer =
-          null
-
-        setIsEditingHome(true)
-      }, 1200)
-  }}
-  onPointerMove={(event) => {
-    if (
-      homeEditHoldRef.current.timer ===
-      null
-    ) {
-      return
-    }
-
-    const deltaX =
-      event.clientX -
-      homeEditHoldRef.current.startX
-
-    const deltaY =
-      event.clientY -
-      homeEditHoldRef.current.startY
-
-    if (
-      Math.hypot(deltaX, deltaY) > 12
-    ) {
-      window.clearTimeout(
-        homeEditHoldRef.current.timer
-      )
-
-      homeEditHoldRef.current.timer =
-        null
-    }
-  }}
-  onPointerUp={() => {
-    if (
-      homeEditHoldRef.current.timer !==
-      null
-    ) {
-      window.clearTimeout(
-        homeEditHoldRef.current.timer
-      )
-
-      homeEditHoldRef.current.timer =
-        null
-    }
-  }}
-  onPointerCancel={() => {
-    if (
-      homeEditHoldRef.current.timer !==
-      null
-    ) {
-      window.clearTimeout(
-        homeEditHoldRef.current.timer
-      )
-
-      homeEditHoldRef.current.timer =
-        null
-    }
-  }}
 >
      
   <SortableHomeWidget
   id="weather"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'weather'
   )}
-  className={`home-widget home-widget-weather home-widget-size-${homeWeatherSize}`}
+  height={homeWeatherSize}
+  width={homeWidgetWidths.weather}
+  onCycleHeight={() => setHomeWeatherSize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
+  )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    weather: current.weather === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-weather home-widget-size-${homeWeatherSize} home-widget-width-${homeWidgetWidths.weather}`}
 >
 
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeWeatherSize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeWeatherSize}
-    </button>
-  )}
 
   <HomeWeather />
 </SortableHomeWidget>
@@ -15749,32 +15642,22 @@ createPortal(
      <SortableHomeWidget
   id="today"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'today'
   )}
-  className={`home-widget home-widget-today home-widget-size-${homeTodaySize}`}
->
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeTodaySize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeTodaySize}
-    </button>
+  height={homeTodaySize}
+  width={homeWidgetWidths.today}
+  onCycleHeight={() => setHomeTodaySize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
   )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    today: current.today === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-today home-widget-size-${homeTodaySize} home-widget-width-${homeWidgetWidths.today}`}
+>
+
         <div className="home-widget-heading">
           <span>Today</span>
 
@@ -15862,32 +15745,22 @@ createPortal(
       <SortableHomeWidget
   id="upcoming"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'upcoming'
   )}
-  className={`home-widget home-widget-upcoming home-widget-size-${homeUpcomingSize}`}
->
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeUpcomingSize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeUpcomingSize}
-    </button>
+  height={homeUpcomingSize}
+  width={homeWidgetWidths.upcoming}
+  onCycleHeight={() => setHomeUpcomingSize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
   )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    upcoming: current.upcoming === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-upcoming home-widget-size-${homeUpcomingSize} home-widget-width-${homeWidgetWidths.upcoming}`}
+>
+
         <div className="home-widget-heading">
           <span>Upcoming</span>
 
@@ -15981,32 +15854,22 @@ createPortal(
       <SortableHomeWidget
   id="notes"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'notes'
   )}
-  className={`home-widget home-widget-notes home-widget-size-${homeNotesSize}`}
->
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeNotesSize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeNotesSize}
-    </button>
+  height={homeNotesSize}
+  width={homeWidgetWidths.notes}
+  onCycleHeight={() => setHomeNotesSize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
   )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    notes: current.notes === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-notes home-widget-size-${homeNotesSize} home-widget-width-${homeWidgetWidths.notes}`}
+>
+
         <div className="home-widget-heading">
           <span>Notes</span>
         </div>
@@ -16019,32 +15882,22 @@ createPortal(
       <SortableHomeWidget
   id="meals"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'meals'
   )}
-  className={`home-widget home-widget-meals home-widget-size-${homeMealsSize}`}
->
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeMealsSize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeMealsSize}
-    </button>
+  height={homeMealsSize}
+  width={homeWidgetWidths.meals}
+  onCycleHeight={() => setHomeMealsSize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
   )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    meals: current.meals === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-meals home-widget-size-${homeMealsSize} home-widget-width-${homeWidgetWidths.meals}`}
+>
+
         <div className="home-widget-heading">
           <span>Today's Meals</span>
 
@@ -16129,32 +15982,22 @@ createPortal(
       <SortableHomeWidget
   id="lists"
   enabled={isEditingHome}
+  onEnterEdit={() => setIsEditingHome(true)}
   order={homeWidgetOrder.indexOf(
     'lists'
   )}
-  className={`home-widget home-widget-lists home-widget-size-${homeListsSize}`}
->
-  {isEditingHome && (
-    <button
-      type="button"
-      className="home-widget-resize-button"
-      onClick={() => {
-        setHomeListsSize((current) => {
-          if (current === 'small') {
-            return 'medium'
-          }
-
-          if (current === 'medium') {
-            return 'large'
-          }
-
-          return 'small'
-        })
-      }}
-    >
-      Size: {homeListsSize}
-    </button>
+  height={homeListsSize}
+  width={homeWidgetWidths.lists}
+  onCycleHeight={() => setHomeListsSize((current) =>
+    current === 'small' ? 'medium' : current === 'medium' ? 'large' : 'small'
   )}
+  onToggleWidth={() => setHomeWidgetWidths((current) => ({
+    ...current,
+    lists: current.lists === 'half' ? 'full' : 'half',
+  }))}
+  className={`home-widget home-widget-lists home-widget-size-${homeListsSize} home-widget-width-${homeWidgetWidths.lists}`}
+>
+
         <div className="home-widget-heading">
           <span>Lists</span>
 
@@ -16270,6 +16113,7 @@ createPortal(
         <button className="mobile-settings-option" type="button"
           onClick={() => {
             setMobileSettingsOpen(false)
+            setActiveHouseholdAccountKey(null)
             setProfileSwitchRequest((request) => request + 1)
           }}>
           Switch Profile{activeHouseholdProfile ? ' · ' + activeHouseholdProfile : ''}
@@ -24426,6 +24270,15 @@ capture.captureType !== 'other' && (
   </div>, document.body
 )}
       <LiveInvitationReminder {...liveInvitationProps} suppressed={page === 'invitations'}/>
+      <ReleaseHighlights
+        accountKey={activeHouseholdAccountKey}
+        personId={activeHouseholdPersonId}
+        suppress={
+          page !== 'home' || isEditingHome || mobileSettingsOpen || showEventModal ||
+          familyInvites.familyInvitations.length > 0 ||
+          assignmentInbox.notifications.length > 0
+        }
+      />
       <HouseholdProfilePicker
         switchRequest={profileSwitchRequest}
         peopleRevision={profilePeopleRevision} onProfileCreated={handleProfileCreated}
