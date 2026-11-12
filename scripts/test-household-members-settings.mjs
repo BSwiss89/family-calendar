@@ -8,10 +8,11 @@ import { fileURLToPath } from 'node:url'
 const source = readFileSync(fileURLToPath(new URL('../src/HouseholdMembersSettings.tsx', import.meta.url)), 'utf8')
 const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8')
 
-test('Household & Members is a Settings destination with mobile home shortcut', () => {
+test('Household & Members remains a Settings destination via mobile Quick Add', () => {
   assert.match(app, /import HouseholdMembersSettings from '\.\/HouseholdMembersSettings'/)
   assert.match(app, /page === 'householdMembers' && <HouseholdMembersSettings/)
-  assert.match(app, /home-mobile-settings-button/)
+  assert.match(app, /quick-add-option quick-add-settings-option/)
+  assert.doesNotMatch(app, /className="home-mobile-settings-button"/)
   assert.match(app, /mobile-settings-panel/)
   assert.match(app, /Household &amp; Members/)
   assert.match(app, /setPage\('householdMembers'\)/)

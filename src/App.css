@@ -21185,3 +21185,40 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   :is(.home-weather-title, .home-weather-location, .home-weather-temperature, .home-weather-details, .home-weather-source) {
   color: #fff;
 }
+
+
+/* November 12 Home polish: editor grip/resize room is necessary only in
+   edit mode. In everyday view, bring all non-weather card titles to the top
+   without touching the saved width, height, or weather presentation. */
+.home-widget-grid:not(.home-widget-grid-editing) > .home-widget:not(.home-widget-weather) {
+  padding-top: 12px;
+}
+.home-widget-grid.home-widget-grid-editing > .home-widget:not(.home-widget-weather) {
+  padding-top: 80px;
+}
+
+/* Fifth action is a compact full-width row; the four existing 112px tiles
+   retain their dimensions, typography and 2x2 positions. */
+@media (max-width: 760px) {
+  .quick-add-options > .quick-add-option.quick-add-settings-option {
+    grid-column: 1 / -1;
+    min-height: 44px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 7px 12px;
+  }
+
+  .quick-add-settings-option .quick-add-option-icon {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    border-radius: 10px;
+    font-size: 19px;
+  }
+
+  .quick-add-settings-option .quick-add-option-text {
+    gap: 2px;
+  }
+}
