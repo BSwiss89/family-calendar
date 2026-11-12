@@ -5,7 +5,7 @@ import {
   acknowledgeRelease,
   isReleaseAcknowledged,
   releaseAcknowledgementKey,
-} from '../src/releaseHighlights.mjs'
+} from '../src/releaseNoticeModel.mjs'
 
 function store() {
   const map = new Map()
