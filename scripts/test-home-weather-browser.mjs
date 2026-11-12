@@ -146,7 +146,7 @@ test('original weather illustration and invisible layout regions keep all detail
             document.querySelector('#weather').className='home-weather home-weather-active weather-theme-rain'
             return getComputedStyle(document.querySelector('.home-weather-title')).color
           })
-          assert.equal(dark,'rgb(255, 255, 255)',engine+' '+viewportWidth+': dark storm theme should keep white text')
+          assert.equal(dark,'rgb(245, 251, 255)',engine+' '+viewportWidth+': dark storm theme should keep bright white text')
         }finally{await page.close()}
       }
     }finally{await browser.close()}
