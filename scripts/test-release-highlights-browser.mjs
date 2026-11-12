@@ -13,7 +13,8 @@ import {createRoot} from 'react-dom/client';
 import ReleaseHighlights from '/src/ReleaseHighlights.tsx';
 function Fixture(){
   const query = new URLSearchParams(window.location.search);
-  const [person,setPerson] = useState(query.get('person')==='home'?null:1);
+  const profileParam=query.get('person');
+  const [person,setPerson] = useState(profileParam==='home'?null:Math.max(1,Number(profileParam)||1));
   const [account,setAccount] = useState('family-calendar.profile.v1.legacy.familyadmin');
   const [pending,setPending] = useState(query.get('pending')==='1');
   window.releaseFixture = {setPerson,setAccount,setPending};
@@ -69,8 +70,9 @@ test('curated update notice is acknowledged once per person/device and yields to
           await notice.waitFor()
           await notice.getByRole('button',{name:'Maybe later'}).click()
           await notice.waitFor({state:'hidden'})
-          await page.evaluate(()=>window.releaseFixture.setPerson(1))
-          await page.evaluate(()=>window.releaseFixture.setPerson(2))
+          // A deferred notice must reappear the next time the same profile
+          // opens the calendar, without relying on batched React state flips.
+          await page.goto(origin+'/__release_fixture?person=2')
           await notice.waitFor()
           await notice.getByRole('button',{name:'Got it'}).click()
           assert.equal(await page.evaluate(()=>Object.keys(localStorage).filter(k=>k.includes('release-notice.v1.')).length),2)
