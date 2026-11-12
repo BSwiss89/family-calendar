@@ -4,7 +4,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
-import react from '@vitejs/plugin-react'
 
 const { chromium, webkit } = await import(process.env.FAMILY_CALENDAR_PLAYWRIGHT_MODULE || 'playwright')
 const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -28,7 +27,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Fixture))
 test('curated update notice is acknowledged once per person/device and yields to event alerts', {timeout:150000}, async t => {
   const server = await createServer({
     root:fileURLToPath(new URL('../', import.meta.url)),
-    plugins:[react(),{name:'release-notes-fixture',configureServer(vite){
+    plugins:[{name:'release-notes-fixture',configureServer(vite){
       vite.middlewares.use('/__release_fixture',async(_req,res,next)=>{
         try {res.setHeader('Content-Type','text/html');res.end(await vite.transformIndexHtml('/__release_fixture',html))}
         catch(error){next(error)}
@@ -48,11 +47,13 @@ test('curated update notice is acknowledged once per person/device and yields to
         try {
           const page=await context.newPage()
           page.setDefaultTimeout(10000)
-          page.on('pageerror',err=>{throw err})
+          const pageErrors = []
+          page.on('pageerror', err => pageErrors.push(err.message))
           await page.goto(origin+'/__release_fixture')
           const notice=page.getByRole('dialog',{name:"What's new in Family Calendar"})
           await notice.waitFor()
           assert.equal(await notice.locator('li').count(),3)
+          assert.deepEqual(pageErrors, [], 'component must not raise a browser error')
           const rect=await notice.boundingBox()
           assert.ok(rect && rect.width<=390 && rect.x>=0 && rect.y>=0 && rect.y+rect.height<=844)
           assert.equal(await page.locator('#calendar').textContent(),'Calendar works normally')
