@@ -1,0 +1,75 @@
+/* Low-priority, once-per-release announcement. Event invitations use
+   z-index 29000; the profile-selection gate uses z-index 100000. */
+.release-highlights-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 18000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+}
+.release-highlights-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(17, 28, 43, .58);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.release-highlights-dialog {
+  position: relative;
+  box-sizing: border-box;
+  width: min(440px, 100%);
+  max-height: min(640px, calc(100dvh - 28px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #f6faff;
+  color: #263c56;
+  border: 1px solid #c8d8ea;
+  border-radius: 17px;
+  padding: 20px;
+  box-shadow: 0 20px 75px rgba(0, 0, 0, .3);
+}
+.release-highlights-dialog:focus { outline: none; }
+.release-highlights-eyebrow {
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: #59738c;
+}
+.release-highlights-dialog h2 { margin: 6px 0 10px; font-size: 22px; line-height: 1.2; }
+.release-highlights-dialog p { margin: 0 0 12px; font-size: 13px; line-height: 1.45; }
+.release-highlights-list {
+  margin: 0 0 18px;
+  padding-left: 22px;
+  display: grid;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.release-highlights-list li { padding-left: 2px; }
+.release-highlights-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+.release-highlights-actions button {
+  min-height: 44px;
+  padding: 9px 16px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 750;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.release-highlights-later { color: #365c84; background: white; border: 1px solid #bbcee3; }
+.release-highlights-acknowledge { color: white; background: #287147; border: 1px solid #287147; }
+.release-highlights-dialog .release-highlights-footnote {
+  color: #6a7e92;
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 14px 0 0;
+}
+.release-highlights-dialog button:focus-visible { outline: 3px solid #4e91df; outline-offset: 2px; }
+@media (max-width: 380px) {
+  .release-highlights-dialog { padding: 16px; }
+  .release-highlights-dialog h2 { font-size: 20px; }
+}

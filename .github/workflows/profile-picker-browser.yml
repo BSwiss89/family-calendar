@@ -5,6 +5,9 @@ on:
     paths:
       - 'src/HouseholdProfilePicker*'
       - 'src/householdProfileSelection*'
+      - 'src/ReleaseHighlights*'
+      - 'src/releaseNoticeModel*'
+      - 'scripts/test-release-highlights-browser.mjs'
       - 'src/App.tsx'
       - 'src/App.css'
       - 'src/homeWidgetLayout.ts'
@@ -45,3 +48,7 @@ jobs:
         env:
           FAMILY_CALENDAR_PLAYWRIGHT_MODULE: ${{ runner.temp }}/profile-browser-tools/node_modules/playwright/index.mjs
         run: node --test scripts/test-home-weather-browser.mjs
+      - name: Verify update acknowledgement and invitation priority in Chromium and WebKit
+        env:
+          FAMILY_CALENDAR_PLAYWRIGHT_MODULE: ${{ runner.temp }}/profile-browser-tools/node_modules/playwright/index.mjs
+        run: node --test scripts/test-release-highlights-browser.mjs
