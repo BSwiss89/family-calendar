@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { CURRENT_RELEASE, acknowledgeRelease, isReleaseAcknowledged, releaseAcknowledgementKey } from './releaseHighlights.mjs'
+import { CURRENT_RELEASE, acknowledgeRelease, isReleaseAcknowledged, releaseAcknowledgementKey } from './releaseNoticeModel.mjs'
 import './ReleaseHighlights.css'
 
 type Props = {
