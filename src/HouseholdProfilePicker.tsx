@@ -18,7 +18,7 @@ type Props = {
   switchRequest: number
   peopleRevision: number
   onProfileCreated: (person: ProfilePerson) => void
-  onProfileChange: (name: string | null, personId: number | null) => void
+  onProfileChange: (name: string | null, personId: number | null, accountKey: string | null) => void
 }
 
 type Screen = 'checking' | 'choose' | 'create' | 'ready' | 'error'
@@ -107,7 +107,7 @@ export default function HouseholdProfilePicker({ switchRequest, peopleRevision, 
       if (!auth || typeof auth !== 'object' || !('enabled' in auth) ||
         auth.enabled !== true) {
         // Legacy, authentication-disabled calendars retain their existing UI.
-        onProfileChange(null,null)
+        onProfileChange(null, null, null)
         setScreen('ready')
         return
       }
@@ -164,12 +164,12 @@ export default function HouseholdProfilePicker({ switchRequest, peopleRevision, 
         }
         const person = selection.kind === 'person'
           ? records.find((item) => item.id === selection.personId) : null
-        onProfileChange(person?.name ?? 'Home',person?.id ?? null)
+        onProfileChange(person?.name ?? 'Home', person?.id ?? null, key)
         setScreen('ready')
       } else {
         if (!selection) {
           rememberedInMemory.current = null
-          onProfileChange(null, null)
+          onProfileChange(null, null, null)
         }
         setScreen('choose')
       }
@@ -214,7 +214,7 @@ export default function HouseholdProfilePicker({ switchRequest, peopleRevision, 
       } catch {
         setNotSaved(true)
       }
-      onProfileChange(person?.name ?? 'Home',person?.id ?? null)
+      onProfileChange(person?.name ?? 'Home', person?.id ?? null, storageKey)
       setScreen('ready')
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : 'Could not save device profile.')
@@ -281,7 +281,7 @@ export default function HouseholdProfilePicker({ switchRequest, peopleRevision, 
       } catch {
         setNotSaved(true)
       }
-      onProfileChange(newPerson.name,newPerson.id)
+      onProfileChange(newPerson.name, newPerson.id, storageKey)
       setScreen('ready')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not save the profile.'
