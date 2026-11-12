@@ -26,6 +26,8 @@ jobs:
         run: npm run build
       - name: Verify Home layout editor and responsive widget sizing
         run: node --experimental-strip-types --test scripts/test-home-widget-layout.mjs
+      - name: Verify shared daily Notes reset, authentication, conflict and Quick Add
+        run: node --test scripts/test-family-daily-notes.mjs
       - name: Verify weather condition and daylight scene mapping
         run: node --experimental-strip-types --test scripts/test-home-weather-scene.mjs
       - name: Verify curated release announcement and per-person acknowledgement

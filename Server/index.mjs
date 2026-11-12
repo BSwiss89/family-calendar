@@ -7,6 +7,7 @@ import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
+import { installDailyFamilyNotes } from './daily-family-notes.mjs'
 import { installLiveNotificationInboxPilot } from './live-notification-inbox.mjs'
 import {
   applyAttributedEventMutation, captureEventMutationAttribution, attributeNewEvent,
@@ -620,6 +621,8 @@ app.use(express.json())
 // Required mode protects all subsequent calendar APIs, uploads and pages.
 // Disabled by default; never enable public Funnel before a tested rollout.
 installFamilyAuth(app, database, __dirname)
+// Authenticated household scratchpad: RAM-only; never write to SQLite or backups.
+installDailyFamilyNotes(app)
 // User-approved one-household notification pilot. Disabled by default;
 // source and database migration are never enabled without LIVE operator opt-in.
 installLiveNotificationInboxPilot(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })

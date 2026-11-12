@@ -82,7 +82,12 @@ test('mobile People Edit opens the actual photo editor', {timeout:180000}, async
               })
               await page.goto(origin+'/__mobile_editor')
               if(touch) {
-                await page.getByRole('button',{name:'Settings',exact:true}).first()[touch?'tap':'click']()
+                if(mode==='fixed') {
+                  await page.locator('.mobile-capture-button').tap()
+                  await page.locator('.quick-add-settings-option').tap()
+                } else {
+                  await page.getByRole('button',{name:'Settings',exact:true}).first().tap()
+                }
                 await page.getByRole('button',{name:/Manage People/})[touch?'tap':'click']()
               } else {
                 await page.locator('.sidebar-nav-button').filter({hasText:'People'}).click()
