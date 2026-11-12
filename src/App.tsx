@@ -1,4 +1,5 @@
 import { normalizePersonPhoto } from './normalizePersonPhoto'
+import { getHomeWeatherScene, type HomeWeatherPeriod } from './homeWeatherScene'
 import {
   readHomeWidgetLayout,
   saveHomeWidgetLayout,
@@ -590,138 +591,43 @@ type HomeWeatherData = {
   low: number
   precipitationChance: number
   theme: string
-}
-
-function getHomeWeatherTheme(
-  weatherCode: number,
-  isDay: boolean
-) {
-  if (weatherCode === 0) {
-    return isDay
-      ? 'weather-theme-sunny'
-      : 'weather-theme-night'
-  }
-
-  if (
-    weatherCode === 1 ||
-    weatherCode === 2 ||
-    weatherCode === 3
-  ) {
-    return 'weather-theme-cloudy'
-  }
-
-  if (
-    weatherCode === 45 ||
-    weatherCode === 48
-  ) {
-    return 'weather-theme-fog'
-  }
-
-  if (
-    (weatherCode >= 51 &&
-      weatherCode <= 67) ||
-    (weatherCode >= 80 &&
-      weatherCode <= 82)
-  ) {
-    return 'weather-theme-rain'
-  }
-
-  if (
-    (weatherCode >= 71 &&
-      weatherCode <= 77) ||
-    weatherCode === 85 ||
-    weatherCode === 86
-  ) {
-    return 'weather-theme-snow'
-  }
-
-  if (
-    weatherCode >= 95 &&
-    weatherCode <= 99
-  ) {
-    return 'weather-theme-storm'
-  }
-
-  return 'weather-theme-cloudy'
+  period: HomeWeatherPeriod
 }
 
 function HomeWeatherArtwork({
   theme,
+  period,
 }: {
   theme: string
+  period: HomeWeatherPeriod
 }) {
+  const isNight = period === 'night'
+  const isCloudy = theme === 'weather-theme-cloudy'
+  const isRain = theme === 'weather-theme-rain'
+  const isStorm = theme === 'weather-theme-storm'
+  const isSnow = theme === 'weather-theme-snow'
+  const isSleet = theme === 'weather-theme-sleet'
+  const showCloud = isCloudy || isRain || isStorm || isSnow || isSleet
   return (
-    <div
-      className={`home-weather-artwork ${theme}`}
-      aria-hidden="true"
-    >
-      {theme === 'weather-theme-sunny' && (
-        <>
-          <div className="weather-art-sun" />
-        </>
+    <div className={`home-weather-artwork ${theme}`} aria-hidden="true">
+      {isNight && <div className="weather-art-moon" />}
+      {!isNight && (theme === 'weather-theme-sunny' || isCloudy) && (
+        <div className={isCloudy ? 'weather-art-sun weather-art-sun-behind' : 'weather-art-sun'} />
       )}
-
-      {theme === 'weather-theme-night' && (
-        <>
-          <div className="weather-art-moon" />
-          <div className="weather-art-cloud weather-art-cloud-small" />
-        </>
-      )}
-
-      {theme === 'weather-theme-cloudy' && (
-        <>
-          <div className="weather-art-sun weather-art-sun-behind" />
-          <div className="weather-art-cloud weather-art-cloud-main" />
-        </>
-      )}
-
-      {theme === 'weather-theme-rain' && (
-        <>
-          <div className="weather-art-cloud weather-art-cloud-main" />
-
-          <div className="weather-art-rain">
-            <span />
-            <span />
-            <span />
-            <span />
-          </div>
-        </>
-      )}
-
-      {theme === 'weather-theme-storm' && (
-        <>
-          <div className="weather-art-cloud weather-art-cloud-main" />
-
-          <div className="weather-art-lightning">
-            ⚡
-          </div>
-
-          <div className="weather-art-rain">
-            <span />
-            <span />
-            <span />
-          </div>
-        </>
-      )}
-
-      {theme === 'weather-theme-snow' && (
-        <>
-          <div className="weather-art-cloud weather-art-cloud-main" />
-
-          <div className="weather-art-snow">
-            <span>❄</span>
-            <span>❄</span>
-            <span>❄</span>
-          </div>
-        </>
-      )}
-
-      {theme === 'weather-theme-fog' && (
-        <div className="weather-art-fog">
-          <span />
-          <span />
-          <span />
+      {showCloud && <div className="weather-art-cloud weather-art-cloud-main" />}
+      {(isRain || isStorm || isSleet) && (
+        <div className="weather-art-rain">
+          <span /><span /><span /><span />
         </div>
+      )}
+      {(isSnow || isSleet) && (
+        <div className="weather-art-snow">
+          <span>❄</span><span>❄</span><span>❄</span>
+        </div>
+      )}
+      {isStorm && <div className="weather-art-lightning">⚡</div>}
+      {theme === 'weather-theme-fog' && (
+        <div className="weather-art-fog"><span /><span /><span /></div>
       )}
     </div>
   )
@@ -1067,15 +973,15 @@ function HomeWeather() {
           return
         }
 
+        const scene = getHomeWeatherScene(weatherCode, isDay)
+
         setWeather({
           icon: getWeatherIcon(
             weatherCode,
             isDay
           ),
-          theme: getHomeWeatherTheme(
-  weatherCode,
-  isDay
-),
+          theme: scene.theme,
+          period: scene.period,
           temperature:
             Math.round(temperature),
           feelsLike:
@@ -1137,7 +1043,7 @@ function HomeWeather() {
       ? `home-weather-active ${
           weather?.theme ??
           'weather-theme-cloudy'
-        }`
+        } ${weather?.period === 'night' ? 'weather-period-night' : 'weather-period-day'}`
       : 'home-weather-setup'
   }`}
 >
@@ -1229,7 +1135,7 @@ function HomeWeather() {
 
             <div className="home-weather-main">
               <div className="home-weather-art-panel" aria-hidden="true">
-                <HomeWeatherArtwork theme={weather.theme} />
+                <HomeWeatherArtwork theme={weather.theme} period={weather.period} />
               </div>
               <div className="home-weather-temperature-panel">
                 <strong className="home-weather-temperature">
