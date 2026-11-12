@@ -10,6 +10,8 @@ on:
       - 'scripts/test-release-highlights-browser.mjs'
       - 'src/App.tsx'
       - 'src/App.css'
+      - 'src/FamilyDailyNotes*'
+      - 'scripts/test-home-quickadd-notes-browser.mjs'
       - 'src/homeWidgetLayout.ts'
       - 'scripts/test-home-widget-layout.mjs'
       - 'scripts/test-home-weather-browser.mjs'
@@ -44,6 +46,10 @@ jobs:
         env:
           FAMILY_CALENDAR_PLAYWRIGHT_MODULE: ${{ runner.temp }}/profile-browser-tools/node_modules/playwright/index.mjs
         run: node --test scripts/test-mobile-profile-editor.mjs
+      - name: Verify Quick Add five-action fit and Home Notes top alignment in Chromium and WebKit
+        env:
+          FAMILY_CALENDAR_PLAYWRIGHT_MODULE: ${{ runner.temp }}/profile-browser-tools/node_modules/playwright/index.mjs
+        run: node --test scripts/test-home-quickadd-notes-browser.mjs
       - name: Verify weather card readability across widths and heights in Chromium and WebKit
         env:
           FAMILY_CALENDAR_PLAYWRIGHT_MODULE: ${{ runner.temp }}/profile-browser-tools/node_modules/playwright/index.mjs
