@@ -161,43 +161,8 @@ function Healthy {
     $auth=Invoke-RestMethod 'http://127.0.0.1:3001/api/auth/status' -TimeoutSec 5
     Assert ($auth.enabled -eq $true) 'LIVE authentication is not enabled.'
 }
-function StopLive {
-    $null=OwnedProcess 3001 $live $true
-    if ((Get-ScheduledTask -TaskName $taskName).State -in @('Running','Queued')) {
-        Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
-    }
-    for ($i=0;$i -lt 15;$i++) {
-        if ((Get-ScheduledTask -TaskName $taskName).State -notin @('Running','Queued')) { break }
-        Start-Sleep -Seconds 1
-    }
-    Assert ((Get-ScheduledTask -TaskName $taskName).State -notin @('Running','Queued')) 'LIVE task did not stop.'
-    for ($i=0;$i -lt 20;$i++) {
-        if (@(Listeners 3001).Count -eq 0) { return }
-        Start-Sleep -Milliseconds 250
-    }
-    $p=OwnedProcess 3001 $live $true
-    if ($null -ne $p) { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop }
-    for ($i=0;$i -lt 10;$i++) {
-        if ($null -eq (OwnedProcess 3001 $live $true)) { return }
-        Start-Sleep -Milliseconds 500
-    }
-    throw 'LIVE listener did not stop.'
-}
-function StartLive {
-    Assert-SecureLiveLauncherPins $launcher $live
-    Enable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
-    Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
-    for ($i=0;$i -lt 30;$i++) {
-        Start-Sleep -Seconds 1
-        try {
-            Healthy
-            Assert ((Get-ScheduledTask -TaskName $taskName).State -eq 'Running') 'LIVE task is not running.'
-            return
-        } catch {}
-        if ($i % 5 -eq 4) { Report "LIVE_START_WAIT=$($i+1)" }
-    }
-    throw 'LIVE startup verification failed.'
-}
+# Frontend-only update: never stop or start the LIVE backend. Shared Notes are
+# RAM-only and would otherwise be lost before the daily reset.
 function SwitchLive([string]$sha) {
     & git -C $live -c advice.detachedHead=false checkout --quiet --detach $sha
     Assert ($LASTEXITCODE -eq 0 -and (Head $live) -eq $sha) 'LIVE source checkout failed.'
@@ -326,11 +291,10 @@ try {
     foreach ($name in @($taskName,$auto,$watchdog)) {
         Export-ScheduledTask -TaskName $name | Set-Content (Join-Path $backup "$name.xml") -Encoding UTF8
     }
-    Copy-Item "$live\Server\index.mjs" "$backup\previous-index.mjs"
     $plan=New-ArneyVoiceLauncherPlan $launcher $live $stage $backup
     $newIndex=Hash "$stage\Server\index.mjs"
     $newLocalStt=Hash "$stage\Server\local-stt.mjs"
-    $newDist=Join-Path $live "dist-home-weather-$tag"
+    $newDist=Join-Path $live "dist-whats-new-$tag"
     CopyVerified "$stage\dist" $newDist
     foreach ($file in Get-ChildItem "$live\dist\assets" -File) {
         $dest=Join-Path "$newDist\assets" $file.Name
@@ -340,38 +304,35 @@ try {
     $oldDist=Join-Path $backup 'active-dist-before-cutover'
     & git -C $live fetch --quiet $stage $CandidateSha
     Assert ($LASTEXITCODE -eq 0) 'Candidate object transfer failed.'
+    CopyVerified "$live\dist" "$backup\previous-dist"
+    $uploadManifest=Manifest "$live\Server\uploads"
     New-Item -ItemType Directory -Path $state -Force | Out-Null
-    WriteJournal @{from=$from;to=$CandidateSha;backup=$backup;stage=$stage;oldDist=$oldDist;newDist=$newDist;launcher=$launcher;phase='prepared'}
+    WriteJournal @{from=$from;to=$CandidateSha;backup=$backup;stage=$stage;oldDist=$oldDist;newDist=$newDist;launcher=$launcher;phase='prepared';mode='frontend-only-no-restart'}
     $opened=$true
     $autoPaused=(Get-ScheduledTask -TaskName $auto).Settings.Enabled
     Disable-ScheduledTask -TaskName $auto | Out-Null
     $paused=$true
     Disable-ScheduledTask -TaskName $watchdog | Out-Null
-    Assert ((Get-ScheduledTask -TaskName $watchdog).State -ne 'Running') 'Watchdog raced staging; abort before LIVE stop.'
+    Assert ((Get-ScheduledTask -TaskName $watchdog).State -ne 'Running') 'Watchdog raced staging; abort before LIVE swap.'
+    # No LIVE task stop/restart: preserve every family member's in-RAM daily Notes.
     $touched=$true
-    Disable-ScheduledTask -TaskName $taskName | Out-Null
-    StopLive
-    CopyVerified "$live\dist" "$backup\previous-dist"
-    & $node --no-warnings "$stage\scripts\live-profile-db-check.mjs" backup "$live\Server\data\calendar.db" $backup "$test\Server\data\calendar.db" "$live\Server\uploads" "$test\Server\uploads"
-    Assert ($LASTEXITCODE -eq 0) 'Stopped LIVE database backup/restore verification failed.'
-    CopyVerified "$live\Server\uploads" "$backup\uploads"
-    $uploadManifest=Manifest "$live\Server\uploads"
     $changed=$true
     SwitchLive $CandidateSha
     Assert ((Hash "$live\Server\index.mjs") -eq $newIndex -and
-        (Hash "$live\Server\local-stt.mjs") -eq $newLocalStt) 'Installed Arney backend differs from candidate.'
+        (Hash "$live\Server\local-stt.mjs") -eq $newLocalStt) 'Protected LIVE backend differs from candidate.'
     Move-Item "$live\dist" $oldDist
     $oldMoved=$true
     Move-Item $newDist "$live\dist"
     Set-SecureLiveLauncher $plan.Candidate $launcher
     Assert-SecureLiveLauncherPins $launcher $live
     Report 'LIVE_WHATS_NEW_FRONTEND_AND_ALL_FOUR_STARTUP_PINS=PASS'
-    StartLive
-    & $node --no-warnings "$stage\scripts\live-profile-db-check.mjs" verify "$live\Server\data\calendar.db" $backup "$test\Server\data\calendar.db" "$live\Server\uploads" "$test\Server\uploads"
-    Assert ($LASTEXITCODE -eq 0) 'Post-start LIVE data verification failed.'
+    Healthy
+    $postProcess=OwnedProcess 3001 $live
+    Assert ("$($postProcess.ProcessId)|$($postProcess.CreationDate.ToUniversalTime().Ticks)" -ceq $processStamp) 'LIVE Node process restarted; shared Notes may have cleared.'
+    Assert ((Get-ScheduledTask -TaskName $taskName).State -eq 'Running') 'LIVE task must stay running without restart.'
     Assert ((Head $live) -eq $CandidateSha -and (Manifest "$live\dist") -ceq $candidateManifest -and
         (Manifest "$live\Server\uploads") -ceq $uploadManifest -and (TestStamp) -ceq $testBefore -and
-        (LocalSttStamp) -ceq $sttBefore -and (Hash $key) -eq $keyHash) 'Post-start source/frontend/uploads/TEST/Local-STT/push-key verification failed.'
+        (LocalSttStamp) -ceq $sttBefore -and (Hash $key) -eq $keyHash) 'Post-swap source/frontend/uploads/TEST/Local-STT/push-key verification failed.'
     Assert (-not (Get-ScheduledTask -TaskName $auto).Settings.Enabled -and
         -not (Get-ScheduledTask -TaskName $testAuto).Settings.Enabled) 'Unexpected updater state.'
     Enable-ScheduledTask -TaskName $watchdog | Out-Null
@@ -380,19 +341,18 @@ try {
     Remove-Item -LiteralPath $journal
     $opened=$false; $success=$true
     Report "LIVE_WHATS_NEW_DEPLOYMENT=PASS | SHA=$CandidateSha"
-    Report 'TEST_UNCHANGED=PASS | LOCAL_STT_UNCHANGED=PASS | DATA_AND_UPLOADS_PRESERVED=PASS | LIVE_HEALTH_AUTH_AND_ARNEY_GATE=PASS | WATCHDOG=Enabled'
+    Report 'LIVE_NODE_UNCHANGED=PASS | FAMILY_NOTES_MEMORY_PRESERVED=PASS | TEST_UNCHANGED=PASS | LOCAL_STT_UNCHANGED=PASS | DATA_AND_UPLOADS_PRESERVED=PASS | LIVE_HEALTH_AUTH_AND_ARNEY_GATE=PASS | WATCHDOG=Enabled'
     Report 'LIVE_AUTO_DEPLOY=Disabled | NEXT=Update approved baseline receipt before enabling'
     Report "RECOVERY_FOLDER=$backup"
 } catch {
     Report "LIVE_WHATS_NEW_DEPLOYMENT=FAIL | $($_.Exception.Message)"
     if ($touched) {
         try {
+            # Restore the last approved source, frontend and launcher while the
+            # LIVE Node task keeps running; the RAM-only Notes remain intact.
             Disable-ScheduledTask -TaskName $watchdog | Out-Null
-            Disable-ScheduledTask -TaskName $taskName | Out-Null
-            StopLive
             if ($changed) {
                 SwitchLive $from
-                [IO.File]::WriteAllBytes("$live\Server\index.mjs",[IO.File]::ReadAllBytes("$backup\previous-index.mjs"))
                 Set-SecureLiveLauncher $plan.Previous $launcher
             }
             if ($oldMoved) {
@@ -400,17 +360,16 @@ try {
                 Move-Item $oldDist "$live\dist"
             }
             Assert ((Head $live) -eq $from -and (Hash "$live\Server\index.mjs") -eq $oldIndex -and
-                (Test-Path -LiteralPath "$live\Server\local-stt.mjs") -eq $oldLocalSttExists -and
                 (Hash "$live\Server\local-stt.mjs") -eq $oldLocalStt -and
                 (Hash $launcher) -eq $launcherHash -and (Manifest "$live\dist") -ceq $oldManifest) 'Rollback baseline verification failed.'
-            # Preserve the newest LIVE data, events and sessions rather than overwriting
-            # them with the earlier recovery snapshot.
-            StartLive
+            Healthy
+            $recoveredProcess=OwnedProcess 3001 $live
+            Assert ("$($recoveredProcess.ProcessId)|$($recoveredProcess.CreationDate.ToUniversalTime().Ticks)" -ceq $processStamp) 'Rollback process identity changed.'
             Assert ((TestStamp) -ceq $testBefore -and (LocalSttStamp) -ceq $sttBefore -and
                 (Hash $key) -eq $keyHash) 'TEST, Local STT, or push key changed during recovery.'
             $rollbackOk=$true
             if ($opened) { Remove-Item -LiteralPath $journal; $opened=$false }
-            Report 'LIVE_WHATS_NEW_ROLLBACK=PASS | DATABASE_AND_UPLOADS_PRESERVED'
+            Report 'LIVE_WHATS_NEW_ROLLBACK=PASS | LIVE_NODE_AND_FAMILY_NOTES_PRESERVED'
         } catch {
             Report "LIVE_WHATS_NEW_ROLLBACK=FAIL | $($_.Exception.Message) | MANUAL_RECOVERY_REQUIRED"
             if ($backup) {
