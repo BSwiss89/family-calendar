@@ -55,6 +55,24 @@ jobs:
           )) {
             if (-not $script.Contains($marker)) { throw "Missing release guard marker: $marker" }
           }
+      - name: Verify LIVE daily Notes backend/frontend launcher and guarded rollback
+        shell: powershell
+        run: |
+          $script=Get-Content -LiteralPath '.\scripts\deploy-live-daily-notes-home.ps1' -Raw
+          $tokens=$null; $errors=$null
+          $null=[System.Management.Automation.Language.Parser]::ParseInput($script,[ref]$tokens,[ref]$errors)
+          if (@($errors).Count -gt 0) { throw 'LIVE Notes guard PowerShell syntax failed.' }
+          foreach ($marker in @('661510f12ba22cf87a157b68bbe75bf41ecfe0a9',
+            '22a6b526a94dceb2104b4f0e4ac9d3ce42ec3578',
+            '3ba93f3e7f78bf0d73003a245b98e0c6695f1ff7',
+            'LIVE_DAILY_NOTES_PREFLIGHT=PASS','LIVE_DAILY_NOTES_DEPLOYMENT=PASS',
+            'scripts/test-family-daily-notes.mjs','family-daily-note',
+            'LocalSttStamp','TestStamp','CopyVerified','New-LiveDailyNotesLauncherPlan',
+            'LIVE_DAILY_NOTES_ROLLBACK=PASS')) {
+            if (-not $script.Contains($marker)) { throw "Missing LIVE Notes guard marker: $marker" }
+          }
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '.\scripts\test-live-daily-notes-launcher-plan.ps1'
+          if ($LASTEXITCODE -ne 0) { throw 'LIVE Notes pin and rollback fixture failed.' }
       - name: Verify guarded LIVE Home/weather and release notice syntax and safety pins
         shell: powershell
         run: |
