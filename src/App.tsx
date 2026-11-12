@@ -1,5 +1,6 @@
 import { normalizePersonPhoto } from './normalizePersonPhoto'
 import { getHomeWeatherScene, type HomeWeatherPeriod } from './homeWeatherScene'
+import { fetchHomeForecast, HomeForecastError } from './homeWeatherFetch'
 import {
   readHomeWidgetLayout,
   saveHomeWidgetLayout,
@@ -238,11 +239,14 @@ async function getCoordinatesForZip(
   }
 
   const request = (async () => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 8000)
     try {
       const response = await fetch(
         `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
           zipCode
-        )}&count=1&language=en&format=json&countryCode=US`
+        )}&count=1&language=en&format=json&countryCode=US`,
+        { signal: controller.signal }
       )
 
       if (!response.ok) {
@@ -266,14 +270,14 @@ async function getCoordinatesForZip(
       }
     } catch {
       return null
+    } finally {
+      clearTimeout(timeout)
     }
   })()
 
-  zipCoordinateCache.set(
-    zipCode,
-    request
-  )
-
+  zipCoordinateCache.set(zipCode, request)
+  // A transient failed lookup must not poison future Retry attempts.
+  void request.then(value => { if (!value) zipCoordinateCache.delete(zipCode) })
   return request
 }
 
@@ -587,10 +591,10 @@ function CompactEventWeather({
 type HomeWeatherData = {
   icon: string
   temperature: number
-  feelsLike: number
-  high: number
-  low: number
-  precipitationChance: number
+  feelsLike: number | null
+  high: number | null
+  low: number | null
+  precipitationChance: number | null
   theme: string
   period: HomeWeatherPeriod
 }
@@ -879,6 +883,7 @@ function HomeWeather() {
 
   const [weatherError, setWeatherError] =
     useState('')
+  const [weatherRetryKey, setWeatherRetryKey] = useState(0)
 
   const [isEditingZip, setIsEditingZip] =
     useState(zipCode === '')
@@ -900,112 +905,42 @@ function HomeWeather() {
     setIsLoading(true)
 
     const loadWeather = async () => {
-      const coordinates =
-        await getCoordinatesForZip(
-          zipCode
-        )
-
-      if (!coordinates) {
-        if (active) {
-          setWeatherError(
-            'Unable to find that ZIP code.'
-          )
-          setIsLoading(false)
-        }
-
-        return
-      }
-
       try {
-        const response = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${coordinates.latitude}&longitude=${coordinates.longitude}&current=temperature_2m,apparent_temperature,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=1`
-        )
-
-        if (!response.ok) {
-          throw new Error(
-            'Weather request failed.'
-          )
-        }
-
-        const data =
-          await response.json()
-
-        const temperature =
-          data.current?.temperature_2m
-
-        const feelsLike =
-          data.current
-            ?.apparent_temperature
-
-        const weatherCode =
-          data.current?.weather_code
-
-        const isDay =
-          data.current?.is_day !== 0
-
-        const high =
-          data.daily
-            ?.temperature_2m_max?.[0]
-
-        const low =
-          data.daily
-            ?.temperature_2m_min?.[0]
-
-        const precipitationChance =
-          data.daily
-            ?.precipitation_probability_max?.[0]
-
-        if (
-          typeof temperature !==
-            'number' ||
-          typeof feelsLike !==
-            'number' ||
-          typeof weatherCode !==
-            'number' ||
-          typeof high !== 'number' ||
-          typeof low !== 'number'
-        ) {
-          throw new Error(
-            'Weather data was incomplete.'
-          )
-        }
-
-        if (!active) {
+        const coordinates = await getCoordinatesForZip(zipCode)
+        if (!active) return
+        if (!coordinates) {
+          setWeatherError('Weather location lookup failed. Check your connection.')
           return
         }
 
-        const scene = getHomeWeatherScene(weatherCode, isDay)
-
+        const data = await fetchHomeForecast(coordinates)
+        if (!active) return
+        const scene = getHomeWeatherScene(data.weatherCode, data.isDay)
         setWeather({
-          icon: getWeatherIcon(
-            weatherCode,
-            isDay
-          ),
+          icon: getWeatherIcon(data.weatherCode, data.isDay),
           theme: scene.theme,
           period: scene.period,
-          temperature:
-            Math.round(temperature),
-          feelsLike:
-            Math.round(feelsLike),
-          high: Math.round(high),
-          low: Math.round(low),
-          precipitationChance:
-            typeof precipitationChance ===
-            'number'
-              ? Math.round(
-                  precipitationChance
-                )
-              : 0,
+          temperature: Math.round(data.temperature),
+          feelsLike: data.feelsLike === null ? null : Math.round(data.feelsLike),
+          high: data.high === null ? null : Math.round(data.high),
+          low: data.low === null ? null : Math.round(data.low),
+          precipitationChance: data.precipitationChance === null
+            ? null : Math.round(data.precipitationChance),
         })
-
-        setIsLoading(false)
-      } catch {
-        if (active) {
-          setWeatherError(
-            'Weather is unavailable right now.'
-          )
-          setIsLoading(false)
-        }
+      } catch (error) {
+        if (!active) return
+        const detail = error instanceof HomeForecastError
+          ? error.reason === 'timeout'
+            ? 'The weather request timed out.'
+            : error.reason === 'invalid'
+              ? 'Weather data is incomplete.'
+              : error.reason === 'http'
+                ? 'The weather service rejected the request.'
+                : 'Cannot reach the weather service.'
+          : 'Weather could not be loaded.'
+        setWeatherError(detail)
+      } finally {
+        if (active) setIsLoading(false)
       }
     }
 
@@ -1014,7 +949,7 @@ function HomeWeather() {
     return () => {
       active = false
     }
-  }, [zipCode])
+  }, [zipCode, weatherRetryKey])
 
   function saveHomeZipCode() {
     const cleanZipCode =
@@ -1108,7 +1043,16 @@ function HomeWeather() {
 
       {weatherError && (
         <div className="home-weather-message">
-          {weatherError}
+          <span>{weatherError}</span>
+          {zipCode && !isEditingZip && (
+            <button
+              className="home-weather-retry-button"
+              type="button"
+              onClick={() => setWeatherRetryKey(key => key + 1)}
+            >
+              Retry weather
+            </button>
+          )}
         </div>
       )}
 
@@ -1148,15 +1092,15 @@ function HomeWeather() {
             <div className="home-weather-details">
               <span className="home-weather-detail-pill">
                 <span className="home-weather-detail-label">Feels like</span>
-                <strong>{weather.feelsLike}{'\u00B0'}</strong>
+                <strong>{weather.feelsLike === null ? '—' : `${weather.feelsLike}°`}</strong>
               </span>
               <span className="home-weather-detail-pill">
                 <span className="home-weather-detail-label">High / Low</span>
-                <strong>H {weather.high}{'\u00B0'} · L {weather.low}{'\u00B0'}</strong>
+                <strong>H {weather.high === null ? '—' : `${weather.high}°`} · L {weather.low === null ? '—' : `${weather.low}°`}</strong>
               </span>
               <span className="home-weather-detail-pill">
                 <span className="home-weather-detail-label">Rain</span>
-                <strong>{weather.precipitationChance}%</strong>
+                <strong>{weather.precipitationChance === null ? '—' : `${weather.precipitationChance}%`}</strong>
               </span>
             </div>
           </div>
