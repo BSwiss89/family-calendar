@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import './FamilyDailyNotes.css'
 
 type DailyNote = { day: string; text: string; revision: number }
@@ -10,6 +10,16 @@ function isDailyNote(value: unknown): value is DailyNote {
     typeof note.text === 'string' && typeof note.revision === 'number'
 }
 
+// Keep every note readable on small cards. Favor larger type when content fits;
+// at 16px leave the textarea scrollable rather than clipping or zooming iOS.
+function fitNoteFont(textarea: HTMLTextAreaElement) {
+  if (textarea.clientWidth < 1 || textarea.clientHeight < 1) return
+  for (let size = 26; size >= 16; size -= 1) {
+    textarea.style.fontSize = `${size}px`
+    if (textarea.scrollHeight <= textarea.clientHeight + 1) return
+  }
+}
+
 export default function FamilyDailyNotes({ disabled = false }: { disabled?: boolean }) {
   const [snapshot, setSnapshot] = useState<DailyNote | null>(null)
   const [draft, setDraft] = useState('')
@@ -19,6 +29,30 @@ export default function FamilyDailyNotes({ disabled = false }: { disabled?: bool
   const currentRef = useRef<DailyNote | null>(null)
   const dirtyRef = useRef(false)
   const mountedRef = useRef(false)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fitFont = useCallback(() => {
+    if (textareaRef.current) fitNoteFont(textareaRef.current)
+  }, [])
+
+  useLayoutEffect(() => { fitFont() }, [draft, message, fitFont])
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const observer = new ResizeObserver(fitFont)
+    observer.observe(textarea)
+    return () => observer.disconnect()
+  }, [fitFont])
+
+  // Successful shares are briefly acknowledged, not permanent footer text.
+  useEffect(() => {
+    if (message !== 'Shared with family for today.' &&
+        message !== 'Showing the latest family note.' &&
+        message !== 'New day — notes cleared.') return
+    const timer = window.setTimeout(() => {
+      setMessage((current) => current === message ? '' : current)
+    }, 2600)
+    return () => window.clearTimeout(timer)
+  }, [message])
 
   useEffect(() => {
     mountedRef.current = true
@@ -108,9 +142,12 @@ export default function FamilyDailyNotes({ disabled = false }: { disabled?: bool
   }
 
   const changed = snapshot !== null && draft !== snapshot.text
+  const showControls = Boolean(message) || (changed && !disabled)
   return (
     <div className="family-daily-notes" data-home-no-hold>
       <textarea
+        ref={textareaRef}
+        className={showControls ? 'family-daily-notes-has-controls' : undefined}
         aria-label="Shared family note for today"
         value={draft}
         onChange={(event) => {
@@ -124,19 +161,20 @@ export default function FamilyDailyNotes({ disabled = false }: { disabled?: bool
         readOnly={disabled || loading || snapshot === null || saving}
         rows={3}
       />
-      <div className="family-daily-notes-bottom">
-        <span>Shared today · clears at midnight or server restart</span>
-        {changed && !disabled && (
-          <button type="button" onClick={() => void share()} disabled={saving || loading}>
-            {saving ? 'Sharing…' : 'Share changes'}
-          </button>
-        )}
-      </div>
-      {message && (
-        <div className="family-daily-notes-message" role="status">
-          {message}
-          {message.includes('Someone updated') && (
-            <button type="button" onClick={() => void reload()} disabled={loading}>Reload</button>
+      {showControls && (
+        <div className="family-daily-notes-controls">
+          {message && (
+            <div className="family-daily-notes-message" role="status">
+              {message}
+              {message.includes('Someone updated') && (
+                <button type="button" onClick={() => void reload()} disabled={loading}>Reload</button>
+              )}
+            </div>
+          )}
+          {changed && !disabled && (
+            <button type="button" onClick={() => void share()} disabled={saving || loading}>
+              {saving ? 'Sharing…' : 'Share changes'}
+            </button>
           )}
         </div>
       )}
