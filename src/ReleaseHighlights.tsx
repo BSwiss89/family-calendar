@@ -44,7 +44,7 @@ export default function ReleaseHighlights({ accountKey, personId, suppress = fal
         return
       }
       if (event.key !== 'Tab' || !dialog.current) return
-      const buttons = [...dialog.current.querySelectorAll<HTMLButtonElement>('button:not([disabled])')]
+      const buttons = Array.from(dialog.current.querySelectorAll<HTMLButtonElement>('button:not([disabled])'))
       if (!buttons.length) return
       const first = buttons[0]
       const last = buttons[buttons.length - 1]
