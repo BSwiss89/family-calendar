@@ -55,6 +55,31 @@ jobs:
           )) {
             if (-not $script.Contains($marker)) { throw "Missing release guard marker: $marker" }
           }
+      - name: Verify guarded LIVE Home/weather and release notice syntax and safety pins
+        shell: powershell
+        run: |
+          $file = '.\scripts\deploy-live-home-weather-notice.ps1'
+          $tokens = $null; $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors) | Out-Null
+          if (@($errors).Count) { throw "PowerShell syntax failed: $file" }
+          $script = Get-Content $file -Raw
+          foreach ($marker in @(
+            '26c9402ef322af42a80e4de539d87bb70126cb92',
+            '7ff062ace9213e7c3e09dafc3caf79ffdd75a90a',
+            '661510f12ba22cf87a157b68bbe75bf41ecfe0a9',
+            '43296301670','43296301598',
+            'src/App.css','src/App.tsx','src/ReleaseHighlights.tsx',
+            'src/homeWeatherScene.ts','src/homeWidgetLayout.ts',
+            'Assert-SecureLiveLauncherPins','CopyVerified','LiveHttpsUrl','TestHttpsUrl',
+            'LIVE_AUTO_DEPLOY=Disabled','LIVE_HOME_WEATHER_PREFLIGHT=PASS'
+          )) {
+            if (-not $script.Contains($marker)) { throw "Missing release guard marker: $marker" }
+          }
+          $allowed = [regex]::Match($script,'(?s)\$allowed=@\((.*?)\)\s+\$files=').Groups[1].Value
+          $paths = @([regex]::Matches($allowed,"'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+          if ($paths.Count -ne 17 -or @($paths | Where-Object { $_ -match '^(Server/|package|public/|stt/)' }).Count) {
+            throw 'Guarded candidate includes unapproved backend, dependencies or data'
+          }
       - name: Verify Duplicate Event drafts are independent of their source
         run: node --test scripts/test-duplicate-event.mjs
       - name: Test list categories and additive migration
