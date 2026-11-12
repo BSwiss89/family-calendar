@@ -121,6 +121,10 @@ jobs:
           $paths=@([regex]::Matches($allowed,"'([^']+)'") | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
           $expected=@('scripts/test-release-highlights-browser.mjs','scripts/test-release-highlights.mjs','src/releaseNoticeModel.mjs')
           if (($paths -join '|') -cne (($expected | Sort-Object) -join '|')) { throw 'Unexpected LIVE hotfix scope' }
+          foreach ($forbidden in @('Stop-ScheduledTask -TaskName $taskName','Start-ScheduledTask -TaskName $taskName','Disable-ScheduledTask -TaskName $taskName','Stop-Process','StopLive','StartLive')) {
+            if ($script.Contains($forbidden)) { throw "Frontend-only announcement must preserve LIVE process and in-memory Notes: $forbidden" }
+          }
+          if (-not $script.Contains('FAMILY_NOTES_MEMORY_PRESERVED=PASS')) { throw 'Expected no-restart Notes preservation receipt missing' }
           .\scripts\test-arney-live-launcher-plan.ps1
       - name: Verify Duplicate Event drafts are independent of their source
         run: node --test scripts/test-duplicate-event.mjs
