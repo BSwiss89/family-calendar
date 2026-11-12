@@ -1,30 +1,51 @@
-/* Compact shared scratchpad inside Home's existing card dimensions. */
+/* Daily family scratchpad fills the Home card without altering saved card sizes. */
+.home-widget-grid > .home-widget-notes {
+  display: flex;
+  flex-direction: column;
+}
+
+.home-widget-grid > .home-widget-notes > .home-widget-heading {
+  flex: 0 0 auto;
+}
+
+.home-widget-grid > .home-widget-notes > .family-daily-notes {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
 .family-daily-notes {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  gap: 7px;
   width: 100%;
 }
 
 .family-daily-notes textarea {
   box-sizing: border-box;
   display: block;
+  flex: 1 1 0;
   width: 100%;
-  min-height: 70px;
-  max-height: 220px;
-  resize: vertical;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  resize: none;
+  overflow-y: auto;
   padding: 10px 11px;
   border: 1px solid rgba(100, 116, 139, 0.25);
   border-radius: 12px;
   background: rgba(248, 250, 252, 0.9);
   color: #202733;
   font: inherit;
-  font-size: 13px;
-  line-height: 1.35;
+  font-size: 16px;
+  line-height: 1.3;
   -webkit-user-select: text;
   user-select: text;
   touch-action: pan-y;
+}
+
+.family-daily-notes textarea.family-daily-notes-has-controls {
+  padding-bottom: 48px;
 }
 
 .family-daily-notes textarea:focus-visible {
@@ -33,19 +54,25 @@
 }
 
 .family-daily-notes textarea[readonly] { opacity: 0.75; }
-.family-daily-notes-bottom {
+
+.family-daily-notes-controls {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  align-items: flex-end;
+  justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 7px;
-  color: #657185;
-  font-size: 10px;
-  line-height: 1.35;
+  gap: 6px;
+  max-height: 65%;
+  overflow-y: auto;
+  pointer-events: none;
 }
 
-.family-daily-notes-bottom button,
+.family-daily-notes-controls > button,
 .family-daily-notes-message button {
+  pointer-events: auto;
   border: 0;
   border-radius: 9px;
   padding: 7px 10px;
@@ -57,15 +84,22 @@
   cursor: pointer;
 }
 
-.family-daily-notes-bottom button:disabled,
-.family-daily-notes-message button:disabled { opacity: 0.5; }
+.family-daily-notes-controls button:disabled { opacity: 0.5; }
+
 .family-daily-notes-message {
+  pointer-events: auto;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 5px;
+  margin-right: auto;
+  padding: 5px 7px;
+  border-radius: 8px;
   color: #475569;
+  background: rgba(255, 255, 255, 0.93);
   font-size: 11px;
+  line-height: 1.2;
+  max-width: 100%;
 }
 
 .home-widget-grid-editing .family-daily-notes { pointer-events: none; }
