@@ -2,13 +2,13 @@
 // to a deploy SHA: frequent TEST auto-deploys should not create popups.
 // Update the ID and items together when shipping the NEXT feature release.
 export const CURRENT_RELEASE = Object.freeze({
-  id: '2026-11-home-weather-refresh',
+  id: '2026-11-home-notes-settings',
   title: "What's new in Family Calendar",
   intro: 'Here are a few things to check out:',
   highlights: Object.freeze([
-    'Weather now matches the conditions, including rain, snow, sleet, and nighttime skies.',
-    'Make the Home weather card wider or taller to see larger icons and text.',
-    'Try Customize Home to arrange and resize your dashboard cards.',
+    'Home card titles now sit closer to the top, with your saved box sizes unchanged.',
+    'Settings has moved into the blue + Quick Add menu, beneath Event, List, Recipe, and Photo.',
+    'Family Notes is now editable and shared. Text fits your box, and notes clear daily.',
   ]),
 })
 
