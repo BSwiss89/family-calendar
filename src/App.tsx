@@ -29,6 +29,7 @@ import { readArneyPreferences } from './arneyPreferences'
 import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
 import { parseArneySimpleCommand } from './arneyTextCommands'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
+import FamilyDailyNotes from './FamilyDailyNotes'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
 import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
 import {
@@ -15203,6 +15204,20 @@ return (
     <small>Analyze an event or recipe</small>
   </span>
 </button>
+          <button
+            className="quick-add-option quick-add-settings-option"
+            type="button"
+            onClick={() => {
+              setQuickAddOpen(false)
+              setMobileSettingsOpen(true)
+            }}
+          >
+            <span className="quick-add-option-icon" aria-hidden="true">⚙</span>
+            <span className="quick-add-option-text">
+              <strong>Settings</strong>
+              <small>Calendar and family preferences</small>
+            </span>
+          </button>
         </div>
       </div>
     </div>,
@@ -16002,9 +16017,7 @@ createPortal(
           <span>Notes</span>
         </div>
 
-        <div className="home-widget-placeholder">
-          Family notes will appear here.
-        </div>
+        <FamilyDailyNotes disabled={isEditingHome} />
       </SortableHomeWidget>
 
       <SortableHomeWidget
@@ -16204,14 +16217,7 @@ createPortal(
       className="home-ai-buddy-zone"
       aria-hidden="true"
     />
-    <button
-      type="button"
-      className="home-mobile-settings-button"
-      onClick={() => setMobileSettingsOpen(true)}
-    >
-      Settings
-    </button>
-  </section>
+   </section>
 )}
 {mobileSettingsOpen && createPortal(
   <div
