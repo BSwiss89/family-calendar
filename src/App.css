@@ -20432,3 +20432,762 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 }
 
 
+/* Home layout editor: visible hold handles, responsive card widths, and full-width layout. */
+.home-dashboard {
+  width: 100%;
+  max-width: none;
+  padding: 12px 12px 18px;
+  overflow: visible;
+}
+
+.home-dashboard-heading {
+  margin-bottom: 12px;
+}
+
+.home-widget-grid {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-rows: none;
+  grid-auto-rows: auto;
+  grid-auto-flow: row dense;
+  gap: 10px;
+  padding-bottom: 28px;
+}
+
+.home-widget-grid > .home-widget {
+  position: relative;
+  min-width: 0;
+  min-height: 175px;
+  height: auto;
+  grid-row: auto;
+  padding-top: 40px;
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.home-widget-grid > .home-widget-weather {
+  padding: 0;
+}
+
+.home-widget-weather .home-weather {
+  min-height: 200px;
+  padding-top: 40px;
+}
+
+.home-widget-grip {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  z-index: 15;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 56px;
+  height: 27px;
+  padding: 0;
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: 999px;
+  color: #625444;
+  background: rgba(255, 255, 255, 0.54);
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.home-widget-grip:focus-visible {
+  outline: 3px solid #4f46e5;
+  outline-offset: 2px;
+}
+
+.home-widget-grip-bars {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.home-widget-grip-bars > span {
+  display: block;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.home-widget-grip-bars > span:nth-child(1) { width: 31px; }
+.home-widget-grip-bars > span:nth-child(2) { width: 23px; }
+.home-widget-grip-bars > span:nth-child(3) { width: 15px; }
+
+.home-widget-grid-editing .home-widget {
+  outline: 2px dashed rgba(87, 74, 60, 0.48);
+  outline-offset: -3px;
+}
+
+.home-widget-grid-editing .home-widget::after {
+  content: none;
+}
+
+.home-widget-grid-editing .home-widget > * {
+  pointer-events: none;
+}
+
+.home-widget-grid-editing .home-widget > .home-widget-grip,
+.home-widget-grid-editing .home-widget > .home-widget-resize-button {
+  pointer-events: auto;
+}
+
+.home-widget-grid-editing .home-widget-grip {
+  background: rgba(249, 242, 232, 0.97);
+  color: #3f372f;
+  cursor: grab;
+}
+
+.home-widget-grid-editing .home-widget-grip:active {
+  cursor: grabbing;
+}
+
+.home-widget-grid-editing .home-widget-weather .home-weather-settings-button {
+  visibility: hidden;
+}
+
+.home-widget-resize-button {
+  display: block;
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  z-index: 20;
+  min-height: 28px;
+  padding: 3px 7px;
+  font-size: 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.home-edit-done-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: sticky;
+  top: calc(env(safe-area-inset-top) + 8px);
+  left: auto;
+  transform: none;
+  z-index: 100;
+  width: max-content;
+  min-height: 40px;
+  margin: 0 0 12px auto;
+  padding: 0 16px;
+  border: 1px solid rgba(87, 74, 60, 0.18);
+  border-radius: 999px;
+  background: #fffdf9;
+  color: #453c33;
+  box-shadow: 0 5px 16px rgba(74, 61, 46, 0.13);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.home-edit-done-button:active {
+  transform: scale(0.98);
+}
+
+/* Make compact card interiors adaptable without changing the weather API. */
+@container (max-width: 235px) {
+  .home-weather {
+    min-height: 175px;
+    padding: 40px 10px 10px;
+  }
+
+  .home-weather-active .home-weather-main {
+    display: flex;
+    grid-template-columns: none;
+    min-height: 94px;
+    gap: 0;
+    margin-top: 3px;
+  }
+
+  .home-weather-artwork {
+    flex: 0 0 125px;
+    width: 125px;
+    max-width: none;
+    height: 110px;
+    margin-right: -67px;
+    margin-left: -3px;
+    transform: scale(0.44);
+    transform-origin: left center;
+  }
+
+  .home-weather-active .home-weather-temperature {
+    margin-top: 0;
+    padding-right: 0;
+    font-size: 36px;
+  }
+
+  .home-weather-location,
+  .home-weather-details {
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .home-weather-details { gap: 4px 7px; }
+  .home-weather-source { font-size: 7px; }
+  .home-widget-heading { flex-wrap: wrap; gap: 5px; }
+  .home-widget-heading span { font-size: 13px; }
+  .home-widget-link { font-size: 10px; }
+  .home-widget-lists .home-list-preview { grid-template-columns: 1fr; }
+  .home-schedule-item,
+  .home-upcoming-item { min-width: 0; }
+  .home-schedule-time,
+  .home-upcoming-date { font-size: 10px; }
+  .home-schedule-info strong,
+  .home-upcoming-info strong { overflow-wrap: anywhere; }
+}
+
+@media (min-width: 761px) {
+  .home-widget-grid > .home-widget-weather.home-widget-size-small { grid-column: span 3; }
+  .home-widget-grid > .home-widget-weather.home-widget-size-medium { grid-column: span 4; }
+  .home-widget-grid > .home-widget-weather.home-widget-size-large { grid-column: span 6; }
+  .home-widget-grid > .home-widget-today.home-widget-size-small { grid-column: span 4; }
+  .home-widget-grid > .home-widget-today.home-widget-size-medium { grid-column: span 5; }
+  .home-widget-grid > .home-widget-today.home-widget-size-large { grid-column: span 6; }
+  .home-widget-grid > .home-widget-upcoming.home-widget-size-small { grid-column: span 3; }
+  .home-widget-grid > .home-widget-upcoming.home-widget-size-medium { grid-column: span 4; }
+  .home-widget-grid > .home-widget-upcoming.home-widget-size-large { grid-column: span 6; }
+  .home-widget-grid > .home-widget-notes.home-widget-size-small { grid-column: span 4; }
+  .home-widget-grid > .home-widget-notes.home-widget-size-medium { grid-column: span 6; }
+  .home-widget-grid > .home-widget-notes.home-widget-size-large { grid-column: span 8; }
+  .home-widget-grid > .home-widget-meals.home-widget-size-small { grid-column: span 4; }
+  .home-widget-grid > .home-widget-meals.home-widget-size-medium { grid-column: span 6; }
+  .home-widget-grid > .home-widget-meals.home-widget-size-large { grid-column: span 8; }
+  .home-widget-grid > .home-widget-lists.home-widget-size-small { grid-column: span 6; }
+  .home-widget-grid > .home-widget-lists.home-widget-size-medium { grid-column: span 8; }
+  .home-widget-grid > .home-widget-lists.home-widget-size-large { grid-column: span 12; }
+}
+
+@media (max-width: 760px) {
+  .calendar-app:has(.home-dashboard) {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .home-dashboard {
+    padding: 8px 4px 18px;
+  }
+
+  .home-widget-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding-bottom: 24px;
+  }
+
+  .home-widget-grid > .home-widget {
+    grid-column: span 2;
+    min-height: 150px;
+    padding: 40px 12px 12px;
+  }
+
+  .home-widget-grid > .home-widget-weather {
+    padding: 0;
+  }
+
+  .home-widget-grid > .home-widget.home-widget-size-small {
+    grid-column: span 1;
+  }
+
+  .home-widget-grid > .home-widget-weather .home-weather {
+    min-height: 175px;
+  }
+
+  .home-edit-done-button,
+  .home-widget-resize-button {
+    display: flex;
+  }
+}
+
+@media (max-width: 365px) {
+  .home-widget-grid > .home-widget.home-widget-size-small {
+    grid-column: span 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-widget-grid-editing .home-widget { transition: none; }
+}
+
+/* Home editor v2: height is always vertical; width is an independent choice.
+   Grid row tracks keep mixed-height cards side by side without forcing equal heights. */
+.home-widget-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: none;
+  grid-auto-rows: 100px;
+  grid-auto-flow: row dense;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.home-widget-grid > .home-widget {
+  min-height: 0;
+  max-height: none;
+  height: 100%;
+  grid-row: auto;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
+.home-widget-grid > .home-widget.home-widget-size-small { grid-row: span 2; }
+.home-widget-grid > .home-widget.home-widget-size-medium { grid-row: span 3; }
+.home-widget-grid > .home-widget.home-widget-size-large { grid-row: span 4; }
+
+.home-widget-grid > .home-widget.home-widget-width-half { grid-column: span 2; }
+.home-widget-grid > .home-widget.home-widget-width-full { grid-column: span 4; }
+
+/* Press-and-hold is recognized on any blank/content area, but interactive
+   links, buttons, and form fields continue to receive their normal gestures. */
+.home-widget-grid:not(.home-widget-grid-editing) > .home-widget {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.home-widget-grid:not(.home-widget-grid-editing) > .home-widget input,
+.home-widget-grid:not(.home-widget-grid-editing) > .home-widget textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.home-widget-grid > .home-widget:focus-visible {
+  outline: 3px solid #4f46e5;
+  outline-offset: -3px;
+}
+
+/* The ascending-to-descending three-line grip is mounted only while editing. */
+.home-widget-grid-editing > .home-widget > .home-widget-grip {
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  touch-action: none;
+}
+
+.home-widget-grid > .home-widget .home-widget-layout-controls {
+  position: absolute;
+  top: 37px;
+  left: 6px;
+  right: 6px;
+  z-index: 21;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 4px;
+  background: rgba(255, 253, 249, 0.96);
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.1);
+}
+
+.home-widget-grid > .home-widget .home-widget-layout-controls > button {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 30px;
+  padding: 3px 2px;
+  margin: 0;
+  border: 1px solid rgba(89, 78, 66, 0.22);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.1;
+  text-transform: capitalize;
+  white-space: nowrap;
+  color: #453c33;
+  background: #fff;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.home-widget-grid > .home-widget .home-widget-layout-controls > button:focus-visible {
+  outline: 2px solid #4f46e5;
+}
+
+.home-widget-grid-editing .home-widget > .home-widget-layout-controls,
+.home-widget-grid-editing .home-widget > .home-widget-layout-controls > button {
+  pointer-events: auto;
+}
+
+/* Let small weather cards be scrolled when their detailed artwork does not fit;
+   the site and weather API stay unchanged. */
+.home-widget-grid > .home-widget-weather {
+  overflow: hidden;
+}
+
+.home-widget-grid > .home-widget-weather > .home-weather {
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 760px) {
+  .home-widget-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: 100px;
+  }
+
+  .home-widget-grid > .home-widget.home-widget-width-half {
+    grid-column: span 1;
+  }
+
+  .home-widget-grid > .home-widget.home-widget-width-full {
+    grid-column: span 2;
+  }
+
+  .home-widget-grid > .home-widget {
+    min-height: 0;
+    height: 100%;
+  }
+}
+
+/* Half-width cards are still allowed on very narrow phones: height never
+   determines whether a neighbor can appear beside a card. */
+@media (max-width: 365px) {
+  .home-widget-grid > .home-widget.home-widget-width-half { grid-column: span 1; }
+  .home-widget-grid > .home-widget.home-widget-width-full { grid-column: span 2; }
+}
+
+/* Home weather smart glass panels: retain the original weather artwork and
+   blue/sun/rain gradients. Only content layout changes with each card's size.
+   Each panel participates in grid layout rather than absolute overlaps. */
+.home-widget-grid > .home-widget-weather > .home-weather {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 12px;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-cloudy,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-snow,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-fog {
+  color: #173b53;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-sunny {
+  color: #473713;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-night,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-rain,
+.home-widget-grid > .home-widget-weather .home-weather-active.weather-theme-storm {
+  color: #fff;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-title,
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-location,
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-temperature,
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-details,
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-source {
+  color: inherit;
+  opacity: 1;
+  text-shadow: none;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-title {
+  flex: 0 0 auto;
+  padding-right: 36px;
+  font-size: 17px;
+  line-height: 1.2;
+  font-weight: 800;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-settings-button {
+  top: 9px;
+  right: 9px;
+  width: 32px;
+  height: 32px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.33);
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-current {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-content: stretch;
+  justify-content: stretch;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  gap: 5px;
+  padding: 0;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-location {
+  min-height: 0;
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.15;
+  font-weight: 800;
+  opacity: 0.85 !important;
+  letter-spacing: 0.04em;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-main {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.13fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-art-panel,
+.home-widget-grid > .home-widget-weather .home-weather-temperature-panel,
+.home-widget-grid > .home-widget-weather .home-weather-detail-pill {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.27);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 12px rgba(36, 75, 98, 0.08);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.home-widget-grid > .home-widget-weather .weather-theme-night .home-weather-art-panel,
+.home-widget-grid > .home-widget-weather .weather-theme-night .home-weather-temperature-panel,
+.home-widget-grid > .home-widget-weather .weather-theme-night .home-weather-detail-pill,
+.home-widget-grid > .home-widget-weather .weather-theme-rain .home-weather-art-panel,
+.home-widget-grid > .home-widget-weather .weather-theme-rain .home-weather-temperature-panel,
+.home-widget-grid > .home-widget-weather .weather-theme-rain .home-weather-detail-pill,
+.home-widget-grid > .home-widget-weather .weather-theme-storm .home-weather-art-panel,
+.home-widget-grid > .home-widget-weather .weather-theme-storm .home-weather-temperature-panel,
+.home-widget-grid > .home-widget-weather .weather-theme-storm .home-weather-detail-pill {
+  background: rgba(10, 29, 54, 0.19);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-art-panel {
+  position: relative;
+  display: block;
+  height: 100%;
+  isolation: isolate;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-art-panel > .home-weather-artwork {
+  --weather-art-scale: 0.7;
+  position: absolute;
+  display: block;
+  left: 50%;
+  top: 50%;
+  width: 215px;
+  max-width: none;
+  height: 160px;
+  margin: 0;
+  overflow: visible;
+  transform: translate(-50%, -50%) scale(var(--weather-art-scale));
+  transform-origin: center center;
+  pointer-events: none;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-temperature-panel {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 3px;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-temperature {
+  position: static;
+  display: block;
+  align-self: center;
+  justify-self: center;
+  margin: 0;
+  padding: 0;
+  font-size: clamp(35px, 5vw, 66px);
+  font-weight: 850;
+  line-height: 1;
+  letter-spacing: -0.06em;
+  white-space: nowrap;
+  color: inherit;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+  opacity: 1;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-detail-pill {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px;
+  font-size: 11px;
+  line-height: 1.15;
+  font-weight: 700;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-detail-label {
+  font-size: 10px;
+  line-height: 1.15;
+  font-weight: 700;
+  opacity: 0.82;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-detail-pill strong {
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.home-widget-grid > .home-widget-weather .home-weather-active .home-weather-source {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin: 0;
+  font-size: 9px;
+  line-height: 1.1;
+  font-weight: 600;
+  opacity: 0.72 !important;
+  text-decoration: none;
+}
+
+/* Short weather cards still show the drawn sun/cloud/moon — just scaled down
+   inside their soft panel instead of switching to a flat emoji. */
+.home-widget-grid > .home-widget-weather.home-widget-size-small .home-weather-art-panel > .home-weather-artwork {
+  --weather-art-scale: 0.48;
+}
+
+/* Half-width widgets: stack the three forecast values in tiny, readable
+   independent rows while leaving art and current temperature side by side. */
+@container (max-width: 280px) {
+  .home-widget-grid > .home-widget-weather > .home-weather {
+    padding: 10px;
+    gap: 3px;
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-title {
+    font-size: 15px;
+    padding-right: 29px;
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-settings-button {
+    top: 6px;
+    right: 6px;
+    width: 27px;
+    height: 27px;
+    font-size: 14px;
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-active .home-weather-current {
+    gap: 3px;
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-location {
+    font-size: 9px;
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-active .home-weather-main {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 5px;
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-art-panel > .home-weather-artwork,
+  .home-widget-grid > .home-widget-weather.home-widget-size-small .home-weather-art-panel > .home-weather-artwork {
+    --weather-art-scale: 0.34;
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-active .home-weather-temperature {
+    font-size: clamp(28px, 8.6cqi, 42px);
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-active .home-weather-details {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-detail-pill {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 3px;
+    min-height: 15px;
+    padding: 1px 5px;
+    border-radius: 9px;
+    font-size: 9px;
+    line-height: 1.05;
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-detail-label {
+    font-size: 9px;
+    line-height: 1.05;
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-detail-pill strong {
+    font-size: 10px;
+    line-height: 1.05;
+  }
+  .home-widget-grid > .home-widget-weather .home-weather-active .home-weather-source {
+    font-size: 8px;
+  }
+}
+
+/* Preserve the existing three-line editing handles and height/width controls.
+   Weather content starts below them but remains inside the card. */
+.home-widget-grid-editing > .home-widget-weather > .home-weather {
+  padding-top: 82px;
+}
+
+.home-widget-grid-editing > .home-widget-weather .home-weather-title,
+.home-widget-grid-editing > .home-widget-weather .home-weather-location,
+.home-widget-grid-editing > .home-widget-weather .home-weather-source {
+  display: none;
+}
+
+.home-widget-grid-editing > .home-widget-weather .home-weather-active .home-weather-current {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.home-widget-grid-editing > .home-widget-weather .home-weather-art-panel > .home-weather-artwork {
+  --weather-art-scale: 0.37;
+}
+
+@container (max-width: 280px) {
+  .home-widget-grid-editing > .home-widget-weather > .home-weather {
+    padding-top: 81px;
+  }
+  .home-widget-grid-editing > .home-widget-weather .home-weather-detail-pill {
+    padding: 1px 4px;
+  }
+  .home-widget-grid-editing > .home-widget-weather .home-weather-art-panel > .home-weather-artwork {
+    --weather-art-scale: 0.3;
+  }
+}
+
+/* Explicit theme contrast for illustrated glass weather panels. */
+.home-widget-grid > .home-widget-weather
+  .home-weather-active:is(.weather-theme-night, .weather-theme-rain, .weather-theme-storm)
+  :is(.home-weather-title, .home-weather-location, .home-weather-temperature, .home-weather-details, .home-weather-source) {
+  color: #fff;
+}
+
+
