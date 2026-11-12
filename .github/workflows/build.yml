@@ -24,6 +24,12 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Check TypeScript and build frontend
         run: npm run build
+      - name: Verify Home layout editor and responsive widget sizing
+        run: node --experimental-strip-types --test scripts/test-home-widget-layout.mjs
+      - name: Verify weather condition and daylight scene mapping
+        run: node --experimental-strip-types --test scripts/test-home-weather-scene.mjs
+      - name: Verify curated release announcement and per-person acknowledgement
+        run: node --test scripts/test-release-highlights.mjs
       - name: Verify Calendar person multi-select filtering
         run: node --experimental-strip-types --test scripts/test-calendar-person-filter.mjs
       - name: Verify Arney voice, local transcription, review-only writes, and People matching
