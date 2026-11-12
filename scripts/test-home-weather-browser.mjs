@@ -6,7 +6,7 @@ const { chromium, webkit } = await import(process.env.FAMILY_CALENDAR_PLAYWRIGHT
 const css = readFileSync(new URL('../src/App.css', import.meta.url), 'utf8') + '\n' +
   readFileSync(new URL('../src/homeWeatherAtmosphere.css', import.meta.url), 'utf8')
 const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>${css}</style><style>.home-widget-layout-controls[hidden]{display:none!important}</style></head><body>
+<style>${css}</style><style>.home-widget-layout-controls[hidden]{display:none!important}#weather{transition:none!important}</style></head><body>
 <div class="calendar-app"><section class="home-dashboard">
 <div class="home-widget-grid" id="grid">
 <section class="home-widget home-widget-weather home-widget-size-small home-widget-width-half" id="card">
