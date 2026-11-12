@@ -98,6 +98,30 @@ jobs:
           if ($paths.Count -ne 17 -or @($paths | Where-Object { $_ -match '^(Server/|package|public/|stt/)' }).Count) {
             throw 'Guarded candidate includes unapproved backend, dependencies or data'
           }
+      - name: Verify guarded LIVE What's New hotfix syntax and strict scope
+        shell: powershell
+        run: |
+          $file = '.\scripts\deploy-live-whats-new-home-notes.ps1'
+          $tokens = $null; $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors) | Out-Null
+          if (@($errors).Count) { throw "PowerShell syntax failed: $file" }
+          $script = Get-Content $file -Raw
+          foreach ($required in @(
+            '3ba93f3e7f78bf0d73003a245b98e0c6695f1ff7',
+            '22a6b526a94dceb2104b4f0e4ac9d3ce42ec3578',
+            '39e01d5dd435dbd4875657c0490eeb8697deb1ed',
+            '43329930309','43329930139','2026-11-home-notes-settings',
+            'LIVE_WHATS_NEW_PREFLIGHT=PASS','LIVE_WHATS_NEW_DEPLOYMENT=PASS',
+            'CopyVerified','Assert-SecureLiveLauncherPins',
+            'LIVE_AUTO_DEPLOY=Disabled','LocalSttStamp','TestStamp'
+          )) {
+            if (-not $script.Contains($required)) { throw "Missing hotfix safety pin: $required" }
+          }
+          $allowed=[regex]::Match($script,'(?s)\$allowed=@\((.*?)\)\s+\$files=').Groups[1].Value
+          $paths=@([regex]::Matches($allowed,"'([^']+)'") | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+          $expected=@('scripts/test-release-highlights-browser.mjs','scripts/test-release-highlights.mjs','src/releaseNoticeModel.mjs')
+          if (($paths -join '|') -cne (($expected | Sort-Object) -join '|')) { throw 'Unexpected LIVE hotfix scope' }
+          .\scripts\test-arney-live-launcher-plan.ps1
       - name: Verify Duplicate Event drafts are independent of their source
         run: node --test scripts/test-duplicate-event.mjs
       - name: Test list categories and additive migration
