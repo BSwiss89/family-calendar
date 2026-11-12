@@ -164,3 +164,11 @@
   position: relative;
   z-index: 2;
 }
+
+/* The old illustrated-card rules target individual labels as well as the
+   weather root. Explicitly win those rules on pale daytime snow/fog skies. */
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active.weather-period-day:is(.weather-theme-snow,.weather-theme-fog),
+.home-widget-grid > .home-widget-weather > .home-weather.home-weather-active.weather-period-day:is(.weather-theme-snow,.weather-theme-fog)
+  :is(.home-weather-title,.home-weather-location,.home-weather-temperature,.home-weather-details,.home-weather-source) {
+  color: #173a4f;
+}
