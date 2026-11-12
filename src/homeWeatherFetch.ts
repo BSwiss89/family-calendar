@@ -11,8 +11,10 @@ export type HomeForecast = {
 }
 
 export class HomeForecastError extends Error {
-  constructor(public readonly reason: 'http' | 'timeout' | 'network' | 'invalid', message: string) {
+  readonly reason: 'http' | 'timeout' | 'network' | 'invalid'
+  constructor(reason: 'http' | 'timeout' | 'network' | 'invalid', message: string) {
     super(message)
+    this.reason = reason
     this.name = 'HomeForecastError'
   }
 }
