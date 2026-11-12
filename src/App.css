@@ -21178,3 +21178,10 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
     --weather-art-scale: 0.3;
   }
 }
+
+/* Explicit theme contrast for illustrated glass weather panels. */
+.home-widget-grid > .home-widget-weather
+  .home-weather-active:is(.weather-theme-night, .weather-theme-rain, .weather-theme-storm)
+  :is(.home-weather-title, .home-weather-location, .home-weather-temperature, .home-weather-details, .home-weather-source) {
+  color: #fff;
+}
