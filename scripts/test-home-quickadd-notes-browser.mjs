@@ -7,19 +7,21 @@ import { readFileSync } from 'node:fs'
 const { chromium, webkit } = await import(process.env.FAMILY_CALENDAR_PLAYWRIGHT_MODULE || 'playwright')
 const css = readFileSync(new URL('../src/App.css', import.meta.url), 'utf8') + '\n' +
   readFileSync(new URL('../src/FamilyDailyNotes.css', import.meta.url), 'utf8')
+const notesComponent = readFileSync(new URL('../src/FamilyDailyNotes.tsx', import.meta.url), 'utf8')
+const fontCode = notesComponent.match(/^function fitNoteFont\(textarea: HTMLTextAreaElement\) \{[\s\S]*?^\}/m)?.[0]?.replace(': HTMLTextAreaElement', '')
+assert.ok(fontCode, 'real responsive text fitter exists in Notes component')
 const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head>
 <body><main class="calendar-app"><section class="home-dashboard">
 <div class="home-widget-grid" id="grid">
 <section class="home-widget home-widget-notes home-widget-size-small home-widget-width-half" id="note-card">
 <div class="home-widget-heading" id="title"><span>Notes</span></div>
-<div class="family-daily-notes"><textarea aria-label="Shared family note" rows="3"></textarea>
-<div class="family-daily-notes-bottom"><span>Shared today</span></div></div></section></div></section></main>
+<div class="family-daily-notes"><textarea aria-label="Shared family note" id="daily-note" rows="3"></textarea></div></section></div></section></main>
 <div class="quick-add-overlay"><div class="quick-add-sheet" id="sheet">
 <div class="quick-add-header"><div><span class="quick-add-eyebrow">Add something</span><h2>Quick Add</h2></div><button class="quick-add-close">×</button></div>
 <div class="quick-add-options" id="options">
 ${['Event','List','Recipe','Photo / Screenshot'].map((label,i)=>`<button class="quick-add-option" data-original="${i}"><span class="quick-add-option-icon">+</span><span class="quick-add-option-text"><strong>${label}</strong><small>Add or manage</small></span></button>`).join('')}
 <button class="quick-add-option quick-add-settings-option" id="settings"><span class="quick-add-option-icon">⚙</span><span class="quick-add-option-text"><strong>Settings</strong><small>Calendar and family preferences</small></span></button>
-</div></div></div></body></html>`
+</div></div></div><script>${fontCode}</script></body></html>`
 
 test('Home headers align at top, and all five Quick Add actions fit without shrinking four tiles', { timeout: 120000 }, async () => {
   for (const [engine, driver] of [['chromium', chromium], ['webkit', webkit]]) {
@@ -50,6 +52,32 @@ test('Home headers align at top, and all five Quick Add actions fit without shri
           assert.ok(measurements.sheetScrollHeight <= measurements.sheetClientHeight + 1, where + ': Quick Add requires vertical scrolling')
           assert.ok(measurements.title.y - measurements.card.y <= 24, where + ': Home title has unnecessary top gap')
           assert.ok(measurements.note.right <= measurements.card.right + 1, where + ': Notes textarea extends outside card')
+          assert.ok(measurements.note.height >= 100, where + ': Notes editor does not fill available card space')
+          assert.ok(measurements.note.bottom <= measurements.card.bottom + 1, where + ': Notes editor extends below card')
+          assert.ok(measurements.note.bottom >= measurements.card.bottom - 35, where + ': Notes editor wastes bottom card space')
+          const fontChecks = await page.evaluate(() => {
+            const card = document.querySelector('#note-card')
+            const note = document.querySelector('#daily-note')
+            note.value = 'Milk'
+            fitNoteFont(note)
+            const largeFont = parseFloat(getComputedStyle(note).fontSize)
+            note.value = ('Remember the groceries, the bills, the appointment and the family schedule. ').repeat(15)
+            fitNoteFont(note)
+            const denseFont = parseFloat(getComputedStyle(note).fontSize)
+            const canScroll = getComputedStyle(note).overflowY === 'auto'
+            card.classList.replace('home-widget-size-small', 'home-widget-size-large')
+            const grownHeight = note.getBoundingClientRect().height
+            note.value = 'Milk'
+            fitNoteFont(note)
+            const expandedFont = parseFloat(getComputedStyle(note).fontSize)
+            return { largeFont, denseFont, expandedFont, grownHeight, canScroll, noFooter: !document.querySelector('.family-daily-notes-bottom') }
+          })
+          assert.ok(fontChecks.noFooter, where + ': permanent Notes footer returned')
+          assert.ok(fontChecks.largeFont >= 23 && fontChecks.largeFont <= 26, where + ': short note did not grow')
+          assert.ok(fontChecks.denseFont >= 16 && fontChecks.denseFont < fontChecks.largeFont, where + ': dense note did not shrink')
+          assert.ok(fontChecks.canScroll, where + ': dense notes must remain scrollable instead of clipped')
+          assert.ok(fontChecks.grownHeight >= measurements.note.height + 100, where + ': editor did not fill taller Notes card')
+          assert.ok(fontChecks.expandedFont >= 23, where + ': text did not reflow in expanded Notes card')
         } finally { await page.close() }
       }
     } finally { await browser.close() }
