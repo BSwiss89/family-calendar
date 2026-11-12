@@ -51,6 +51,8 @@ jobs:
         run: node --experimental-strip-types --test scripts/test-home-widget-layout.mjs
       - name: Verify weather condition and daylight scene mapping
         run: node --experimental-strip-types --test scripts/test-home-weather-scene.mjs
+      - name: Verify Home weather request recovery and partial forecast handling
+        run: node --experimental-strip-types --test scripts/test-home-weather-fetch.mjs
       - name: Verify Duplicate Event drafts are independent of their source
         run: node --test scripts/test-duplicate-event.mjs
       - name: Test list categories and additive migration
