@@ -172,3 +172,94 @@
   :is(.home-weather-title,.home-weather-location,.home-weather-temperature,.home-weather-details,.home-weather-source) {
   color: #173a4f;
 }
+
+
+/* Space-aware weather typography and illustration (PR #183).
+   The parent Home card is an inline-size query container. Only enlarge when
+   it has genuine horizontal space; card-height classes cap art on short cards.
+   Editing remains at its known-safe compact scale around resize controls. */
+@container (min-width: 330px) {
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-title {
+    font-size: 18px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-location {
+    font-size: 11px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-active .home-weather-details {
+    grid-template-columns: minmax(0, .9fr) minmax(0, 1.5fr) minmax(0, .65fr);
+    gap: 5px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-detail-pill {
+    padding: 5px 2px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-detail-label {
+    font-size: 11px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-detail-pill strong {
+    font-size: 13px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather.home-widget-size-small .home-weather-active .home-weather-temperature {
+    font-size: clamp(40px, 11.5cqi, 49px);
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather:is(.home-widget-size-medium, .home-widget-size-large) .home-weather-active .home-weather-temperature {
+    font-size: clamp(48px, 13.5cqi, 70px);
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather.home-widget-size-small .home-weather-art-panel > .home-weather-artwork {
+    --weather-art-scale: .51;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather.home-widget-size-medium .home-weather-art-panel > .home-weather-artwork {
+    --weather-art-scale: .75;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather.home-widget-size-large .home-weather-art-panel > .home-weather-artwork {
+    --weather-art-scale: .78;
+  }
+}
+
+/* Taller and genuinely wider cards can grow again without overflowing
+   the right-hand temperature area or the high/low forecast column. */
+@container (min-width: 400px) {
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-title {
+    font-size: 19px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-detail-label {
+    font-size: 12px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-detail-pill strong {
+    font-size: 14px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather:is(.home-widget-size-medium, .home-widget-size-large) .home-weather-active .home-weather-temperature {
+    font-size: clamp(56px, 12.5cqi, 76px);
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather.home-widget-size-medium .home-weather-art-panel > .home-weather-artwork {
+    --weather-art-scale: .84;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather.home-widget-size-large .home-weather-art-panel > .home-weather-artwork {
+    --weather-art-scale: .87;
+  }
+}
+
+/* Desktop / wall-display expanses allow another bump; preserve the
+   restrained height of Small widgets even if their width is Full. */
+@container (min-width: 540px) {
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-title {
+    font-size: 20px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-location {
+    font-size: 12px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-detail-label {
+    font-size: 13px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather .home-weather-detail-pill strong {
+    font-size: 16px;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather.home-widget-size-large .home-weather-active .home-weather-temperature {
+    font-size: clamp(66px, 11cqi, 84px);
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather.home-widget-size-medium .home-weather-art-panel > .home-weather-artwork {
+    --weather-art-scale: .94;
+  }
+  .home-widget-grid:not(.home-widget-grid-editing) > .home-widget-weather.home-widget-size-large .home-weather-art-panel > .home-weather-artwork {
+    --weather-art-scale: 1.03;
+  }
+}
