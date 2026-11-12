@@ -83,6 +83,34 @@ test('curated update notice is acknowledged once per person/device and yields to
         }finally{await context.close()}
       })
 
+      await t.test(name+' new Home/Notes update appears after old weather acknowledgement', async()=>{
+        const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true})
+        try {
+          await context.addInitScript(() => {
+            try {
+              localStorage.setItem(
+                'family-calendar.release-notice.v1.family-calendar.profile.v1.legacy.familyadmin.person-1.2026-11-home-weather-refresh',
+                'acknowledged',
+              )
+            } catch {}
+          })
+          const page=await context.newPage()
+          await page.goto(origin+'/__release_fixture')
+          const notice=page.getByRole('dialog',{name:"What's new in Family Calendar"})
+          await notice.waitFor()
+          assert.equal(await notice.locator('li').count(),3)
+          assert.ok((await notice.innerText()).includes('Settings'))
+          assert.ok((await notice.innerText()).includes('Notes'))
+          await notice.getByRole('button',{name:'Got it'}).click()
+          await notice.waitFor({state:'hidden'})
+          const keys=await page.evaluate(()=>Object.keys(localStorage).filter(k=>k.includes('release-notice.v1.')))
+          assert.equal(keys.length,2,'both old and new release IDs should be acknowledged separately')
+          await page.reload()
+          await page.waitForTimeout(1000)
+          assert.equal(await notice.count(),0,'new release should not reappear after Got it')
+        } finally { await context.close() }
+      })
+
       await t.test(name+' notifications take priority and Later never acknowledges',async()=>{
         const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true})
         try {
