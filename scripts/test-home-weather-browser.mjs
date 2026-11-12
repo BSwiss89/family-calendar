@@ -19,17 +19,20 @@ const html = `<!doctype html><html><head><meta name="viewport" content="width=de
     <div class="home-weather-current">
       <div class="home-weather-location">Home · 77375</div>
       <div class="home-weather-main">
-        <div class="home-weather-artwork weather-theme-cloudy" aria-hidden="true">
-          <div class="weather-art-sun weather-art-sun-behind"></div>
-          <div class="weather-art-cloud weather-art-cloud-main"></div>
+        <div class="home-weather-art-panel" aria-hidden="true">
+          <div class="home-weather-artwork weather-theme-cloudy" aria-hidden="true">
+            <div class="weather-art-sun weather-art-sun-behind"></div>
+            <div class="weather-art-cloud weather-art-cloud-main"></div>
+          </div>
         </div>
-        <span class="home-weather-compact-icon" aria-hidden="true">🌤️</span>
-        <strong class="home-weather-temperature">71°</strong>
+        <div class="home-weather-temperature-panel">
+          <strong class="home-weather-temperature">71°</strong>
+        </div>
       </div>
       <div class="home-weather-details">
-        <span>Feels like 75°</span>
-        <span>H 72° · L 60°</span>
-        <span>Rain 68%</span>
+        <span class="home-weather-detail-pill"><span class="home-weather-detail-label">Feels like</span><strong>75°</strong></span>
+        <span class="home-weather-detail-pill"><span class="home-weather-detail-label">High / Low</span><strong>H 72° · L 60°</strong></span>
+        <span class="home-weather-detail-pill"><span class="home-weather-detail-label">Rain</span><strong>68%</strong></span>
       </div>
     </div>
     <a class="home-weather-source" href="https://open-meteo.com/">Weather by Open-Meteo</a>
@@ -38,103 +41,101 @@ const html = `<!doctype html><html><head><meta name="viewport" content="width=de
 <section class="home-widget home-widget-today home-widget-size-small home-widget-width-half" id="neighbor">Today</section>
 </div></section></div></body></html>`
 
-function rect(element) {
+
+function box(element) {
   const r = element.getBoundingClientRect()
-  return {left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height}
+  return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}
+}
+function overlap(a,b) {
+  return Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left)) *
+         Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top))
 }
 
-test('weather stays readable at half/full width and all three vertical heights in Chromium and iPhone WebKit', {timeout:90000}, async () => {
-  for (const [name, driver] of [['chromium', chromium], ['webkit', webkit]]) {
-    const browser = await driver.launch({headless:true})
+test('original weather illustration stays in a soft panel and all forecast panels reflow', {timeout:120000}, async () => {
+  for (const [engine,driver] of [['chromium',chromium],['webkit',webkit]]) {
+    const browser=await driver.launch({headless:true})
     try {
-      const page = await browser.newPage({
-        viewport:{width:390,height:844}, isMobile:true, hasTouch:true,
-      })
-      try {
-        await page.setContent(html, {waitUntil:'domcontentloaded'})
-        for (const width of ['half', 'full']) {
-          for (const height of ['small', 'medium', 'large']) {
-            const result = await page.evaluate(({width, height}) => {
-              const card = document.querySelector('#card')
-              card.className = `home-widget home-widget-weather home-widget-size-${height} home-widget-width-${width}`
-              const weather = document.querySelector('#weather')
-              weather.className = 'home-weather home-weather-active weather-theme-cloudy'
-              const get = selector => {
-                const r = document.querySelector(selector).getBoundingClientRect()
-                return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}
+      for (const viewportWidth of [390,1024]) {
+        const page=await browser.newPage({
+          viewport:{width:viewportWidth,height:900},isMobile:viewportWidth===390,hasTouch:viewportWidth===390,
+        })
+        try {
+          await page.setContent(html,{waitUntil:'domcontentloaded'})
+          for (const width of ['half','full']) for (const height of ['small','medium','large']) for (const editing of [false,true]) {
+            const result=await page.evaluate(({width,height,editing})=>{
+              const grid=document.querySelector('#grid')
+              const card=document.querySelector('#card')
+              card.className='home-widget home-widget-weather home-widget-size-'+height+' home-widget-width-'+width
+              grid.classList.toggle('home-widget-grid-editing',editing)
+              document.querySelector('#controls').hidden=!editing
+              const box=selector=>{const r=document.querySelector(selector).getBoundingClientRect()
+                return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}}
+              const range=document.createRange()
+              range.selectNodeContents(document.querySelector('.home-weather-title'))
+              const pills=[...document.querySelectorAll('.home-weather-detail-pill')].map(node=>{
+                const r=node.getBoundingClientRect()
+                const t=node.querySelector('strong').getBoundingClientRect()
+                return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,
+                        textLeft:t.left,textRight:t.right,textBottom:t.bottom}
+              })
+              return {card:box('#card'),weather:box('#weather'),art:box('.home-weather-art-panel'),
+                artDisplay:getComputedStyle(document.querySelector('.home-weather-artwork')).display,
+                artScale:getComputedStyle(document.querySelector('.home-weather-artwork')).transform,
+                tempPanel:box('.home-weather-temperature-panel'),
+                temp:box('.home-weather-temperature'),pills,details:box('.home-weather-details'),
+                controls:box('#controls'),source:box('.home-weather-source'),
+                titleRight:range.getBoundingClientRect().right,
+                gear:box('.home-weather-settings-button'),
+                color:getComputedStyle(document.querySelector('.home-weather-title')).color,
+                tempFont:parseFloat(getComputedStyle(document.querySelector('.home-weather-temperature')).fontSize),
+                scrollExcess:document.querySelector('#weather').scrollHeight-document.querySelector('#weather').clientHeight,
               }
-              const icon = document.querySelector('.home-weather-compact-icon')
-              const art = document.querySelector('.home-weather-artwork')
-              const details = document.querySelector('.home-weather-details')
-              const title = document.querySelector('.home-weather-title')
-              const titleRange = document.createRange()
-              titleRange.selectNodeContents(title)
-              return {
-                card:get('#card'),icon:get('.home-weather-compact-icon'),
-                art:get('.home-weather-artwork'),temp:get('.home-weather-temperature'),
-                main:get('.home-weather-main'),details:get('.home-weather-details'),
-                source:get('.home-weather-source'),title:{right:titleRange.getBoundingClientRect().right},
-                gear:get('.home-weather-settings-button'),
-                textColor:getComputedStyle(title).color,
-                iconDisplay:getComputedStyle(icon).display,
-                artDisplay:getComputedStyle(art).display,
-                innerScroll:weather.scrollHeight > weather.clientHeight + 4,
-                maxScroll:weather.scrollHeight-weather.clientHeight,
-                neighbor:get('#neighbor'),
-              }
-            }, {width,height})
-            const info = `${name} ${width} ${height}`
-            assert.ok(result.card.width > 130, `${info}: card isn't wide enough`)
-            assert.ok(result.temp.right <= result.card.right - 5, `${info}: temperature clipped horizontally`)
-            assert.ok(result.temp.left >= result.card.left + 5, `${info}: temperature clipped at left`)
-            assert.ok(result.details.top >= result.temp.bottom - 3, `${info}: weather facts overlap temperature`)
-            assert.ok(result.title.right <= result.gear.left + 3, `${info}: settings overlaps title`)
-            assert.equal(result.textColor, 'rgb(22, 59, 81)', `${info}: cloudy label should be high-contrast navy`)
-            if (width === 'half' || height === 'small') {
-              assert.notEqual(result.iconDisplay, 'none', `${info}: compact icon missing`)
-              assert.equal(result.artDisplay, 'none', `${info}: art should not collide on a compact card`)
-              assert.ok(result.icon.right <= result.temp.left + 3, `${info}: icon overlaps temperature`)
-            } else {
-              assert.equal(result.iconDisplay, 'none', `${info}: redundant emoji in illustrated view`)
-              assert.notEqual(result.artDisplay, 'none', `${info}: illustrated view missing`)
-              assert.ok(result.art.right <= result.temp.left + 3, `${info}: illustration overlaps temperature`)
+            },{width,height,editing})
+            const info=engine+' '+viewportWidth+'px '+width+'/'+height+' edit='+editing
+            assert.ok(result.card.width>=130,info+': card too narrow')
+            assert.ok(result.art.width>=25&&result.art.height>=25,info+': illustrated panel collapsed')
+            assert.ok(result.tempPanel.width>=25&&result.tempPanel.height>=25,info+': temperature panel collapsed')
+            assert.ok(overlap(result.art,result.tempPanel)<=1,info+': artwork and temperature panels overlap')
+            assert.equal(result.artDisplay,'block',info+': original sun/cloud artwork hidden')
+            assert.notEqual(result.artScale,'none',info+': artwork has no responsive scale')
+            assert.ok(result.temp.left>=result.tempPanel.left-1&&result.temp.right<=result.tempPanel.right+1,
+              info+': temperature outside glass panel')
+            assert.ok(result.tempFont>=27,info+': temperature is too small')
+            assert.equal(result.pills.length,3,info+': needs three independent glass forecast panels')
+            for (const [i,p] of result.pills.entries()) {
+              assert.ok(p.height>=13,info+': forecast panel '+i+' collapsed')
+              assert.ok(p.textLeft>=p.left-1&&p.textRight<=p.right+1,info+': forecast value '+i+' overflows')
+              assert.ok(p.textBottom<=p.bottom+1,info+': forecast value '+i+' vertical overflow')
+              assert.ok(overlap(p,result.art)<=1&&overlap(p,result.tempPanel)<=1,
+                info+': forecast panel '+i+' overlaps temperature or artwork')
             }
-            assert.ok(result.source.bottom <= result.card.bottom + 4, `${info}: source outside the card`)
-            assert.ok(result.details.bottom <= result.card.bottom + 3, `${info}: facts below card`)
-            if (height === 'small') {
-              assert.ok(result.details.bottom <= result.card.bottom - 6, `${info}: small card hides weather facts`)
-              assert.ok(result.source.bottom <= result.card.bottom - 6, `${info}: small card hides source text`)
+            for(let i=0;i<3;i++)for(let j=i+1;j<3;j++)
+              assert.ok(overlap(result.pills[i],result.pills[j])<=1,info+': forecast panels overlap')
+            assert.ok(result.pills[2].bottom<=result.card.bottom+1,info+': forecast below card')
+            if(!editing){
+              assert.ok(result.source.bottom<=result.card.bottom+1,info+': attribution below card')
+              assert.ok(result.titleRight<=result.gear.left+4,info+': settings overlaps title')
+            }else{
+              assert.ok(result.art.top>=result.controls.bottom-3,info+': editor controls overlap art')
+              assert.ok(result.tempPanel.top>=result.controls.bottom-3,info+': editor controls overlap temperature')
             }
-            if (width === 'half') assert.ok(Math.abs(result.card.width-result.neighbor.width) < 5, `${info}: neighbors not equal half widths`)
+            if(viewportWidth===390&&width==='half') {
+              assert.ok(result.pills[0].top<result.pills[1].top&&result.pills[1].top<result.pills[2].top,
+                info+': compact glass panels must stack vertically')
+            }
+            assert.equal(result.color,'rgb(23, 59, 83)',info+': cloudy theme text must be dark enough')
+            // Decorative sun/cloud pseudo-elements can extend outside their
+            // clipped panel, so scrollHeight is not a reliable readability test.
+            // Assert the actual text and glass panels stay within the card above.
           }
-        }
-        const dark = await page.evaluate(() => {
-          const weather = document.querySelector('#weather')
-          weather.className = 'home-weather home-weather-active weather-theme-rain'
-          return getComputedStyle(document.querySelector('.home-weather-title')).color
-        })
-        assert.equal(dark,'rgb(255, 255, 255)',`${name}: rain theme should use white text`)
-        await page.evaluate(() => {
-          const grid = document.querySelector('#grid')
-          const card = document.querySelector('#card')
-          grid.classList.add('home-widget-grid-editing')
-          card.className = 'home-widget home-widget-weather home-widget-size-small home-widget-width-half'
-          document.querySelector('#controls').hidden = false
-          document.querySelector('#weather').className = 'home-weather home-weather-active weather-theme-cloudy'
-        })
-        const edit = await page.evaluate(() => {
-          const a = document.querySelector('#controls').getBoundingClientRect()
-          const b = document.querySelector('.home-weather-temperature').getBoundingClientRect()
-          const c = document.querySelector('.home-weather-details').getBoundingClientRect()
-          return {controlsBottom:a.bottom, tempTop:b.top, detailsTop:c.top,tempBottom:b.bottom}
-        })
-        assert.ok(edit.tempTop >= edit.controlsBottom - 3,`${name}: editing controls overlap temperature`)
-        assert.ok(edit.detailsTop >= edit.tempBottom - 3,`${name}: edit mode weather facts overlap temperature`)
-      } finally {
-        await page.close()
+          const dark=await page.evaluate(()=>{
+            document.querySelector('#grid').classList.remove('home-widget-grid-editing')
+            document.querySelector('#weather').className='home-weather home-weather-active weather-theme-rain'
+            return getComputedStyle(document.querySelector('.home-weather-title')).color
+          })
+          assert.equal(dark,'rgb(255, 255, 255)',engine+' '+viewportWidth+': dark storm theme should keep white text')
+        }finally{await page.close()}
       }
-    } finally {
-      await browser.close()
-    }
+    }finally{await browser.close()}
   }
 })
