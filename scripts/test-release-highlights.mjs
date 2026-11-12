@@ -43,6 +43,23 @@ test('one acknowledgement per person, household/account and release on each brow
   assert.equal(browser.count(), 1)
 })
 
+test('a fresh Home and Notes release shows even after the older weather update was acknowledged', () => {
+  assert.equal(CURRENT_RELEASE.id, '2026-11-home-notes-settings')
+  assert.ok(CURRENT_RELEASE.highlights.some(item => item.includes('Settings')))
+  assert.ok(CURRENT_RELEASE.highlights.some(item => item.includes('Notes')))
+  const browser = store()
+  const account = 'family-calendar.profile.v1.legacy.familyadmin'
+  const oldKey = releaseAcknowledgementKey(account, 1, '2026-11-home-weather-refresh')
+  const newKey = releaseAcknowledgementKey(account, 1)
+  assert.ok(oldKey && newKey)
+  assert.notEqual(oldKey, newKey)
+  assert.equal(acknowledgeRelease(browser, oldKey), true)
+  assert.equal(isReleaseAcknowledged(browser, oldKey), true)
+  assert.equal(isReleaseAcknowledged(browser, newKey), false, 'old weather acknowledgement must not suppress this release')
+  assert.equal(acknowledgeRelease(browser, newKey), true)
+  assert.equal(isReleaseAcknowledged(browser, newKey), true)
+})
+
 test('Home/wall and unverified accounts get no announcement', () => {
   const account = 'family-calendar.profile.v1.legacy.familyadmin'
   assert.equal(releaseAcknowledgementKey(account, null), null)
