@@ -21,6 +21,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import './homeWeatherAtmosphere.css'
 import { arneySpeechAvailable, beginArneySpeech, getArneySpeechDiagnostics, speakArneyReply, stopArneyReply } from './arneySpeech'
 import { arneyLocalSpeechAvailable, beginArneyLocalSpeech } from './arneyLocalSpeech'
 import { describeArneyError, describeArneyIntent, describeArneyPreview, shouldSpeakArneyReply, type ArneyReply } from './arneyResponses'
