@@ -11,7 +11,8 @@ const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url
 test('Household & Members remains a Settings destination via mobile Quick Add', () => {
   assert.match(app, /import HouseholdMembersSettings from '\.\/HouseholdMembersSettings'/)
   assert.match(app, /page === 'householdMembers' && <HouseholdMembersSettings/)
-  assert.match(app, /quick-add-option quick-add-settings-option/)\n  assert.doesNotMatch(app, /className="home-mobile-settings-button"/)
+  assert.match(app, /quick-add-option quick-add-settings-option/)
+  assert.doesNotMatch(app, /className="home-mobile-settings-button"/)
   assert.match(app, /mobile-settings-panel/)
   assert.match(app, /Household &amp; Members/)
   assert.match(app, /setPage\('householdMembers'\)/)
