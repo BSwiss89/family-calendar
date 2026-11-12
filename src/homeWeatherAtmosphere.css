@@ -172,3 +172,30 @@
   :is(.home-weather-title,.home-weather-location,.home-weather-temperature,.home-weather-details,.home-weather-source) {
   color: #173a4f;
 }
+
+
+/* Only displayed on weather-request failures; keep the scene and responsive
+   weather artwork unchanged while giving mobile users an obvious retry. */
+.home-widget-grid > .home-widget-weather .home-weather-message {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.home-widget-grid > .home-widget-weather .home-weather-retry-button {
+  position: relative;
+  z-index: 3;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.13);
+  color: inherit;
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.home-widget-grid > .home-widget-weather .home-weather-retry-button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
