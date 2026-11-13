@@ -21354,3 +21354,20 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
     max-height: calc(100dvh - env(safe-area-inset-bottom) - 12px);
   }
 }
+
+/* Phase 4A daily voice reads: show the ephemeral recognized words so a family
+   member can verify Whisper heard the intended calendar request. */
+.arney-voice-heard {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid #d7e4f4;
+  border-radius: 12px;
+  background: #f5f9ff;
+  color: #354967;
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.arney-voice-heard strong {
+  color: #17488c;
+}
