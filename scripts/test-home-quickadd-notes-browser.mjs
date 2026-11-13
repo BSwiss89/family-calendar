@@ -5,7 +5,8 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 
 const { chromium, webkit } = await import(process.env.FAMILY_CALENDAR_PLAYWRIGHT_MODULE || 'playwright')
-const css = readFileSync(new URL('../src/App.css', import.meta.url), 'utf8') + '\n' +
+const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8') + '\n' +
+  readFileSync(new URL('../src/App.css', import.meta.url), 'utf8') + '\n' +
   readFileSync(new URL('../src/FamilyDailyNotes.css', import.meta.url), 'utf8')
 const notesComponent = readFileSync(new URL('../src/FamilyDailyNotes.tsx', import.meta.url), 'utf8')
 const fontCode = notesComponent.match(/^function fitNoteFont\(textarea: HTMLTextAreaElement\) \{[\s\S]*?^\}/m)?.[0]?.replace(': HTMLTextAreaElement', '')
@@ -21,9 +22,10 @@ const html = `<!doctype html><html><head><meta name="viewport" content="width=de
 <div class="quick-add-options" id="options">
 ${['Event','List','Recipe','Photo / Screenshot'].map((label,i)=>`<button class="quick-add-option" data-original="${i}"><span class="quick-add-option-icon">+</span><span class="quick-add-option-text"><strong>${label}</strong><small>Add or manage</small></span></button>`).join('')}
 <button class="quick-add-option quick-add-settings-option" id="settings"><span class="quick-add-option-icon">⚙</span><span class="quick-add-option-text"><strong>Settings</strong><small>Calendar and family preferences</small></span></button>
+<button class="quick-add-option quick-add-arney-option" id="ask-arney"><span class="quick-add-option-icon">✦</span><span class="quick-add-option-text"><strong>Ask Arney</strong><small>Type a question or request</small></span><span class="quick-add-arney-new">NEW</span></button>
 </div></div></div><script>${fontCode}</script></body></html>`
 
-test('Home headers align at top, and all five Quick Add actions fit without shrinking four tiles', { timeout: 120000 }, async () => {
+test('Home headers align at top, and all six Quick Add actions fit without shrinking four tiles', { timeout: 120000 }, async () => {
   for (const [engine, driver] of [['chromium', chromium], ['webkit', webkit]]) {
     const browser = await driver.launch({ headless: true })
     try {
@@ -35,12 +37,13 @@ test('Home headers align at top, and all five Quick Add actions fit without shri
             const box = el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom } }
             const original = [...document.querySelectorAll('[data-original]')].map(box)
             const settings = box(document.querySelector('#settings'))
+            const arney = box(document.querySelector('#ask-arney'))
             const sheetEl = document.querySelector('#sheet')
             const sheet = box(sheetEl)
             const title = box(document.querySelector('#title'))
             const card = box(document.querySelector('#note-card'))
             const note = box(document.querySelector('.family-daily-notes textarea'))
-            return { original, settings, sheet, title, card, note, sheetScrollHeight: sheetEl.scrollHeight, sheetClientHeight: sheetEl.clientHeight }
+            return { original, settings, arney, sheet, title, card, note, sheetScrollHeight: sheetEl.scrollHeight, sheetClientHeight: sheetEl.clientHeight }
           })
           const where = engine + ' ' + viewport.width + 'x' + viewport.height
           assert.equal(measurements.original.length, 4, where + ': lost original actions')
@@ -48,6 +51,9 @@ test('Home headers align at top, and all five Quick Add actions fit without shri
           assert.ok(measurements.settings.height >= 40 && measurements.settings.height <= 64, where + ': Settings row is not compact')
           assert.ok(measurements.settings.y >= measurements.original[2].bottom, where + ': Settings overlaps the original tiles')
           assert.ok(measurements.settings.width >= measurements.original[0].width * 1.9, where + ': Settings is not full width')
+          assert.ok(measurements.arney.height >= 40 && measurements.arney.height <= 64, where + ': Ask Arney row is not compact')
+          assert.ok(measurements.arney.y >= measurements.settings.bottom, where + ': Ask Arney overlaps Settings')
+          assert.ok(measurements.arney.width >= measurements.original[0].width * 1.9, where + ': Ask Arney is not full width')
           assert.ok(measurements.sheet.y >= 0 && measurements.sheet.bottom <= viewport.height + 1, where + ': Quick Add exceeds available viewport')
           assert.ok(measurements.sheetScrollHeight <= measurements.sheetClientHeight + 1, where + ': Quick Add requires vertical scrolling')
           assert.ok(measurements.title.y - measurements.card.y <= 24, where + ': Home title has unnecessary top gap')

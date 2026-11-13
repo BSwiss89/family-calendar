@@ -28,6 +28,7 @@ import { describeArneyError, describeArneyIntent, describeArneyPreview, shouldSp
 import { readArneyPreferences } from './arneyPreferences'
 import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
 import { parseArneySimpleCommand } from './arneyTextCommands'
+import { planArneyReadOnlyRequest } from './arneyPlanning.mjs'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
 import FamilyDailyNotes from './FamilyDailyNotes'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
@@ -4147,6 +4148,26 @@ async function submitAiCommand(
     command === '' ||
     aiCommandLoading
   ) {
+    return
+  }
+
+  // Phase 4A: read-only tools run against the current authenticated client
+  // data. No model call, DB write, API request, or state mutation is performed.
+  const planningReply = planArneyReadOnlyRequest(command, {
+    now: new Date(),
+    events,
+    recipes,
+    mealPlanItems,
+    mealPlans,
+    activePersonId: activeHouseholdPersonId,
+    occurrenceStartForDate: getOccurrenceStartForDate,
+  })
+  if (planningReply) {
+    stopArneyReply()
+    setArneyVoiceStatus('')
+    setAiCancellationPreview(null)
+    setAiReschedulePreview(null)
+    announceArneyReply(planningReply)
     return
   }
 
@@ -14523,6 +14544,9 @@ return (
     >
       <div
         className="ai-command-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="arney-command-title"
         onClick={(event) => {
           event.stopPropagation()
         }}
@@ -14532,8 +14556,15 @@ return (
             <span className="ai-command-eyebrow">
               Calendar Assistant
             </span>
-
-            <h2>{aiVoiceDirect ? 'Review Arney\'s result' : 'What would you like to do?'}</h2>
+            <h2 id="arney-command-title">
+              <span className="ai-command-title-icon" aria-hidden="true">✦</span>
+              Ask Arney
+            </h2>
+            <p className="ai-command-helper">
+              {aiVoiceDirect
+                ? 'Review Arney’s answer or hear it aloud.'
+                : 'Type a question or request.'}
+            </p>
           </div>
 
           <button
@@ -14575,13 +14606,15 @@ return (
           {!aiVoiceDirect && (
             <textarea
               className="ai-command-input"
+              aria-label="Ask Arney a question or request"
+              rows={3}
               value={aiCommandText}
               onChange={(event) => {
                 setAiCommandText(
                   event.target.value
                 )
               }}
-              placeholder="Try: Cancel my dentist appointment tomorrow at 2 PM"
+              placeholder="What's on our family calendar this week?"
               autoFocus
             />
           )}
@@ -14975,22 +15008,6 @@ return (
     </div>
   )}
 
-{aiCommandResult !== '' && (
-  <section className="arney-conversation-result" role="status" aria-live="polite">
-    <p>{aiCommandResult}</p>
-    <div className="arney-conversation-audio-controls">
-      <button type="button" onClick={() => {
-        if (!speakArneyReply(aiCommandResult)) {
-          setArneyVoiceStatus('Audio playback is not available here. You can read the reply below.')
-        }
-      }} aria-label="Hear Arney's reply">Hear reply</button>
-      <button type="button" onClick={stopArneyReply}
-        aria-label="Stop Arney speaking">Stop speaking</button>
-    </div>
-  </section>
-)}
-
-
           <div className="ai-command-actions">
             <button
               type="button"
@@ -15018,6 +15035,27 @@ return (
               </button>
             )}
           </div>
+
+{aiCommandResult !== '' && (
+  <section className="arney-conversation-result" role="status" aria-live="polite">
+    <strong className="arney-conversation-name">
+      <span className="arney-conversation-name-icon" aria-hidden="true">✦</span>
+      Arney
+    </strong>
+    <p style={{ whiteSpace: 'pre-wrap' }}>{aiCommandResult}</p>
+    <div className="arney-conversation-audio-controls">
+      <button type="button" onClick={() => {
+        if (!speakArneyReply(aiCommandResult)) {
+          setArneyVoiceStatus('Audio playback is not available here. You can read the reply below.')
+        }
+      }} aria-label="Hear Arney's reply">Hear reply</button>
+      <button type="button" onClick={stopArneyReply}
+        aria-label="Stop Arney speaking">Stop speaking</button>
+    </div>
+  </section>
+)}
+
+
         </form>
       </div>
     </div>,
@@ -15217,6 +15255,29 @@ return (
               <strong>Settings</strong>
               <small>Calendar and family preferences</small>
             </span>
+          </button>
+          <button
+            className="quick-add-option quick-add-arney-option"
+            type="button"
+            onClick={() => {
+              setQuickAddOpen(false)
+              stopArneyReply()
+              setAiVoiceDirect(false)
+              setAiCommandText('')
+              setAiCommandResult('')
+              setAiClarificationAnswer('')
+              setArneyVoiceStatus('')
+              setAiCancellationPreview(null)
+              setAiReschedulePreview(null)
+              setAiCommandOpen(true)
+            }}
+          >
+            <span className="quick-add-option-icon" aria-hidden="true">✦</span>
+            <span className="quick-add-option-text">
+              <strong>Ask Arney</strong>
+              <small>Type a question or request</small>
+            </span>
+            <span className="quick-add-arney-new" aria-hidden="true">NEW</span>
           </button>
         </div>
       </div>

@@ -11,7 +11,7 @@ body {
   padding: 24px;
   background: #f4f5f7;
   color: #222;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--family-calendar-font, 'Nunito', 'Trebuchet MS', Arial, sans-serif);
 }
 
 .top-bar {
@@ -21220,5 +21220,137 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 
   .quick-add-settings-option .quick-add-option-text {
     gap: 2px;
+  }
+}
+
+
+/* Arney Phase 4A UI — rounded, quiet text-first assistant styling.
+   The existing Home widgets and original four Quick Add tile sizes are unchanged. */
+.ai-command-panel {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ai-command-header {
+  margin-bottom: 16px;
+}
+
+.ai-command-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: #16294b;
+}
+
+.ai-command-title-icon {
+  color: #1874e8;
+  font-size: 29px;
+  line-height: 1;
+}
+
+.ai-command-helper {
+  margin: 10px 0 0;
+  color: #5c6b85;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.ai-command-input {
+  min-height: 116px;
+  border: 1.5px solid #b9c8dc;
+  background: #fcfdff;
+  font-size: 17px;
+  line-height: 1.48;
+}
+
+.ai-command-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ai-command-actions > button {
+  width: 100%;
+}
+
+.arney-conversation-result {
+  margin-top: 2px;
+  padding: 18px;
+  border: 1px solid #d3e6ff;
+  border-radius: 20px;
+  background: #eaf4ff;
+  color: #16294b;
+}
+
+.arney-conversation-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.arney-conversation-name-icon {
+  color: #1672e5;
+  font-size: 23px;
+  line-height: 1;
+}
+
+.arney-conversation-result p {
+  margin-bottom: 15px;
+}
+
+.arney-conversation-audio-controls button {
+  border-radius: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  /* Sixth action: another compact full-width row, preserving the four 112px tiles. */
+  .quick-add-options > .quick-add-option.quick-add-arney-option {
+    grid-column: 1 / -1;
+    min-height: 44px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 7px 12px;
+    border-color: #d1e3ff;
+    background: #eaf3ff;
+  }
+
+  .quick-add-arney-option .quick-add-option-icon {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    border-radius: 10px;
+    background: #1672e5;
+    font-size: 22px;
+  }
+
+  .quick-add-arney-option .quick-add-option-text {
+    gap: 2px;
+  }
+
+  .quick-add-arney-option .quick-add-option-text strong {
+    color: #164e9b;
+  }
+
+  .quick-add-arney-new {
+    margin-left: auto;
+    border-radius: 8px;
+    padding: 3px 6px;
+    background: #1976e6;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+  }
+
+  .ai-command-panel {
+    max-height: calc(100dvh - env(safe-area-inset-bottom) - 12px);
   }
 }
