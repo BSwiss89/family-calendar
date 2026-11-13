@@ -15,6 +15,7 @@ export declare function planArneyReadOnlyRequest<
     events: TEvent[]
     recipes: Array<{ name: string; favorite?: boolean }>
     mealPlanItems: Array<{ date: string; mealType: string; title: string }>
+    mealPlans: Array<{ date: string; dinner: string }>
     activePersonId: number | null
     occurrenceStartForDate: (event: TEvent, date: string) => string | null
   },
