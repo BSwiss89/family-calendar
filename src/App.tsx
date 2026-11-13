@@ -28,6 +28,7 @@ import { describeArneyError, describeArneyIntent, describeArneyPreview, shouldSp
 import { readArneyPreferences } from './arneyPreferences'
 import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
 import { parseArneySimpleCommand } from './arneyTextCommands'
+import { planArneyReadOnlyRequest } from './arneyPlanning.mjs'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
 import FamilyDailyNotes from './FamilyDailyNotes'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
@@ -4147,6 +4148,25 @@ async function submitAiCommand(
     command === '' ||
     aiCommandLoading
   ) {
+    return
+  }
+
+  // Phase 4A: read-only tools run against the current authenticated client
+  // data. No model call, DB write, API request, or state mutation is performed.
+  const planningReply = planArneyReadOnlyRequest(command, {
+    now: new Date(),
+    events,
+    recipes,
+    mealPlanItems,
+    activePersonId: activeHouseholdPersonId,
+    occurrenceStartForDate: getOccurrenceStartForDate,
+  })
+  if (planningReply) {
+    stopArneyReply()
+    setArneyVoiceStatus('')
+    setAiCancellationPreview(null)
+    setAiReschedulePreview(null)
+    announceArneyReply(planningReply)
     return
   }
 
@@ -14977,7 +14997,7 @@ return (
 
 {aiCommandResult !== '' && (
   <section className="arney-conversation-result" role="status" aria-live="polite">
-    <p>{aiCommandResult}</p>
+    <p style={{ whiteSpace: 'pre-wrap' }}>{aiCommandResult}</p>
     <div className="arney-conversation-audio-controls">
       <button type="button" onClick={() => {
         if (!speakArneyReply(aiCommandResult)) {
