@@ -34,7 +34,7 @@ function displayDay(dateKeyValue) {
 
 function peopleLabel(event) {
   const names = (event.people ?? []).map(person => person?.name?.trim()).filter(Boolean)
-  return names.length ? names.join(', ') : 'Unassigned'
+  return names.length ? names.join(', ') : (event.person?.trim() || 'Unassigned')
 }
 
 function occurrencesIn(dates, events, occurrenceStartForDate) {
@@ -93,7 +93,7 @@ function weeklyCalendar(text, context, dates) {
     : all
   const title = mine ? 'Your' : 'Family'
   if (!entries.length) return title + ' calendar: no matching events found for ' +
-    displayDay(dates[0]) + '–' + displayDay(dates[6]) + '.'
+    displayDay(dates[0]) + '–' + displayDay(dates[6]) + '. Accepted cross-household shares are not included.'
   const lines = entries.slice(0, 20).map(item => {
     const when = item.time ? ' at ' + item.time : ' (all day / time not set)'
     return displayDay(item.day) + ': ' + item.event.title.slice(0, 100) + when +
@@ -101,7 +101,7 @@ function weeklyCalendar(text, context, dates) {
   })
   if (entries.length > 20) lines.push('...and ' + (entries.length - 20) + ' more. Open Calendar for the full schedule.')
   return title + ' calendar (' + displayDay(dates[0]) + '–' + displayDay(dates[6]) + '):\n' +
-    lines.join('\n') + '\nRead-only. Nothing was changed.'
+    lines.join('\n') + '\nLocal household events only; accepted cross-household shares are not included. Read-only. Nothing was changed.'
 }
 
 function overlapCheck(context, dates) {
@@ -137,7 +137,7 @@ function overlapCheck(context, dates) {
   )
   if (overlaps.length > 10) lines.push('...and ' + (overlaps.length - 10) + ' more overlaps.')
   return 'Possible schedule overlaps (not confirmed conflicts):\n' + lines.join('\n') +
-    '\nEvents without start/end times, all-day events, and overnight ranges were not checked. Nothing was changed.'
+    '\nEvents without start/end times, all-day events, overnight ranges, and cross-household shares were not checked. Nothing was changed.'
 }
 
 function dinnerDraft(text, context, dates, now) {
@@ -151,6 +151,10 @@ function dinnerDraft(text, context, dates, now) {
   for (const meal of context.mealPlanItems ?? []) {
     if (meal.mealType === 'dinner' && typeof meal.date === 'string' &&
       typeof meal.title === 'string' && !planned.has(meal.date)) planned.set(meal.date, meal.title)
+  }
+  for (const legacy of context.mealPlans ?? []) {
+    if (typeof legacy.date === 'string' && typeof legacy.dinner === 'string' &&
+      legacy.dinner.trim() && !planned.has(legacy.date)) planned.set(legacy.date, legacy.dinner)
   }
   const existingNames = new Set([...planned.values()].map(name => name.trim().toLowerCase()))
   const unique = new Map()
@@ -183,6 +187,7 @@ export function planArneyReadOnlyRequest(text, context) {
   if (typeof text !== 'string' || !context || !(context.now instanceof Date) ||
     Number.isNaN(context.now.getTime()) || !Array.isArray(context.events) ||
     !Array.isArray(context.recipes) || !Array.isArray(context.mealPlanItems) ||
+    !Array.isArray(context.mealPlans) ||
     typeof context.occurrenceStartForDate !== 'function') return null
   const request = text.trim().replace(/\s+/g, ' ')
   if (!request || request.length > 500) return null
