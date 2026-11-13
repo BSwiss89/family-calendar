@@ -160,3 +160,44 @@ test('current Arney text and voice routes use planning without saving anything',
   assert.doesNotMatch(app.slice(first, next), /fetch\(|\.save\(|\.post\(/)
   assert.match(app, /whiteSpace: 'pre-wrap'/)
 })
+
+
+test('Ask Arney option exposes typed entry without replacing hold-to-talk', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const app = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8')
+  assert.match(app, /className="quick-add-option quick-add-arney-option"/)
+  const open = app.slice(app.indexOf('className="quick-add-option quick-add-arney-option"'),
+    app.indexOf('className="quick-add-option quick-add-arney-option"') + 1200)
+  assert.match(open, /setQuickAddOpen\(false\)/)
+  assert.match(open, /setAiVoiceDirect\(false\)/)
+  assert.match(open, /setAiCommandText\(''\)/)
+  assert.match(open, /setAiCommandOpen\(true\)/)
+  assert.match(app, /function startCalendarAddHold/)
+  assert.match(app, /openArneyVoiceDraft\(transcript\)/)
+  assert.match(app, /aria-label="Ask Arney a question or request"/)
+  assert.match(app, /Type a question or request\./)
+  assert.match(app, /className="arney-conversation-name"/)
+})
+
+test('entire app uses self-hosted Nunito with fallback and an included open license', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const index = fs.readFileSync(path.join(root, 'src/index.css'), 'utf8')
+  const appCss = fs.readFileSync(path.join(root, 'src/App.css'), 'utf8')
+  assert.match(index, /font-family: 'Nunito'/)
+  assert.match(index, /font-family: var\(--family-calendar-font\)/)
+  assert.match(appCss, /font-family: var\(--family-calendar-font/)
+  assert.doesNotMatch(index, /https?:\/\/fonts\.(?:googleapis|gstatic)\.com/)
+  for (const name of [
+    'nunito-latin-wght-normal.woff2',
+    'nunito-latin-wght-italic.woff2',
+    'nunito-latin-ext-wght-normal.woff2',
+    'nunito-latin-ext-wght-italic.woff2',
+  ]) {
+    const file = fs.readFileSync(path.join(root, 'public/fonts', name))
+    assert.equal(file.subarray(0, 4).toString('ascii'), 'wOF2')
+    assert.ok(file.length > 10000)
+    assert.ok(index.includes('/fonts/' + name))
+  }
+  const license = fs.readFileSync(path.join(root, 'public/fonts/Nunito-OFL-LICENSE.txt'), 'utf8')
+  assert.match(license, /SIL OPEN FONT LICENSE Version 1\.1/)
+})
