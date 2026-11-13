@@ -10,7 +10,7 @@ const people = [{ id: 2, name: 'Robert' }, { id: 3, name: 'Haylee' }]
 const event = (id, date, title, time = null, endTime = null, assigned = [people[0]]) =>
   ({ id, date, title, time, endTime, people: assigned })
 const base = {
-  now, activePersonId: 2, recipes: [], mealPlanItems: [],
+  now, activePersonId: 2, recipes: [], mealPlanItems: [], mealPlans: [],
   events: [],
   occurrenceStartForDate: (e, day) => e.date === day ? e.date : null,
 }
@@ -136,4 +136,27 @@ test('planning code contains no fetch, persistence, or model calls', () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const source = fs.readFileSync(path.join(root, 'src/arneyPlanning.mjs'), 'utf8')
   assert.doesNotMatch(source, /\b(?:fetch|localStorage|indexedDB|writeFile|\.run\(|ollama|axios)\s*\(/)
+})
+
+
+test('legacy dinner plans are preserved, not overwritten by suggestions', () => {
+  const result = plan('Plan dinners for next week', {
+    recipes: [{ name: 'Fajitas', favorite: true }],
+    mealPlans: [{ date: '2026-11-15', dinner: 'Pasta' }],
+  })
+  assert.match(result.text, /Already planned — Pasta/)
+  assert.match(result.text, /Suggested — Fajitas/)
+})
+
+test('current Arney text and voice routes use planning without saving anything', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const app = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8')
+  assert.match(app, /import \{ planArneyReadOnlyRequest \} from '\.\/arneyPlanning\.mjs'/)
+  assert.match(app, /const planningReply = planArneyReadOnlyRequest\(command/)
+  assert.match(app, /occurrenceStartForDate: getOccurrenceStartForDate/)
+  const first = app.indexOf('const planningReply = planArneyReadOnlyRequest')
+  const next = app.indexOf('setAiCommandLoading(true)', first)
+  assert.ok(first > 0 && next > first)
+  assert.doesNotMatch(app.slice(first, next), /fetch\(|\.save\(|\.post\(/)
+  assert.match(app, /whiteSpace: 'pre-wrap'/)
 })
