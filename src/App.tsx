@@ -4158,6 +4158,7 @@ async function submitAiCommand(
     events,
     recipes,
     mealPlanItems,
+    mealPlans,
     activePersonId: activeHouseholdPersonId,
     occurrenceStartForDate: getOccurrenceStartForDate,
   })
