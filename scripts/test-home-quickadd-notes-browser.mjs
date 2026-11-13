@@ -45,7 +45,7 @@ test('Home headers align at top, and six floating Quick Add rows fit phone scree
             const title = box(document.querySelector('#title'))
             const card = box(document.querySelector('#note-card'))
             const note = box(document.querySelector('.family-daily-notes textarea'))
-            return { original, settings, arney, actions, visualLayout, sheet, title, card, note, sheetScrollHeight: sheetEl.scrollHeight, sheetClientHeight: sheetEl.clientHeight }
+            return { original, settings, arney, actions, visualLayout, sheet, title, card, note, sheetOverflow: getComputedStyle(sheetEl).overflowY, sheetScrollHeight: sheetEl.scrollHeight, sheetClientHeight: sheetEl.clientHeight }
           })
           const where = engine + ' ' + viewport.width + 'x' + viewport.height
           assert.equal(measurements.original.length, 4, where + ': lost original actions')
@@ -64,7 +64,12 @@ test('Home headers align at top, and six floating Quick Add rows fit phone scree
           assert.ok(measurements.sheet.right <= viewport.width + 1 && measurements.sheet.right >= viewport.width - 19,
             where + ': menu is not anchored near the blue plus')
           assert.ok(measurements.sheet.y >= 0 && measurements.sheet.bottom <= viewport.height + 1, where + ': Quick Add exceeds available viewport')
-          assert.ok(measurements.sheetScrollHeight <= measurements.sheetClientHeight + 1, where + ': Quick Add requires vertical scrolling')
+          assert.ok(measurements.sheetScrollHeight <= measurements.sheetClientHeight + 12,
+            where + ': menu contents overflow more than the decorative 7px pointer tail')
+          assert.ok(measurements.sheetOverflow === 'visible',
+            where + ': Quick Add popup unexpectedly has scrolling enabled')
+          assert.ok(measurements.actions[5].bottom <= measurements.sheet.bottom + 1,
+            where + ': final Ask Arney row is clipped below the popup')
           assert.ok(measurements.title.y - measurements.card.y <= 24, where + ': Home title has unnecessary top gap')
           assert.ok(measurements.note.right <= measurements.card.right + 1, where + ': Notes textarea extends outside card')
           assert.ok(measurements.note.height >= 100, where + ': Notes editor does not fill available card space')
