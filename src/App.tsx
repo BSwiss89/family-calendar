@@ -15072,7 +15072,10 @@ return (
       }}
     >
       <div
-        className="quick-add-sheet"
+        className="quick-add-sheet quick-add-actions-sheet"
+        role="dialog"
+        aria-label="Quick Add actions"
+        aria-modal="true"
         onClick={(event) => {
           event.stopPropagation()
         }}
@@ -15151,11 +15154,11 @@ return (
 }}
           >
             <span className="quick-add-option-icon">
-              +
+              ▦
             </span>
 
             <span className="quick-add-option-text">
-              <strong>Event</strong>
+              <strong>Add Event</strong>
               <small>
                 Add something to the calendar
               </small>
@@ -15182,11 +15185,11 @@ return (
   }}
 >
   <span className="quick-add-option-icon">
-    ✓
+    ☷
   </span>
 
   <span className="quick-add-option-text">
-    <strong>List</strong>
+    <strong>Add List Item</strong>
     <small>Add an item to a list</small>
   </span>
 </button>
@@ -15206,11 +15209,11 @@ return (
   }}
 >
   <span className="quick-add-option-icon">
-    R
+    ♧
   </span>
 
   <span className="quick-add-option-text">
-    <strong>Recipe</strong>
+    <strong>Add Recipe</strong>
     <small>Add a new recipe</small>
   </span>
 </button>
@@ -15238,7 +15241,7 @@ return (
   </span>
 
   <span className="quick-add-option-text">
-    <strong>Photo / Screenshot</strong>
+    <strong>Add Photo</strong>
     <small>Analyze an event or recipe</small>
   </span>
 </button>
