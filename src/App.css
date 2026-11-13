@@ -21451,6 +21451,12 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
     font-weight: 650;
   }
 
+  .quick-add-actions-sheet .quick-add-option-icon svg {
+    display: block;
+    width: 23px;
+    height: 23px;
+  }
+
   .quick-add-actions-sheet .quick-add-option-text {
     flex: 1 1 auto;
     gap: 0;
