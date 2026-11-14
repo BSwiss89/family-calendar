@@ -68,7 +68,7 @@ test('server process restart and a second household process preserve no prior no
   assert.equal(call(restarted.read).data.text, '')
 })
 
-test('Home and Quick Add integration preserves four original tiles and separate widget sizes', () => {
+test('Home and Quick Add integration preserves Home widget sizes and all seven floating actions', () => {
   const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   const styles = fs.readFileSync(new URL('../src/App.css', import.meta.url), 'utf8')
   const notes = fs.readFileSync(new URL('../src/FamilyDailyNotes.tsx', import.meta.url), 'utf8')
@@ -76,10 +76,13 @@ test('Home and Quick Add integration preserves four original tiles and separate 
   assert.match(app, /<FamilyDailyNotes disabled=\{isEditingHome\}/)
   assert.match(app, /quick-add-option quick-add-settings-option/)
   assert.doesNotMatch(app, /className="home-mobile-settings-button"/)
-  for (const item of ['Event', 'List', 'Recipe', 'Photo / Screenshot']) {
-    assert.ok(app.includes(`<strong>${item}</strong>`), `${item} Quick Add action remains`)
+  const quickAddBlock = app.slice(app.indexOf('{quickAddOpen &&'), app.indexOf('{captureOpen &&'))
+  assert.match(quickAddBlock, /className="quick-add-sheet quick-add-actions-sheet"/)
+  for (const item of ['Add Event', 'Add List Item', 'Add Recipe', 'Analyze Photo', 'Take Photo', 'Settings', 'Ask Arney']) {
+    assert.ok(quickAddBlock.includes(`<strong>${item}</strong>`), `${item} Quick Add action remains`)
   }
-  assert.match(styles, /min-height: 112px/)
+  assert.match(styles, /\.quick-add-sheet\.quick-add-actions-sheet/)
+  assert.match(styles, /\.quick-add-actions-sheet \.quick-add-options/)
   assert.match(styles, /quick-add-option\.quick-add-settings-option/)
   assert.match(styles, /home-widget-grid:not\(\.home-widget-grid-editing\).*home-widget:not/)
   assert.match(notes, /Share changes/)

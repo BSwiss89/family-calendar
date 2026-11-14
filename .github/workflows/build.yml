@@ -24,6 +24,10 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Check TypeScript and build frontend
         run: npm run build
+      - name: Verify Arney read-only planning and compact Quick Add
+        run: node --test scripts/test-arney-planning.mjs
+      - name: Verify visible date ranges from photographed flyers
+        run: node --test scripts/test-photo-event-date-range.mjs
       - name: Verify Home layout editor and responsive widget sizing
         run: node --experimental-strip-types --test scripts/test-home-widget-layout.mjs
       - name: Verify shared daily Notes reset, authentication, conflict and Quick Add

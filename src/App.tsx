@@ -28,6 +28,7 @@ import { describeArneyError, describeArneyIntent, describeArneyPreview, shouldSp
 import { readArneyPreferences } from './arneyPreferences'
 import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
 import { parseArneySimpleCommand } from './arneyTextCommands'
+import { planArneyReadOnlyRequest } from './arneyPlanning.mjs'
 import FamilyDailyNotes from './FamilyDailyNotes'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
 import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
@@ -1231,6 +1232,9 @@ sourceImage?: string | null
     year?: number | null
     month?: number | null
     day?: number | null
+    endMonth?: number | null
+    endDay?: number | null
+    endYear?: number | null
     weekday?: string
   }
 
@@ -3337,6 +3341,56 @@ const [captureFile, setCaptureFile] = useState<File | null>(null)
 const [capturePreviewUrl, setCapturePreviewUrl] = useState('')
 const [captureNote, setCaptureNote] = useState('')
 const [captureSaving, setCaptureSaving] = useState(false)
+
+const capturePhotoInputRef = useRef<HTMLInputElement | null>(null)
+const captureCameraInputRef = useRef<HTMLInputElement | null>(null)
+const capturePickerGenerationRef = useRef(0)
+
+// File input activation must happen synchronously inside the tap on iOS Safari.
+function openQuickAddCapturePicker(source: 'photo' | 'camera') {
+  if (captureSaving) return
+  const input = source === 'camera'
+    ? captureCameraInputRef.current
+    : capturePhotoInputRef.current
+  if (!input) {
+    showAppNotification('Photo selection is unavailable right now.')
+    return
+  }
+  capturePickerGenerationRef.current += 1
+  if (capturePreviewUrl) URL.revokeObjectURL(capturePreviewUrl)
+  setQuickAddOpen(false)
+  setCaptureOpen(false)
+  setCaptureFile(null)
+  setCapturePreviewUrl('')
+  setCaptureNote('')
+  input.value = ''
+  input.click()
+}
+
+// No upload or analysis is triggered merely by choosing a file.
+async function handleQuickAddCaptureSelection(event: ChangeEvent<HTMLInputElement>) {
+  const file = event.currentTarget.files?.[0] ?? null
+  event.currentTarget.value = ''
+  if (!file) return // Native picker/camera was dismissed.
+  if (!file.type.startsWith('image/')) {
+    showAppNotification('Choose a photo or screenshot.')
+    return
+  }
+  const generation = ++capturePickerGenerationRef.current
+  try {
+    const preparedFile = await prepareCaptureImage(file)
+    if (generation !== capturePickerGenerationRef.current) return
+    setCaptureFile(preparedFile)
+    setCaptureNote('')
+    setCapturePreviewUrl(URL.createObjectURL(preparedFile))
+    setCaptureOpen(true)
+  } catch {
+    if (generation === capturePickerGenerationRef.current) {
+      showAppNotification('The selected photo could not be opened.')
+    }
+  }
+}
+
 const [listCreateOpen, setListCreateOpen] = useState(false)
 const [newListIcon, setNewListIcon] = useState<string | null>(null)
 const [listIconPickerTarget, setListIconPickerTarget] = useState<'create' | number | null>(null)
@@ -4095,6 +4149,26 @@ async function submitAiCommand(
     command === '' ||
     aiCommandLoading
   ) {
+    return
+  }
+
+  // Phase 4A: read-only tools run against the current authenticated client
+  // data. No model call, DB write, API request, or state mutation is performed.
+  const planningReply = planArneyReadOnlyRequest(command, {
+    now: new Date(),
+    events,
+    recipes,
+    mealPlanItems,
+    mealPlans,
+    activePersonId: activeHouseholdPersonId,
+    occurrenceStartForDate: getOccurrenceStartForDate,
+  })
+  if (planningReply) {
+    stopArneyReply()
+    setArneyVoiceStatus('')
+    setAiCancellationPreview(null)
+    setAiReschedulePreview(null)
+    announceArneyReply(planningReply)
     return
   }
 
@@ -6269,6 +6343,36 @@ function openCapturedEventForReview(
         targetDateKey
       )
     )
+
+    // Preserve a multi-day span extracted from the flyer. The calendar form
+    // remains editable and nothing is saved without the user's confirmation.
+    if (
+      typeof dateContext?.endMonth === 'number' &&
+      typeof dateContext?.endDay === 'number' &&
+      dateContext.endMonth >= 1 &&
+      dateContext.endMonth <= 12 &&
+      dateContext.endDay >= 1 &&
+      dateContext.endDay <= 31
+    ) {
+      const endYear =
+        typeof dateContext.endYear === 'number'
+          ? dateContext.endYear
+          : targetDate.getFullYear() +
+            (dateContext.endMonth < targetDate.getMonth() + 1 ? 1 : 0)
+      const capturedEndDate = new Date(
+        endYear, dateContext.endMonth - 1, dateContext.endDay
+      )
+      if (
+        capturedEndDate.getFullYear() === endYear &&
+        capturedEndDate.getMonth() === dateContext.endMonth - 1 &&
+        capturedEndDate.getDate() === dateContext.endDay &&
+        capturedEndDate > targetDate
+      ) {
+        const endDateKey = getDateKeyFromDate(capturedEndDate)
+        setEventEndDate(endDateKey)
+        setEventEndDateText(formatDateKeyForText(endDateKey))
+      }
+    }
 
     setViewDate(
       new Date(
@@ -14139,6 +14243,26 @@ const homeListPreview =
   lists.slice(0, 4)
 return (
     <main className="calendar-app">
+      {/* Keep both inputs mounted so native iPhone file/camera pickers outlive Quick Add. */}
+      <input
+        ref={capturePhotoInputRef}
+        className="capture-picker-hidden-input"
+        type="file"
+        accept="image/*"
+        aria-label="Choose a photo or screenshot"
+        tabIndex={-1}
+        onChange={handleQuickAddCaptureSelection}
+      />
+      <input
+        ref={captureCameraInputRef}
+        className="capture-picker-hidden-input"
+        type="file"
+        accept="image/*"
+        capture="environment"
+        aria-label="Take a photo with the camera"
+        tabIndex={-1}
+        onChange={handleQuickAddCaptureSelection}
+      />
       {createPortal(<div className="app-status-bar-strip" aria-hidden="true" />, document.body)}
       <header
   className={`top-bar ${
@@ -14417,6 +14541,9 @@ return (
     >
       <div
         className="ai-command-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="arney-command-title"
         onClick={(event) => {
           event.stopPropagation()
         }}
@@ -14426,8 +14553,15 @@ return (
             <span className="ai-command-eyebrow">
               Calendar Assistant
             </span>
-
-            <h2>{aiVoiceDirect ? 'Review Arney\'s result' : 'What would you like to do?'}</h2>
+            <h2 id="arney-command-title">
+              <span className="ai-command-title-icon" aria-hidden="true">✦</span>
+              Ask Arney
+            </h2>
+            <p className="ai-command-helper">
+              {aiVoiceDirect
+                ? 'Review Arney’s answer or hear it aloud.'
+                : 'Type a question or request.'}
+            </p>
           </div>
 
           <button
@@ -14460,6 +14594,11 @@ return (
               )}
             </p>
           )}
+          {aiVoiceDirect && aiCommandText.trim() !== '' && (
+            <p className="arney-voice-heard" aria-label="Words Arney heard">
+              <strong>You said:</strong> {aiCommandText.trim().slice(0, 500)}
+            </p>
+          )}
           {arneyMicDiagnostics.length > 0 && (
             <details className="arney-mic-diagnostics">
               <summary>Microphone diagnostics (no audio or spoken words)</summary>
@@ -14469,13 +14608,15 @@ return (
           {!aiVoiceDirect && (
             <textarea
               className="ai-command-input"
+              aria-label="Ask Arney a question or request"
+              rows={3}
               value={aiCommandText}
               onChange={(event) => {
                 setAiCommandText(
                   event.target.value
                 )
               }}
-              placeholder="Try: Cancel my dentist appointment tomorrow at 2 PM"
+              placeholder="What's on our family calendar this week?"
               autoFocus
             />
           )}
@@ -14869,22 +15010,6 @@ return (
     </div>
   )}
 
-{aiCommandResult !== '' && (
-  <section className="arney-conversation-result" role="status" aria-live="polite">
-    <p>{aiCommandResult}</p>
-    <div className="arney-conversation-audio-controls">
-      <button type="button" onClick={() => {
-        if (!speakArneyReply(aiCommandResult)) {
-          setArneyVoiceStatus('Audio playback is not available here. You can read the reply below.')
-        }
-      }} aria-label="Hear Arney's reply">Hear reply</button>
-      <button type="button" onClick={stopArneyReply}
-        aria-label="Stop Arney speaking">Stop speaking</button>
-    </div>
-  </section>
-)}
-
-
           <div className="ai-command-actions">
             <button
               type="button"
@@ -14912,6 +15037,27 @@ return (
               </button>
             )}
           </div>
+
+{aiCommandResult !== '' && (
+  <section className="arney-conversation-result" role="status" aria-live="polite">
+    <strong className="arney-conversation-name">
+      <span className="arney-conversation-name-icon" aria-hidden="true">✦</span>
+      Arney
+    </strong>
+    <p style={{ whiteSpace: 'pre-wrap' }}>{aiCommandResult}</p>
+    <div className="arney-conversation-audio-controls">
+      <button type="button" onClick={() => {
+        if (!speakArneyReply(aiCommandResult)) {
+          setArneyVoiceStatus('Audio playback is not available here. You can read the reply below.')
+        }
+      }} aria-label="Hear Arney's reply">Hear reply</button>
+      <button type="button" onClick={stopArneyReply}
+        aria-label="Stop Arney speaking">Stop speaking</button>
+    </div>
+  </section>
+)}
+
+
         </form>
       </div>
     </div>,
@@ -14928,7 +15074,10 @@ return (
       }}
     >
       <div
-        className="quick-add-sheet"
+        className="quick-add-sheet quick-add-actions-sheet"
+        role="dialog"
+        aria-label="Quick Add actions"
+        aria-modal="true"
         onClick={(event) => {
           event.stopPropagation()
         }}
@@ -15006,12 +15155,15 @@ return (
   })
 }}
           >
-            <span className="quick-add-option-icon">
-              +
+            <span className="quick-add-option-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="5" width="18" height="16" rx="2" />
+                <path d="M7 3v4M17 3v4M3 10h18M7 14h3M14 14h3" />
+              </svg>
             </span>
 
             <span className="quick-add-option-text">
-              <strong>Event</strong>
+              <strong>Add Event</strong>
               <small>
                 Add something to the calendar
               </small>
@@ -15037,12 +15189,14 @@ return (
     setQuickListOpen(true)
   }}
 >
-  <span className="quick-add-option-icon">
-    ✓
+  <span className="quick-add-option-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 6h11M10 12h11M10 18h11M3 6l2 2 3-4M3 12l2 2 3-4M3 18l2 2 3-4" />
+    </svg>
   </span>
 
   <span className="quick-add-option-text">
-    <strong>List</strong>
+    <strong>Add List Item</strong>
     <small>Add an item to a list</small>
   </span>
 </button>
@@ -15061,12 +15215,15 @@ return (
     }, 0)
   }}
 >
-  <span className="quick-add-option-icon">
-    R
+  <span className="quick-add-option-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 18V11a4.5 4.5 0 0 1-1-8 4.5 4.5 0 0 1 7 1 4.5 4.5 0 0 1 7 7v7H6Z" />
+      <path d="M6 21h13" />
+    </svg>
   </span>
 
   <span className="quick-add-option-text">
-    <strong>Recipe</strong>
+    <strong>Add Recipe</strong>
     <small>Add a new recipe</small>
   </span>
 </button>
@@ -15074,30 +15231,37 @@ return (
           <button
   className="quick-add-option"
   type="button"
-  onClick={() => {
-    setQuickAddOpen(false)
-
-    if (capturePreviewUrl) {
-      URL.revokeObjectURL(
-        capturePreviewUrl
-      )
-    }
-
-    setCaptureFile(null)
-    setCapturePreviewUrl('')
-    setCaptureNote('')
-    setCaptureOpen(true)
-  }}
+  onClick={() => openQuickAddCapturePicker('photo')}
 >
-  <span className="quick-add-option-icon">
-    ▣
+  <span className="quick-add-option-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9" r="1.2" />
+      <path d="m3 17 5-5 4 4 3-3 6 6" />
+    </svg>
   </span>
 
   <span className="quick-add-option-text">
-    <strong>Photo / Screenshot</strong>
+    <strong>Analyze Photo</strong>
     <small>Analyze an event or recipe</small>
   </span>
 </button>
+          <button
+            className="quick-add-option quick-add-camera-option"
+            type="button"
+            onClick={() => openQuickAddCapturePicker('camera')}
+          >
+            <span className="quick-add-option-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 7h3l2-2h4l2 2h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" />
+                <circle cx="12" cy="13" r="3.5" />
+              </svg>
+            </span>
+            <span className="quick-add-option-text">
+              <strong>Take Photo</strong>
+              <small>Photograph a flyer or recipe</small>
+            </span>
+          </button>
           <button
             className="quick-add-option quick-add-settings-option"
             type="button"
@@ -15111,6 +15275,29 @@ return (
               <strong>Settings</strong>
               <small>Calendar and family preferences</small>
             </span>
+          </button>
+          <button
+            className="quick-add-option quick-add-arney-option"
+            type="button"
+            onClick={() => {
+              setQuickAddOpen(false)
+              stopArneyReply()
+              setAiVoiceDirect(false)
+              setAiCommandText('')
+              setAiCommandResult('')
+              setAiClarificationAnswer('')
+              setArneyVoiceStatus('')
+              setAiCancellationPreview(null)
+              setAiReschedulePreview(null)
+              setAiCommandOpen(true)
+            }}
+          >
+            <span className="quick-add-option-icon" aria-hidden="true">✦</span>
+            <span className="quick-add-option-text">
+              <strong>Ask Arney</strong>
+              <small>Type a question or request</small>
+            </span>
+            <span className="quick-add-arney-new" aria-hidden="true">NEW</span>
           </button>
         </div>
       </div>
@@ -15148,46 +15335,9 @@ createPortal(
   AI Quick Add
 </span>
 
-<h2>Photo / Screenshot</h2>
+<h2>Review Photo</h2>
 
-<p>
-  Choose a photo or screenshot and let AI create the event or recipe.
-</p>
-
-<input
-  className="event-input"
-  type="file"
-        accept="image/jpeg,image/png,image/webp"
-        disabled={captureSaving}
-       onChange={async (event) => {
-  const file =
-    event.target.files?.[0] ??
-    null
-
-  if (capturePreviewUrl) {
-    URL.revokeObjectURL(
-      capturePreviewUrl
-    )
-  }
-
-  if (!file) {
-    setCaptureFile(null)
-    setCapturePreviewUrl('')
-    return
-  }
-
-  const preparedFile =
-    await prepareCaptureImage(file)
-
-  setCaptureFile(preparedFile)
-
-  setCapturePreviewUrl(
-    URL.createObjectURL(
-      preparedFile
-    )
-  )
-}}
-      />
+<p>Check the image, add a note if needed, then analyze it.</p>
 
       {capturePreviewUrl && (
         <div className="capture-preview">
