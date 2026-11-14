@@ -203,7 +203,7 @@ test('entire app uses self-hosted Nunito with fallback and an included open lice
 })
 
 
-test('blue plus uses six ordered compact rows matching the approved mockup', () => {
+test('blue plus uses seven ordered compact rows matching the approved mockup', () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const app = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8')
   const css = fs.readFileSync(path.join(root, 'src/App.css'), 'utf8')
@@ -212,9 +212,9 @@ test('blue plus uses six ordered compact rows matching the approved mockup', () 
   assert.ok(first > 0 && last > first)
   const block = app.slice(first, last)
   assert.match(block, /className="quick-add-sheet quick-add-actions-sheet"/)
-  assert.deepEqual([...block.matchAll(/<strong>(Add Event|Add List Item|Add Recipe|Add Photo|Settings|Ask Arney)<\/strong>/g)]
+  assert.deepEqual([...block.matchAll(/<strong>(Add Event|Add List Item|Add Recipe|Analyze Photo|Take Photo|Settings|Ask Arney)<\/strong>/g)]
     .map(match => match[1]), [
-      'Add Event', 'Add List Item', 'Add Recipe', 'Add Photo', 'Settings', 'Ask Arney',
+      'Add Event', 'Add List Item', 'Add Recipe', 'Analyze Photo', 'Take Photo', 'Settings', 'Ask Arney',
     ])
   assert.match(css, /\.quick-add-actions-sheet \.quick-add-options \{/)
   assert.match(css, /flex-direction: column;/)
@@ -366,4 +366,40 @@ test('conflict and dinner replies avoid repetitive status boilerplate', () => {
   }
   assert.match(conflict.text, /without complete times/)
   assert.match(meal.text, /Suggested — Chicken tacos/)
+})
+
+test('Analyze Photo opens native file chooser directly, camera asks for rear camera, and selection is reviewed before analysis', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const app = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8')
+  const css = fs.readFileSync(path.join(root, 'src/App.css'), 'utf8')
+  const menu = app.slice(app.indexOf('{quickAddOpen &&'), app.indexOf('{captureOpen &&'))
+  const modal = app.slice(app.indexOf('{captureOpen &&'), app.indexOf('{multiEventReview &&'))
+  assert.match(menu, /onClick=\{\(\) => openQuickAddCapturePicker\('photo'\)\}/)
+  assert.match(menu, /onClick=\{\(\) => openQuickAddCapturePicker\('camera'\)\}/)
+  assert.match(app, /ref=\{capturePhotoInputRef\}/)
+  assert.match(app, /ref=\{captureCameraInputRef\}/)
+  assert.match(app, /capture="environment"/)
+  assert.match(app, /accept="image\/\*"/)
+  assert.match(app, /input\.click\(\)/)
+  assert.match(app, /event\.currentTarget\.value = ''/)
+  assert.match(app, /if \(!file\) return \/\/ Native picker\/camera was dismissed/)
+  assert.match(app, /await prepareCaptureImage\(file\)/)
+  assert.match(app, /setCaptureOpen\(true\)/)
+  assert.match(css, /\.capture-picker-hidden-input \{/)
+  assert.doesNotMatch(menu, /setCaptureOpen\(true\)/)
+  assert.match(modal, /<h2>Review Photo<\/h2>/)
+  assert.match(modal, /className="capture-preview"/)
+  assert.match(modal, /void analyzeQuickAddPhoto\(\)/)
+  assert.match(modal, /disabled=\{\s*captureFile === null \|\|\s*captureSaving/)
+  assert.doesNotMatch(modal, /View Capture Inbox|type="file"|setPage\('capture'\)/)
+})
+
+test('existing Capture Inbox data and APIs remain intact despite removing popup button', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const app = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8')
+  assert.match(app, /async function loadCaptureInbox\(\)/)
+  assert.match(app, /page === 'capture'/)
+  assert.match(app, /function openCaptureDestination\(/)
+  assert.match(app, /function openCapturedEventForReview\(/)
+  assert.match(app, /async function analyzeQuickAddPhoto\(\)/)
 })
