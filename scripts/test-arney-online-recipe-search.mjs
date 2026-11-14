@@ -66,7 +66,7 @@ test('feature remains after family authentication and before generic intent; no 
     s.indexOf("app.post('/api/ai/recipe-search'"))
   assert.ok(s.indexOf("app.post('/api/ai/recipe-search'") <
     s.indexOf("app.post('/api/ai/intent'"))
-  assert.ok(a.indexOf("parseArneyPublicRecipeRequest(command)") <
+  assert.ok(a.indexOf("parseArneyRecipeDiscovery(command)") <
     a.indexOf("'/api/ai/intent'"))
   assert.ok(!readFileSync(new URL('../Server/arney-public-recipe-search.mjs',import.meta.url),'utf8')
     .includes('11434'))
