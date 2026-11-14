@@ -29,7 +29,8 @@ import { readArneyPreferences } from './arneyPreferences'
 import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
 import { parseArneySimpleCommand } from './arneyTextCommands'
 import { planArneyReadOnlyRequest } from './arneyPlanning.mjs'
-import { parseArneyPublicRecipeRequest, formatArneyPublicRecipeReply } from './arneyOnlineResearch.mjs'
+import { parseArneyRecipeDiscovery, normalizeArneyRecipeResults, type PublicRecipe } from './arneyRecipeDiscovery.mjs'
+import ArneyRecipeCarousel from './ArneyRecipeCarousel'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
 import FamilyDailyNotes from './FamilyDailyNotes'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
@@ -3289,6 +3290,7 @@ const [aiCommandLoading, setAiCommandLoading] =
 
 const [aiCommandResult, setAiCommandResult] =
   useState('')
+const [arneyRecipeResults, setArneyRecipeResults] = useState<PublicRecipe[]>([])
 
 function announceArneyReply(reply: ArneyReply) {
   setAiCommandResult(reply.text)
@@ -4221,15 +4223,17 @@ async function submitAiCommand(
     setArneyVoiceStatus('')
     setAiCancellationPreview(null)
     setAiReschedulePreview(null)
+    setArneyRecipeResults([])
     announceArneyReply(planningReply)
     return
   }
 
- const publicRecipeRequest = parseArneyPublicRecipeRequest(command)
+ const publicRecipeRequest = parseArneyRecipeDiscovery(command)
  setAiCommandLoading(true)
 stopArneyReply()
 setArneyVoiceStatus('')
 setAiCommandResult('')
+setArneyRecipeResults([])
 setAiCancellationPreview(null)
 setAiReschedulePreview(null)
 
@@ -4251,12 +4255,16 @@ setAiReschedulePreview(null)
       const found = await fetch('/api/ai/recipe-search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: publicRecipeRequest.query }),
+        body: JSON.stringify({ query: publicRecipeRequest.query, preferences: publicRecipeRequest.preferences }),
         signal: requestController.signal,
       })
       const result = await found.json()
       if (!found.ok) throw new Error('Public recipe research is currently unavailable.')
-      announceArneyReply(formatArneyPublicRecipeReply(result, publicRecipeRequest.query))
+      const candidateRecipes = normalizeArneyRecipeResults(result)
+      setArneyRecipeResults(candidateRecipes)
+      announceArneyReply({ kind: 'information', text: candidateRecipes.length
+        ? `I found ${candidateRecipes.length} recipes for ${publicRecipeRequest.query}. Swipe through them, then choose Save to Recipes to review a copy before saving. Nothing was changed.`
+        : 'I could not find matching recipes with these preferences. Try relaxing a filter or another ingredient. Nothing was saved.' })
       return
     }
     const intentResponse =
@@ -7302,6 +7310,23 @@ async function loadRecipes() {
   const data = await response.json()
 
   setRecipes(data)
+}
+
+
+function reviewArneyPublicRecipe(recipe: PublicRecipe) {
+  // The user opens the existing editable recipe form; this is NOT a save.
+  clearRecipeForm()
+  setRecipeName(recipe.name)
+  setRecipeIngredients(recipe.ingredients.join('\n'))
+  setRecipeInstructions(recipe.instructions)
+  setRecipeSourceUrl(recipe.url)
+  setRecipeTags([recipe.category, 'Dinner'].filter(Boolean).join(', ').slice(0,1000))
+  setRecipeFormSource('recipes')
+  setRecipeFormOpen(true)
+  setAiCommandOpen(false)
+  setPage('meals')
+  setMealsView('recipes')
+  showAppNotification('Recipe draft ready. Review and tap Save Recipe to keep it. Photos are preview-only until you choose one in the editor.')
 }
 
 function clearRecipeForm() {
@@ -15174,6 +15199,9 @@ return (
       Arney
     </strong>
     <p style={{ whiteSpace: 'pre-wrap' }}>{aiCommandResult}</p>
+    {arneyRecipeResults.length > 0 && (
+      <ArneyRecipeCarousel recipes={arneyRecipeResults} onReviewSave={reviewArneyPublicRecipe} />
+    )}
     <div className="arney-conversation-audio-controls">
       <button type="button" onClick={() => {
         if (!speakArneyReply(aiCommandResult)) {
