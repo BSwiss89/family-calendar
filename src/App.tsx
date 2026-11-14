@@ -4209,7 +4209,10 @@ async function submitAiCommand(
 
   // Phase 4A: read-only tools run against the current authenticated client
   // data. No model call, DB write, API request, or state mutation is performed.
-  const planningReply = planArneyReadOnlyRequest(command, {
+  // Explicit public recipe searches bypass saved-recipe suggestions, which
+  // otherwise interpret bare 'find chicken recipes' as local planning.
+  const publicRecipeRequest = parseArneyRecipeDiscovery(command)
+  const planningReply = publicRecipeRequest ? null : planArneyReadOnlyRequest(command, {
     now: new Date(),
     events,
     recipes,
@@ -4228,7 +4231,6 @@ async function submitAiCommand(
     return
   }
 
- const publicRecipeRequest = parseArneyRecipeDiscovery(command)
  setAiCommandLoading(true)
 stopArneyReply()
 setArneyVoiceStatus('')
