@@ -14,7 +14,7 @@ const dish = (id,name,ingredients,{instructions='Cook everything together.',spic
 const chickenPasta=dish(52772,'One-Pot Chicken Penne','Penne Pasta',{instructions:'Cook in one pot until done.'})
 const spicy=dish(52773,'Spicy Chicken Pasta','Spaghetti',{spicy:true})
 const creamy=dish(52774,'Chicken Noodles','Noodles',{instructions:'Use a large pot to cook.'})
-const unrelated=dish(52775,'Beef Pasta Bake','Penne Pasta')
+const unrelated={...dish(52775,'Beef Pasta Bake','Penne Pasta'),strIngredient1:'Beef'}
 function mockSource(sources) {
   const calls=[]
   const fetchImpl=async url => {
@@ -78,6 +78,8 @@ test('repeated IDs are deduplicated and preview rejects injected external URLs',
 test('swipeable selection is separate from explicit recipe form submission',()=>{
   const app=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8')
   const carousel=readFileSync(new URL('../src/ArneyRecipeCarousel.tsx',import.meta.url),'utf8')
+  assert.ok(app.indexOf('const publicRecipeRequest = parseArneyRecipeDiscovery(command)') <
+    app.indexOf('const planningReply = publicRecipeRequest ? null : planArneyReadOnlyRequest('))
   assert.ok(app.includes('<ArneyRecipeCarousel recipes={arneyRecipeResults}'))
   assert.ok(app.includes('setRecipeFormOpen(true)'))
   assert.ok(app.includes('setRecipeSourceUrl(recipe.url)'))
