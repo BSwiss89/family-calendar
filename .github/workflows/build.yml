@@ -87,7 +87,7 @@ jobs:
             'LIVE_ARNEY_PHOTO_PREFLIGHT=PASS','LIVE_ARNEY_PHOTO_DEPLOYMENT=PASS',
             'LIVE_ARNEY_PHOTO_ROLLBACK=PASS','LocalSttStamp','TestStamp','CopyVerified',
             'New-LiveArneyPhotoLauncherPlan','scripts/test-photo-event-date-range.mjs',
-            'src/LiveInvitations.tsx','Server/photo-event-date-range.mjs')) {
+            'src\LiveInvitations.tsx','Server/photo-event-date-range.mjs')) {
             if (-not $script.Contains($marker)) { throw "Missing operator safety marker: $marker" }
           }
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '.\\scripts\\test-live-arney-photo-launcher-plan.ps1'
