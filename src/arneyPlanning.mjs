@@ -110,7 +110,7 @@ function calendarSummary(text, context, dates) {
     ? displayDay(dates[0])
     : displayDay(dates[0]) + '–' + displayDay(dates[dates.length - 1])
   if (!entries.length) return title + ' calendar: no matching events found for ' +
-    dateRange + '. Accepted cross-household shares are not included.'
+    dateRange + '.'
   const lines = entries.slice(0, 20).map(item => {
     const when = item.time ? ' at ' + item.time : ' (all day / time not set)'
     return displayDay(item.day) + ': ' + item.event.title.slice(0, 100) + when +
@@ -118,7 +118,7 @@ function calendarSummary(text, context, dates) {
   })
   if (entries.length > 20) lines.push('...and ' + (entries.length - 20) + ' more. Open Calendar for the full schedule.')
   return title + ' calendar (' + dateRange + '):\n' +
-    lines.join('\n') + '\nLocal household events only; accepted cross-household shares are not included. Read-only. Nothing was changed.'
+    lines.join('\n')
 }
 
 function overlapCheck(context, dates) {
@@ -146,7 +146,7 @@ function overlapCheck(context, dates) {
   }
   if (!overlaps.length) return 'No overlapping timed event pairs found for ' +
     displayDay(dates[0]) + '–' + displayDay(dates[6]) +
-    '. This does not check events without valid start and end times, all-day events, or overnight ranges. Nothing was changed.'
+    '. Events without complete times or overnight ranges are not included.'
   const lines = overlaps.slice(0, 10).map(({day, a, b, sharedIds}) =>
     displayDay(day) + ': ' + a.event.title.slice(0, 70) + ' (' + a.time + '–' + a.endTime +
     ') overlaps ' + b.event.title.slice(0, 70) + ' (' + b.time + '–' + b.endTime + '). ' +
@@ -154,7 +154,7 @@ function overlapCheck(context, dates) {
   )
   if (overlaps.length > 10) lines.push('...and ' + (overlaps.length - 10) + ' more overlaps.')
   return 'Possible schedule overlaps (not confirmed conflicts):\n' + lines.join('\n') +
-    '\nEvents without start/end times, all-day events, overnight ranges, and cross-household shares were not checked. Nothing was changed.'
+    '\nEvents without complete times or overnight ranges are not included.'
 }
 
 function dinnerDraft(text, context, dates, now) {
@@ -195,9 +195,8 @@ function dinnerDraft(text, context, dates, now) {
     next += 1
   }
   if (!lines.length) return 'No saved recipes are available to suggest. Add recipes first, or use the meal planner.'
-  return 'Dinner ideas from your saved recipes (draft only):\n' + lines.join('\n') +
-    (next < count ? '\nOnly ' + next + ' distinct unplanned recipe suggestions were available.' : '') +
-    '\nNo meal plans or shopping lists were changed. Review each idea in Meals before saving.'
+  return 'Dinner ideas from your saved recipes:\n' + lines.join('\n') +
+    (next < count ? '\nOnly ' + next + ' distinct unplanned recipe suggestions were available.' : '')
 }
 
 export function planArneyReadOnlyRequest(text, context) {

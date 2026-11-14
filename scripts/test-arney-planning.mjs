@@ -23,7 +23,7 @@ test('weekly family schedule includes verified events, people and exact week', (
   assert.equal(result.kind, 'information')
   assert.match(result.text, /Family calendar/)
   assert.match(result.text, /Fri, 11\/13: Dentist at 14:00 — Robert/)
-  assert.match(result.text, /Nothing was changed/)
+  assert.doesNotMatch(result.text, /Nothing was changed|Read-only|Local household|cross-household shares/i)
 })
 
 test('no events is read-only and does not invent entries', () => {
@@ -91,7 +91,7 @@ test('missing end times never cause a false all-clear', () => {
   const result = plan('Check for conflicts this week', {
     events: [event(1, '2026-11-13', 'Unfinished', '10:00', null)],
   })
-  assert.match(result.text, /without valid start and end times/)
+  assert.match(result.text, /without complete times/)
 })
 
 test('end-to-start touching times do not overlap', () => {
@@ -117,7 +117,7 @@ test('dinner ideas use only saved recipes, preserve existing plans, and never sa
   assert.match(result.text, /Suggested — Fajitas/)
   assert.match(result.text, /Suggested — Chicken rice/)
   assert.equal(result.text.split('Suggested — Fajitas').length - 1, 1)
-  assert.match(result.text, /No meal plans or shopping lists were changed/)
+  assert.doesNotMatch(result.text, /No meal plans or shopping lists were changed|draft only|Read-only/i)
 })
 
 test('no saved recipes reports the limitation', () => {
@@ -234,7 +234,7 @@ test('spoken daily question reads only today and never falls back to cancel/move
   assert.match(result.text, /Family calendar \(Fri, 11\/13\):/)
   assert.match(result.text, /Shift change/)
   assert.doesNotMatch(result.text, /Tomorrow dinner/)
-  assert.match(result.text, /Nothing was changed/)
+  assert.doesNotMatch(result.text, /Nothing was changed|Read-only|Local household|cross-household shares/i)
 })
 
 test('common voice variants including Hey Arney and a read without calendar noun', () => {
@@ -325,4 +325,45 @@ test('voice reply retains the on-screen transcript without auto-saving it', () =
   assert.match(app, /You said:/)
   assert.match(app, /aria-label="Words Arney heard"/)
   assert.match(app, /className="arney-voice-heard"/)
+})
+
+test('calendar answers stay concise without technical notes across date scopes', () => {
+  const events = [
+    event(1, '2026-11-13', 'Work', '07:00'),
+    event(2, '2026-11-14', 'Family time', '11:00'),
+  ]
+  for (const query of [
+    "What's on our calendar today?",
+    "What's on our calendar tomorrow?",
+    "What's on our calendar this week?",
+    "What's on our calendar this weekend?",
+    "Show my schedule today",
+  ]) {
+    const result = plan(query, { events })
+    assert.equal(result?.kind, 'information', query)
+    assert.doesNotMatch(result.text,
+      /local household|cross-household|not shared|read-only|nothing was changed/i, query)
+    assert.match(result.text, /calendar/, query)
+  }
+})
+
+test('empty days do not add warnings about sharing or changing data', () => {
+  const answer = plan("What's on our calendar today?")
+  assert.match(answer.text, /no matching events found/i)
+  assert.doesNotMatch(answer.text,
+    /local household|cross-household|read-only|nothing was changed/i)
+})
+
+test('conflict and dinner replies avoid repetitive status boilerplate', () => {
+  const conflict = plan('Check our calendar for conflicts this week')
+  const meal = plan('Plan dinners for next week', {
+    recipes: [{ name: 'Chicken tacos' }],
+  })
+  for (const result of [conflict, meal]) {
+    assert.equal(result.kind, 'information')
+    assert.doesNotMatch(result.text,
+      /local household|cross-household|read-only|nothing was changed|no meal plans or shopping lists were changed/i)
+  }
+  assert.match(conflict.text, /without complete times/)
+  assert.match(meal.text, /Suggested — Chicken tacos/)
 })
