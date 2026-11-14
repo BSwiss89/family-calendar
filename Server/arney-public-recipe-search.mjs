@@ -5,7 +5,7 @@ const SEARCH_URL = 'https://www.themealdb.com/api/json/v1/1/search.php'
 const MAX_RESPONSE = 500_000
 
 export function normalizePublicRecipeQuery(raw) {
-  if (typeof raw !== 'string' || raw.length > 70) return null
+  if (typeof raw !== 'string' || raw.length > 70 || /[\x00-\x1f\x7f]/.test(raw)) return null
   const query = raw.trim().replace(/\s+/g, ' ')
   if (query.length < 2 || query.length > 60 ||
       !/^[a-zA-Z0-9][a-zA-Z0-9 '-]*$/.test(query) ||

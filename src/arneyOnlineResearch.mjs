@@ -42,6 +42,6 @@ export function formatArneyPublicRecipeReply(payload, query) {
   return {
     kind: 'information',
     text: 'Public recipes for "' + query + '" from TheMealDB:\n' +
-      text + '\nThese are ideas only. No recipes, meals, lists, or events were saved.',
+      text + '\nThese are suggestions only. Nothing was saved or changed.',
   }
 }
