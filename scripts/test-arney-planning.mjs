@@ -222,3 +222,107 @@ test('blue plus uses six ordered compact rows matching the approved mockup', () 
   assert.match(css, /\.quick-add-actions-sheet \.quick-add-option-text small \{\s*display: none;/)
   assert.match(app, /function startCalendarAddHold/)
 })
+
+test('spoken daily question reads only today and never falls back to cancel/move', () => {
+  const result = plan("What's on our calendar today?", {
+    events: [
+      event(1, '2026-11-13', 'Shift change', '07:00', '08:00'),
+      event(2, '2026-11-14', 'Tomorrow dinner', '18:00'),
+    ],
+  })
+  assert.equal(result.kind, 'information')
+  assert.match(result.text, /Family calendar \(Fri, 11\/13\):/)
+  assert.match(result.text, /Shift change/)
+  assert.doesNotMatch(result.text, /Tomorrow dinner/)
+  assert.match(result.text, /Nothing was changed/)
+})
+
+test('common voice variants including Hey Arney and a read without calendar noun', () => {
+  const events = [event(1, '2026-11-13', 'School pickup', '15:00')]
+  for (const phrase of [
+    'Hey Arney, what is on our calendar today?',
+    'Hey Arney, what’s on our calendar today?',
+    'What do we have today?',
+    'Show me the events today',
+    "What's going on today?",
+    "What's on my schedule today?",
+  ]) {
+    const answer = plan(phrase, { events })
+    assert.ok(answer, 'unrecognized voice read: ' + phrase)
+    assert.match(answer.text, /School pickup/, phrase)
+  }
+})
+
+test('tomorrow reads a different date and respects recurring occurrences', () => {
+  const answer = plan('What do we have tomorrow?', {
+    events: [event(1, '2026-11-13', 'Today'), event(2, '2026-11-07', 'Recurring workout')],
+    occurrenceStartForDate: (entry, date) =>
+      entry.id === 2 && date === '2026-11-14' ? date : entry.date === date ? date : null,
+  })
+  assert.match(answer.text, /Sat, 11\/14/)
+  assert.match(answer.text, /Recurring workout/)
+  assert.doesNotMatch(answer.text, /Today/)
+})
+
+test('weekend spans Saturday and Sunday even when the dates cross weeks', () => {
+  const events = [
+    event(1, '2026-11-13', 'Friday'),
+    event(2, '2026-11-14', 'Saturday'),
+    event(3, '2026-11-15', 'Sunday'),
+    event(4, '2026-11-21', 'Next Saturday'),
+  ]
+  const thisWeekend = plan("What's on our calendar this weekend?", { events })
+  assert.match(thisWeekend.text, /Saturday/)
+  assert.match(thisWeekend.text, /Sunday/)
+  assert.doesNotMatch(thisWeekend.text, /Friday/)
+  assert.doesNotMatch(thisWeekend.text, /Next Saturday/)
+  const nextWeekend = plan('Show our schedule next weekend', { events })
+  assert.match(nextWeekend.text, /Next Saturday/)
+  assert.doesNotMatch(nextWeekend.text, /Sunday/)
+})
+
+test('this weekend on Sunday still includes yesterday Saturday', () => {
+  const answer = plan("What's our schedule this weekend?", {
+    now: new Date(2026, 10, 15, 12),
+    events: [event(1, '2026-11-14', 'Saturday plans'), event(2, '2026-11-15', 'Sunday plans')],
+  })
+  assert.match(answer.text, /Saturday plans/)
+  assert.match(answer.text, /Sunday plans/)
+})
+
+test('daily personal schedule requires selection and excludes others', () => {
+  const events = [
+    event(1, '2026-11-13', 'My event'),
+    event(2, '2026-11-13', 'Other event', null, null, [people[1]]),
+  ]
+  assert.match(plan("What's on my calendar today?", { events, activePersonId: null }).text, /Select your personal profile/)
+  const own = plan('Show my schedule today', { events })
+  assert.match(own.text, /My event/)
+  assert.doesNotMatch(own.text, /Other event/)
+})
+
+test('daily empty schedule is explicit rather than a generic calendar edit limitation', () => {
+  const answer = plan("What's on our calendar today?", {
+    events: [event(1, '2026-11-14', 'Not today')],
+  })
+  assert.match(answer.text, /no matching events found for Fri, 11\/13/)
+  assert.doesNotMatch(answer.text, /Not today/)
+})
+
+test('daily query tool refuses weather, mutations, and unrelated work', () => {
+  assert.equal(plan('What is the weather today?'), null)
+  assert.equal(plan('Add an event today'), null)
+  assert.equal(plan('Cancel my appointment today'), null)
+  assert.equal(plan('Can you book my dentist appointment today?'), null)
+})
+
+test('voice reply retains the on-screen transcript without auto-saving it', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const app = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8')
+  assert.match(app, /onFinished: result =>/)
+  assert.match(app, /void submitAiCommand\(transcript\)/)
+  assert.match(app, /aiVoiceDirect && aiCommandText\.trim\(\) !== ''/)
+  assert.match(app, /You said:/)
+  assert.match(app, /aria-label="Words Arney heard"/)
+  assert.match(app, /className="arney-voice-heard"/)
+})
