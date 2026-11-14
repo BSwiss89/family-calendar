@@ -221,6 +221,7 @@ test('common voice variants including Hey Arney and a read without calendar noun
   const events = [event(1, '2026-11-13', 'School pickup', '15:00')]
   for (const phrase of [
     'Hey Arney, what is on our calendar today?',
+    'Hey Arney, what’s on our calendar today?',
     'What do we have today?',
     'Show me the events today',
     "What's going on today?",
