@@ -29,6 +29,7 @@ import {
 } from './list-features.mjs'
 import { ensureListIcons, normalizeListIcon } from './list-icons.mjs'
 import { resolvePhotoEventEndDate } from './photo-event-date-range.mjs'
+import { searchPublicRecipes, normalizePublicRecipeQuery } from './arney-public-recipe-search.mjs'
 import { ensureShoppingStores, getShoppingStores, looksLikeShoppingList, requireStoreId,
   suggestShoppingStoreId, organizeShoppingStores, saveShoppingStoreCorrection,
   sortUnknownStoresWithOllama } from './smart-stores.mjs'
@@ -1789,6 +1790,30 @@ app.post('/api/ai/reschedule-criteria', async (request, response) => {
       error:
         'Local AI rescheduling parsing is unavailable.',
     })
+  }
+})
+
+// Explicit, authenticated public-recipe lookup. No household context is sent
+// to TheMealDB, and the official fixed destination is the only possible fetch.
+let lastPublicRecipeLookupAt = 0
+app.post('/api/ai/recipe-search', async (request, response) => {
+  response.set('Cache-Control', 'no-store')
+  const keys = request.body && typeof request.body === 'object' && !Array.isArray(request.body)
+    ? Object.keys(request.body) : []
+  if (keys.length !== 1 || keys[0] !== 'query') {
+    return response.status(400).json({ error: 'A recipe name or ingredient is required.' })
+  }
+  const query = normalizePublicRecipeQuery(request.body.query)
+  if (!query) return response.status(400).json({ error: 'Enter a generic dish or ingredient.' })
+  if (Date.now() - lastPublicRecipeLookupAt < 2500) {
+    return response.status(429).json({ error: 'Try another recipe search in a moment.' })
+  }
+  lastPublicRecipeLookupAt = Date.now()
+  try {
+    const result = await searchPublicRecipes(query)
+    return response.json(result)
+  } catch {
+    return response.status(503).json({ error: 'Public recipe search is unavailable right now.' })
   }
 })
 

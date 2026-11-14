@@ -29,6 +29,7 @@ import { readArneyPreferences } from './arneyPreferences'
 import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
 import { parseArneySimpleCommand } from './arneyTextCommands'
 import { planArneyReadOnlyRequest } from './arneyPlanning.mjs'
+import { parseArneyPublicRecipeRequest, formatArneyPublicRecipeReply } from './arneyOnlineResearch.mjs'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
 import FamilyDailyNotes from './FamilyDailyNotes'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
@@ -4224,6 +4225,7 @@ async function submitAiCommand(
     return
   }
 
+ const publicRecipeRequest = parseArneyPublicRecipeRequest(command)
  setAiCommandLoading(true)
 stopArneyReply()
 setArneyVoiceStatus('')
@@ -4238,6 +4240,25 @@ setAiReschedulePreview(null)
   )
 
   try {
+    if (publicRecipeRequest) {
+      if (!publicRecipeRequest.query) {
+        announceArneyReply({
+          text: 'What ingredient or dish should I search for online?',
+          kind: 'clarification',
+        })
+        return
+      }
+      const found = await fetch('/api/ai/recipe-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: publicRecipeRequest.query }),
+        signal: requestController.signal,
+      })
+      const result = await found.json()
+      if (!found.ok) throw new Error('Public recipe research is currently unavailable.')
+      announceArneyReply(formatArneyPublicRecipeReply(result, publicRecipeRequest.query))
+      return
+    }
     const intentResponse =
       await fetch(
         '/api/ai/intent',
@@ -4320,6 +4341,8 @@ announceArneyReply(describeArneyPreview(intentData.intent, previewData))
         text: 'Arney took too long to respond. Nothing was changed. Please try again.',
         kind: 'error',
       })
+    } else if (publicRecipeRequest) {
+      announceArneyReply({ text: 'Online recipe search is unavailable right now. Nothing was saved.', kind: 'error' })
     } else {
       announceArneyReply(describeArneyError())
     }
