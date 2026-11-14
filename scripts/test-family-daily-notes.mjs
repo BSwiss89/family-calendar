@@ -68,7 +68,7 @@ test('server process restart and a second household process preserve no prior no
   assert.equal(call(restarted.read).data.text, '')
 })
 
-test('Home and Quick Add integration preserves Home widget sizes and all six floating actions', () => {
+test('Home and Quick Add integration preserves Home widget sizes and all seven floating actions', () => {
   const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
   const styles = fs.readFileSync(new URL('../src/App.css', import.meta.url), 'utf8')
   const notes = fs.readFileSync(new URL('../src/FamilyDailyNotes.tsx', import.meta.url), 'utf8')
@@ -78,7 +78,7 @@ test('Home and Quick Add integration preserves Home widget sizes and all six flo
   assert.doesNotMatch(app, /className="home-mobile-settings-button"/)
   const quickAddBlock = app.slice(app.indexOf('{quickAddOpen &&'), app.indexOf('{captureOpen &&'))
   assert.match(quickAddBlock, /className="quick-add-sheet quick-add-actions-sheet"/)
-  for (const item of ['Add Event', 'Add List Item', 'Add Recipe', 'Add Photo', 'Settings', 'Ask Arney']) {
+  for (const item of ['Add Event', 'Add List Item', 'Add Recipe', 'Analyze Photo', 'Take Photo', 'Settings', 'Ask Arney']) {
     assert.ok(quickAddBlock.includes(`<strong>${item}</strong>`), `${item} Quick Add action remains`)
   }
   assert.match(styles, /\.quick-add-sheet\.quick-add-actions-sheet/)
