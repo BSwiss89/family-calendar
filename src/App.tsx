@@ -3346,6 +3346,56 @@ const [captureFile, setCaptureFile] = useState<File | null>(null)
 const [capturePreviewUrl, setCapturePreviewUrl] = useState('')
 const [captureNote, setCaptureNote] = useState('')
 const [captureSaving, setCaptureSaving] = useState(false)
+
+const capturePhotoInputRef = useRef<HTMLInputElement | null>(null)
+const captureCameraInputRef = useRef<HTMLInputElement | null>(null)
+const capturePickerGenerationRef = useRef(0)
+
+// File input activation must happen synchronously inside the tap on iOS Safari.
+function openQuickAddCapturePicker(source: 'photo' | 'camera') {
+  if (captureSaving) return
+  const input = source === 'camera'
+    ? captureCameraInputRef.current
+    : capturePhotoInputRef.current
+  if (!input) {
+    showAppNotification('Photo selection is unavailable right now.')
+    return
+  }
+  capturePickerGenerationRef.current += 1
+  if (capturePreviewUrl) URL.revokeObjectURL(capturePreviewUrl)
+  setQuickAddOpen(false)
+  setCaptureOpen(false)
+  setCaptureFile(null)
+  setCapturePreviewUrl('')
+  setCaptureNote('')
+  input.value = ''
+  input.click()
+}
+
+// No upload or analysis is triggered merely by choosing a file.
+async function handleQuickAddCaptureSelection(event: ChangeEvent<HTMLInputElement>) {
+  const file = event.currentTarget.files?.[0] ?? null
+  event.currentTarget.value = ''
+  if (!file) return // Native picker/camera was dismissed.
+  if (!file.type.startsWith('image/')) {
+    showAppNotification('Choose a photo or screenshot.')
+    return
+  }
+  const generation = ++capturePickerGenerationRef.current
+  try {
+    const preparedFile = await prepareCaptureImage(file)
+    if (generation !== capturePickerGenerationRef.current) return
+    setCaptureFile(preparedFile)
+    setCaptureNote('')
+    setCapturePreviewUrl(URL.createObjectURL(preparedFile))
+    setCaptureOpen(true)
+  } catch {
+    if (generation === capturePickerGenerationRef.current) {
+      showAppNotification('The selected photo could not be opened.')
+    }
+  }
+}
+
 const [listCreateOpen, setListCreateOpen] = useState(false)
 const [newListIcon, setNewListIcon] = useState<string | null>(null)
 const [listIconPickerTarget, setListIconPickerTarget] = useState<'create' | number | null>(null)
@@ -14258,6 +14308,26 @@ const homeListPreview =
   lists.slice(0, 4)
 return (
     <main className="calendar-app">
+      {/* Keep both inputs mounted so native iPhone file/camera pickers outlive Quick Add. */}
+      <input
+        ref={capturePhotoInputRef}
+        className="capture-picker-hidden-input"
+        type="file"
+        accept="image/*"
+        aria-label="Choose a photo or screenshot"
+        tabIndex={-1}
+        onChange={handleQuickAddCaptureSelection}
+      />
+      <input
+        ref={captureCameraInputRef}
+        className="capture-picker-hidden-input"
+        type="file"
+        accept="image/*"
+        capture="environment"
+        aria-label="Take a photo with the camera"
+        tabIndex={-1}
+        onChange={handleQuickAddCaptureSelection}
+      />
       {createPortal(<div className="app-status-bar-strip" aria-hidden="true" />, document.body)}
       <header
   className={`top-bar ${
@@ -15234,20 +15304,7 @@ return (
           <button
   className="quick-add-option"
   type="button"
-  onClick={() => {
-    setQuickAddOpen(false)
-
-    if (capturePreviewUrl) {
-      URL.revokeObjectURL(
-        capturePreviewUrl
-      )
-    }
-
-    setCaptureFile(null)
-    setCapturePreviewUrl('')
-    setCaptureNote('')
-    setCaptureOpen(true)
-  }}
+  onClick={() => openQuickAddCapturePicker('photo')}
 >
   <span className="quick-add-option-icon" aria-hidden="true">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -15258,10 +15315,26 @@ return (
   </span>
 
   <span className="quick-add-option-text">
-    <strong>Add Photo</strong>
+    <strong>Analyze Photo</strong>
     <small>Analyze an event or recipe</small>
   </span>
 </button>
+          <button
+            className="quick-add-option quick-add-camera-option"
+            type="button"
+            onClick={() => openQuickAddCapturePicker('camera')}
+          >
+            <span className="quick-add-option-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 7h3l2-2h4l2 2h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" />
+                <circle cx="12" cy="13" r="3.5" />
+              </svg>
+            </span>
+            <span className="quick-add-option-text">
+              <strong>Take Photo</strong>
+              <small>Photograph a flyer or recipe</small>
+            </span>
+          </button>
           <button
             className="quick-add-option quick-add-settings-option"
             type="button"
@@ -15335,68 +15408,8 @@ createPortal(
   AI Quick Add
 </span>
 
-<h2>Photo / Screenshot</h2>
-
-<p>
-  Choose a photo or screenshot and let AI create the event or recipe.
-</p>
-
-<button
-  type="button"
-  className="capture-view-inbox-button"
-  onClick={() => {
-    if (capturePreviewUrl) {
-      URL.revokeObjectURL(
-        capturePreviewUrl
-      )
-    }
-
-    setCaptureOpen(false)
-    setCaptureFile(null)
-    setCapturePreviewUrl('')
-    setCaptureNote('')
-
-    setPage('capture')
-    void loadCaptureInbox()
-  }}
->
-  View Capture Inbox
-</button>
-
-<input
-  className="event-input"
-  type="file"
-        accept="image/jpeg,image/png,image/webp"
-        disabled={captureSaving}
-       onChange={async (event) => {
-  const file =
-    event.target.files?.[0] ??
-    null
-
-  if (capturePreviewUrl) {
-    URL.revokeObjectURL(
-      capturePreviewUrl
-    )
-  }
-
-  if (!file) {
-    setCaptureFile(null)
-    setCapturePreviewUrl('')
-    return
-  }
-
-  const preparedFile =
-    await prepareCaptureImage(file)
-
-  setCaptureFile(preparedFile)
-
-  setCapturePreviewUrl(
-    URL.createObjectURL(
-      preparedFile
-    )
-  )
-}}
-      />
+<h2>Review Photo</h2>
+<p>Check the image, add a note if needed, then analyze it.</p>
 
       {capturePreviewUrl && (
         <div className="capture-preview">
