@@ -47,6 +47,8 @@ jobs:
         run: node --test scripts/test-arney-planning.mjs
       - name: Verify photographed event date ranges without inventing dates
         run: node --test scripts/test-photo-event-date-range.mjs
+      - name: Verify Arney public recipe read-only research boundaries
+        run: node --test scripts/test-arney-online-recipe-search.mjs
       - name: Check TypeScript and build frontend
         run: npm run build
       - name: Verify Calendar person multi-select filtering
