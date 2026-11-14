@@ -20,12 +20,13 @@ const html = `<!doctype html><html><head><meta name="viewport" content="width=de
 <div class="quick-add-overlay"><div class="quick-add-sheet quick-add-actions-sheet" id="sheet">
 <div class="quick-add-header"><div><span class="quick-add-eyebrow">Add something</span><h2>Quick Add</h2></div><button class="quick-add-close">×</button></div>
 <div class="quick-add-options" id="options">
-${['Add Event','Add List Item','Add Recipe','Add Photo'].map((label,i)=>`<button class="quick-add-option" data-original="${i}"><span class="quick-add-option-icon">+</span><span class="quick-add-option-text"><strong>${label}</strong><small>Add or manage</small></span></button>`).join('')}
+${['Add Event','Add List Item','Add Recipe','Analyze Photo'].map((label,i)=>`<button class="quick-add-option" data-original="${i}"><span class="quick-add-option-icon">+</span><span class="quick-add-option-text"><strong>${label}</strong><small>Add or manage</small></span></button>`).join('')}
+<button class="quick-add-option quick-add-camera-option" id="take-photo"><span class="quick-add-option-icon">◎</span><span class="quick-add-option-text"><strong>Take Photo</strong><small>Capture a flyer or recipe</small></span></button>
 <button class="quick-add-option quick-add-settings-option" id="settings"><span class="quick-add-option-icon">⚙</span><span class="quick-add-option-text"><strong>Settings</strong><small>Calendar and family preferences</small></span></button>
 <button class="quick-add-option quick-add-arney-option" id="ask-arney"><span class="quick-add-option-icon">✦</span><span class="quick-add-option-text"><strong>Ask Arney</strong><small>Type a question or request</small></span><span class="quick-add-arney-new">NEW</span></button>
 </div></div></div><script>${fontCode}</script></body></html>`
 
-test('Home headers align at top, and six floating Quick Add rows fit phone screens without scrolling', { timeout: 120000 }, async () => {
+test('Home headers align at top, and seven floating Quick Add rows fit phone screens without scrolling', { timeout: 120000 }, async () => {
   for (const [engine, driver] of [['chromium', chromium], ['webkit', webkit]]) {
     const browser = await driver.launch({ headless: true })
     try {
@@ -36,6 +37,7 @@ test('Home headers align at top, and six floating Quick Add rows fit phone scree
           const measurements = await page.evaluate(() => {
             const box = el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom } }
             const original = [...document.querySelectorAll('[data-original]')].map(box)
+            const camera = box(document.querySelector('#take-photo'))
             const settings = box(document.querySelector('#settings'))
             const arney = box(document.querySelector('#ask-arney'))
             const actions = [...document.querySelectorAll('#options > button')].map(box)
@@ -45,11 +47,11 @@ test('Home headers align at top, and six floating Quick Add rows fit phone scree
             const title = box(document.querySelector('#title'))
             const card = box(document.querySelector('#note-card'))
             const note = box(document.querySelector('.family-daily-notes textarea'))
-            return { original, settings, arney, actions, visualLayout, sheet, title, card, note, sheetOverflow: getComputedStyle(sheetEl).overflowY, sheetScrollHeight: sheetEl.scrollHeight, sheetClientHeight: sheetEl.clientHeight }
+            return { original, camera, settings, arney, actions, visualLayout, sheet, title, card, note, sheetOverflow: getComputedStyle(sheetEl).overflowY, sheetScrollHeight: sheetEl.scrollHeight, sheetClientHeight: sheetEl.clientHeight }
           })
           const where = engine + ' ' + viewport.width + 'x' + viewport.height
           assert.equal(measurements.original.length, 4, where + ': lost original actions')
-          assert.equal(measurements.actions.length, 6, where + ': exactly six actions expected')
+          assert.equal(measurements.actions.length, 7, where + ': exactly seven actions expected')
           assert.equal(measurements.visualLayout, 'column', where + ': Quick Add is not a single list')
           for (const [index, row] of measurements.actions.entries()) {
             assert.ok(row.height >= 44 && row.height <= 52, where + ': menu row ' + index + ' not compact')
@@ -58,7 +60,8 @@ test('Home headers align at top, and six floating Quick Add rows fit phone scree
             if (index > 0) assert.ok(row.y >= measurements.actions[index - 1].bottom - 1,
               where + ': menu row overlaps preceding row')
           }
-          assert.ok(measurements.settings.y >= measurements.original[3].bottom - 1, where + ': Settings is out of order')
+          assert.ok(measurements.camera.y >= measurements.original[3].bottom - 1, where + ': camera is out of order')
+          assert.ok(measurements.settings.y >= measurements.camera.bottom - 1, where + ': Settings is out of order')
           assert.ok(measurements.arney.y >= measurements.settings.bottom - 1, where + ': Ask Arney is out of order')
           assert.ok(measurements.sheet.width < viewport.width * .87, where + ': menu is not a compact popup')
           assert.ok(measurements.sheet.right <= viewport.width + 1 && measurements.sheet.right >= viewport.width - 19,
@@ -68,7 +71,7 @@ test('Home headers align at top, and six floating Quick Add rows fit phone scree
             where + ': menu contents overflow more than the decorative 7px pointer tail')
           assert.ok(measurements.sheetOverflow === 'visible',
             where + ': Quick Add popup unexpectedly has scrolling enabled')
-          assert.ok(measurements.actions[5].bottom <= measurements.sheet.bottom + 1,
+          assert.ok(measurements.actions[6].bottom <= measurements.sheet.bottom + 1,
             where + ': final Ask Arney row is clipped below the popup')
           assert.ok(measurements.title.y - measurements.card.y <= 24, where + ': Home title has unnecessary top gap')
           assert.ok(measurements.note.right <= measurements.card.right + 1, where + ': Notes textarea extends outside card')
