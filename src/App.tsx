@@ -14597,6 +14597,11 @@ return (
               )}
             </p>
           )}
+          {aiVoiceDirect && aiCommandText.trim() !== '' && (
+            <p className="arney-voice-heard" aria-label="Words Arney heard">
+              <strong>You said:</strong> {aiCommandText.trim().slice(0, 500)}
+            </p>
+          )}
           {arneyMicDiagnostics.length > 0 && (
             <details className="arney-mic-diagnostics">
               <summary>Microphone diagnostics (no audio or spoken words)</summary>

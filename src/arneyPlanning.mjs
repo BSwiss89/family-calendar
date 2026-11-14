@@ -23,6 +23,16 @@ function datesFor(text, now) {
   if (/\bnext (?:seven|7) days\b/i.test(text)) {
     return daysFrom(now, 0, 7)
   }
+  if (/\bnext weekend\b/i.test(text)) {
+    const saturdayOffset = now.getDay() === 0 ? 6 : 6 - now.getDay()
+    return daysFrom(now, saturdayOffset + 7, 2)
+  }
+  if (/\b(?:this|the) weekend\b/i.test(text)) {
+    const saturdayOffset = now.getDay() === 0 ? -1 : 6 - now.getDay()
+    return daysFrom(now, saturdayOffset, 2)
+  }
+  if (/\btomorrow\b/i.test(text)) return daysFrom(now, 1, 1)
+  if (/\btoday\b/i.test(text)) return daysFrom(now, 0, 1)
   return daysFrom(now, -now.getDay(), 7)
 }
 
@@ -59,10 +69,14 @@ function occurrencesIn(dates, events, occurrenceStartForDate) {
     (a.time ?? '').localeCompare(b.time ?? '') || a.event.id - b.event.id)
 }
 
-function isWeeklyCalendar(text) {
-  return /^(?:what(?:'s| is)(?: on)?|what do (?:we|i) have|show|read|summari[sz]e|give me|tell me)\b/i.test(text) &&
-    /\b(?:this week|next week|next (?:seven|7) days)\b/i.test(text) &&
-    /\b(?:calendar|schedule|events?|appointments?|going on|have)\b/i.test(text)
+function isCalendarRead(text) {
+  // Only handle clear read requests for specific date scopes. Other requests
+  // stay on the existing Arney intent path; no calendar mutation can result.
+  const prompt = text.replace(/^(?:hey\s+)?arney[,! ]*/i, '')
+  const readVerb = /^(?:what(?:'s| is| are| do)?\b|what do (?:we|i)\b|show\b|read\b|summari[sz]e\b|give me\b|tell me\b|list\b|do (?:we|i) have\b|are there\b|any\b)/i.test(prompt)
+  const period = /\b(?:today|tomorrow|this weekend|next weekend|the weekend|this week|next week|next (?:seven|7) days)\b/i.test(prompt)
+  const subject = /\b(?:calendar|schedule|events?|appointments?|going on|have|happening|planned|doing|agenda)\b/i.test(prompt)
+  return readVerb && period && subject
 }
 
 function isConflictRequest(text) {
@@ -82,25 +96,28 @@ function clockMinutes(text) {
   return h * 60 + m
 }
 
-function weeklyCalendar(text, context, dates) {
-  if (/\b(?:my calendar|my schedule|do i have)\b/i.test(text) && !context.activePersonId) {
+function calendarSummary(text, context, dates) {
+  const mine = /\b(?:my calendar|my schedule|my events|do i have|what do i have)\b/i.test(text)
+  if (mine && !context.activePersonId) {
     return 'Select your personal profile before asking about your own schedule.'
   }
-  const mine = /\b(?:my calendar|my schedule|do i have)\b/i.test(text)
   const all = occurrencesIn(dates, context.events, context.occurrenceStartForDate)
   const entries = mine
     ? all.filter(item => (item.event.people ?? []).some(p => p.id === context.activePersonId))
     : all
   const title = mine ? 'Your' : 'Family'
+  const dateRange = dates.length === 1
+    ? displayDay(dates[0])
+    : displayDay(dates[0]) + '–' + displayDay(dates[dates.length - 1])
   if (!entries.length) return title + ' calendar: no matching events found for ' +
-    displayDay(dates[0]) + '–' + displayDay(dates[6]) + '. Accepted cross-household shares are not included.'
+    dateRange + '. Accepted cross-household shares are not included.'
   const lines = entries.slice(0, 20).map(item => {
     const when = item.time ? ' at ' + item.time : ' (all day / time not set)'
     return displayDay(item.day) + ': ' + item.event.title.slice(0, 100) + when +
       ' — ' + peopleLabel(item.event) + (item.start < item.day ? ' (continues)' : '')
   })
   if (entries.length > 20) lines.push('...and ' + (entries.length - 20) + ' more. Open Calendar for the full schedule.')
-  return title + ' calendar (' + displayDay(dates[0]) + '–' + displayDay(dates[6]) + '):\n' +
+  return title + ' calendar (' + dateRange + '):\n' +
     lines.join('\n') + '\nLocal household events only; accepted cross-household shares are not included. Read-only. Nothing was changed.'
 }
 
@@ -189,14 +206,14 @@ export function planArneyReadOnlyRequest(text, context) {
     !Array.isArray(context.recipes) || !Array.isArray(context.mealPlanItems) ||
     !Array.isArray(context.mealPlans) ||
     typeof context.occurrenceStartForDate !== 'function') return null
-  const request = text.trim().replace(/\s+/g, ' ')
+  const request = text.trim().replace(/[‘’]/g, "'").replace(/\s+/g, ' ')
   if (!request || request.length > 500) return null
   // Reject obvious mutation phrasing: never interpret a write as a read-only result.
   if (/^(?:add|create|delete|remove|cancel|move|reschedule|change|save|book|schedule|put)\b/i.test(request)) return null
   const dates = datesFor(request, context.now)
   let result = null
   if (isConflictRequest(request)) result = overlapCheck(context, dates)
-  else if (isWeeklyCalendar(request)) result = weeklyCalendar(request, context, dates)
+  else if (isCalendarRead(request)) result = calendarSummary(request, context, dates)
   else if (isDinnerRequest(request)) {
     const dinnerDates = /\b(?:this week|next week|next (?:seven|7) days)\b/i.test(request)
       ? dates : daysFrom(context.now, 0, 7)
