@@ -15072,7 +15072,10 @@ return (
       }}
     >
       <div
-        className="quick-add-sheet"
+        className="quick-add-sheet quick-add-actions-sheet"
+        role="dialog"
+        aria-label="Quick Add actions"
+        aria-modal="true"
         onClick={(event) => {
           event.stopPropagation()
         }}
@@ -15150,12 +15153,15 @@ return (
   })
 }}
           >
-            <span className="quick-add-option-icon">
-              +
+            <span className="quick-add-option-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="5" width="18" height="16" rx="2" />
+                <path d="M7 3v4M17 3v4M3 10h18M7 14h3M14 14h3" />
+              </svg>
             </span>
 
             <span className="quick-add-option-text">
-              <strong>Event</strong>
+              <strong>Add Event</strong>
               <small>
                 Add something to the calendar
               </small>
@@ -15181,12 +15187,14 @@ return (
     setQuickListOpen(true)
   }}
 >
-  <span className="quick-add-option-icon">
-    ✓
+  <span className="quick-add-option-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 6h11M10 12h11M10 18h11M3 6l2 2 3-4M3 12l2 2 3-4M3 18l2 2 3-4" />
+    </svg>
   </span>
 
   <span className="quick-add-option-text">
-    <strong>List</strong>
+    <strong>Add List Item</strong>
     <small>Add an item to a list</small>
   </span>
 </button>
@@ -15205,12 +15213,15 @@ return (
     }, 0)
   }}
 >
-  <span className="quick-add-option-icon">
-    R
+  <span className="quick-add-option-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 18V11a4.5 4.5 0 0 1-1-8 4.5 4.5 0 0 1 7 1 4.5 4.5 0 0 1 7 7v7H6Z" />
+      <path d="M6 21h13" />
+    </svg>
   </span>
 
   <span className="quick-add-option-text">
-    <strong>Recipe</strong>
+    <strong>Add Recipe</strong>
     <small>Add a new recipe</small>
   </span>
 </button>
@@ -15233,12 +15244,16 @@ return (
     setCaptureOpen(true)
   }}
 >
-  <span className="quick-add-option-icon">
-    ▣
+  <span className="quick-add-option-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9" r="1.2" />
+      <path d="m3 17 5-5 4 4 3-3 6 6" />
+    </svg>
   </span>
 
   <span className="quick-add-option-text">
-    <strong>Photo / Screenshot</strong>
+    <strong>Add Photo</strong>
     <small>Analyze an event or recipe</small>
   </span>
 </button>

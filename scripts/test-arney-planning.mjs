@@ -201,3 +201,24 @@ test('entire app uses self-hosted Nunito with fallback and an included open lice
   const license = fs.readFileSync(path.join(root, 'public/fonts/Nunito-OFL-LICENSE.txt'), 'utf8')
   assert.match(license, /SIL OPEN FONT LICENSE Version 1\.1/)
 })
+
+
+test('blue plus uses six ordered compact rows matching the approved mockup', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const app = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8')
+  const css = fs.readFileSync(path.join(root, 'src/App.css'), 'utf8')
+  const first = app.indexOf('{quickAddOpen &&')
+  const last = app.indexOf('{captureOpen &&', first)
+  assert.ok(first > 0 && last > first)
+  const block = app.slice(first, last)
+  assert.match(block, /className="quick-add-sheet quick-add-actions-sheet"/)
+  assert.deepEqual([...block.matchAll(/<strong>(Add Event|Add List Item|Add Recipe|Add Photo|Settings|Ask Arney)<\/strong>/g)]
+    .map(match => match[1]), [
+      'Add Event', 'Add List Item', 'Add Recipe', 'Add Photo', 'Settings', 'Ask Arney',
+    ])
+  assert.match(css, /\.quick-add-actions-sheet \.quick-add-options \{/)
+  assert.match(css, /flex-direction: column;/)
+  assert.match(css, /\.quick-add-sheet\.quick-add-actions-sheet \{/)
+  assert.match(css, /\.quick-add-actions-sheet \.quick-add-option-text small \{\s*display: none;/)
+  assert.match(app, /function startCalendarAddHold/)
+})
