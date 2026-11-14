@@ -41,8 +41,8 @@ test('official API is queried only once with a fixed destination and trimmed out
     {idMeal:'x',strMeal:'bad'}, {...meal,idMeal:'56789',strMeal:'Chicken soup'}]})})
   assert.equal(out.recipes.length, 2)
   assert.equal(out.provider, 'TheMealDB')
-  assert.equal(out.recipes[0].url, 'https://www.themealdb.com/meal/52772-Teriyaki-Chicken-Casserole-Recipe')
-  assert.equal(out.recipes[0].category, 'Chicken')
+  assert.equal(out.recipes.find(recipe => recipe.id === '52772')?.url, 'https://www.themealdb.com/meal/52772-Teriyaki-Chicken-Casserole-Recipe')
+  assert.equal(out.recipes.find(recipe => recipe.id === '52772')?.category, 'Chicken')
 })
 test('malformed upstream errors fail closed and no local data is saved', async () => {
   await assert.rejects(searchPublicRecipes('chicken',{fetchImpl:makeFetcher({noMeals:true})}))
