@@ -206,7 +206,7 @@ export function planArneyReadOnlyRequest(text, context) {
     !Array.isArray(context.recipes) || !Array.isArray(context.mealPlanItems) ||
     !Array.isArray(context.mealPlans) ||
     typeof context.occurrenceStartForDate !== 'function') return null
-  const request = text.trim().replace(/\s+/g, ' ')
+  const request = text.trim().replace(/[‘’]/g, "'").replace(/\s+/g, ' ')
   if (!request || request.length > 500) return null
   // Reject obvious mutation phrasing: never interpret a write as a read-only result.
   if (/^(?:add|create|delete|remove|cancel|move|reschedule|change|save|book|schedule|put)\b/i.test(request)) return null
