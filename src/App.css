@@ -21522,3 +21522,17 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 .arney-voice-heard strong {
   color: #17488c;
 }
+
+/* Native iOS pickers must stay mounted while the Quick Add popover unmounts.
+   Visually hide without display:none so the picker remains tappable via JS. */
+.capture-picker-hidden-input {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  clip-path: inset(50%);
+  overflow: hidden;
+}
