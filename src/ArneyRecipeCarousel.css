@@ -1,0 +1,24 @@
+.arney-recipe-browser { display:grid;gap:10px; min-width:0;margin-top:14px;color:#20304e; }
+.arney-recipe-browser-top,.arney-recipe-nav,.arney-recipe-actions {display:flex;align-items:center;justify-content:space-between;gap:8px}
+.arney-recipe-browser-top span {font-size:12px;color:#64748b}
+.arney-recipe-swipe-surface {border:1px solid #cfdded;border-radius:17px;background:#fff;overflow:hidden;min-width:0;touch-action:pan-y;outline-offset:3px}
+.arney-recipe-photo,.arney-recipe-photo-placeholder {width:100%;height:180px;object-fit:cover;display:block;background:#e8f0fc}
+.arney-recipe-photo-placeholder {display:grid;place-items:center;font-size:56px}
+.arney-recipe-heading {padding:13px 14px 8px}
+.arney-recipe-heading h3 {font-size:19px;line-height:1.25;margin:0 0 4px;color:#172c4e}
+.arney-recipe-heading span {font-size:13px;color:#64748b}
+.arney-recipe-match-notes {display:flex;gap:6px;flex-wrap:wrap;padding:0 14px 10px}
+.arney-recipe-match-notes span {background:#e8f2ff;color:#18549d;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:650}
+.arney-recipe-details {padding:9px 14px;border-top:1px solid #e4ebf6;font-size:14px}
+.arney-recipe-details summary {cursor:pointer;font-weight:750;touch-action:manipulation}
+.arney-recipe-details ul {margin:9px 0;padding-left:22px}
+.arney-recipe-details li {margin:2px 0}
+.arney-recipe-details p {margin:9px 0 2px;white-space:pre-wrap;line-height:1.55}
+.arney-recipe-source {display:block;padding:10px 14px;border-top:1px solid #e4ebf6;font-weight:650;font-size:13px;color:#1866c6;overflow-wrap:anywhere}
+.arney-recipe-nav button,.arney-recipe-actions button,.arney-recipe-more {min-height:44px;padding:9px 13px;border-radius:12px;border:1px solid #bed3ed;background:#fff;color:#1c549d;font:inherit;font-size:14px;font-weight:700;cursor:pointer;touch-action:manipulation}
+.arney-recipe-nav button:disabled {opacity:.4;cursor:default}
+.arney-recipe-actions {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr)}
+.arney-recipe-actions .arney-recipe-save {background:#1874e8;color:#fff;border-color:#1874e8}
+.arney-recipe-more {width:100%;background:#e8f2ff;color:#155bb6}
+.arney-recipe-end,.arney-recipe-help {margin:0!important;color:#64748b;font-size:12px;line-height:1.45}
+@media(max-width:760px){.arney-recipe-photo,.arney-recipe-photo-placeholder {height:170px}.arney-recipe-heading h3{font-size:18px}.arney-recipe-nav button,.arney-recipe-actions button,.arney-recipe-more{min-height:48px}}

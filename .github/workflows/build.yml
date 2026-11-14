@@ -49,6 +49,8 @@ jobs:
         run: node --test scripts/test-photo-event-date-range.mjs
       - name: Verify Arney public recipe read-only research boundaries
         run: node --test scripts/test-arney-online-recipe-search.mjs
+      - name: Verify Arney swipe previews and compound recipe search safety
+        run: node --test scripts/test-arney-recipe-preview.mjs
       - name: Check TypeScript and build frontend
         run: npm run build
       - name: Verify Calendar person multi-select filtering

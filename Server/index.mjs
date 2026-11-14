@@ -1800,7 +1800,8 @@ app.post('/api/ai/recipe-search', async (request, response) => {
   response.set('Cache-Control', 'no-store')
   const keys = request.body && typeof request.body === 'object' && !Array.isArray(request.body)
     ? Object.keys(request.body) : []
-  if (keys.length !== 1 || keys[0] !== 'query') {
+  if (!keys.includes('query') || keys.some(k => !['query','preferences'].includes(k)) ||
+      keys.length > 2) {
     return response.status(400).json({ error: 'A recipe name or ingredient is required.' })
   }
   const query = normalizePublicRecipeQuery(request.body.query)
@@ -1810,7 +1811,7 @@ app.post('/api/ai/recipe-search', async (request, response) => {
   }
   lastPublicRecipeLookupAt = Date.now()
   try {
-    const result = await searchPublicRecipes(query)
+    const result = await searchPublicRecipes(query, { preferences: request.body.preferences })
     return response.json(result)
   } catch {
     return response.status(503).json({ error: 'Public recipe search is unavailable right now.' })
