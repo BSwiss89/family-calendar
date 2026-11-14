@@ -1238,6 +1238,9 @@ sourceImage?: string | null
     year?: number | null
     month?: number | null
     day?: number | null
+    endMonth?: number | null
+    endDay?: number | null
+    endYear?: number | null
     weekday?: string
   }
 
@@ -6392,6 +6395,36 @@ function openCapturedEventForReview(
         targetDateKey
       )
     )
+
+    // Preserve a multi-day span extracted from the flyer. The calendar form
+    // remains editable and nothing is saved without the user's confirmation.
+    if (
+      typeof dateContext?.endMonth === 'number' &&
+      typeof dateContext?.endDay === 'number' &&
+      dateContext.endMonth >= 1 &&
+      dateContext.endMonth <= 12 &&
+      dateContext.endDay >= 1 &&
+      dateContext.endDay <= 31
+    ) {
+      const endYear =
+        typeof dateContext.endYear === 'number'
+          ? dateContext.endYear
+          : targetDate.getFullYear() +
+            (dateContext.endMonth < targetDate.getMonth() + 1 ? 1 : 0)
+      const capturedEndDate = new Date(
+        endYear, dateContext.endMonth - 1, dateContext.endDay
+      )
+      if (
+        capturedEndDate.getFullYear() === endYear &&
+        capturedEndDate.getMonth() === dateContext.endMonth - 1 &&
+        capturedEndDate.getDate() === dateContext.endDay &&
+        capturedEndDate > targetDate
+      ) {
+        const endDateKey = getDateKeyFromDate(capturedEndDate)
+        setEventEndDate(endDateKey)
+        setEventEndDateText(formatDateKeyForText(endDateKey))
+      }
+    }
 
     setViewDate(
       new Date(
