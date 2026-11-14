@@ -28,6 +28,7 @@ import {
   organizeExistingListItems,
 } from './list-features.mjs'
 import { ensureListIcons, normalizeListIcon } from './list-icons.mjs'
+import { resolvePhotoEventEndDate } from './photo-event-date-range.mjs'
 import { ensureShoppingStores, getShoppingStores, looksLikeShoppingList, requireStoreId,
   suggestShoppingStoreId, organizeShoppingStores, saveShoppingStoreCorrection,
   sortUnknownStoresWithOllama } from './smart-stores.mjs'
@@ -2729,7 +2730,10 @@ For event date object d:
 - v = true only when a 4-digit year is visibly printed
 - y = visible 4-digit year, or null when no year is visible
 - m = month number from 1 through 12
-- d = day of month from 1 through 31
+- d = starting day of month from 1 through 31
+- em = ending month of a visibly printed multi-day date range, or null
+- ed = ending day of that range, or null
+- ey = ending year only if separately printed for the end date, otherwise null
 
 For each event object in e:
 - n = event title
@@ -2764,7 +2768,9 @@ Rules:
 - For event dates, read the entire visible date line carefully, including any visible 4-digit year.
 - If a 4-digit year is visibly shown with the event date, yearVisible must be true and year must contain that exact year.
 - If no year is visibly shown, yearVisible must be false and year must be null.
-- dateText should preserve the complete visible date wording, including the year when shown.
+- dateText should preserve the complete visible date wording, including both endpoints and the year when shown.
+- A printed span like DECEMBER 8TH – 10TH, 2026 is one event: return start month/day 12/8 and end month/day 12/10 (em=12, ed=10). Do not mistake the ending day for an ending clock time.
+- For a single-date event, em, ed, and ey must all be null.
 - For visible time ranges such as 12pm-4pm, return the first time as startTime and the second time as endTime.
 - If only one time is visibly shown, return it as startTime and leave endTime empty.
 - If an event has a visible start or end time, it is not all-day.
@@ -2773,6 +2779,7 @@ Rules:
 - If both a venue name and address are visible, include both in location.
 - Do not put venue names, street addresses, city/state/ZIP information, dates, or times in event notes when they belong in their dedicated fields.
 - Event notes should contain only separate descriptive information visible in the image.
+- Preserve event highlights, vendor-contact names, phone numbers, and email addresses in notes when visibly printed; do not invent missing details.
 - Do not repeat an event title, date, time, location, or address inside notes.
 - For recipes, extract only information visibly shown in the image. Never infer missing recipe fields.
 - For recipe servings, only return a value if the image explicitly shows a serving, serves, yield, or makes value. Do not use subtitles, difficulty labels, nutrition values, or other text as servings.
@@ -2821,6 +2828,24 @@ Rules:
                       'null',
                     ],
                   },
+                  em: {
+                    type: [
+                      'integer',
+                      'null',
+                    ],
+                  },
+                  ed: {
+                    type: [
+                      'integer',
+                      'null',
+                    ],
+                  },
+                  ey: {
+                    type: [
+                      'integer',
+                      'null',
+                    ],
+                  },
                 },
                 required: [
                   'x',
@@ -2828,6 +2853,9 @@ Rules:
                   'y',
                   'm',
                   'd',
+                  'em',
+                  'ed',
+                  'ey',
                 ],
                 additionalProperties: false,
               },
@@ -3191,7 +3219,10 @@ Date object d:
 - v = whether a 4-digit year is visibly printed
 - y = visible 4-digit year or null
 - m = month number
-- d = day of month
+- d = starting day of month
+- em = ending month for a visibly printed date range, otherwise null
+- ed = ending day for the date range, otherwise null
+- ey = ending year only if separately printed for the end date, otherwise null
 
 Each event object in e:
 - n = complete event title
@@ -3206,7 +3237,8 @@ Fields s and e may contain only clock times.
 
 Pay special attention to:
 - the complete event title
-- the complete date, including any visible 4-digit year
+- the complete date span (including its final day), and any visible 4-digit year
+- vendor names, phone numbers, emails and other useful printed descriptive details in notes
 - both times when a start-to-end time range is printed
 - the actual venue or place name
 - the full street address, city, state, and ZIP when visible
@@ -3255,6 +3287,24 @@ Rules:
                         'null',
                       ],
                     },
+                    em: {
+                      type: [
+                        'integer',
+                        'null',
+                      ],
+                    },
+                    ed: {
+                      type: [
+                        'integer',
+                        'null',
+                      ],
+                    },
+                    ey: {
+                      type: [
+                        'integer',
+                        'null',
+                      ],
+                    },
                   },
                   required: [
                     'x',
@@ -3262,6 +3312,9 @@ Rules:
                     'y',
                     'm',
                     'd',
+                    'em',
+                    'ed',
+                    'ey',
                   ],
                   additionalProperties:
                     false,
@@ -3462,6 +3515,12 @@ Rules:
                     verifiedDate.d <= 31
                       ? verifiedDate.d
                       : firstPassDate.d,
+                  em: Number.isInteger(verifiedDate.em)
+                    ? verifiedDate.em : firstPassDate.em,
+                  ed: Number.isInteger(verifiedDate.ed)
+                    ? verifiedDate.ed : firstPassDate.ed,
+                  ey: Number.isInteger(verifiedDate.ey)
+                    ? verifiedDate.ey : firstPassDate.ey,
                 }
 
                 const preferVerifiedText = (
@@ -3703,6 +3762,15 @@ Rules:
           }
         }
 
+        const visibleEndDate = resolvePhotoEventEndDate({
+          dateText: normalizedDateText,
+          startMonth: month,
+          startDay: day,
+          modelEndMonth: compactDate.em,
+          modelEndDay: compactDate.ed,
+          modelEndYear: compactDate.ey,
+        })
+
         analysis.dateContext = {
           dateText:
             normalizedDateText,
@@ -3713,6 +3781,9 @@ Rules:
               : null,
           month,
           day,
+          endMonth: visibleEndDate.endMonth,
+          endDay: visibleEndDate.endDay,
+          endYear: visibleEndDate.endYear,
           weekday: '',
         }
 
