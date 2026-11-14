@@ -73,6 +73,25 @@ jobs:
           }
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '.\scripts\test-live-daily-notes-launcher-plan.ps1'
           if ($LASTEXITCODE -ne 0) { throw 'LIVE Notes pin and rollback fixture failed.' }
+      - name: Verify guarded Arney/photo LIVE operator and launcher rollback
+        shell: powershell
+        run: |
+          $file='.\\scripts\\deploy-live-arney-photo.ps1'
+          $tokens=$null; $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors) | Out-Null
+          if (@($errors).Count) { throw "PowerShell syntax failure in $file" }
+          $script=Get-Content -LiteralPath $file -Raw
+          foreach ($marker in @('39e01d5dd435dbd4875657c0490eeb8697deb1ed',
+            '581a18835859c989e81bc833a2999caaf8b2e375',
+            'a33dfb20c8434d244c992ffc1ac8bab6ff7a0c5a',
+            'LIVE_ARNEY_PHOTO_PREFLIGHT=PASS','LIVE_ARNEY_PHOTO_DEPLOYMENT=PASS',
+            'LIVE_ARNEY_PHOTO_ROLLBACK=PASS','LocalSttStamp','TestStamp','CopyVerified',
+            'New-LiveArneyPhotoLauncherPlan','scripts/test-photo-event-date-range.mjs',
+            'src/LiveInvitations.tsx','Server/photo-event-date-range.mjs')) {
+            if (-not $script.Contains($marker)) { throw "Missing operator safety marker: $marker" }
+          }
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '.\\scripts\\test-live-arney-photo-launcher-plan.ps1'
+          if ($LASTEXITCODE -ne 0) { throw 'Arney/photo launcher/rollback fixture failed.' }
       - name: Verify guarded LIVE Home/weather and release notice syntax and safety pins
         shell: powershell
         run: |
