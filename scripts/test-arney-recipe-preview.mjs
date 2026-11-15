@@ -30,12 +30,53 @@ function mockSource(sources) {
 }
 test('understands natural compound preferences without leaking entire utterances',()=>{
   assert.deepEqual(parseArneyRecipeDiscovery('Find me chicken recipes, one pot, pasta, kid friendly'),{
-    query:'chicken',preferences:{onePot:true,pasta:true,kidFriendly:true}})
+    query:'chicken',preferences:{onePot:true,pasta:true,kidFriendly:true,easy:false,quick:false}})
   assert.deepEqual(parseArneyRecipeDiscovery('Find chicken recipes'),{
-    query:'chicken',preferences:{onePot:false,pasta:false,kidFriendly:false}})
+    query:'chicken',preferences:{onePot:false,pasta:false,kidFriendly:false,easy:false,quick:false}})
   assert.deepEqual(parseArneyRecipeDiscovery('Find pasta recipes'),{
-    query:'pasta',preferences:{onePot:false,pasta:false,kidFriendly:false}})
-  assert.equal(parseArneyRecipeDiscovery('Find recipes online').query,null)
+    query:'pasta',preferences:{onePot:false,pasta:false,kidFriendly:false,easy:false,quick:false}})
+  assert.equal(parseArneyRecipeDiscovery('Find recipes online').query,'any')
+})
+test('natural easy, quick, and kid-friendly requests allow generic meal discovery',()=>{
+  const easy=parseArneyRecipeDiscovery('Find easy meals')
+  assert.deepEqual(easy,{query:'any',preferences:{
+    onePot:false,pasta:false,kidFriendly:false,easy:true,quick:false}})
+  const child=parseArneyRecipeDiscovery('Find kid friendly meals')
+  assert.equal(child.query,'any')
+  assert.equal(child.preferences.kidFriendly,true)
+  const combined=parseArneyRecipeDiscovery('Hey Arney, find easy, kid-friendly meals for dinner')
+  assert.equal(combined.query,'any')
+  assert.equal(combined.preferences.easy,true)
+  assert.equal(combined.preferences.kidFriendly,true)
+  const quick=parseArneyRecipeDiscovery('Can you find quick chicken dinners?')
+  assert.equal(quick.query,'chicken')
+  assert.equal(quick.preferences.quick,true)
+  assert.equal(parseArneyRecipeDiscovery('Find easy pasta meals').query,'pasta')
+  assert.equal(parseArneyRecipeDiscovery('Plan easy dinners next week'),null)
+})
+test('generic free provider search samples a small fixed menu, ranks mild low-effort ideas, and uses no private data',async()=>{
+  const f=mockSource({chicken:[spicy,chickenPasta],pasta:[chickenPasta],
+    soup:[creamy],rice:[chickenPasta]})
+  const out=await searchPublicRecipes('any',{fetchImpl:f.fetchImpl,
+    preferences:{kidFriendly:true,easy:true,quick:true}})
+  assert.deepEqual(f.calls,['chicken','pasta','soup','rice'])
+  assert.equal(out.recipes.length,3)
+  assert.notEqual(out.recipes[0].id,'52773','spicy recipe should not outrank mild options')
+  assert.ok(out.recipes[0].matchNotes.some(t=>t.includes('ease not verified')))
+  assert.ok(out.recipes[0].matchNotes.some(t=>t.includes('cook time not verified')))
+  assert.ok(out.recipes.every(r=>r.url.startsWith('https://www.themealdb.com/meal/')))
+})
+test('recipe results hide only assistant conversation controls, not normal reply controls',()=>{
+  const app=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8')
+  const carousel=readFileSync(new URL('../src/ArneyRecipeCarousel.tsx',import.meta.url),'utf8')
+  assert.ok(app.includes('ai-command-recipe-mode'))
+  assert.ok(app.includes('arneyRecipeResults.length === 0 && aiVoiceDirect'))
+  assert.ok(app.includes('arneyRecipeResults.length === 0 && (<div className="ai-command-actions">'))
+  assert.ok(app.includes('arneyRecipeResults.length === 0 && (<div className="arney-conversation-audio-controls">'))
+  assert.ok(carousel.includes('Save to Recipes'))
+  assert.ok(carousel.includes('Next ›'))
+  assert.ok(!carousel.includes('arney-recipe-skip'))
+  assert.ok(!carousel.includes('arney-recipe-help'))
 })
 test('saved meals and calendar writes never initiate public discovery',()=>{
   for(const prompt of ['Find our saved recipes','Suggest five dinners from our recipes',
