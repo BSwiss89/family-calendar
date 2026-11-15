@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { parseArneyRecipeDiscovery, normalizeArneyRecipeResults } from '../src/arneyRecipeDiscovery.mjs'
 import { searchPublicRecipes } from '../Server/arney-public-recipe-search.mjs'
+import { normalizeTheMealDbImageUrl, fetchVerifiedRecipeImage } from '../Server/arney-public-recipe-image.mjs'
+import sharp from 'sharp'
 
 const dish = (id,name,ingredients,{instructions='Cook everything together.',spicy=false}={})=>({
   idMeal:String(id),strMeal:name,strCategory:'Pasta',strArea:'American',
@@ -85,7 +87,61 @@ test('swipeable selection is separate from explicit recipe form submission',()=>
   assert.ok(app.includes('setRecipeSourceUrl(recipe.url)'))
   assert.ok(app.includes("setRecipeIngredients(recipe.ingredients.join('\\n'))"))
   assert.ok(!carousel.includes("fetch('/api/recipes'"))
-  assert.ok(carousel.includes('Find {Math.min(5,recipes.length-visible)} More'))
-  assert.ok(carousel.includes('onTouchEnd'))
-  assert.ok(carousel.includes('onReviewSave(item)'))
+  assert.ok(!carousel.includes('Find {Math.min(5,recipes.length-visible)} More'))
+  assert.ok(!carousel.includes('nextBatch'))
+  assert.ok(carousel.includes('recipes.map((item, i) =>'))
+  assert.ok(carousel.includes('onScroll={handleScroll}'))
+  assert.ok(carousel.includes("behavior: 'smooth'"))
+  assert.ok(carousel.includes('onReviewSave(selected)'))
+  assert.ok(app.includes('setRecipePublicImageUrl(recipe.image)'))
+  assert.ok(app.includes("'/api/arney/public-recipe-image'"))
+  assert.ok(app.includes("new File([photoBlob], 'arney-recipe.webp'"))
+  assert.ok(app.includes('onlineImageFailed'))
+})
+
+
+test('photo import permits only official fixed media links and rejects arbitrary URLs', async () => {
+  const allowed = 'https://www.themealdb.com/images/media/meals/abc123.jpg'
+  assert.equal(normalizeTheMealDbImageUrl(allowed), allowed)
+  for (const source of [
+    'http://www.themealdb.com/images/media/meals/abc123.jpg',
+    'https://www.themealdb.com.evil.example/images/media/meals/abc123.jpg',
+    'https://www.themealdb.com/images/media/meals/abc123.jpg?next=http://127.0.0.1',
+    'https://127.0.0.1/images/media/meals/abc123.jpg',
+    'https://www.themealdb.com/meal/52772-Recipe',
+  ]) assert.equal(normalizeTheMealDbImageUrl(source), null)
+  await assert.rejects(
+    fetchVerifiedRecipeImage('https://127.0.0.1/internal', {
+      fetchImpl: () => { throw new Error('should never fetch'); },
+    }), /Unapproved/
+  )
+})
+
+test('photo import validates actual pixels, size and redirect policy and returns local-ready WebP', async () => {
+  const source = 'https://www.themealdb.com/images/media/meals/abc123.jpg'
+  const photo = await sharp({create:{width:64,height:48,channels:3,background:'#aabbcc'}})
+    .jpeg().toBuffer()
+  const headers = {get: name => name==='content-type'?'image/jpeg':name==='content-length'?String(photo.length):null}
+  let calls=0
+  const fetchImpl=async (url, options) => {
+    assert.equal(url,source)
+    assert.equal(options.redirect,'error')
+    assert.ok(options.signal)
+    calls+=1
+    return {ok:true,headers,body:{async *[Symbol.asyncIterator](){yield photo}}}
+  }
+  const result=await fetchVerifiedRecipeImage(source,{fetchImpl})
+  assert.equal(calls,1)
+  const m=await sharp(result).metadata()
+  assert.equal(m.format,'webp')
+  assert.equal(m.width,64)
+  assert.equal(m.height,48)
+  await assert.rejects(fetchVerifiedRecipeImage(source,{
+    fetchImpl:async()=>({ok:true,headers:{get:n=>n==='content-type'?'text/html':null},
+      body:{async *[Symbol.asyncIterator](){yield Buffer.from('<html>')}}}),
+  }), /not a supported image/)
+  await assert.rejects(fetchVerifiedRecipeImage(source,{
+    fetchImpl:async()=>({ok:true,headers:{get:n=>n==='content-type'?'image/jpeg':null},
+      body:{async *[Symbol.asyncIterator](){yield Buffer.alloc(3*1024*1024+1)}}}),
+  }), /too large/)
 })
