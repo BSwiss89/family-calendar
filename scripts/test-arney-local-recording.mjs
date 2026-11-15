@@ -38,6 +38,7 @@ function setup(responses=['First local command']) {
       })
     },
     now:()=>clock,
+    stopDelayMs:0, // Baseline fixture keeps its original immediate-stop semantics.
   }
   return {dependencies,recorders,tracks,uploads,advance:n=>{clock+=n}}
 }
@@ -66,6 +67,49 @@ test('local hold records once, uploads only after release, and returns editable 
   assert.equal(x.tracks.every(track=>track.stopped),true)
 })
 
+test('release tail records the end of speech before upload and cancel still discards it',async()=>{
+  const x=setup(['Full natural sentence'])
+  let pending=null
+  let scheduledMs=0
+  x.dependencies.stopDelayMs=180
+  x.dependencies.scheduleStop=(callback,delay)=>{
+    scheduledMs=delay
+    pending=callback
+    return 123
+  }
+  x.dependencies.clearStop=()=>{pending=null}
+  const results=[]
+  const session=beginArneyLocalSpeech(result=>results.push(result),undefined,x.dependencies)
+  await tick()
+  x.advance(1150)
+  session.stop()
+  assert.equal(scheduledMs,180)
+  assert.equal(x.recorders[0].state,'recording')
+  assert.equal(x.uploads.length,0,'no network before trailing buffer completes')
+  x.advance(180)
+  const flush=pending
+  flush()
+  await tick()
+  assert.equal(x.recorders[0].state,'inactive')
+  assert.equal(x.uploads.length,1)
+  assert.equal(x.uploads[0].options.body.get('durationMs'),'1330')
+  assert.equal(results[0].text,'Full natural sentence')
+  const y=setup()
+  let canceledFlush
+  y.dependencies.stopDelayMs=180
+  y.dependencies.scheduleStop=callback=>{canceledFlush=callback;return 123}
+  y.dependencies.clearStop=()=>{}
+  const canceledResults=[]
+  const second=beginArneyLocalSpeech(result=>canceledResults.push(result),undefined,y.dependencies)
+  await tick()
+  y.advance(500)
+  second.stop()
+  second.cancel()
+  canceledFlush()
+  await tick()
+  assert.equal(y.uploads.length,0)
+  assert.deepEqual(canceledResults,[])
+})
 test('two consecutive local recordings use fresh recorders and both transcribe',async()=>{
   const x=setup(['First','Second'])
   const results=[]
