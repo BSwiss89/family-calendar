@@ -20,6 +20,7 @@ export default function ArneyRecipeCarousel({ recipes, onReviewSave }: Props) {
   if (recipes.length === 0) return null
   const selectedIndex = Math.min(index, recipes.length - 1)
   const selected = recipes[selectedIndex]
+  if (!selected) return null
 
   function goTo(next: number) {
     const target = Math.max(0, Math.min(recipes.length - 1, next))
