@@ -21541,3 +21541,17 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 .ai-command-panel.ai-command-recipe-mode .ai-command-header {margin-bottom:10px}
 .ai-command-panel.ai-command-recipe-mode .arney-conversation-result {margin-top:0;padding:0;border:0;background:transparent}
 .ai-command-panel.ai-command-recipe-mode .arney-recipe-browser {margin-top:0}
+
+/* Arney recipe examples belong only to the pre-search Ask Arney dialog.
+   The recipe result browser retains its previously accepted clean layout. */
+.arney-recipe-try{display:grid;gap:9px;margin-top:12px;padding:12px;border-radius:15px;border:1px solid #d8e6fa;background:#f6faff;color:#1a3558}
+.arney-recipe-try-heading{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.arney-recipe-try-heading strong{font-size:14px}
+.arney-recipe-try-heading span{color:#677a97;font-size:12px;font-weight:700}
+.arney-recipe-try-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.arney-recipe-try-command{min-height:43px;padding:8px 9px;border:1px solid #c6dcf7;border-radius:10px;background:#fff;color:#20528c;text-align:left;font:inherit;font-size:12px;font-weight:700;line-height:1.3;cursor:pointer;touch-action:manipulation}
+.arney-recipe-try-command:active{background:#e2f0ff}
+.arney-recipe-try-command:focus-visible,.arney-recipe-try-more:focus-visible{outline:3px solid #2563eb;outline-offset:2px}
+.arney-recipe-try-more{justify-self:end;min-height:34px;padding:5px 10px;background:transparent;border:1px solid #c8daf0;border-radius:9px;color:#1c5b9a;font:inherit;font-size:12px;font-weight:750;cursor:pointer}
+.arney-recipe-try small{color:#64748b;font-size:12px;line-height:1.3}
+@media(max-width:390px){.arney-recipe-try{padding:10px}.arney-recipe-try-grid{gap:5px}.arney-recipe-try-command{font-size:11.5px;padding:7px}}
