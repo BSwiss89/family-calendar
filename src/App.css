@@ -21536,3 +21536,8 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   clip-path: inset(50%);
   overflow: hidden;
 }
+
+/* Recipe-only mode: hide standard conversation chrome without changing normal Arney replies. */
+.ai-command-panel.ai-command-recipe-mode .ai-command-header {margin-bottom:10px}
+.ai-command-panel.ai-command-recipe-mode .arney-conversation-result {margin-top:0;padding:0;border:0;background:transparent}
+.ai-command-panel.ai-command-recipe-mode .arney-recipe-browser {margin-top:0}
