@@ -14724,7 +14724,7 @@ return (
       }}
     >
       <div
-        className="ai-command-panel"
+        className={arneyRecipeResults.length > 0 ? "ai-command-panel ai-command-recipe-mode" : "ai-command-panel"}
         role="dialog"
         aria-modal="true"
         aria-labelledby="arney-command-title"
@@ -14741,11 +14741,13 @@ return (
               <span className="ai-command-title-icon" aria-hidden="true">✦</span>
               Ask Arney
             </h2>
-            <p className="ai-command-helper">
-              {aiVoiceDirect
-                ? 'Review Arney’s answer or hear it aloud.'
-                : 'Type a question or request.'}
-            </p>
+            {arneyRecipeResults.length === 0 && (
+              <p className="ai-command-helper">
+                {aiVoiceDirect
+                  ? 'Review Arney’s answer or hear it aloud.'
+                  : 'Type a question or request.'}
+              </p>
+            )}
           </div>
 
           <button
@@ -14768,7 +14770,7 @@ return (
     void submitAiCommand()
   }}
 >
-          {arneyVoiceStatus && (
+          {arneyRecipeResults.length === 0 && arneyVoiceStatus && (
             <p className="arney-voice-review-status" role="status">
               {arneyVoiceStatus}
               {arneyVoiceStatus.includes('Voice Settings') && (
@@ -14778,12 +14780,12 @@ return (
               )}
             </p>
           )}
-          {aiVoiceDirect && aiCommandText.trim() !== '' && (
+          {arneyRecipeResults.length === 0 && aiVoiceDirect && aiCommandText.trim() !== '' && (
             <p className="arney-voice-heard" aria-label="Words Arney heard">
               <strong>You said:</strong> {aiCommandText.trim().slice(0, 500)}
             </p>
           )}
-          {arneyMicDiagnostics.length > 0 && (
+          {arneyRecipeResults.length === 0 && arneyMicDiagnostics.length > 0 && (
             <details className="arney-mic-diagnostics">
               <summary>Microphone diagnostics (no audio or spoken words)</summary>
               <pre>{arneyMicDiagnostics.join('\n')}</pre>
@@ -15194,7 +15196,7 @@ return (
     </div>
   )}
 
-          <div className="ai-command-actions">
+          {arneyRecipeResults.length === 0 && (<div className="ai-command-actions">
             <button
               type="button"
               className="ai-command-cancel"
@@ -15220,19 +15222,23 @@ return (
                   : 'Send'}
               </button>
             )}
-          </div>
+          </div>)}
 
 {aiCommandResult !== '' && (
   <section className="arney-conversation-result" role="status" aria-live="polite">
-    <strong className="arney-conversation-name">
-      <span className="arney-conversation-name-icon" aria-hidden="true">✦</span>
-      Arney
-    </strong>
-    <p style={{ whiteSpace: 'pre-wrap' }}>{aiCommandResult}</p>
+    {arneyRecipeResults.length === 0 && (
+      <>
+        <strong className="arney-conversation-name">
+          <span className="arney-conversation-name-icon" aria-hidden="true">✦</span>
+          Arney
+        </strong>
+        <p style={{ whiteSpace: 'pre-wrap' }}>{aiCommandResult}</p>
+      </>
+    )}
     {arneyRecipeResults.length > 0 && (
       <ArneyRecipeCarousel recipes={arneyRecipeResults} onReviewSave={reviewArneyPublicRecipe} />
     )}
-    <div className="arney-conversation-audio-controls">
+    {arneyRecipeResults.length === 0 && (<div className="arney-conversation-audio-controls">
       <button type="button" onClick={() => {
         if (!speakArneyReply(aiCommandResult)) {
           setArneyVoiceStatus('Audio playback is not available here. You can read the reply below.')
@@ -15240,7 +15246,7 @@ return (
       }} aria-label="Hear Arney's reply">Hear reply</button>
       <button type="button" onClick={stopArneyReply}
         aria-label="Stop Arney speaking">Stop speaking</button>
-    </div>
+    </div>)}
   </section>
 )}
 
