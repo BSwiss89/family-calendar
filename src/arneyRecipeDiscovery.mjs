@@ -14,22 +14,27 @@ export function parseArneyRecipeDiscovery(raw) {
   const preferences = {
     onePot: /\b(?:one|single)[ -]?(?:pot|pan)\b/i.test(prompt),
     pasta: /\b(?:pasta|spaghetti|penne|macaroni|noodles|fettuccine)\b/i.test(prompt),
-    kidFriendly: /\b(?:kid|child|toddler)[ -]?friendly\b|\b(?:not spicy|mild)\b/i.test(prompt),
+    kidFriendly: /\b(?:kid(?:s)?|child(?:ren)?|toddler|family)[ -]?friendly\b|\b(?:mild|not spicy|for (?:the )?kids)\b/i.test(prompt),
+    easy: /\b(?:easy|simple|beginner|low[ -]?effort|few ingredients?)\b/i.test(prompt),
+    quick: /\b(?:quick|fast|speedy|weeknight|30[ -]?minute|under \d+ minutes?)\b/i.test(prompt),
   }
+  // Only a normalized dish/ingredient, never the original spoken sentence,
+  // goes to the fixed public provider. "Any" means locally curated discovery.
   const stripped = prompt.replace(/^(?:(?:hey\s+)?arney[,!\s]*)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:find|search|look\s+up|show|suggest|recommend|give)(?:\s+me)?\b/i,' ')
     .replace(/\b(?:one|single)[ -]?(?:pot|pan)\b/gi,' ')
-    .replace(/\b(?:kid|child|toddler)[ -]?friendly\b/gi,' ')
-    .replace(/\b(?:online|internet|web|search|recipes?|dinners?|meals?|dishes?|ideas?|easy|quick|healthy|mild|not spicy|for|with|using|some|any|a|an|the|me|please|that|are|in|of)\b/gi,' ')
+    .replace(/\b(?:kid(?:s)?|child(?:ren)?|toddler|family)[ -]?friendly\b|\bfor (?:the )?kids\b/gi,' ')
+    .replace(/\b(?:easy|simple|beginner|low[ -]?effort|few ingredients?|quick|fast|speedy|weeknight|30[ -]?minute|under \d+ minutes?)\b/gi,' ')
+    .replace(/\b(?:online|internet|web|search|recipes?|dinners?|meals?|dishes?|ideas?|healthy|mild|not spicy|for|with|using|some|any|a|an|the|me|please|that|are|in|of|tonight|today)\b/gi,' ')
     .replace(/[^A-Za-z0-9 ' -]/g,' ').replace(/\s+/g,' ').trim().toLowerCase()
   const main = KNOWN.find(word => new RegExp('\\b' + word + '\\b','i').test(stripped))
-  const query = main || (stripped && !preferences.onePot && !preferences.kidFriendly &&
-    /^[a-z][a-z '-]{1,40}$/i.test(stripped) && stripped.split(' ').length <= 3
+  const query = main || (stripped && /^[a-z][a-z '-]{1,40}$/i.test(stripped) &&
+    stripped.split(' ').length <= 3 && !/\b(?:my|our|wife|husband|family|personal|private)\b/.test(stripped)
     ? stripped : null)
-  // "pasta" is a preference only when another main ingredient is present.
+  // "Pasta" is a dish search unless paired with another ingredient.
   if (query === 'pasta') preferences.pasta = false
   // Common generic questions are clarification, not accidental provider searches.
   if (query && /^(?:what|where|who|can|could|would|you|we|make|cook)$/.test(query)) return null
-  return { query: query ?? null, preferences }
+  return { query: query ?? 'any', preferences }
 }
 
 export function normalizeArneyRecipeResults(payload) {
