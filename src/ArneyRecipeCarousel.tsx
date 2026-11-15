@@ -102,17 +102,11 @@ export default function ArneyRecipeCarousel({ recipes, onReviewSave }: Props) {
         disabled={selectedIndex === recipes.length - 1} aria-label="Next recipe">Next ›</button>
     </div>
     <div className="arney-recipe-actions">
-      <button type="button" className="arney-recipe-skip"
-        onClick={() => goTo(selectedIndex === recipes.length - 1 ? 0 : selectedIndex + 1)}>
-        {selectedIndex === recipes.length - 1 ? 'Back to first' : 'Skip'}
-      </button>
       <button type="button" className="arney-recipe-save"
         onClick={() => onReviewSave(selected)}>Save to Recipes</button>
     </div>
     {selectedIndex === recipes.length - 1 && <p className="arney-recipe-end">
       That's all {recipes.length} recipes returned by this search.
     </p>}
-    <p className="arney-recipe-help">Drag sideways to turn the page, or use the arrows.
-      Recipe matches are suggestions. Review ingredients and instructions before saving.</p>
   </section>
 }
