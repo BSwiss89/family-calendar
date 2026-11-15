@@ -1,6 +1,6 @@
 // Arney public recipe discovery. Only a generic dish/ingredient or sentinel
 // 'any' goes to the fixed provider; full speech and family context stay local.
-const RECIPE_NOUN = /\b(?:recipes?|dinners?|meals?|dishes?|breakfasts?|lunch(?:es)?|snacks?|food|dinner ideas?)\b/i
+const RECIPE_NOUN = /\b(?:recipes?|dinners?|meals?|dishes?|breakfasts?|lunch(?:es)?|snacks?|food|dinner ideas?|casseroles?|picky eaters?)\b/i
 const READ_START = /^(?:(?:hey\s+)?arney[,!\s]*)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:find|search|look\s+up|show|suggest|recommend|give)\b/i
 const WRITE_START = /^(?:(?:hey\s+)?arney[,!\s]*)?(?:add|save|create|schedule|put|delete|remove|cancel|change|update|book|order|buy|plan)\b/i
 const LOCAL = /\b(?:my|our|saved|existing|family's)\s+(?:favorite\s+)?recipes?\b/i
@@ -37,7 +37,7 @@ export function parseArneyRecipeDiscovery(raw) {
     .replace(/\b(?:one|single)[ -]?(?:pot|pan)\b/gi,' ')
     .replace(/\b(?:kid(?:s)?|child(?:ren)?|toddler|family)[ -]?friendly\b|\bfor (?:the )?kids\b/gi,' ')
     .replace(/\b(?:easy|simple|beginner|low[ -]?effort|few ingredients?|quick|fast|speedy|weeknight|busy weeknights?|30[ -]?minute|under \d+ minutes?|budget[ -]?friendly|inexpensive|cheap|healthy|nutritious|balanced|picky eaters?|fussy eaters?|something different|new (?:dinner|meal) ideas?|air[ -]?fryer|slow[ -]?cooker|crock[ -]?pot|fewer dishes(?: to wash)?|less cleanup)\b/gi,' ')
-    .replace(/\b(?:online|internet|web|search|recipes?|dinners?|meals?|dishes?|ideas?|mild|not spicy|for|with|using|some|any|a|an|the|me|please|that|are|in|of|tonight|today|busy|our|my|family|show|give|something)\b/gi,' ')
+    .replace(/\b(?:online|internet|web|search|recipes?|dinners?|meals?|dishes?|ideas?|mild|not spicy|for|with|using|some|any|a|an|the|me|please|that|are|in|of|tonight|today|busy|our|my|family|kids|children|show|give|something|ground|busy|weeknights?)\b/gi,' ')
     .replace(/[^A-Za-z0-9 ' -]/g,' ').replace(/\s+/g,' ').trim().toLowerCase()
   const main = KNOWN.find(word => new RegExp('\\b' + word + '\\b','i').test(stripped))
   const dish = DISH_ALIASES.find(x=>x.pattern.test(stripped))?.value
