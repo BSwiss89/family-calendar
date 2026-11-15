@@ -30,6 +30,7 @@ import {
 import { ensureListIcons, normalizeListIcon } from './list-icons.mjs'
 import { resolvePhotoEventEndDate } from './photo-event-date-range.mjs'
 import { searchPublicRecipes, normalizePublicRecipeQuery } from './arney-public-recipe-search.mjs'
+import { fetchVerifiedRecipeImage } from './arney-public-recipe-image.mjs'
 import { ensureShoppingStores, getShoppingStores, looksLikeShoppingList, requireStoreId,
   suggestShoppingStoreId, organizeShoppingStores, saveShoppingStoreCorrection,
   sortUnknownStoresWithOllama } from './smart-stores.mjs'
@@ -5000,6 +5001,22 @@ servings,
     }))
 
   response.json(recipes)
+})
+
+// Source photo bytes are requested ONLY after the user presses Save Recipe.
+// This authenticated route only accepts fixed TheMealDB media paths, validates
+// actual image pixels and converts to small WebP for existing local uploads.
+app.post('/api/arney/public-recipe-image', async (request, response) => {
+  try {
+    const bytes = await fetchVerifiedRecipeImage(request.body?.imageUrl)
+    response.set('Cache-Control', 'private, no-store')
+    response.type('image/webp').send(bytes)
+  } catch (error) {
+    const invalid = error instanceof TypeError
+    response.status(invalid ? 400 : 502).json({
+      error: invalid ? 'Invalid recipe photo source.' : 'Could not import recipe photo.',
+    })
+  }
 })
 
 app.post(
