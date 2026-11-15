@@ -1,10 +1,13 @@
-// Phase 4B.1 — purposefully narrow recipe discovery. Family data and the
-// user's original utterance are never sent to external recipe services.
-const RECIPE_NOUN = /\b(?:recipes?|dinners?|meals?|dishes?)\b/i
+// Arney public recipe discovery. Only a generic dish/ingredient or sentinel
+// 'any' goes to the fixed provider; full speech and family context stay local.
+const RECIPE_NOUN = /\b(?:recipes?|dinners?|meals?|dishes?|breakfasts?|lunch(?:es)?|snacks?|food|dinner ideas?)\b/i
 const READ_START = /^(?:(?:hey\s+)?arney[,!\s]*)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:find|search|look\s+up|show|suggest|recommend|give)\b/i
 const WRITE_START = /^(?:(?:hey\s+)?arney[,!\s]*)?(?:add|save|create|schedule|put|delete|remove|cancel|change|update|book|order|buy|plan)\b/i
 const LOCAL = /\b(?:my|our|saved|existing|family's)\s+(?:favorite\s+)?recipes?\b/i
-const KNOWN = ['chicken', 'salmon', 'shrimp', 'turkey', 'beef', 'pork', 'tofu', 'tuna', 'fish', 'lamb', 'rice', 'potatoes', 'mushrooms', 'pasta']
+const KNOWN = ['chicken','salmon','shrimp','turkey','beef','pork','tofu','tuna','fish','lamb','rice','potatoes','mushrooms','pasta']
+const DISH_ALIASES = [{pattern:/\bcasseroles?\b/i,value:'casserole'},
+  {pattern:/\bquesadillas?\b/i,value:'quesadilla'},
+  {pattern:/\bmeatballs?\b/i,value:'meatball'}]
 
 export function parseArneyRecipeDiscovery(raw) {
   if (typeof raw !== 'string' || raw.length > 250 || /[\x00-\x1f\x7f]/.test(raw)) return null
@@ -16,24 +19,32 @@ export function parseArneyRecipeDiscovery(raw) {
     pasta: /\b(?:pasta|spaghetti|penne|macaroni|noodles|fettuccine)\b/i.test(prompt),
     kidFriendly: /\b(?:kid(?:s)?|child(?:ren)?|toddler|family)[ -]?friendly\b|\b(?:mild|not spicy|for (?:the )?kids)\b/i.test(prompt),
     easy: /\b(?:easy|simple|beginner|low[ -]?effort|few ingredients?)\b/i.test(prompt),
-    quick: /\b(?:quick|fast|speedy|weeknight|30[ -]?minute|under \d+ minutes?)\b/i.test(prompt),
+    quick: /\b(?:quick|fast|speedy|weeknight|busy weeknights?|30[ -]?minute|under \d+ minutes?)\b/i.test(prompt),
+    purpose: /\b(?:picky eaters?|fussy eaters?)\b/i.test(prompt) ? 'picky' :
+      /\b(?:budget[ -]?friendly|inexpensive|cheap)\b/i.test(prompt) ? 'budget' :
+        /\b(?:healthy|nutritious|balanced)\b/i.test(prompt) ? 'healthy' :
+          /\b(?:something different|new (?:dinner|meal) ideas?)\b/i.test(prompt) ? 'different' : '',
+    method: /\b(?:air[ -]?fryer)\b/i.test(prompt) ? 'air-fryer' :
+      /\b(?:slow[ -]?cooker|crock[ -]?pot)\b/i.test(prompt) ? 'slow-cooker' :
+        /\b(?:breakfasts?)\b/i.test(prompt) ? 'breakfast' :
+          /\b(?:casseroles?)\b/i.test(prompt) ? 'casserole' :
+            /\b(?:fewer dishes|less cleanup|one[ -]?pot|one[ -]?pan)\b/i.test(prompt) ? 'low-cleanup' : '',
   }
-  // Only a normalized dish/ingredient, never the original spoken sentence,
-  // goes to the fixed public provider. "Any" means locally curated discovery.
+  // A picky-eater request is kid oriented, but 'family dinner' alone
+  // is not automatically a claim that every child will like it.
+  if (preferences.purpose === 'picky') preferences.kidFriendly = true
   const stripped = prompt.replace(/^(?:(?:hey\s+)?arney[,!\s]*)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:find|search|look\s+up|show|suggest|recommend|give)(?:\s+me)?\b/i,' ')
     .replace(/\b(?:one|single)[ -]?(?:pot|pan)\b/gi,' ')
     .replace(/\b(?:kid(?:s)?|child(?:ren)?|toddler|family)[ -]?friendly\b|\bfor (?:the )?kids\b/gi,' ')
-    .replace(/\b(?:easy|simple|beginner|low[ -]?effort|few ingredients?|quick|fast|speedy|weeknight|30[ -]?minute|under \d+ minutes?)\b/gi,' ')
-    .replace(/\b(?:online|internet|web|search|recipes?|dinners?|meals?|dishes?|ideas?|healthy|mild|not spicy|for|with|using|some|any|a|an|the|me|please|that|are|in|of|tonight|today)\b/gi,' ')
+    .replace(/\b(?:easy|simple|beginner|low[ -]?effort|few ingredients?|quick|fast|speedy|weeknight|busy weeknights?|30[ -]?minute|under \d+ minutes?|budget[ -]?friendly|inexpensive|cheap|healthy|nutritious|balanced|picky eaters?|fussy eaters?|something different|new (?:dinner|meal) ideas?|air[ -]?fryer|slow[ -]?cooker|crock[ -]?pot|fewer dishes(?: to wash)?|less cleanup)\b/gi,' ')
+    .replace(/\b(?:online|internet|web|search|recipes?|dinners?|meals?|dishes?|ideas?|mild|not spicy|for|with|using|some|any|a|an|the|me|please|that|are|in|of|tonight|today|busy|our|my|family|show|give|something)\b/gi,' ')
     .replace(/[^A-Za-z0-9 ' -]/g,' ').replace(/\s+/g,' ').trim().toLowerCase()
   const main = KNOWN.find(word => new RegExp('\\b' + word + '\\b','i').test(stripped))
-  const query = main || (stripped && /^[a-z][a-z '-]{1,40}$/i.test(stripped) &&
-    stripped.split(' ').length <= 3 && !/\b(?:my|our|wife|husband|family|personal|private)\b/.test(stripped)
+  const dish = DISH_ALIASES.find(x=>x.pattern.test(stripped))?.value
+  const query = main || dish || (stripped && /^[a-z][a-z '-]{1,40}$/i.test(stripped) &&
+    stripped.split(' ').length <= 3 && !/\b(?:wife|husband|family|personal|private|what|where|who|can|could|would|you|we|make|cook)\b/.test(stripped)
     ? stripped : null)
-  // "Pasta" is a dish search unless paired with another ingredient.
   if (query === 'pasta') preferences.pasta = false
-  // Common generic questions are clarification, not accidental provider searches.
-  if (query && /^(?:what|where|who|can|could|would|you|we|make|cook)$/.test(query)) return null
   return { query: query ?? 'any', preferences }
 }
 
