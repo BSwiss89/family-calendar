@@ -4265,9 +4265,16 @@ setAiReschedulePreview(null)
       if (!found.ok) throw new Error('Public recipe research is currently unavailable.')
       const candidateRecipes = normalizeArneyRecipeResults(result)
       setArneyRecipeResults(candidateRecipes)
-      announceArneyReply({ kind: 'information', text: candidateRecipes.length
-        ? `I found ${candidateRecipes.length} recipes for ${publicRecipeRequest.query}. Swipe through them, then choose Save to Recipes to review a copy before saving. Nothing was changed.`
-        : 'I could not find matching recipes with these preferences. Try relaxing a filter or another ingredient. Nothing was saved.' })
+      if (candidateRecipes.length > 0) {
+        // Recipe-only results have their own accessible browser; no long
+        // conversation paragraph or unsolicited spoken playback.
+        setAiCommandResult('')
+      } else {
+        announceArneyReply({
+          kind: 'clarification',
+          text: 'I could not find matching recipes with these preferences. Try relaxing a filter or another ingredient. Nothing was saved.',
+        })
+      }
       return
     }
     const intentResponse =
@@ -15224,7 +15231,7 @@ return (
             )}
           </div>)}
 
-{aiCommandResult !== '' && (
+{(aiCommandResult !== '' || arneyRecipeResults.length > 0) && (
   <section className="arney-conversation-result" role="status" aria-live="polite">
     {arneyRecipeResults.length === 0 && (
       <>
