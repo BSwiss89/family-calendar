@@ -25,8 +25,9 @@ export default function ArneyRecipeCarousel({ recipes, onReviewSave }: Props) {
   function goTo(next: number) {
     const target = Math.max(0, Math.min(recipes.length - 1, next))
     setIndex(target)
-    viewport.current?.scrollTo({
-      left: target * viewport.current.clientWidth,
+    const element = viewport.current
+    if (element) element.scrollTo({
+      left: target * element.clientWidth,
       behavior: 'smooth',
     })
   }
