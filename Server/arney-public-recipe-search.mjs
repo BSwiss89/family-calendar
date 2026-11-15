@@ -43,11 +43,11 @@ function publicMeal(item) {
   return { id:String(item.idMeal), name, category, area, image, ingredients, instructions, url }
 }
 function preferencesOrDefault(value) {
-  if (value === undefined) return { pasta:false, onePot:false, kidFriendly:false }
+  if (value === undefined) return { pasta:false, onePot:false, kidFriendly:false, easy:false, quick:false }
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
-      Object.keys(value).some(k=>!['pasta','onePot','kidFriendly'].includes(k)) ||
+      Object.keys(value).some(k=>!['pasta','onePot','kidFriendly','easy','quick'].includes(k)) ||
       Object.values(value).some(v=>typeof v !== 'boolean')) throw new TypeError('Invalid recipe preferences.')
-  return { pasta: value.pasta === true, onePot: value.onePot === true, kidFriendly: value.kidFriendly === true }
+  return { pasta: value.pasta === true, onePot: value.onePot === true, kidFriendly: value.kidFriendly === true, easy: value.easy === true, quick: value.quick === true }
 }
 async function nameSearch(query, fetchImpl) {
   const url = new URL(SEARCH_URL)
@@ -68,35 +68,45 @@ function rankMeal(item, query, p) {
   const title=item.name.toLowerCase()
   const joined=item.ingredients.join(' ').toLowerCase()
   const q=query.toLowerCase()
-  if(!title.includes(q)&&!joined.includes(q))return null
+  const generic=q==='any'
+  if(!generic&&!title.includes(q)&&!joined.includes(q))return null
   const hasPasta=/(?:\bpasta\b|\bspaghetti\b|\bpenne\b|\bmacaroni\b|\bfettuccine\b|\bfusilli\b|\blinguine\b|\bnoodles\b|\borzo\b)/i.test(title+' '+joined)
   if(p.pasta && !hasPasta)return null
   const onePot=/(?:\bone[- ]?(?:pot|pan)\b|\bsingle[- ]?(?:pot|pan)\b|\bin the same (?:pot|pan)\b)/i.test(title+' '+item.instructions)
   const spicy=/(?:\bchill?i\b|\bhot sauce\b|\bcayenne\b|\bsriracha\b|\bjalape[ñn]o\b|\bchili flakes\b|\bscotch bonnet\b)/i.test(joined)
+  // Heuristics are only ranking signals: TheMealDB does not verify prep time,
+  // age suitability or effort. Never say these results are guaranteed.
+  const fewerIngredients=item.ingredients.length>0 && item.ingredients.length<=8
+  const shortDirections=item.instructions.length>0 && item.instructions.length<=650
   const tags=[]
   if(p.pasta&&hasPasta)tags.push('Contains pasta')
   if(p.onePot&&onePot)tags.push('One-pot wording found')
   if(p.kidFriendly&&!spicy)tags.push('Milder ingredients (not guaranteed kid-friendly)')
-  const score=(title.includes(q)?6:4)+(p.pasta&&hasPasta?10:0)+
-    (p.onePot&&onePot?12:0)+(p.kidFriendly&&!spicy?4:0)
+  if(p.easy&&fewerIngredients)tags.push('8 or fewer listed ingredients (ease not verified)')
+  if(p.quick&&shortDirections)tags.push('Shorter directions (cook time not verified)')
+  const score=(generic?0:(title.includes(q)?6:4))+(p.pasta&&hasPasta?10:0)+
+    (p.onePot&&onePot?12:0)+(p.kidFriendly?(spicy?-16:8):0)+
+    (p.easy?(fewerIngredients?12:0)+Math.max(0,12-item.ingredients.length):0)+
+    (p.quick?(shortDirections?12:0)+Math.max(0,12-Math.ceil(item.instructions.length/130)):0)
   return {...item,matchNotes:tags,score}
 }
 export async function searchPublicRecipes(rawQuery,{fetchImpl=fetch,preferences}={}) {
   const query=normalizePublicRecipeQuery(rawQuery)
   if(!query)throw new TypeError('Invalid generic recipe lookup.')
   const p=preferencesOrDefault(preferences)
-  const key=query.toLowerCase()+'|'+Number(p.onePot)+Number(p.pasta)+Number(p.kidFriendly)
+  const key=query.toLowerCase()+'|'+Number(p.onePot)+Number(p.pasta)+Number(p.kidFriendly)+Number(p.easy)+Number(p.quick)
   const now=Date.now()
   if(fetchImpl===fetch){
     const cached=cache.get(key)
     if(cached&&cached.expires>now)return cached.value
   }
-  const raw=await nameSearch(query,fetchImpl)
-  // Combine two *name* searches using the free V1 API. No paid multi-filter.
-  // Both return complete details and need no arbitrary third-party URL fetch.
-  if(p.pasta && query.toLowerCase()!=='pasta'){
-    raw.push(...await nameSearch('pasta',fetchImpl))
-  }
+  // Generic requests are sampled from a small, fixed, free name-search
+  // collection. They do NOT imply access to a complete recipe catalog.
+  const searchTerms=query.toLowerCase()==='any'
+    ? (p.pasta?['pasta','macaroni','spaghetti']:['chicken','pasta','soup','rice'])
+    : (p.pasta&&query.toLowerCase()!=='pasta'?[query,'pasta']:[query])
+  const groups=await Promise.all(searchTerms.map(term=>nameSearch(term,fetchImpl)))
+  const raw=groups.flat()
   const byId=new Map()
   for(const item of raw){
     const meal=publicMeal(item)
