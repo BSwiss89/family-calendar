@@ -3748,6 +3748,7 @@ const [recipeImageFile, setRecipeImageFile] =
   useState<File | null>(null)
 const [recipeImagePreview, setRecipeImagePreview] =
   useState('')
+const [recipePublicImageUrl, setRecipePublicImageUrl] = useState('')
 const [recipeFileInputKey, setRecipeFileInputKey] =
   useState(0)
 const [recipeServings, setRecipeServings] = useState('')
@@ -7318,6 +7319,8 @@ async function loadRecipes() {
 function reviewArneyPublicRecipe(recipe: PublicRecipe) {
   // The user opens the existing editable recipe form; this is NOT a save.
   clearRecipeForm()
+  setRecipePublicImageUrl(recipe.image)
+  setRecipeImagePreview(recipe.image)
   setRecipeName(recipe.name)
   setRecipeIngredients(recipe.ingredients.join('\n'))
   setRecipeInstructions(recipe.instructions)
@@ -7328,7 +7331,7 @@ function reviewArneyPublicRecipe(recipe: PublicRecipe) {
   setAiCommandOpen(false)
   setPage('meals')
   setMealsView('recipes')
-  showAppNotification('Recipe draft ready. Review and tap Save Recipe to keep it. Photos are preview-only until you choose one in the editor.')
+  showAppNotification('Recipe draft ready. Review it and tap Save Recipe. The preview photo will be copied into your calendar when you save.')
 }
 
 function clearRecipeForm() {
@@ -7336,6 +7339,7 @@ function clearRecipeForm() {
   setRecipeName('')
   setRecipeImageFile(null)
   setRecipeImagePreview('')
+  setRecipePublicImageUrl('')
   setRecipeFileInputKey((value) => value + 1)
   setRecipeServings('')
   setRecipePrepTime('')
@@ -7853,6 +7857,7 @@ function handleRecipeImageChange(
     event.target.files?.[0] ?? null
 
   setRecipeImageFile(file)
+  setRecipePublicImageUrl('')
 
   if (file) {
     setRecipeImagePreview(
@@ -7942,6 +7947,27 @@ async function saveRecipe(
     )
   }
 
+  // Import only on the user's explicit Save click, never on preview/review.
+  // The server permits only official TheMealDB images and returns validated WebP.
+  // A failed image import must not lose the editable recipe or its source URL.
+  let onlineImageFailed = false
+  if (!recipeImageFile && recipePublicImageUrl && editingRecipeId === null) {
+    try {
+      const photoResponse = await fetch('/api/arney/public-recipe-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: recipePublicImageUrl }),
+      })
+      if (!photoResponse.ok) throw new Error('Photo unavailable')
+      const photoBlob = await photoResponse.blob()
+      if (photoBlob.type !== 'image/webp' || photoBlob.size === 0 ||
+          photoBlob.size > 2 * 1024 * 1024) throw new Error('Invalid photo')
+      formData.append('image', new File([photoBlob], 'arney-recipe.webp', { type: 'image/webp' }))
+    } catch {
+      onlineImageFailed = true
+    }
+  }
+
   const recipeUrl =
   editingRecipeId === null
     ? '/api/recipes'
@@ -7975,9 +8001,11 @@ const response = await fetch(
   await loadRecipes()
 
   showAppNotification(
-  editingRecipeId === null
-    ? 'Recipe saved.'
-    : 'Recipe updated.'
+  onlineImageFailed
+    ? 'Recipe saved, but the online photo could not be copied. You can add one later.'
+    : editingRecipeId === null
+      ? 'Recipe saved.'
+      : 'Recipe updated.'
 )
 
   closeRecipeForm()
@@ -23132,9 +23160,11 @@ resetMealPlannerScroll()
     <span className="recipe-photo-picker-text">
       {recipeImageFile
         ? recipeImageFile.name
-        : recipeImagePreview !== ''
-          ? 'Current recipe photo'
-          : 'No photo selected'}
+        : recipePublicImageUrl !== ''
+          ? 'Online photo — saved locally when you save this recipe'
+          : recipeImagePreview !== ''
+            ? 'Current recipe photo'
+            : 'No photo selected'}
     </span>
   </label>
 </div>
