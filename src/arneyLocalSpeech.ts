@@ -17,7 +17,7 @@ const preferredTypes = [
   'audio/ogg;codecs=opus',
 ]
 
-function browserDependencies(): Required<LocalSpeechDependencies> | null {
+function browserDependencies(): Required<Pick<LocalSpeechDependencies, 'getUserMedia' | 'Recorder' | 'fetchImpl' | 'now'>> | null {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia ||
       typeof MediaRecorder === 'undefined' || typeof fetch === 'undefined') return null
   return {
