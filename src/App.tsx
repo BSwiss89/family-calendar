@@ -30,6 +30,7 @@ import { createArneyPlusHoldController, type ArneyPlusHoldController } from './a
 import { parseArneySimpleCommand } from './arneyTextCommands'
 import { planArneyReadOnlyRequest } from './arneyPlanning.mjs'
 import { parseArneyRecipeDiscovery, normalizeArneyRecipeResults, type PublicRecipe } from './arneyRecipeDiscovery.mjs'
+import { ARNEY_RECIPE_SUGGESTIONS, ARNEY_RECIPE_SUGGESTIONS_PER_PAGE, suggestionPage } from './arneyRecipeSuggestions.mjs'
 import ArneyRecipeCarousel from './ArneyRecipeCarousel'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
 import FamilyDailyNotes from './FamilyDailyNotes'
@@ -3291,6 +3292,7 @@ const [aiCommandLoading, setAiCommandLoading] =
 const [aiCommandResult, setAiCommandResult] =
   useState('')
 const [arneyRecipeResults, setArneyRecipeResults] = useState<PublicRecipe[]>([])
+const [arneyRecipeSuggestionPage, setArneyRecipeSuggestionPage] = useState(0)
 
 function announceArneyReply(reply: ArneyReply) {
   setAiCommandResult(reply.text)
@@ -14810,8 +14812,31 @@ return (
                 )
               }}
               placeholder="What's on our family calendar this week?"
-              autoFocus
+              autoFocus={aiCommandText.trim() !== ''}
             />
+          )}
+          {!aiVoiceDirect && !aiCommandLoading && !aiCommandText.trim() &&
+            !aiCommandResult && arneyRecipeResults.length === 0 && (
+            <section className="arney-recipe-try" aria-label="Suggested Arney recipe searches">
+              <div className="arney-recipe-try-heading">
+                <strong>Try asking Arney</strong>
+                <span>{arneyRecipeSuggestionPage + 1} of {Math.ceil(ARNEY_RECIPE_SUGGESTIONS.length / ARNEY_RECIPE_SUGGESTIONS_PER_PAGE)}</span>
+              </div>
+              <div className="arney-recipe-try-grid">
+                {suggestionPage(arneyRecipeSuggestionPage).map(phrase => (
+                  <button type="button" key={phrase} className="arney-recipe-try-command"
+                    onClick={() => { setAiCommandText(phrase); void submitAiCommand(phrase) }}>
+                    {phrase}
+                  </button>
+                ))}
+              </div>
+              <button type="button" className="arney-recipe-try-more"
+                onClick={() => setArneyRecipeSuggestionPage(page =>
+                  (page + 1) % Math.ceil(ARNEY_RECIPE_SUGGESTIONS.length / ARNEY_RECIPE_SUGGESTIONS_PER_PAGE))}>
+                More ideas
+              </button>
+              <small>Tap a phrase to search, or say it while holding the blue +.</small>
+            </section>
           )}
 {aiCancellationPreview?.status ===
   'needs_clarification' &&
@@ -15485,6 +15510,8 @@ return (
               setAiVoiceDirect(false)
               setAiCommandText('')
               setAiCommandResult('')
+              setArneyRecipeSuggestionPage(0)
+              setArneyRecipeResults([])
               setAiClarificationAnswer('')
               setArneyVoiceStatus('')
               setAiCancellationPreview(null)
