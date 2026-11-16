@@ -23172,24 +23172,24 @@ resetMealPlannerScroll()
                       }}
                     />
                   </label>
-                  <label className="event-field">
-                    Video recording (only if the link cannot be analyzed)
-                    <input
-                      className="event-input"
-                      type="file"
-                      accept="video/mp4,video/quicktime,video/webm"
-                      onChange={event => {
-                        setSocialRecipeVideoFile(event.target.files?.[0] ?? null)
-                        setSocialRecipeImportMessage('')
-                        setSocialRecipeImportError('')
-                      }}
-                    />
-                    <small>Optional. A screen recording from Photos works too (MP4, MOV, or WebM; up to 36 MB).</small>
-                  </label>
                   <details className="recipe-social-import-advanced">
-                    <summary>Optional: paste caption text</summary>
+                    <summary>Advanced options (optional)</summary>
                     <label className="event-field">
-                      Post caption
+                      Attach a local video file
+                      <input
+                        className="event-input"
+                        type="file"
+                        accept="video/mp4,video/quicktime,video/webm"
+                        onChange={event => {
+                          setSocialRecipeVideoFile(event.target.files?.[0] ?? null)
+                          setSocialRecipeImportMessage('')
+                          setSocialRecipeImportError('')
+                        }}
+                      />
+                      <small>Not needed for accessible public Reels. MP4, MOV or WebM up to 36 MB.</small>
+                    </label>
+                    <label className="event-field">
+                      Paste caption text
                       <textarea
                         className="event-input recipe-social-import-caption"
                         placeholder={'Ingredients:\n- 1 cup rice\nInstructions:\n1. Cook the rice'}
