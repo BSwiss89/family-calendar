@@ -5,6 +5,7 @@ import { parseArneyRecipeDiscovery, normalizeArneyRecipeResults } from '../src/a
 import { searchPublicRecipes } from '../Server/arney-public-recipe-search.mjs'
 import { normalizeTheMealDbImageUrl, fetchVerifiedRecipeImage } from '../Server/arney-public-recipe-image.mjs'
 import sharp from 'sharp'
+import './test-arney-recipe-quality.mjs'
 
 const dish = (id,name,ingredients,{instructions='Cook everything together.',spicy=false}={})=>({
   idMeal:String(id),strMeal:name,strCategory:'Pasta',strArea:'American',
@@ -19,28 +20,34 @@ const creamy=dish(52774,'Chicken Noodles','Noodles',{instructions:'Use a large p
 const unrelated={...dish(52775,'Beef Pasta Bake','Penne Pasta'),strIngredient1:'Beef'}
 function mockSource(sources) {
   const calls=[]
-  const fetchImpl=async url => {
+  const fetchImpl=async (url,options) => {
     const u=new URL(url)
     assert.equal(u.origin,'https://www.themealdb.com')
-    assert.equal(u.pathname,'/api/json/v1/1/search.php')
-    calls.push(u.searchParams.get('s'))
-    return {ok:true,headers:{get:()=>null},text:async()=>JSON.stringify({meals:sources[u.searchParams.get('s')]||null})}
+    assert.ok(['/api/json/v1/1/search.php','/api/json/v1/1/filter.php','/api/json/v1/1/lookup.php'].includes(u.pathname))
+    assert.equal(options.method,'GET')
+    assert.equal(options.redirect,'error')
+    const type=u.pathname.endsWith('search.php')?'name':u.pathname.endsWith('filter.php')?'category':'detail'
+    const term=u.searchParams.get(type==='name'?'s':type==='category'?'c':'i')
+    calls.push(type==='name'?term:type+':'+term)
+    return {ok:true,headers:{get:()=>null},text:async()=>JSON.stringify({
+      meals:sources[type+':'+term]??(type==='name'?sources[term]:null)??null
+    })}
   }
   return {fetchImpl,calls}
 }
 test('understands natural compound preferences without leaking entire utterances',()=>{
   assert.deepEqual(parseArneyRecipeDiscovery('Find me chicken recipes, one pot, pasta, kid friendly'),{
-    query:'chicken',preferences:{onePot:true,pasta:true,kidFriendly:true,easy:false,quick:false}})
+    query:'chicken',preferences:{onePot:true,pasta:true,kidFriendly:true,easy:false,quick:false,purpose:'',method:'low-cleanup'}})
   assert.deepEqual(parseArneyRecipeDiscovery('Find chicken recipes'),{
-    query:'chicken',preferences:{onePot:false,pasta:false,kidFriendly:false,easy:false,quick:false}})
+    query:'chicken',preferences:{onePot:false,pasta:false,kidFriendly:false,easy:false,quick:false,purpose:'',method:''}})
   assert.deepEqual(parseArneyRecipeDiscovery('Find pasta recipes'),{
-    query:'pasta',preferences:{onePot:false,pasta:false,kidFriendly:false,easy:false,quick:false}})
+    query:'pasta',preferences:{onePot:false,pasta:false,kidFriendly:false,easy:false,quick:false,purpose:'',method:''}})
   assert.equal(parseArneyRecipeDiscovery('Find recipes online').query,'any')
 })
 test('natural easy, quick, and kid-friendly requests allow generic meal discovery',()=>{
   const easy=parseArneyRecipeDiscovery('Find easy meals')
   assert.deepEqual(easy,{query:'any',preferences:{
-    onePot:false,pasta:false,kidFriendly:false,easy:true,quick:false}})
+    onePot:false,pasta:false,kidFriendly:false,easy:true,quick:false,purpose:'',method:''}})
   const child=parseArneyRecipeDiscovery('Find kid friendly meals')
   assert.equal(child.query,'any')
   assert.equal(child.preferences.kidFriendly,true)
@@ -59,7 +66,7 @@ test('generic free provider search samples a small fixed menu, ranks mild low-ef
     soup:[creamy],rice:[chickenPasta]})
   const out=await searchPublicRecipes('any',{fetchImpl:f.fetchImpl,
     preferences:{kidFriendly:true,easy:true,quick:true}})
-  assert.deepEqual(f.calls,['chicken','pasta','soup','rice'])
+  assert.deepEqual(f.calls,['chicken','pasta','soup','rice','category:Chicken','category:Beef','category:Vegetarian'])
   assert.equal(out.recipes.length,3)
   assert.notEqual(out.recipes[0].id,'52773','spicy recipe should not outrank mild options')
   assert.ok(out.recipes[0].matchNotes.some(t=>t.includes('ease not verified')))
