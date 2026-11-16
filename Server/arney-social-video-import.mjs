@@ -313,7 +313,8 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         ? 'Video was processed locally. Check all AI-extracted measurements and steps before saving.'
         : 'Video opened, but no usable speech or on-screen recipe text was recovered.')
     } else if (videoNotice) noticeParts.push(videoNotice)
-    if (!videoAnalyzed && !caption.trim()) noticeParts.push('Only the source link is available so far.')
+    if (!videoAnalyzed && !caption.trim() && !recoveredCaption)
+      noticeParts.push('Only the source link is available so far.')
     if (draft.conflicts.length)
       noticeParts.push('Check possible caption/video differences: ' + draft.conflicts.join('; ').slice(0, 600) + '.')
     if (draft.missing.length) noticeParts.push('Still missing: ' + draft.missing.join(' and ') + '.')
