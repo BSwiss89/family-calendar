@@ -118,6 +118,7 @@ test('a complete caption is recovered even when video retrieval fails', async ()
   assert.equal(result.instructions,'Bake at 200C for 22 minutes.')
   assert.equal(result.videoAnalyzed,false)
   assert.match(result.notice,/video could not be retrieved/i)
+  assert.doesNotMatch(result.notice,/only the source link is available/i)
 })
 
 test('always processes video even with a complete caption and appends missing video-only facts',async()=>{
