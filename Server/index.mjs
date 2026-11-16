@@ -5086,7 +5086,24 @@ if (socialVideoAllowedOnTest({
     }
     if (videoProcessing) return response.status(503).json({ error: 'Arney is analyzing another video.' })
     videoProcessing = true
+    // Existing clients keep the original JSON result. New TEST clients explicitly
+    // opt into newline-delimited progress events using the Accept header.
+    const wantsProgress = /application\/x-ndjson/i.test(request.get('Accept') || '')
+    let streamStarted = false
+    function writeProgress(type, fields = {}) {
+      if (!streamStarted || response.writableEnded || response.destroyed) return
+      response.write(JSON.stringify({ type, ...fields }) + '\n')
+    }
     try {
+      if (wantsProgress) {
+        response.status(200).set({
+          'Content-Type': 'application/x-ndjson; charset=utf-8',
+          'Cache-Control': 'private, no-store',
+          'X-Accel-Buffering': 'no',
+        })
+        response.flushHeaders()
+        streamStarted = true
+      }
       const stt = resolveTestLocalSttBridge({
         port: PORT, rootFolder: path.resolve(__dirname, '..'),
       })
@@ -5094,12 +5111,25 @@ if (socialVideoAllowedOnTest({
         url: body.url, caption: body.caption ?? '',
         videoBuffer: request.file?.buffer ?? null,
         videoMime: request.file?.mimetype ?? '',
-      }, { stt })
-      response.json(draft)
-    } catch (error) {
-      response.status(error instanceof TypeError ? 400 : 503).json({
-        error: error instanceof TypeError ? error.message : 'Video preview is temporarily unavailable.',
+      }, {
+        stt,
+        onProgress: wantsProgress ? event => writeProgress('progress', event) : null,
       })
+      if (streamStarted) {
+        writeProgress('result', { data: draft })
+        response.end()
+      } else {
+        response.json(draft)
+      }
+    } catch (error) {
+      const message = error instanceof TypeError
+        ? error.message : 'Video preview is temporarily unavailable.'
+      if (streamStarted) {
+        writeProgress('error', { message })
+        response.end()
+      } else {
+        response.status(error instanceof TypeError ? 400 : 503).json({ error: message })
+      }
     } finally { videoProcessing = false }
   })
 }
