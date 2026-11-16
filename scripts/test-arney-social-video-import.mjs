@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { socialVideoAllowedOnTest, groundedVideoDraft, analyzePublicSocialVideo } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
@@ -49,6 +51,22 @@ test('uploaded video frames and multiple audio clips can populate a reviewed dra
   assert.deepEqual(result.missing,[])
 })
 
+test('creator description is imported automatically without caption paste', async () => {
+  let seen=''
+  const result=await analyzePublicSocialVideo({url:ig},{
+    downloader:async(_url,folder)=>{
+      const filename=path.join(folder,'fake.mp4')
+      await writeFile(filename,Buffer.alloc(300))
+      return {filename,caption:'Recipe: Beans\nIngredients:\n- 1 cup beans\nInstructions:\n1. Simmer beans.'}
+    },
+    durationReader:async()=>1, transcriber:async()=>'',visualReader:async()=>'',
+    extractor:async evidence=>{seen=evidence.caption;return null}
+  })
+  assert.match(seen,/1 cup beans/)
+  assert.equal(result.ingredients,'1 cup beans')
+  assert.equal(result.instructions,'Simmer beans.')
+  assert.equal(result.captionRecovered,true)
+})
 test('invalid hosts and recording formats stop before network fetch', async () => {
   let called=false
   await assert.rejects(()=>analyzePublicSocialVideo({url:'https://facebook.com.evil.test/reel/1234567'},{
