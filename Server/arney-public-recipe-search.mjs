@@ -152,13 +152,13 @@ function rankMeal(item,query,p) {
   const customizable=CUSTOM.test(directions)
   const steps=directions.split(/(?:[.!?]\s+|\r?\n+)/).map(s=>s.trim()).filter(Boolean).length
   const shortSteps=steps>0&&steps<=7
-  const lowPrep=prep<=2 && !advanced
+  const lowPrep=directions.length>0 && prep<=2 && !advanced
   let score=generic?0:(title.includes(q)?7:4)
   const notes=[]
-  if(p.pasta) notes.push('Pasta ingredients listed')
+  if(p.pasta) notes.push('Contains pasta')
   if(p.onePot||p.method==='low-cleanup') {
     score+=convenient?12:0
-    if(convenient) notes.push('One-pan or simple setup described')
+    if(convenient) notes.push(p.onePot?'One-pot wording found':'One-pan or simple setup described')
   }
   if(p.easy||p.quick) {
     // No single threshold decides "easy": technique, hands-on preparation,
@@ -177,8 +177,8 @@ function rankMeal(item,query,p) {
     score+=spicy?-16:6
     score+=familiar?12:0
     score+=customizable?5:0
+    if(!spicy) notes.push('Milder ingredients (not guaranteed kid-friendly)')
     if(familiar) notes.push('Familiar dish style (preference estimate)')
-    else if(!spicy) notes.push('No obvious hot peppers listed')
     if(p.purpose==='picky' && customizable)score+=8
   }
   if(p.purpose==='budget') {
