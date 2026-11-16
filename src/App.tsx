@@ -1548,18 +1548,6 @@ type SocialVideoRecipePreview = {
   notice: string
 }
 
-type SocialRecipePreview = {
-  platform: 'Instagram' | 'Facebook'
-  sourceUrl: string
-  publicEmbedAvailable: boolean
-  name: string
-  ingredients: string
-  instructions: string
-  suppliedCaption: boolean
-  missing: string[]
-  notice: string
-}
-
 type Recipe = {
   id: number
   name: string
