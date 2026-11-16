@@ -51,6 +51,8 @@ jobs:
         run: node --test scripts/test-arney-online-recipe-search.mjs
       - name: Verify Arney swipe previews and compound recipe search safety
         run: node --test scripts/test-arney-recipe-preview.mjs
+      - name: Verify safe Instagram and Facebook link-to-draft import
+        run: node --test scripts/test-arney-social-recipe-import.mjs
       - name: Check TypeScript and build frontend
         run: npm run build
       - name: Verify Calendar person multi-select filtering
