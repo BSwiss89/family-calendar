@@ -32,6 +32,7 @@ import { resolvePhotoEventEndDate } from './photo-event-date-range.mjs'
 import { searchPublicRecipes, normalizePublicRecipeQuery } from './arney-public-recipe-search.mjs'
 import { readHouseholdRecipeHistory, reorderRecipesForHousehold } from './arney-household-recipe-ranking.mjs'
 import { fetchVerifiedRecipeImage } from './arney-public-recipe-image.mjs'
+import { previewSocialRecipe } from './arney-social-recipe-import.mjs'
 import { ensureShoppingStores, getShoppingStores, looksLikeShoppingList, requireStoreId,
   suggestShoppingStoreId, organizeShoppingStores, saveShoppingStoreCorrection,
   sortUnknownStoresWithOllama } from './smart-stores.mjs'
@@ -5014,6 +5015,28 @@ servings,
     }))
 
   response.json(recipes)
+})
+
+// TEST feature: public Instagram/Facebook link + user-pasted caption -> draft.
+// Meta oEmbed is used only to check public embedding availability, never
+// scraped for media/captions. No database writes, video download or paid AI.
+app.post('/api/arney/social-recipe-preview', async (request, response) => {
+  response.set('Cache-Control', 'private, no-store')
+  const body = request.body
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).some(key => !['url', 'caption'].includes(key)) ||
+      typeof body.url !== 'string' ||
+      (body.caption !== undefined && typeof body.caption !== 'string')) {
+    return response.status(400).json({ error: 'Enter a public social post link and optional copied caption.' })
+  }
+  try {
+    const draft = await previewSocialRecipe({ url: body.url, caption: body.caption ?? '' })
+    return response.json(draft)
+  } catch (error) {
+    return response.status(400).json({
+      error: error instanceof TypeError ? error.message : 'Could not review that public social link.',
+    })
+  }
 })
 
 // Source photo bytes are requested ONLY after the user presses Save Recipe.
