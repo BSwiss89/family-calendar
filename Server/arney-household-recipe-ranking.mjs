@@ -5,7 +5,7 @@
 // nothing from household data is sent to TheMealDB.
 const GROUPS = Object.freeze({
   chicken: /\b(?:chicken|poultry)\b/i,
-  beef: /\b(?:beef|steak|brisket|hamburger|meatloaf|meatballs?)\b/i,
+  beef: /\b(?:beef|steak|brisket|sirloin)\b/i,
   pork: /\b(?:pork|bacon|ham|sausage)\b/i,
   turkey: /\bturkey\b/i,
   seafood: /\b(?:seafood|fish|salmon|shrimp|tuna|cod|tilapia|prawn|crab)\b/i,
