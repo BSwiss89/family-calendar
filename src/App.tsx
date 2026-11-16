@@ -29,6 +29,9 @@ import { readArneyPreferences } from './arneyPreferences'
 import { createArneyPlusHoldController, type ArneyPlusHoldController } from './arneyPlusHold'
 import { parseArneySimpleCommand } from './arneyTextCommands'
 import { planArneyReadOnlyRequest } from './arneyPlanning.mjs'
+import { parseArneyRecipeDiscovery, normalizeArneyRecipeResults, type PublicRecipe } from './arneyRecipeDiscovery.mjs'
+import { ARNEY_RECIPE_SUGGESTIONS, ARNEY_RECIPE_SUGGESTIONS_PER_PAGE, suggestionPage } from './arneyRecipeSuggestions.mjs'
+import ArneyRecipeCarousel from './ArneyRecipeCarousel'
 import FamilyDailyNotes from './FamilyDailyNotes'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
 import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
@@ -3280,6 +3283,8 @@ const [aiCommandLoading, setAiCommandLoading] =
 
 const [aiCommandResult, setAiCommandResult] =
   useState('')
+const [arneyRecipeResults, setArneyRecipeResults] = useState<PublicRecipe[]>([])
+const [arneyRecipeSuggestionPage, setArneyRecipeSuggestionPage] = useState(0)
 
 function announceArneyReply(reply: ArneyReply) {
   setAiCommandResult(reply.text)
@@ -3732,6 +3737,7 @@ const [recipeImageFile, setRecipeImageFile] =
   useState<File | null>(null)
 const [recipeImagePreview, setRecipeImagePreview] =
   useState('')
+const [recipePublicImageUrl, setRecipePublicImageUrl] = useState('')
 const [recipeFileInputKey, setRecipeFileInputKey] =
   useState(0)
 const [recipeServings, setRecipeServings] = useState('')
@@ -4154,7 +4160,10 @@ async function submitAiCommand(
 
   // Phase 4A: read-only tools run against the current authenticated client
   // data. No model call, DB write, API request, or state mutation is performed.
-  const planningReply = planArneyReadOnlyRequest(command, {
+  // Explicit public recipe searches bypass saved-recipe suggestions, which
+  // otherwise interpret bare 'find chicken recipes' as local planning.
+  const publicRecipeRequest = parseArneyRecipeDiscovery(command)
+  const planningReply = publicRecipeRequest ? null : planArneyReadOnlyRequest(command, {
     now: new Date(),
     events,
     recipes,
@@ -4168,6 +4177,7 @@ async function submitAiCommand(
     setArneyVoiceStatus('')
     setAiCancellationPreview(null)
     setAiReschedulePreview(null)
+    setArneyRecipeResults([])
     announceArneyReply(planningReply)
     return
   }
@@ -4176,6 +4186,7 @@ async function submitAiCommand(
 stopArneyReply()
 setArneyVoiceStatus('')
 setAiCommandResult('')
+setArneyRecipeResults([])
 setAiCancellationPreview(null)
 setAiReschedulePreview(null)
 
@@ -4186,6 +4197,36 @@ setAiReschedulePreview(null)
   )
 
   try {
+    if (publicRecipeRequest) {
+      if (!publicRecipeRequest.query) {
+        announceArneyReply({
+          text: 'What ingredient or dish should I search for online?',
+          kind: 'clarification',
+        })
+        return
+      }
+      const found = await fetch('/api/ai/recipe-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: publicRecipeRequest.query, preferences: publicRecipeRequest.preferences }),
+        signal: requestController.signal,
+      })
+      const result = await found.json()
+      if (!found.ok) throw new Error('Public recipe research is currently unavailable.')
+      const candidateRecipes = normalizeArneyRecipeResults(result)
+      setArneyRecipeResults(candidateRecipes)
+      if (candidateRecipes.length > 0) {
+        // Recipe-only results have their own accessible browser; no long
+        // conversation paragraph or unsolicited spoken playback.
+        setAiCommandResult('')
+      } else {
+        announceArneyReply({
+          kind: 'clarification',
+          text: 'I could not find matching recipes with these preferences. Try relaxing a filter or another ingredient. Nothing was saved.',
+        })
+      }
+      return
+    }
     const intentResponse =
       await fetch(
         '/api/ai/intent',
@@ -4268,6 +4309,8 @@ announceArneyReply(describeArneyPreview(intentData.intent, previewData))
         text: 'Arney took too long to respond. Nothing was changed. Please try again.',
         kind: 'error',
       })
+    } else if (publicRecipeRequest) {
+      announceArneyReply({ text: 'Online recipe search is unavailable right now. Nothing was saved.', kind: 'error' })
     } else {
       announceArneyReply(describeArneyError())
     }
@@ -7229,11 +7272,31 @@ async function loadRecipes() {
   setRecipes(data)
 }
 
+
+function reviewArneyPublicRecipe(recipe: PublicRecipe) {
+  // The user opens the existing editable recipe form; this is NOT a save.
+  clearRecipeForm()
+  setRecipePublicImageUrl(recipe.image)
+  setRecipeImagePreview(recipe.image)
+  setRecipeName(recipe.name)
+  setRecipeIngredients(recipe.ingredients.join('\n'))
+  setRecipeInstructions(recipe.instructions)
+  setRecipeSourceUrl(recipe.url)
+  setRecipeTags([recipe.category, 'Dinner'].filter(Boolean).join(', ').slice(0,1000))
+  setRecipeFormSource('recipes')
+  setRecipeFormOpen(true)
+  setAiCommandOpen(false)
+  setPage('meals')
+  setMealsView('recipes')
+  showAppNotification('Recipe draft ready. Review it and tap Save Recipe. The preview photo will be copied into your calendar when you save.')
+}
+
 function clearRecipeForm() {
   setEditingRecipeId(null)
   setRecipeName('')
   setRecipeImageFile(null)
   setRecipeImagePreview('')
+  setRecipePublicImageUrl('')
   setRecipeFileInputKey((value) => value + 1)
   setRecipeServings('')
   setRecipePrepTime('')
@@ -7751,6 +7814,7 @@ function handleRecipeImageChange(
     event.target.files?.[0] ?? null
 
   setRecipeImageFile(file)
+  setRecipePublicImageUrl('')
 
   if (file) {
     setRecipeImagePreview(
@@ -7840,6 +7904,27 @@ async function saveRecipe(
     )
   }
 
+  // Import only on the user's explicit Save click, never on preview/review.
+  // The server permits only official TheMealDB images and returns validated WebP.
+  // A failed image import must not lose the editable recipe or its source URL.
+  let onlineImageFailed = false
+  if (!recipeImageFile && recipePublicImageUrl && editingRecipeId === null) {
+    try {
+      const photoResponse = await fetch('/api/arney/public-recipe-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: recipePublicImageUrl }),
+      })
+      if (!photoResponse.ok) throw new Error('Photo unavailable')
+      const photoBlob = await photoResponse.blob()
+      if (photoBlob.type !== 'image/webp' || photoBlob.size === 0 ||
+          photoBlob.size > 2 * 1024 * 1024) throw new Error('Invalid photo')
+      formData.append('image', new File([photoBlob], 'arney-recipe.webp', { type: 'image/webp' }))
+    } catch {
+      onlineImageFailed = true
+    }
+  }
+
   const recipeUrl =
   editingRecipeId === null
     ? '/api/recipes'
@@ -7873,9 +7958,11 @@ const response = await fetch(
   await loadRecipes()
 
   showAppNotification(
-  editingRecipeId === null
-    ? 'Recipe saved.'
-    : 'Recipe updated.'
+  onlineImageFailed
+    ? 'Recipe saved, but the online photo could not be copied. You can add one later.'
+    : editingRecipeId === null
+      ? 'Recipe saved.'
+      : 'Recipe updated.'
 )
 
   closeRecipeForm()
@@ -14540,7 +14627,7 @@ return (
       }}
     >
       <div
-        className="ai-command-panel"
+        className={arneyRecipeResults.length > 0 ? "ai-command-panel ai-command-recipe-mode" : "ai-command-panel"}
         role="dialog"
         aria-modal="true"
         aria-labelledby="arney-command-title"
@@ -14557,11 +14644,13 @@ return (
               <span className="ai-command-title-icon" aria-hidden="true">✦</span>
               Ask Arney
             </h2>
-            <p className="ai-command-helper">
-              {aiVoiceDirect
-                ? 'Review Arney’s answer or hear it aloud.'
-                : 'Type a question or request.'}
-            </p>
+            {arneyRecipeResults.length === 0 && (
+              <p className="ai-command-helper">
+                {aiVoiceDirect
+                  ? 'Review Arney’s answer or hear it aloud.'
+                  : 'Type a question or request.'}
+              </p>
+            )}
           </div>
 
           <button
@@ -14584,7 +14673,7 @@ return (
     void submitAiCommand()
   }}
 >
-          {arneyVoiceStatus && (
+          {arneyRecipeResults.length === 0 && arneyVoiceStatus && (
             <p className="arney-voice-review-status" role="status">
               {arneyVoiceStatus}
               {arneyVoiceStatus.includes('Voice Settings') && (
@@ -14594,12 +14683,12 @@ return (
               )}
             </p>
           )}
-          {aiVoiceDirect && aiCommandText.trim() !== '' && (
+          {arneyRecipeResults.length === 0 && aiVoiceDirect && aiCommandText.trim() !== '' && (
             <p className="arney-voice-heard" aria-label="Words Arney heard">
               <strong>You said:</strong> {aiCommandText.trim().slice(0, 500)}
             </p>
           )}
-          {arneyMicDiagnostics.length > 0 && (
+          {arneyRecipeResults.length === 0 && arneyMicDiagnostics.length > 0 && (
             <details className="arney-mic-diagnostics">
               <summary>Microphone diagnostics (no audio or spoken words)</summary>
               <pre>{arneyMicDiagnostics.join('\n')}</pre>
@@ -14617,8 +14706,31 @@ return (
                 )
               }}
               placeholder="What's on our family calendar this week?"
-              autoFocus
+              autoFocus={aiCommandText.trim() !== ''}
             />
+          )}
+          {!aiVoiceDirect && !aiCommandLoading && !aiCommandText.trim() &&
+            !aiCommandResult && arneyRecipeResults.length === 0 && (
+            <section className="arney-recipe-try" aria-label="Suggested Arney recipe searches">
+              <div className="arney-recipe-try-heading">
+                <strong>Try asking Arney</strong>
+                <span>{arneyRecipeSuggestionPage + 1} of {Math.ceil(ARNEY_RECIPE_SUGGESTIONS.length / ARNEY_RECIPE_SUGGESTIONS_PER_PAGE)}</span>
+              </div>
+              <div className="arney-recipe-try-grid">
+                {suggestionPage(arneyRecipeSuggestionPage).map(phrase => (
+                  <button type="button" key={phrase} className="arney-recipe-try-command"
+                    onClick={() => { setAiCommandText(phrase); void submitAiCommand(phrase) }}>
+                    {phrase}
+                  </button>
+                ))}
+              </div>
+              <button type="button" className="arney-recipe-try-more"
+                onClick={() => setArneyRecipeSuggestionPage(page =>
+                  (page + 1) % Math.ceil(ARNEY_RECIPE_SUGGESTIONS.length / ARNEY_RECIPE_SUGGESTIONS_PER_PAGE))}>
+                More ideas
+              </button>
+              <small>Tap a phrase to search, or say it while holding the blue +.</small>
+            </section>
           )}
 {aiCancellationPreview?.status ===
   'needs_clarification' &&
@@ -15010,7 +15122,7 @@ return (
     </div>
   )}
 
-          <div className="ai-command-actions">
+          {arneyRecipeResults.length === 0 && (<div className="ai-command-actions">
             <button
               type="button"
               className="ai-command-cancel"
@@ -15036,16 +15148,23 @@ return (
                   : 'Send'}
               </button>
             )}
-          </div>
+          </div>)}
 
-{aiCommandResult !== '' && (
+{(aiCommandResult !== '' || arneyRecipeResults.length > 0) && (
   <section className="arney-conversation-result" role="status" aria-live="polite">
-    <strong className="arney-conversation-name">
-      <span className="arney-conversation-name-icon" aria-hidden="true">✦</span>
-      Arney
-    </strong>
-    <p style={{ whiteSpace: 'pre-wrap' }}>{aiCommandResult}</p>
-    <div className="arney-conversation-audio-controls">
+    {arneyRecipeResults.length === 0 && (
+      <>
+        <strong className="arney-conversation-name">
+          <span className="arney-conversation-name-icon" aria-hidden="true">✦</span>
+          Arney
+        </strong>
+        <p style={{ whiteSpace: 'pre-wrap' }}>{aiCommandResult}</p>
+      </>
+    )}
+    {arneyRecipeResults.length > 0 && (
+      <ArneyRecipeCarousel recipes={arneyRecipeResults} onReviewSave={reviewArneyPublicRecipe} />
+    )}
+    {arneyRecipeResults.length === 0 && (<div className="arney-conversation-audio-controls">
       <button type="button" onClick={() => {
         if (!speakArneyReply(aiCommandResult)) {
           setArneyVoiceStatus('Audio playback is not available here. You can read the reply below.')
@@ -15053,7 +15172,7 @@ return (
       }} aria-label="Hear Arney's reply">Hear reply</button>
       <button type="button" onClick={stopArneyReply}
         aria-label="Stop Arney speaking">Stop speaking</button>
-    </div>
+    </div>)}
   </section>
 )}
 
@@ -15285,6 +15404,8 @@ return (
               setAiVoiceDirect(false)
               setAiCommandText('')
               setAiCommandResult('')
+              setArneyRecipeSuggestionPage(0)
+              setArneyRecipeResults([])
               setAiClarificationAnswer('')
               setArneyVoiceStatus('')
               setAiCancellationPreview(null)
@@ -22880,9 +23001,11 @@ resetMealPlannerScroll()
     <span className="recipe-photo-picker-text">
       {recipeImageFile
         ? recipeImageFile.name
-        : recipeImagePreview !== ''
-          ? 'Current recipe photo'
-          : 'No photo selected'}
+        : recipePublicImageUrl !== ''
+          ? 'Online photo — saved locally when you save this recipe'
+          : recipeImagePreview !== ''
+            ? 'Current recipe photo'
+            : 'No photo selected'}
     </span>
   </label>
 </div>
