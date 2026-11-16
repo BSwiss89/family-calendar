@@ -21555,3 +21555,73 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 .arney-recipe-try-more{justify-self:end;min-height:34px;padding:5px 10px;background:transparent;border:1px solid #c8daf0;border-radius:9px;color:#1c5b9a;font:inherit;font-size:12px;font-weight:750;cursor:pointer}
 .arney-recipe-try small{color:#64748b;font-size:12px;line-height:1.3}
 @media(max-width:390px){.arney-recipe-try{padding:10px}.arney-recipe-try-grid{gap:5px}.arney-recipe-try-command{font-size:11.5px;padding:7px}}
+
+
+/* TEST: social recipe link importer within the existing Add Recipe modal.
+   Keeps the compact blue + menu and the recipe form's mobile layout intact. */
+.recipe-social-import{
+  grid-column:1/-1;
+  min-width:0;
+  border:1px solid rgba(54,99,159,.22);
+  border-radius:16px;
+  background:rgba(236,245,255,.56);
+  overflow:hidden;
+}
+.recipe-social-import-toggle{
+  width:100%;
+  min-height:46px;
+  border:0;
+  padding:11px 15px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  background:transparent;
+  color:#21558d;
+  font:inherit;
+  font-weight:800;
+  text-align:left;
+  cursor:pointer;
+}
+.recipe-social-import-toggle span:nth-child(2){flex:1}
+.recipe-social-import-toggle:focus-visible{outline:3px solid #317ac3;outline-offset:-3px}
+.recipe-social-import-panel{
+  padding:2px 15px 15px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.recipe-social-import-panel>p:first-child{
+  margin:0;
+  color:#485e7b;
+  font-size:13px;
+  line-height:1.5;
+}
+.recipe-social-import-caption{
+  width:100%;
+  min-height:128px;
+  line-height:1.45;
+  resize:vertical;
+}
+.recipe-social-import-actions{
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap;
+  align-items:center;
+}
+.recipe-social-import-actions button{min-height:42px}
+.recipe-social-import-actions button:disabled{opacity:.55;cursor:not-allowed}
+.recipe-social-import-actions small{color:#536680;font-size:12px;line-height:1.4}
+.recipe-social-import-status,.recipe-social-import-error{
+  margin:0;
+  padding:11px 12px;
+  border-radius:10px;
+  line-height:1.5;
+  font-size:13px;
+}
+.recipe-social-import-status{border:1px solid #accbdc;background:#f3fafb;color:#244f66}
+.recipe-social-import-error{border:1px solid #e6b9b9;background:#fff7f7;color:#8a2d37}
+@media(max-width:540px){
+  .recipe-social-import-toggle{font-size:14px}
+  .recipe-social-import-actions{align-items:stretch;flex-direction:column}
+  .recipe-social-import-actions button{width:100%}
+}
