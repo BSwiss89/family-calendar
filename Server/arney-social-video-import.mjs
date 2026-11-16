@@ -6,8 +6,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { normalizeSocialRecipeUrl, parseSocialRecipeCaption } from './arney-social-recipe-import.mjs'
 
-const MAX_VIDEO_BYTES = 36 * 1024 * 1024
-const MAX_SECONDS = 110
+const MAX_VIDEO_BYTES = 36 * 1024 * 1024 // User-supplied recordings only
+const MAX_LINK_VIDEO_BYTES = 72 * 1024 * 1024 // Temporary public link downloads
+const MAX_SECONDS = 600 // Ten-minute limit
 const OLLAMA = 'http://127.0.0.1:11434/api/chat'
 const AUDIO_SECONDS = 18
 const MAX_AUDIO_BYTES = 2 * 1024 * 1024
@@ -42,15 +43,20 @@ async function downloadPublicVideo(sourceUrl, folder) {
   // Only a canonical, allowlisted Instagram/Facebook URL reaches the downloader.
   // No credential store, browser cookies, playlists, user-defined arguments,
   // arbitrary remote URLs, or scraper output is exposed to the browser.
-  await run('yt-dlp', [
+  const downloaderOutput = await run('yt-dlp', [
     '--ignore-config', '--no-playlist', '--no-progress', '--no-warnings',
-    '--write-info-json', '--no-write-thumbnail', '--max-filesize', '36m',
-    '--match-filter', 'duration <= 110', '--format', 'best[height<=480]/best',
+    '--write-info-json', '--no-write-thumbnail', '--max-filesize', '72m',
+    '--match-filter', 'duration <= 600', '--format', 'best[height<=480]/best',
     '--output', path.join(folder, 'linked-video.%(ext)s'), sourceUrl,
-  ], { cwd: folder, timeoutMs: 60_000 })
+  ], { cwd: folder, timeoutMs: 120_000 })
   const entries = await fs.readdir(folder)
   const filename = entries.find(name => /^linked-video\.(?:mp4|m4v|mov|webm|mkv)$/i.test(name))
-  if (!filename) throw new Error('No accessible public video file was provided by this link.')
+  // yt-dlp returns exit code 0 even when its filter skips a long Reel.
+  if (!filename) {
+    if (/does not pass filter/i.test(downloaderOutput))
+      throw new Error('This video is longer than the 10-minute analysis limit.')
+    throw new Error('yt-dlp did not save an accessible video from this link.')
+  }
   let caption = ''
   try {
     const info = path.join(folder, 'linked-video.info.json')
@@ -71,7 +77,7 @@ async function inspectDuration(filename) {
   ])
   const duration = Number(raw)
   if (!Number.isFinite(duration) || duration < 1 || duration > MAX_SECONDS)
-    throw new Error('Video duration is unavailable or outside the 110-second limit.')
+    throw new Error('Video duration is unavailable or outside the 10-minute limit.')
   return duration
 }
 
@@ -105,7 +111,8 @@ async function transcribeClip(filename, folder, start, seconds, stt) {
 }
 
 async function visibleVideoText(filename, folder, duration) {
-  const times = [Math.min(6, duration / 3), Math.min(25, duration / 2), Math.min(55, duration * 0.8)]
+  // Distribute frames through the whole Reel instead of only its first minute.
+  const times = [Math.min(6, duration * 0.1), duration * 0.35, duration * 0.65, duration * 0.9]
   const frames = []
   for (const [i, time] of times.entries()) {
     const target = path.join(folder, 'frame-' + i + '.jpg')
@@ -209,21 +216,24 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         const fetched = await downloader(source.url, folder)
         filename = typeof fetched === 'string' ? fetched : fetched?.filename ?? ''
         recoveredCaption = typeof fetched?.caption === 'string' ? fetched.caption.slice(0, 10_000) : ''
-      } catch {
-        videoNotice = 'The platform did not provide an accessible video from this link. You can attach a screen recording instead.'
+      } catch (error) {
+        videoNotice = error instanceof Error && error.message === 'This video is longer than the 10-minute analysis limit.'
+          ? error.message
+          : 'The public video could not be retrieved by yt-dlp on TEST. Check its availability or the downloader setup.'
       }
     }
     if (filename) {
       try {
         const stat = await fs.stat(filename)
-        if (!stat.isFile() || stat.size < 100 || stat.size > MAX_VIDEO_BYTES)
-          throw new Error('Video size is invalid.')
+        const maxBytes = videoBuffer ? MAX_VIDEO_BYTES : MAX_LINK_VIDEO_BYTES
+        if (!stat.isFile() || stat.size < 100 || stat.size > maxBytes)
+          throw new Error('Video size is invalid or exceeds the analysis limit.')
         const duration = await durationReader(filename)
         if (!Number.isFinite(duration) || duration < 1 || duration > MAX_SECONDS)
           throw new Error('Video is too long.')
         videoAnalyzed = true
         const portions = []
-        for (let start = 0; start < duration && start < 108; start += AUDIO_SECONDS) {
+        for (let start = 0; start < duration && start < MAX_SECONDS; start += AUDIO_SECONDS) {
           const seconds = Math.min(AUDIO_SECONDS, duration - start)
           if (seconds < 0.2) break
           const words = await transcriber(filename, folder, start, seconds, stt)
@@ -232,7 +242,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         transcript = portions.join('\n').slice(0, 9000)
         visibleText = await visualReader(filename, folder, duration)
       } catch {
-        videoNotice = 'The video could not be safely analyzed. Try a shorter screen recording.'
+        videoNotice = 'The video could not be analyzed safely (maximum 10 minutes; linked video maximum 72 MB).'
       }
     }
     const recipeCaption = caption.trim() || recoveredCaption

@@ -6,8 +6,8 @@ Paste one public Instagram or Facebook Reel URL. Arney should attempt to retriev
 ## Safety and data handling
 - Only normalized Instagram/Facebook URLs already accepted by the existing importer. No arbitrary URL fetch, Meta login, cookie use, private-account access, or creator crawling.
 - The preview endpoint exists only on isolated authenticated TEST (port 13002 with the expected TEST folder), checks family sessions, limits four attempts per ten minutes per session, and permits only one analysis at a time.
-- Public link extraction uses the optional yt-dlp executable installed separately on the TEST laptop, with strict size/duration/time limits, no cookies, no playlist. When a public video exposes a creator description, Arney imports that text automatically without an extra caption paste. A link alone may not provide a usable video due to platform restrictions or an absent downloader.
-- Fallback is an explicitly chosen MP4/MOV/WebM recording of at most 36 MB and 110 seconds. FFmpeg extracts 18-second mono WAV clips, which use the existing authenticated localhost STT bridge. A few scaled video frames go only to local vision AI. Local Ministral organizes the evidence into a review-only recipe.
+- Public link extraction uses the optional yt-dlp executable installed separately on the TEST laptop, with limits of 10 minutes, a 72-MB temporary linked download and a 120-second download timeout; no cookies or playlists. Previously, the 110-second filter silently skipped long public Reels with exit code 0. When a public video exposes a creator description, Arney imports that text automatically without an extra caption paste. A link alone may not provide a usable video due to platform restrictions or an absent downloader.
+- Optional MP4/MOV/WebM recordings remain capped at 36 MB; they are not required for an accessible public Reel. Linked and uploaded videos can be up to 10 minutes. FFmpeg extracts 18-second mono WAV clips across the duration to use the existing authenticated localhost STT bridge. Scaled video frames are sampled across the duration for local vision AI. Local Ministral organizes the evidence into a review-only recipe.
 - Video, audio, temporary frames, captions and transcripts are discarded from the OS temporary directory at request completion. Nothing is written to permanent calendar uploads or SQLite before explicit Save Recipe.
 - Models must leave unsupported ingredients, amounts and steps missing; AI transcription/extraction is not guaranteed to be accurate. User must review the exact amounts and directions before saving.
 - The feature does not copy social-media photos, alter the shopping list or calendar, change households, install software, or invoke paid AI.
@@ -16,7 +16,7 @@ Paste one public Instagram or Facebook Reel URL. Arney should attempt to retriev
 1. Obtain separate owner approval for merging to test-release. Verify exact-head GitHub CI and browser regressions. Do not merge main or LIVE.
 2. Verify TEST laptop has yt-dlp, ffmpeg, ffprobe, configured existing local STT service and Ollama models before expecting video transcription. Their installation is NOT part of this source PR.
 3. Run the existing guarded TEST deployment and confirm target SHA, health, authentication, anonymous denial, tests and rollback backup.
-4. On an iPhone, use a public Instagram Reel and Facebook Reel, check link-based analysis when accessible, and check that blocked links prompt for screen recording rather than inventing data.
+4. On an iPhone, use a public Instagram Reel longer than 110 seconds and a Facebook Reel. Verify a longer Reel is not silently filtered, speech beyond 110 seconds is included and blocked links show a truthful retrieval error instead of inventing data.
 5. Confirm video and caption extraction never auto-saves a recipe. Verify other features and LIVE unchanged.
 
 ## Limitations
