@@ -53,7 +53,7 @@ export function normalizeSocialRecipeUrl(value) {
   }
 }
 
-const INGREDIENT_HEADING = /^(?:ingredients?|what you(?:'|’)ll need|you will need)\s*(?::|[-–—])?\s*(.*)$/i
+const INGREDIENT_HEADING = /^(?:ingredients?|what you(?:'|’)ll need|you will need)\s*(?:\([^)]{1,60}\))?\s*(?::|[-–—])?\s*(.*)$/i
 const STEP_HEADING = /^(?:instructions?|directions?|method|steps?|how to (?:make|cook)(?: this| it)?|preparation)\s*(?::|[-–—])?\s*(.*)$/i
 const TITLE_HEADING = /^(?:recipe|dish|title)\s*:\s*(.{3,120})$/i
 const LIST_MARKER = /^\s*(?:[-*•·▪◦]\s*|\d{1,2}[.)]\s+)\s*/
@@ -71,15 +71,17 @@ export function parseSocialRecipeCaption(value) {
   const ingredients = [], steps = []
   for (const line of lines) {
     if (!line) continue
-    let match = TITLE_HEADING.exec(line)
+    // Social captions often prefix section headings with cooking emojis.
+    const headingLine = line.replace(/^[^\p{L}\p{N}]+/u, '')
+    let match = TITLE_HEADING.exec(headingLine)
     if (match) { title = match[1].trim(); explicitTitle = true; continue }
-    match = INGREDIENT_HEADING.exec(line)
+    match = INGREDIENT_HEADING.exec(headingLine)
     if (match) {
       section = 'ingredients'
       if (match[1]) ingredients.push(withoutListMarker(match[1]))
       continue
     }
-    match = STEP_HEADING.exec(line)
+    match = STEP_HEADING.exec(headingLine)
     if (match) {
       section = 'instructions'
       if (match[1]) steps.push(withoutListMarker(match[1]))
@@ -100,8 +102,18 @@ export function parseSocialRecipeCaption(value) {
       title = line.replace(/^["'“”]+|["'“”]+$/g, '').trim()
     }
   }
+  // Preserve creator-supplied serving count and nutrition without fabricating values.
+  const servingsLabel = /\b(?:Makes|Serves)\s+(\d{1,3})\s+Servings?\b/i.exec(value)
+  const servingsTotal = /\(\s*(\d{1,3})\s+Total\s*\)/i.exec(value)
+  const servings = Number(servingsLabel?.[1] || servingsTotal?.[1] || 0)
+  const macros = lines.find(line =>
+    /\b\d{1,4}\s*(?:Calories|kcal)\b/i.test(line) &&
+    /\bProtein\b/i.test(line) && /\bCarbs?\b/i.test(line) &&
+    /\bFat\b/i.test(line))
   return {
     name: title.slice(0, 110),
+    servings: servings >= 1 && servings <= 1000 ? String(servings) : '',
+    notes: macros ? 'Creator-reported macros per serving: ' + macros.slice(0, 250) : '',
     titleIsExplicit: explicitTitle,
     ingredients: ingredients.filter(Boolean).join('\n').slice(0, 7000),
     instructions: steps.filter(Boolean).join('\n').slice(0, 8000),
