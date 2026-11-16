@@ -1534,6 +1534,20 @@ type MealPlanItem = {
   recipeImage: string | null
 }
 
+type SocialVideoRecipePreview = {
+  platform: 'Instagram' | 'Facebook'
+  sourceUrl: string
+  name: string
+  ingredients: string
+  instructions: string
+  missing: string[]
+  videoAnalyzed: boolean
+  audioTranscribed: boolean
+  framesRead: boolean
+  suppliedCaption: boolean
+  notice: string
+}
+
 type SocialRecipePreview = {
   platform: 'Instagram' | 'Facebook'
   sourceUrl: string
@@ -3758,6 +3772,7 @@ const [recipeFormOpen, setRecipeFormOpen] = useState(false)
 const [socialRecipeImportOpen, setSocialRecipeImportOpen] = useState(false)
 const [socialRecipeImportUrl, setSocialRecipeImportUrl] = useState('')
 const [socialRecipeImportCaption, setSocialRecipeImportCaption] = useState('')
+const [socialRecipeVideoFile, setSocialRecipeVideoFile] = useState<File | null>(null)
 const [socialRecipeImportLoading, setSocialRecipeImportLoading] = useState(false)
 const [socialRecipeImportMessage, setSocialRecipeImportMessage] = useState('')
 const [socialRecipeImportError, setSocialRecipeImportError] = useState('')
@@ -7363,34 +7378,34 @@ function reviewArneyPublicRecipe(recipe: PublicRecipe) {
 
 async function previewSocialRecipeImport() {
   if (socialRecipeImportLoading) return
+  if (socialRecipeVideoFile && socialRecipeVideoFile.size > 36 * 1024 * 1024) {
+    setSocialRecipeImportError('Choose a shorter recording under 36 MB.')
+    return
+  }
   setSocialRecipeImportLoading(true)
   setSocialRecipeImportError('')
   setSocialRecipeImportMessage('')
   try {
-    const response = await fetch('/api/arney/social-recipe-preview', {
+    const body = new FormData()
+    body.append('url', socialRecipeImportUrl.trim())
+    if (socialRecipeImportCaption.trim()) body.append('caption', socialRecipeImportCaption)
+    if (socialRecipeVideoFile) body.append('video', socialRecipeVideoFile, socialRecipeVideoFile.name)
+    const response = await fetch('/api/arney/social-recipe-video-preview', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: socialRecipeImportUrl.trim(),
-        caption: socialRecipeImportCaption,
-      }),
+      body,
+      credentials: 'same-origin',
     })
-    const data: SocialRecipePreview & { error?: string } = await response.json()
-    if (!response.ok) throw new Error(data.error || 'Could not preview this social link.')
-    // Existing edits win. Preview must never overwrite entered ingredients,
-    // instructions, or the user-selected image, and NEVER auto-save.
+    const data: SocialVideoRecipePreview & { error?: string } = await response.json()
+    if (!response.ok) throw new Error(data.error || 'Could not analyze this social recipe.')
+    // Draft only: entered recipe fields and chosen photos always win.
     setRecipeName(current => current.trim() || data.name)
     setRecipeIngredients(current => current.trim() || data.ingredients)
     setRecipeInstructions(current => current.trim() || data.instructions)
     setRecipeSourceUrl(data.sourceUrl)
-    setSocialRecipeImportMessage(
-      data.platform + ' source link attached. ' + data.notice +
-      (data.publicEmbedAvailable ? ' Public embed available.' :
-        ' Public embed could not be verified; you can still review the source link.')
-    )
+    setSocialRecipeImportMessage(data.platform + ' link attached. ' + data.notice)
   } catch (error) {
     setSocialRecipeImportError(
-      error instanceof Error ? error.message : 'Could not preview this social link.'
+      error instanceof Error ? error.message : 'Could not analyze this social recipe.'
     )
   } finally {
     setSocialRecipeImportLoading(false)
@@ -7402,6 +7417,7 @@ function clearRecipeForm() {
   setSocialRecipeImportOpen(false)
   setSocialRecipeImportUrl('')
   setSocialRecipeImportCaption('')
+  setSocialRecipeVideoFile(null)
   setSocialRecipeImportLoading(false)
   setSocialRecipeImportMessage('')
   setSocialRecipeImportError('')
@@ -23144,9 +23160,9 @@ resetMealPlannerScroll()
               {socialRecipeImportOpen && (
                 <div className="recipe-social-import-panel">
                   <p>
-                    Paste a public post or Reel link. If the creator included a recipe in
-                    the caption, copy and paste that text below. Video speech cannot
-                    be read from the link alone.
+                    Paste a public Instagram or Facebook Reel link. Arney will attempt to
+                    read accessible video audio and on-screen recipe text using our local
+                    laptop AI. If the platform blocks the video, attach a screen recording.
                   </p>
                   <label className="event-field">
                     Instagram or Facebook post link
@@ -23165,18 +23181,35 @@ resetMealPlannerScroll()
                     />
                   </label>
                   <label className="event-field">
-                    Post caption (optional, for ingredients and directions)
-                    <textarea
-                      className="event-input recipe-social-import-caption"
-                      placeholder={'Ingredients:\n- 1 cup rice\n- 2 cups broth\nInstructions:\n1. Combine ingredients\n2. Cook until ready'}
-                      value={socialRecipeImportCaption}
-                      maxLength={10000}
+                    Video recording (only if the link cannot be analyzed)
+                    <input
+                      className="event-input"
+                      type="file"
+                      accept="video/mp4,video/quicktime,video/webm"
                       onChange={event => {
-                        setSocialRecipeImportCaption(event.target.value)
+                        setSocialRecipeVideoFile(event.target.files?.[0] ?? null)
                         setSocialRecipeImportMessage('')
+                        setSocialRecipeImportError('')
                       }}
                     />
+                    <small>Optional. A screen recording from Photos works too (MP4, MOV, or WebM; up to 36 MB).</small>
                   </label>
+                  <details className="recipe-social-import-advanced">
+                    <summary>Optional: paste caption text</summary>
+                    <label className="event-field">
+                      Post caption
+                      <textarea
+                        className="event-input recipe-social-import-caption"
+                        placeholder={'Ingredients:\n- 1 cup rice\nInstructions:\n1. Cook the rice'}
+                        value={socialRecipeImportCaption}
+                        maxLength={10000}
+                        onChange={event => {
+                          setSocialRecipeImportCaption(event.target.value)
+                          setSocialRecipeImportMessage('')
+                        }}
+                      />
+                    </label>
+                  </details>
                   <div className="recipe-social-import-actions">
                     <button
                       type="button"
@@ -23184,7 +23217,7 @@ resetMealPlannerScroll()
                       disabled={socialRecipeImportLoading || !socialRecipeImportUrl.trim()}
                       onClick={() => void previewSocialRecipeImport()}
                     >
-                      {socialRecipeImportLoading ? 'Checking link…' : 'Import to Draft'}
+                      {socialRecipeImportLoading ? 'Analyzing recipe…' : 'Analyze Recipe Link'}
                     </button>
                     <small>Preview only. You must review and tap Save Recipe.</small>
                   </div>
