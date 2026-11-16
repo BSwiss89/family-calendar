@@ -30,6 +30,7 @@ import {
 import { ensureListIcons, normalizeListIcon } from './list-icons.mjs'
 import { resolvePhotoEventEndDate } from './photo-event-date-range.mjs'
 import { searchPublicRecipes, normalizePublicRecipeQuery } from './arney-public-recipe-search.mjs'
+import { readHouseholdRecipeHistory, reorderRecipesForHousehold } from './arney-household-recipe-ranking.mjs'
 import { fetchVerifiedRecipeImage } from './arney-public-recipe-image.mjs'
 import { ensureShoppingStores, getShoppingStores, looksLikeShoppingList, requireStoreId,
   suggestShoppingStoreId, organizeShoppingStores, saveShoppingStoreCorrection,
@@ -1813,6 +1814,18 @@ app.post('/api/ai/recipe-search', async (request, response) => {
   lastPublicRecipeLookupAt = Date.now()
   try {
     const result = await searchPublicRecipes(query, { preferences: request.body.preferences })
+    // Only reorder the already-selected public recipe previews. Household
+    // counts are drawn from this instance's isolated local SQLite database,
+    // AFTER the outbound TheMealDB request; none are sent to the provider.
+    // An unavailable local history query must not break recipe discovery.
+    if (query === 'any') {
+      try {
+        const householdCounts = readHouseholdRecipeHistory(database)
+        return response.json(reorderRecipesForHousehold(result, query, householdCounts))
+      } catch (error) {
+        console.error('Household recipe ranking unavailable; using original public order:', error instanceof Error ? error.message : 'unknown')
+      }
+    }
     return response.json(result)
   } catch {
     return response.status(503).json({ error: 'Public recipe search is unavailable right now.' })

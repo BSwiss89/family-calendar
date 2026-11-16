@@ -5,6 +5,7 @@ import { parseArneyRecipeDiscovery, normalizeArneyRecipeResults } from '../src/a
 import { searchPublicRecipes } from '../Server/arney-public-recipe-search.mjs'
 import { normalizeTheMealDbImageUrl, fetchVerifiedRecipeImage } from '../Server/arney-public-recipe-image.mjs'
 import sharp from 'sharp'
+import './test-arney-household-recipe-ranking.mjs'
 import './test-arney-recipe-quality.mjs'
 
 const dish = (id,name,ingredients,{instructions='Cook everything together.',spicy=false}={})=>({
