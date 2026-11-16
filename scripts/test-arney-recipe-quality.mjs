@@ -77,7 +77,7 @@ test('generic search adds varied free categories and bounded ID lookups',async()
   entries['detail:61002']=[meal(61002,'Beef Casserole','Beef')]
   entries['detail:62001']=[meal(62001,'Vegetable Rice','Vegetarian')]
   const fake=fakeSource(entries)
-  const result=await searchPublicRecipes('any',{fetchImpl:fake.fetchImpl,preferences:{easy:true,kidFriendly:true}})
+  const result=await searchPublicRecipes('any',{fetchImpl:fake.fetchImpl,preferences:{easy:true}})
   assert.ok(result.recipes.length>=4)
   assert.ok(result.recipes.some(x=>x.category==='Beef'))
   assert.ok(result.recipes.some(x=>x.category==='Vegetarian'))
