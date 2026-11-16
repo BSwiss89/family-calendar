@@ -24,6 +24,9 @@ import {
 } from './list-features.mjs'
 import { ensureListIcons, normalizeListIcon } from './list-icons.mjs'
 import { resolvePhotoEventEndDate } from './photo-event-date-range.mjs'
+import { searchPublicRecipes, normalizePublicRecipeQuery } from './arney-public-recipe-search.mjs'
+import { readHouseholdRecipeHistory, reorderRecipesForHousehold } from './arney-household-recipe-ranking.mjs'
+import { fetchVerifiedRecipeImage } from './arney-public-recipe-image.mjs'
 import { ensureShoppingStores, getShoppingStores, looksLikeShoppingList, requireStoreId,
   suggestShoppingStoreId, organizeShoppingStores, saveShoppingStoreCorrection,
   sortUnknownStoresWithOllama } from './smart-stores.mjs'
@@ -1748,6 +1751,43 @@ app.post('/api/ai/reschedule-criteria', async (request, response) => {
       error:
         'Local AI rescheduling parsing is unavailable.',
     })
+  }
+})
+
+// Explicit, authenticated public-recipe lookup. No household context is sent
+// to TheMealDB, and the official fixed destination is the only possible fetch.
+let lastPublicRecipeLookupAt = 0
+app.post('/api/ai/recipe-search', async (request, response) => {
+  response.set('Cache-Control', 'no-store')
+  const keys = request.body && typeof request.body === 'object' && !Array.isArray(request.body)
+    ? Object.keys(request.body) : []
+  if (!keys.includes('query') || keys.some(k => !['query','preferences'].includes(k)) ||
+      keys.length > 2) {
+    return response.status(400).json({ error: 'A recipe name or ingredient is required.' })
+  }
+  const query = normalizePublicRecipeQuery(request.body.query)
+  if (!query) return response.status(400).json({ error: 'Enter a generic dish or ingredient.' })
+  if (Date.now() - lastPublicRecipeLookupAt < 2500) {
+    return response.status(429).json({ error: 'Try another recipe search in a moment.' })
+  }
+  lastPublicRecipeLookupAt = Date.now()
+  try {
+    const result = await searchPublicRecipes(query, { preferences: request.body.preferences })
+    // Only reorder the already-selected public recipe previews. Household
+    // counts are drawn from this instance's isolated local SQLite database,
+    // AFTER the outbound TheMealDB request; none are sent to the provider.
+    // An unavailable local history query must not break recipe discovery.
+    if (query === 'any') {
+      try {
+        const householdCounts = readHouseholdRecipeHistory(database)
+        return response.json(reorderRecipesForHousehold(result, query, householdCounts))
+      } catch (error) {
+        console.error('Household recipe ranking unavailable; using original public order:', error instanceof Error ? error.message : 'unknown')
+      }
+    }
+    return response.json(result)
+  } catch {
+    return response.status(503).json({ error: 'Public recipe search is unavailable right now.' })
   }
 })
 
@@ -4933,6 +4973,22 @@ servings,
     }))
 
   response.json(recipes)
+})
+
+// Source photo bytes are requested ONLY after the user presses Save Recipe.
+// This authenticated route only accepts fixed TheMealDB media paths, validates
+// actual image pixels and converts to small WebP for existing local uploads.
+app.post('/api/arney/public-recipe-image', async (request, response) => {
+  try {
+    const bytes = await fetchVerifiedRecipeImage(request.body?.imageUrl)
+    response.set('Cache-Control', 'private, no-store')
+    response.type('image/webp').send(bytes)
+  } catch (error) {
+    const invalid = error instanceof TypeError
+    response.status(invalid ? 400 : 502).json({
+      error: invalid ? 'Invalid recipe photo source.' : 'Could not import recipe photo.',
+    })
+  }
 })
 
 app.post(
