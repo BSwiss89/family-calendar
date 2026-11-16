@@ -1534,6 +1534,18 @@ type MealPlanItem = {
   recipeImage: string | null
 }
 
+type SocialRecipePreview = {
+  platform: 'Instagram' | 'Facebook'
+  sourceUrl: string
+  publicEmbedAvailable: boolean
+  name: string
+  ingredients: string
+  instructions: string
+  suppliedCaption: boolean
+  missing: string[]
+  notice: string
+}
+
 type Recipe = {
   id: number
   name: string
@@ -3743,6 +3755,12 @@ const [
 const [editingRecipeId, setEditingRecipeId] =
   useState<number | null>(null)
 const [recipeFormOpen, setRecipeFormOpen] = useState(false)
+const [socialRecipeImportOpen, setSocialRecipeImportOpen] = useState(false)
+const [socialRecipeImportUrl, setSocialRecipeImportUrl] = useState('')
+const [socialRecipeImportCaption, setSocialRecipeImportCaption] = useState('')
+const [socialRecipeImportLoading, setSocialRecipeImportLoading] = useState(false)
+const [socialRecipeImportMessage, setSocialRecipeImportMessage] = useState('')
+const [socialRecipeImportError, setSocialRecipeImportError] = useState('')
 const [recipeFormSource, setRecipeFormSource] =
   useState<'recipes' | 'meal-picker'>('recipes')
 const [recipeName, setRecipeName] = useState('')
@@ -7343,8 +7361,50 @@ function reviewArneyPublicRecipe(recipe: PublicRecipe) {
   showAppNotification('Recipe draft ready. Review it and tap Save Recipe. The preview photo will be copied into your calendar when you save.')
 }
 
+async function previewSocialRecipeImport() {
+  if (socialRecipeImportLoading) return
+  setSocialRecipeImportLoading(true)
+  setSocialRecipeImportError('')
+  setSocialRecipeImportMessage('')
+  try {
+    const response = await fetch('/api/arney/social-recipe-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: socialRecipeImportUrl.trim(),
+        caption: socialRecipeImportCaption,
+      }),
+    })
+    const data: SocialRecipePreview & { error?: string } = await response.json()
+    if (!response.ok) throw new Error(data.error || 'Could not preview this social link.')
+    // Existing edits win. Preview must never overwrite entered ingredients,
+    // instructions, or the user-selected image, and NEVER auto-save.
+    setRecipeName(current => current.trim() || data.name)
+    setRecipeIngredients(current => current.trim() || data.ingredients)
+    setRecipeInstructions(current => current.trim() || data.instructions)
+    setRecipeSourceUrl(data.sourceUrl)
+    setSocialRecipeImportMessage(
+      data.platform + ' source link attached. ' + data.notice +
+      (data.publicEmbedAvailable ? ' Public embed available.' :
+        ' Public embed could not be verified; you can still review the source link.')
+    )
+  } catch (error) {
+    setSocialRecipeImportError(
+      error instanceof Error ? error.message : 'Could not preview this social link.'
+    )
+  } finally {
+    setSocialRecipeImportLoading(false)
+  }
+}
+
 function clearRecipeForm() {
   setEditingRecipeId(null)
+  setSocialRecipeImportOpen(false)
+  setSocialRecipeImportUrl('')
+  setSocialRecipeImportCaption('')
+  setSocialRecipeImportLoading(false)
+  setSocialRecipeImportMessage('')
+  setSocialRecipeImportError('')
   setRecipeName('')
   setRecipeImageFile(null)
   setRecipeImagePreview('')
@@ -23069,6 +23129,79 @@ resetMealPlannerScroll()
           className="recipe-form"
           onSubmit={saveRecipe}
         >
+          {editingRecipeId === null && (
+            <div className="recipe-social-import">
+              <button
+                type="button"
+                className="recipe-social-import-toggle"
+                aria-expanded={socialRecipeImportOpen}
+                onClick={() => setSocialRecipeImportOpen(open => !open)}
+              >
+                <span aria-hidden="true">↗</span>
+                <span>Import from Instagram or Facebook</span>
+                <span aria-hidden="true">{socialRecipeImportOpen ? '−' : '+'}</span>
+              </button>
+              {socialRecipeImportOpen && (
+                <div className="recipe-social-import-panel">
+                  <p>
+                    Paste a public post or Reel link. If the creator included a recipe in
+                    the caption, copy and paste that text below. Video speech cannot
+                    be read from the link alone.
+                  </p>
+                  <label className="event-field">
+                    Instagram or Facebook post link
+                    <input
+                      className="event-input"
+                      type="url"
+                      inputMode="url"
+                      autoComplete="url"
+                      placeholder="https://www.instagram.com/reel/..."
+                      value={socialRecipeImportUrl}
+                      onChange={event => {
+                        setSocialRecipeImportUrl(event.target.value)
+                        setSocialRecipeImportMessage('')
+                        setSocialRecipeImportError('')
+                      }}
+                    />
+                  </label>
+                  <label className="event-field">
+                    Post caption (optional, for ingredients and directions)
+                    <textarea
+                      className="event-input recipe-social-import-caption"
+                      placeholder={'Ingredients:\n- 1 cup rice\n- 2 cups broth\nInstructions:\n1. Combine ingredients\n2. Cook until ready'}
+                      value={socialRecipeImportCaption}
+                      maxLength={10000}
+                      onChange={event => {
+                        setSocialRecipeImportCaption(event.target.value)
+                        setSocialRecipeImportMessage('')
+                      }}
+                    />
+                  </label>
+                  <div className="recipe-social-import-actions">
+                    <button
+                      type="button"
+                      className="meals-add-recipe-button"
+                      disabled={socialRecipeImportLoading || !socialRecipeImportUrl.trim()}
+                      onClick={() => void previewSocialRecipeImport()}
+                    >
+                      {socialRecipeImportLoading ? 'Checking link…' : 'Import to Draft'}
+                    </button>
+                    <small>Preview only. You must review and tap Save Recipe.</small>
+                  </div>
+                  {socialRecipeImportError && (
+                    <p className="recipe-social-import-error" role="alert">
+                      {socialRecipeImportError}
+                    </p>
+                  )}
+                  {socialRecipeImportMessage && (
+                    <p className="recipe-social-import-status" role="status">
+                      {socialRecipeImportMessage}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <div className="recipe-form-main">
             <label className="event-field">
               Recipe Name
