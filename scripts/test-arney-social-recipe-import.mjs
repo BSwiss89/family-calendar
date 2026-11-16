@@ -91,6 +91,29 @@ test('Jalal-style Instagram captions with emoji headings preserve quantities, se
   assert.equal(result.instructions, 'Trim excess fat from the chicken thighs.\nBake at 200C / 400F for 22-25 minutes.')
 })
 
+test('unlabeled Bang Bang chicken Reel captions recover only stated bullets and numbered cooking steps', () => {
+  const caption = [
+    '😋 HIGH PROTEIN BANG BANG CHICKEN POWER BOWLS',
+    '4 portions of easy meal prep',
+    '• 500g chicken breast',
+    '• 2 tbsp sweet chili sauce',
+    '• 150g white rice',
+    '1. Preheat oven to 400F.',
+    '2. Cook the chicken for 24 minutes.',
+    'Protein-packed meal prep!',
+  ].join('\n')
+  const result = parseSocialRecipeCaption(caption)
+  assert.match(result.name, /BANG BANG CHICKEN POWER BOWLS/)
+  assert.equal(result.ingredients, '500g chicken breast\n2 tbsp sweet chili sauce\n150g white rice')
+  assert.equal(result.instructions, 'Preheat oven to 400F.\nCook the chicken for 24 minutes.')
+})
+
+test('unlabeled captions without quantities or numbered cooking steps do not make up a recipe', () => {
+  const result = parseSocialRecipeCaption('Easy recipe!\nMore details in comments\n#dinner')
+  assert.equal(result.ingredients, '')
+  assert.equal(result.instructions, '')
+})
+
 test('does not invent instructions or ingredients from vague social posts', () => {
   const result = parseSocialRecipeCaption('Save this delicious dinner idea for later!\nFollow me for more!')
   assert.equal(result.ingredients, '')
