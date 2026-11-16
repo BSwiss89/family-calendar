@@ -27,6 +27,8 @@ test('classifies actual meal names and tags but not unrelated stock ingredients'
     ['soup'])
   assert.ok(classifyHouseholdMeal({name:'Family Dinner',tags:'Chicken, Soup'}).includes('chicken'))
   assert.deepEqual(classifyHouseholdMeal({name:'Dinner',tags:null}),[])
+  assert.deepEqual(classifyHouseholdMeal({name:'Turkey Meatballs'}),['turkey'],
+    'turkey meatballs must never silently train the beef category')
 })
 
 test('household history counts saves once and each selected plan slot twice, without ratings',()=>{
