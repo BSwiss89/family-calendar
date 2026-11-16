@@ -65,6 +65,32 @@ test('only clearly labeled caption sections become recipe fields, original quant
   assert.equal(draft.suppliedCaption, true)
 })
 
+test('Jalal-style Instagram captions with emoji headings preserve quantities, servings and macros', () => {
+  const caption = [
+    'Creamy Peri Peri Chicken Pasta🍗🧀🍝',
+    'Macros Per Serving (8 Total)',
+    '592 Calories | 55g Protein | 54g Carbs | 19g Fat',
+    'Ingredients (Makes 8 Servings)',
+    'Peri Peri Chicken',
+    '- 1500g Raw Boneless Skinless Chicken Thighs, fat trimmed',
+    '- 100g Nando’s Peri Peri Medium Sauce',
+    'Creamy Peri Peri Pasta',
+    '- 480g Uncooked Protein Rigatoni Pasta',
+    '👨‍🍳 Instructions',
+    '1. Trim excess fat from the chicken thighs.',
+    '2. Bake at 200C / 400F for 22-25 minutes.',
+  ].join('\n')
+  const result = parseSocialRecipeCaption(caption)
+  assert.match(result.name, /Creamy Peri Peri Chicken Pasta/)
+  assert.equal(result.servings, '8')
+  assert.match(result.notes, /592 Calories \| 55g Protein \| 54g Carbs \| 19g Fat/)
+  assert.match(result.ingredients, /1500g Raw Boneless Skinless Chicken Thighs/)
+  assert.match(result.ingredients, /480g Uncooked Protein Rigatoni Pasta/)
+  assert.doesNotMatch(result.ingredients, /Makes 8 Servings/)
+  assert.doesNotMatch(result.ingredients, /Instructions/)
+  assert.equal(result.instructions, 'Trim excess fat from the chicken thighs.\nBake at 200C / 400F for 22-25 minutes.')
+})
+
 test('does not invent instructions or ingredients from vague social posts', () => {
   const result = parseSocialRecipeCaption('Save this delicious dinner idea for later!\nFollow me for more!')
   assert.equal(result.ingredients, '')
