@@ -152,7 +152,7 @@ test('authenticated backend route is preview-only; existing Save Recipe remains 
     assert.ok(!route.includes(forbidden), forbidden)
   }
   assert.ok(client.includes('Import from Instagram or Facebook'))
-  assert.ok(client.includes('/api/arney/social-recipe-preview'))
+  assert.ok(client.includes('/api/arney/social-recipe-video-preview'))
   assert.ok(client.includes('setRecipeSourceUrl(data.sourceUrl)'))
   assert.ok(client.includes('onSubmit={saveRecipe}'))
   assert.ok(client.includes('Save Recipe'))
