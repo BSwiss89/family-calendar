@@ -86,6 +86,27 @@ function audioParser() {
   })
 }
 
+// Reuse the same protected TEST-only service identity for explicit recipe-video
+// transcription. Never expose this token or loopback URL to a browser client.
+export function resolveTestLocalSttBridge({
+  port, authMode = process.env.FAMILY_CALENDAR_AUTH_MODE, rootFolder,
+  flag = process.env.FAMILY_CALENDAR_TEST_LOCAL_STT,
+  serviceUrl = process.env.FAMILY_CALENDAR_LOCAL_STT_URL,
+  serviceToken = process.env.FAMILY_CALENDAR_LOCAL_STT_TOKEN,
+  configFile = process.env.FAMILY_CALENDAR_LOCAL_STT_CONFIG ??
+    (process.env.PROGRAMDATA
+      ? path.join(process.env.PROGRAMDATA, 'FamilyCalendar', 'LocalSTT', 'config.json')
+      : null),
+} = {}) {
+  if (!testLocation({ port, authMode, rootFolder })) return null
+  const installed = flag ? null : installedConfiguration(configFile)
+  if ((flag || (installed?.enabled ? 'enabled' : 'disabled')) !== 'enabled') return null
+  const url = localServiceUrl(serviceUrl || installed?.serviceUrl)
+  const token = serviceToken || installed?.serviceToken
+  if (!url || typeof token !== 'string' || token.length < 32) return null
+  return { url, token }
+}
+
 /** Mount only after required family-auth has installed its session/origin guard. */
 export function installTestLocalStt(app, {
   flag = process.env.FAMILY_CALENDAR_TEST_LOCAL_STT,
