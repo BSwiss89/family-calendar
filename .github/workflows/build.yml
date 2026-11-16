@@ -53,6 +53,8 @@ jobs:
         run: node --test scripts/test-arney-recipe-preview.mjs
       - name: Verify safe Instagram and Facebook link-to-draft import
         run: node --test scripts/test-arney-social-recipe-import.mjs
+      - name: Verify safe linked video and local recipe extraction previews
+        run: node --test scripts/test-arney-social-video-import.mjs
       - name: Check TypeScript and build frontend
         run: npm run build
       - name: Verify Calendar person multi-select filtering
