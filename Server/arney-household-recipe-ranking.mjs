@@ -9,7 +9,7 @@ const GROUPS = Object.freeze({
   pork: /\b(?:pork|bacon|ham|sausage)\b/i,
   turkey: /\bturkey\b/i,
   seafood: /\b(?:seafood|fish|salmon|shrimp|tuna|cod|tilapia|prawn|crab)\b/i,
-  pasta: /\b(?:pasta|spaghetti|penne|macaroni|lasagna|lasagne|fettuccine|noodles|linguine|alfredo|ravioli)\b/i,
+  pasta: /\b(?:pasta|spaghetti|penne|macaroni|lasagna|lasagne|fettuccine|noodles?|linguine|alfredo|ravioli)\b/i,
   soup: /\b(?:soup|stew|chowder|bisque|broth|ramen)\b/i,
   casserole: /\b(?:casserole|bake|baked|gratin)\b/i,
   rice: /\b(?:rice|risotto)\b/i,
