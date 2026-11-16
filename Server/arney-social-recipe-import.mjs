@@ -100,13 +100,13 @@ export function parseSocialRecipeCaption(value) {
     match = INGREDIENT_HEADING.exec(headingLine)
     if (match) {
       section = 'ingredients'
-      if (match[1]) ingredients.push(withoutListMarker(match[1]))
+      if (match[1] && /[\p{L}\p{N}]/u.test(match[1])) ingredients.push(withoutListMarker(match[1]))
       continue
     }
     match = STEP_HEADING.exec(headingLine)
     if (match) {
       section = 'instructions'
-      if (match[1]) steps.push(withoutListMarker(match[1]))
+      if (match[1] && /[\p{L}\p{N}]/u.test(match[1])) steps.push(withoutListMarker(match[1]))
       continue
     }
     if (DISCARD.test(line)) continue
