@@ -208,8 +208,14 @@ export function groundedVideoDraft({ caption = '', transcript = '', visibleText 
     : baseInstructions
   const conflicts = videoEvidence && Array.isArray(model.conflicts)
     ? model.conflicts.slice(0, 5).map(item => cleanField(item, 220)).filter(Boolean) : []
+  const videoServings = videoEvidence && Number.isSafeInteger(Number(model.servings))
+    ? Number(model.servings) : 0
+  const servings = fromCaption.servings ||
+    (videoServings >= 1 && videoServings <= 1000 ? String(videoServings) : '')
+  const notes = fromCaption.notes ||
+    (videoEvidence ? cleanField(model.nutritionNotes, 350) : '')
   return {
-    name, ingredients, instructions, conflicts,
+    name, ingredients, instructions, conflicts, servings, notes,
     missing: ['ingredients', 'instructions'].filter(field => !({ ingredients, instructions })[field]),
   }
 }
@@ -223,7 +229,7 @@ async function structureEvidence({ caption, transcript, visibleText }) {
         model: 'ministral-3:8b', stream: false, think: false,
         format: 'json', options: { temperature: 0 },
         messages: [
-          { role: 'system', content: 'Extract and cross-check a cooking recipe using BOTH the public creator caption and the actual video audio/on-screen text. JSON only with fields {"name":"","ingredients":[],"instructions":[],"videoIngredientsAdded":[],"videoInstructionsAdded":[],"conflicts":[]}. Base ingredients/instructions are fallback when the caption has no clear labeled sections. videoIngredientsAdded and videoInstructionsAdded must contain ONLY new details actually spoken or visible in the video but missing from the caption (never repeat a caption item). conflicts must describe only concrete disagreements between caption and video, not overwrite either source. Preserve exact measured quantities, heat, durations and chronology. Do not guess unsupported steps, ingredients or amounts. Empty arrays when uncertain. Editable draft only.' },
+          { role: 'system', content: 'Extract and cross-check a cooking recipe using BOTH the public creator caption and the actual video audio/on-screen text. JSON only with fields {"name":"","ingredients":[],"instructions":[],"videoIngredientsAdded":[],"videoInstructionsAdded":[],"conflicts":[],"servings":"","nutritionNotes":""}. Base ingredients/instructions are fallback when the caption has no clear labeled sections. videoIngredientsAdded and videoInstructionsAdded must contain ONLY new details actually spoken or visible in the video but missing from the caption (never repeat a caption item). conflicts must describe only concrete disagreements between caption and video, not overwrite either source. Preserve exact measured quantities, heat, durations, servings, creator-stated macros and chronology. nutritionNotes only for nutrition explicitly stated in the evidence, otherwise empty. Do not guess unsupported steps, ingredients or amounts. Empty arrays when uncertain. Editable draft only.' },
           { role: 'user', content: 'Caption:\n' + caption.slice(0, 8000) + '\nAudio transcript:\n' + transcript.slice(0, 9000) + '\nVisible video words:\n' + visibleText.slice(0, 6000) },
         ],
       }),
@@ -314,6 +320,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
     return {
       platform: source.platform, sourceUrl: source.url,
       name: draft.name, ingredients: draft.ingredients, instructions: draft.instructions,
+      servings: draft.servings, notes: draft.notes,
       missing: draft.missing, videoAnalyzed, audioTranscribed: Boolean(transcript),
       framesRead: Boolean(visibleText), suppliedCaption: Boolean(caption.trim()),
       captionRecovered: Boolean(recoveredCaption && !caption.trim()),
