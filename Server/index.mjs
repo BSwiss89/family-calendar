@@ -15,7 +15,8 @@ import {
 import { installTestHouseholdEventJoin } from './test-household-event-join.mjs'
 import { installTestInformationalPush } from './test-informational-push.mjs'
 import { installTestEventInvitations } from './test-event-invitations.mjs'
-import { installTestLocalStt } from './test-local-stt.mjs'
+import { installTestLocalStt, resolveTestLocalSttBridge } from './test-local-stt.mjs'
+import { analyzePublicSocialVideo, socialVideoAllowedOnTest } from './arney-social-video-import.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { acquirePrivateHouseholdBackendWriterLock } from './private-gateway-writer-lock.mjs'
 import { installPrivateEventIdentity } from './private-event-identity.mjs'
@@ -5038,6 +5039,70 @@ app.post('/api/arney/social-recipe-preview', async (request, response) => {
     })
   }
 })
+
+// TEST-only video analysis. No permanent file, database mutation, paid API,
+// external cookies or hidden saves. Keep this path entirely absent from LIVE.
+if (socialVideoAllowedOnTest({
+  port: PORT, authMode: process.env.FAMILY_CALENDAR_AUTH_MODE,
+  rootFolder: path.resolve(__dirname, '..'),
+})) {
+  const videoUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { files: 1, fields: 2, fileSize: 36 * 1024 * 1024 },
+    fileFilter(_request, file, callback) {
+      callback(null, ['video/mp4', 'video/quicktime', 'video/webm'].includes(file.mimetype))
+    },
+  }).single('video')
+  const videoAttempts = new Map()
+  let videoProcessing = false
+  app.post('/api/arney/social-recipe-video-preview', (request, response, next) => {
+    response.set('Cache-Control', 'private, no-store')
+    const account = request.familyAccount
+    if (!Number.isSafeInteger(account?.id) || !Number.isSafeInteger(account?.user_id)) {
+      return response.status(401).json({ error: 'Sign in to TEST first.' })
+    }
+    if (videoProcessing) return response.status(503).json({ error: 'Arney is analyzing another video.' })
+    const key = String(account.user_id) + ':' + String(account.id)
+    const at = Date.now()
+    const previous = videoAttempts.get(key)
+    const record = !previous || at - previous.started > 600_000
+      ? { started: at, count: 0 } : previous
+    record.count++
+    videoAttempts.set(key, record)
+    if (record.count > 4) return response.status(429).json({ error: 'Too many video previews. Try again later.' })
+    next()
+  }, (request, response, next) => {
+    videoUpload(request, response, error => {
+      if (!error) return next()
+      return response.status(error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE' ? 413 : 400)
+        .json({ error: 'Use one MP4, MOV, or WebM video under 36 MB.' })
+    })
+  }, async (request, response) => {
+    const body = request.body
+    if (!body || typeof body !== 'object' ||
+        Object.keys(body).some(key => !['url', 'caption'].includes(key)) ||
+        typeof body.url !== 'string' || (body.caption !== undefined && typeof body.caption !== 'string')) {
+      return response.status(400).json({ error: 'Paste one public Instagram or Facebook link.' })
+    }
+    if (videoProcessing) return response.status(503).json({ error: 'Arney is analyzing another video.' })
+    videoProcessing = true
+    try {
+      const stt = resolveTestLocalSttBridge({
+        port: PORT, rootFolder: path.resolve(__dirname, '..'),
+      })
+      const draft = await analyzePublicSocialVideo({
+        url: body.url, caption: body.caption ?? '',
+        videoBuffer: request.file?.buffer ?? null,
+        videoMime: request.file?.mimetype ?? '',
+      }, { stt })
+      response.json(draft)
+    } catch (error) {
+      response.status(error instanceof TypeError ? 400 : 503).json({
+        error: error instanceof TypeError ? error.message : 'Video preview is temporarily unavailable.',
+      })
+    } finally { videoProcessing = false }
+  })
+}
 
 // Source photo bytes are requested ONLY after the user presses Save Recipe.
 // This authenticated route only accepts fixed TheMealDB media paths, validates
