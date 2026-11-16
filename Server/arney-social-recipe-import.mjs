@@ -57,7 +57,7 @@ const INGREDIENT_HEADING = /^(?:ingredients?|what you(?:'|’)ll need|you will n
 const STEP_HEADING = /^(?:instructions?|directions?|method|steps?|how to (?:make|cook)(?: this| it)?|preparation)\s*(?::|[-–—])?\s*(.*)$/i
 const TITLE_HEADING = /^(?:recipe|dish|title)\s*:\s*(.{3,120})$/i
 const LIST_MARKER = /^\s*(?:[-*•·▪◦]\s*|\d{1,2}[.)]\s+)\s*/
-const DISCARD = /^(?:#\S+[\s#]*|follow (?:me|us)|link in (?:my |our )?bio|save (?:this|for later)|(?:https?:\/\/|www\.)\S+)$/i
+const DISCARD = /^(?:#.*|follow (?:me|us)|link in (?:my |our )?bio|save (?:this|for later)|(?:https?:\/\/|www\.)\S+)$/i
 function cleanLine(line) {
   return line.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim()
 }
