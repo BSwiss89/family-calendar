@@ -63,14 +63,14 @@ test('natural easy, quick, and kid-friendly requests allow generic meal discover
 })
 test('generic free provider search samples a small fixed menu, ranks mild low-effort ideas, and uses no private data',async()=>{
   const f=mockSource({chicken:[spicy,chickenPasta],pasta:[chickenPasta],
-    soup:[creamy],rice:[chickenPasta]})
+    meatball:[creamy],pizza:[]})
   const out=await searchPublicRecipes('any',{fetchImpl:f.fetchImpl,
     preferences:{kidFriendly:true,easy:true,quick:true}})
-  assert.deepEqual(f.calls,['chicken','pasta','soup','rice','category:Chicken','category:Beef','category:Vegetarian'])
+  assert.deepEqual(f.calls,['pasta','chicken','meatball','pizza','category:Chicken','category:Pasta','category:Beef'])
   assert.equal(out.recipes.length,3)
   assert.notEqual(out.recipes[0].id,'52773','spicy recipe should not outrank mild options')
-  assert.ok(out.recipes[0].matchNotes.some(t=>t.includes('ease not verified')))
-  assert.ok(out.recipes[0].matchNotes.some(t=>t.includes('cook time not verified')))
+  assert.ok(out.recipes[0].matchNotes.some(t=>/prep|steps/i.test(t)))
+  assert.ok(out.recipes.every(x=>x.matchNotes.every(t=>!t.includes('verified cook time'))))
   assert.ok(out.recipes.every(r=>r.url.startsWith('https://www.themealdb.com/meal/')))
 })
 test('recipe results hide only assistant conversation controls, not normal reply controls',()=>{
