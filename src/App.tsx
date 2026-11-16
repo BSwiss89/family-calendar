@@ -1540,6 +1540,8 @@ type SocialVideoRecipePreview = {
   name: string
   ingredients: string
   instructions: string
+  servings: string
+  notes: string
   missing: string[]
   videoAnalyzed: boolean
   audioTranscribed: boolean
@@ -7389,6 +7391,8 @@ async function previewSocialRecipeImport() {
     setRecipeName(current => current.trim() || data.name)
     setRecipeIngredients(current => current.trim() || data.ingredients)
     setRecipeInstructions(current => current.trim() || data.instructions)
+    setRecipeServings(current => current.trim() || data.servings || '')
+    setRecipeNotes(current => current.trim() || data.notes || '')
     setRecipeSourceUrl(data.sourceUrl)
     setSocialRecipeImportMessage(data.platform + ' link attached. ' + data.notice)
   } catch (error) {
@@ -23148,9 +23152,9 @@ resetMealPlannerScroll()
               {socialRecipeImportOpen && (
                 <div className="recipe-social-import-panel">
                   <p>
-                    Paste a public Instagram or Facebook Reel link. Arney will attempt to
-                    read accessible video audio and on-screen recipe text using our local
-                    laptop AI. If the platform blocks the video, attach a screen recording.
+                    Paste a public Instagram or Facebook Reel link. Arney will retrieve the
+                    creator caption and always attempt video speech and on-screen analysis
+                    with our local laptop AI, even when the caption has a complete recipe.
                   </p>
                   <label className="event-field">
                     Instagram or Facebook post link
@@ -23168,24 +23172,24 @@ resetMealPlannerScroll()
                       }}
                     />
                   </label>
-                  <label className="event-field">
-                    Video recording (only if the link cannot be analyzed)
-                    <input
-                      className="event-input"
-                      type="file"
-                      accept="video/mp4,video/quicktime,video/webm"
-                      onChange={event => {
-                        setSocialRecipeVideoFile(event.target.files?.[0] ?? null)
-                        setSocialRecipeImportMessage('')
-                        setSocialRecipeImportError('')
-                      }}
-                    />
-                    <small>Optional. A screen recording from Photos works too (MP4, MOV, or WebM; up to 36 MB).</small>
-                  </label>
                   <details className="recipe-social-import-advanced">
-                    <summary>Optional: paste caption text</summary>
+                    <summary>Advanced options (optional)</summary>
                     <label className="event-field">
-                      Post caption
+                      Attach a local video file
+                      <input
+                        className="event-input"
+                        type="file"
+                        accept="video/mp4,video/quicktime,video/webm"
+                        onChange={event => {
+                          setSocialRecipeVideoFile(event.target.files?.[0] ?? null)
+                          setSocialRecipeImportMessage('')
+                          setSocialRecipeImportError('')
+                        }}
+                      />
+                      <small>Not needed for accessible public Reels. MP4, MOV or WebM up to 36 MB.</small>
+                    </label>
+                    <label className="event-field">
+                      Paste caption text
                       <textarea
                         className="event-input recipe-social-import-caption"
                         placeholder={'Ingredients:\n- 1 cup rice\nInstructions:\n1. Cook the rice'}

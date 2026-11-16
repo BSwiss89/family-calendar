@@ -39,6 +39,23 @@ function run(program, args, { cwd, timeoutMs = 25_000 } = {}) {
   })
 }
 
+async function readPublicCaption(sourceUrl, folder) {
+  // Read the creator's public description independently of the media download.
+  // A blocked, oversized or unknown-duration video must not hide its recipe caption.
+  try {
+    await run('yt-dlp', [
+      '--ignore-config', '--no-playlist', '--skip-download',
+      '--no-warnings', '--write-info-json', '--no-write-thumbnail',
+      '--output', path.join(folder, 'caption-only.%(ext)s'), sourceUrl,
+    ], { cwd: folder, timeoutMs: 35_000 })
+    const filename = path.join(folder, 'caption-only.info.json')
+    const stat = await fs.stat(filename)
+    if (!stat.isFile() || stat.size > 512_000) return ''
+    const data = JSON.parse(await fs.readFile(filename, 'utf8'))
+    return typeof data?.description === 'string' ? data.description.slice(0, 10_000) : ''
+  } catch { return '' }
+}
+
 async function downloadPublicVideo(sourceUrl, folder) {
   // Only a canonical, allowlisted Instagram/Facebook URL reaches the downloader.
   // No credential store, browser cookies, playlists, user-defined arguments,
@@ -46,7 +63,8 @@ async function downloadPublicVideo(sourceUrl, folder) {
   const downloaderOutput = await run('yt-dlp', [
     '--ignore-config', '--no-playlist', '--no-progress', '--no-warnings',
     '--write-info-json', '--no-write-thumbnail', '--max-filesize', '72m',
-    '--match-filter', 'duration <= 600', '--format', 'best[height<=480]/best',
+    // Instagram sometimes omits duration; accept missing metadata and verify the actual file with ffprobe.
+    '--match-filter', 'duration <=? 600', '--format', 'best[height<=480]/best',
     '--output', path.join(folder, 'linked-video.%(ext)s'), sourceUrl,
   ], { cwd: folder, timeoutMs: 120_000 })
   const entries = await fs.readdir(folder)
@@ -156,6 +174,20 @@ function cleanLines(value, maxItems, maxLine) {
   return list.slice(0, maxItems).map(item => cleanField(item, maxLine)).filter(Boolean).join('\n')
 }
 
+function appendVideoDetails(base, additions, maxLines, maxLength, maxChars) {
+  const lines = base ? base.split('\n') : []
+  const normalized = text => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  const seen = new Set(lines.map(normalized))
+  if (Array.isArray(additions)) for (const detail of additions.slice(0, maxLines)) {
+    const line = cleanField(detail, maxLength)
+    const key = normalized(line)
+    if (!key || seen.has(key) || lines.length >= maxLines) continue
+    lines.push(line)
+    seen.add(key)
+  }
+  return lines.join('\n').slice(0, maxChars)
+}
+
 export function groundedVideoDraft({ caption = '', transcript = '', visibleText = '', structured = null } = {}) {
   const fromCaption = parseSocialRecipeCaption(caption)
   const evidence = [caption, transcript, visibleText].filter(Boolean).join('\n').slice(0, 16000)
@@ -163,10 +195,27 @@ export function groundedVideoDraft({ caption = '', transcript = '', visibleText 
   const model = evidence && structured && typeof structured === 'object' && !Array.isArray(structured)
     ? structured : {}
   const name = fromCaption.name || cleanField(model.name, 110)
-  const ingredients = fromCaption.ingredients || cleanLines(model.ingredients, 80, 260)
-  const instructions = fromCaption.instructions || cleanLines(model.instructions, 80, 500)
+  const videoEvidence = Boolean(transcript.trim() || visibleText.trim())
+  const baseIngredients = fromCaption.ingredients || cleanLines(model.ingredients, 80, 260)
+  const baseInstructions = fromCaption.instructions || cleanLines(model.instructions, 80, 500)
+  // Caption is the stable baseline. Append only non-repeated details identified in
+  // actual speech/frames; the model must not replace confirmed quantities or steps.
+  const ingredients = videoEvidence
+    ? appendVideoDetails(baseIngredients, model.videoIngredientsAdded, 80, 260, 7000)
+    : baseIngredients
+  const instructions = videoEvidence
+    ? appendVideoDetails(baseInstructions, model.videoInstructionsAdded, 80, 500, 8000)
+    : baseInstructions
+  const conflicts = videoEvidence && Array.isArray(model.conflicts)
+    ? model.conflicts.slice(0, 5).map(item => cleanField(item, 220)).filter(Boolean) : []
+  const videoServings = videoEvidence && Number.isSafeInteger(Number(model.servings))
+    ? Number(model.servings) : 0
+  const servings = fromCaption.servings ||
+    (videoServings >= 1 && videoServings <= 1000 ? String(videoServings) : '')
+  const notes = fromCaption.notes ||
+    (videoEvidence ? cleanField(model.nutritionNotes, 350) : '')
   return {
-    name, ingredients, instructions,
+    name, ingredients, instructions, conflicts, servings, notes,
     missing: ['ingredients', 'instructions'].filter(field => !({ ingredients, instructions })[field]),
   }
 }
@@ -180,7 +229,7 @@ async function structureEvidence({ caption, transcript, visibleText }) {
         model: 'ministral-3:8b', stream: false, think: false,
         format: 'json', options: { temperature: 0 },
         messages: [
-          { role: 'system', content: 'Extract a cooking recipe from provided evidence. JSON only: {"name":"","ingredients":[],"instructions":[]}. Preserve exact spoken/visible measurements and chronological steps. Never guess missing quantities, ingredients, steps, cooking time, or implied technique. Omit unsupported values; empty arrays when uncertain. This is an editable draft, not a completed recipe.' },
+          { role: 'system', content: 'Extract and cross-check a cooking recipe using BOTH the public creator caption and the actual video audio/on-screen text. JSON only with fields {"name":"","ingredients":[],"instructions":[],"videoIngredientsAdded":[],"videoInstructionsAdded":[],"conflicts":[],"servings":"","nutritionNotes":""}. Base ingredients/instructions are fallback when the caption has no clear labeled sections. videoIngredientsAdded and videoInstructionsAdded must contain ONLY new details actually spoken or visible in the video but missing from the caption (never repeat a caption item). conflicts must describe only concrete disagreements between caption and video, not overwrite either source. Preserve exact measured quantities, heat, durations, servings, creator-stated macros and chronology. nutritionNotes only for nutrition explicitly stated in the evidence, otherwise empty. Do not guess unsupported steps, ingredients or amounts. Empty arrays when uncertain. Editable draft only.' },
           { role: 'user', content: 'Caption:\n' + caption.slice(0, 8000) + '\nAudio transcript:\n' + transcript.slice(0, 9000) + '\nVisible video words:\n' + visibleText.slice(0, 6000) },
         ],
       }),
@@ -194,7 +243,8 @@ async function structureEvidence({ caption, transcript, visibleText }) {
 }
 
 export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer = null, videoMime = '' } = {}, {
-  stt = null, downloader = downloadPublicVideo, durationReader = inspectDuration,
+  stt = null, downloader = downloadPublicVideo, captionReader = readPublicCaption,
+  durationReader = inspectDuration,
   transcriber = transcribeClip, visualReader = visibleVideoText, extractor = structureEvidence,
 } = {}) {
   const source = normalizeSocialRecipeUrl(url)
@@ -206,6 +256,12 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'arney-social-preview-'))
   let transcript = '', visibleText = '', recoveredCaption = '', videoAnalyzed = false, videoNotice = ''
   try {
+    // Always attempt a caption read first when none was pasted, but continue to
+    // analyze the video even when the caption already has a full recipe.
+    if (!caption.trim()) {
+      try { recoveredCaption = (await captionReader(source.url, folder)).slice(0, 10_000) }
+      catch { /* Still attempt media retrieval and video extraction. */ }
+    }
     let filename = ''
     if (videoBuffer) {
       filename = path.join(folder, 'uploaded-video.' +
@@ -215,7 +271,8 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
       try {
         const fetched = await downloader(source.url, folder)
         filename = typeof fetched === 'string' ? fetched : fetched?.filename ?? ''
-        recoveredCaption = typeof fetched?.caption === 'string' ? fetched.caption.slice(0, 10_000) : ''
+        if (!recoveredCaption && typeof fetched?.caption === 'string')
+          recoveredCaption = fetched.caption.slice(0, 10_000)
       } catch (error) {
         videoNotice = error instanceof Error && error.message === 'This video is longer than the 10-minute analysis limit.'
           ? error.message
@@ -256,11 +313,15 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         ? 'Video was processed locally. Check all AI-extracted measurements and steps before saving.'
         : 'Video opened, but no usable speech or on-screen recipe text was recovered.')
     } else if (videoNotice) noticeParts.push(videoNotice)
-    if (!videoAnalyzed && !caption.trim()) noticeParts.push('Only the source link is available so far.')
+    if (!videoAnalyzed && !caption.trim() && !recoveredCaption)
+      noticeParts.push('Only the source link is available so far.')
+    if (draft.conflicts.length)
+      noticeParts.push('Check possible caption/video differences: ' + draft.conflicts.join('; ').slice(0, 600) + '.')
     if (draft.missing.length) noticeParts.push('Still missing: ' + draft.missing.join(' and ') + '.')
     return {
       platform: source.platform, sourceUrl: source.url,
       name: draft.name, ingredients: draft.ingredients, instructions: draft.instructions,
+      servings: draft.servings, notes: draft.notes,
       missing: draft.missing, videoAnalyzed, audioTranscribed: Boolean(transcript),
       framesRead: Boolean(visibleText), suppliedCaption: Boolean(caption.trim()),
       captionRecovered: Boolean(recoveredCaption && !caption.trim()),
