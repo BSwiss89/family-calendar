@@ -44,14 +44,24 @@ async function downloadPublicVideo(sourceUrl, folder) {
   // arbitrary remote URLs, or scraper output is exposed to the browser.
   await run('yt-dlp', [
     '--ignore-config', '--no-playlist', '--no-progress', '--no-warnings',
-    '--no-write-info-json', '--no-write-thumbnail', '--max-filesize', '36m',
+    '--write-info-json', '--no-write-thumbnail', '--max-filesize', '36m',
     '--match-filter', 'duration <= 110', '--format', 'best[height<=480]/best',
     '--output', path.join(folder, 'linked-video.%(ext)s'), sourceUrl,
   ], { cwd: folder, timeoutMs: 60_000 })
   const entries = await fs.readdir(folder)
   const filename = entries.find(name => /^linked-video\.(?:mp4|m4v|mov|webm|mkv)$/i.test(name))
   if (!filename) throw new Error('No accessible public video file was provided by this link.')
-  return path.join(folder, filename)
+  let caption = ''
+  try {
+    const info = path.join(folder, 'linked-video.info.json')
+    const stat = await fs.stat(info)
+    if (stat.isFile() && stat.size <= 100_000) {
+      const metadata = JSON.parse(await fs.readFile(info, 'utf8'))
+      if (typeof metadata?.description === 'string')
+        caption = metadata.description.slice(0, 10_000)
+    }
+  } catch { /* Description is optional and never trusted as a URL. */ }
+  return { filename: path.join(folder, filename), caption }
 }
 
 async function inspectDuration(filename) {
@@ -187,7 +197,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
       videoBuffer.length > MAX_VIDEO_BYTES || !['video/mp4', 'video/quicktime', 'video/webm'].includes(videoMime)))
     throw new TypeError('Choose an MP4, MOV, or WebM recording under 36 MB.')
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'arney-social-preview-'))
-  let transcript = '', visibleText = '', videoAnalyzed = false, videoNotice = ''
+  let transcript = '', visibleText = '', recoveredCaption = '', videoAnalyzed = false, videoNotice = ''
   try {
     let filename = ''
     if (videoBuffer) {
@@ -195,8 +205,13 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         (videoMime === 'video/quicktime' ? 'mov' : videoMime === 'video/webm' ? 'webm' : 'mp4'))
       await fs.writeFile(filename, videoBuffer, { flag: 'wx' })
     } else {
-      try { filename = await downloader(source.url, folder) }
-      catch { videoNotice = 'The platform did not provide an accessible video from this link. You can attach a screen recording instead.' }
+      try {
+        const fetched = await downloader(source.url, folder)
+        filename = typeof fetched === 'string' ? fetched : fetched?.filename ?? ''
+        recoveredCaption = typeof fetched?.caption === 'string' ? fetched.caption.slice(0, 10_000) : ''
+      } catch {
+        videoNotice = 'The platform did not provide an accessible video from this link. You can attach a screen recording instead.'
+      }
     }
     if (filename) {
       try {
@@ -220,9 +235,12 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         videoNotice = 'The video could not be safely analyzed. Try a shorter screen recording.'
       }
     }
-    const structured = await extractor({ caption, transcript, visibleText })
-    const draft = groundedVideoDraft({ caption, transcript, visibleText, structured })
+    const recipeCaption = caption.trim() || recoveredCaption
+    const structured = await extractor({ caption: recipeCaption, transcript, visibleText })
+    const draft = groundedVideoDraft({ caption: recipeCaption, transcript, visibleText, structured })
     const noticeParts = []
+    if (recoveredCaption && !caption.trim())
+      noticeParts.push('Creator description was retrieved automatically.')
     if (videoAnalyzed) {
       noticeParts.push(transcript || visibleText
         ? 'Video was processed locally. Check all AI-extracted measurements and steps before saving.'
@@ -235,6 +253,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
       name: draft.name, ingredients: draft.ingredients, instructions: draft.instructions,
       missing: draft.missing, videoAnalyzed, audioTranscribed: Boolean(transcript),
       framesRead: Boolean(visibleText), suppliedCaption: Boolean(caption.trim()),
+      captionRecovered: Boolean(recoveredCaption && !caption.trim()),
       notice: noticeParts.join(' '),
     }
   } finally {
