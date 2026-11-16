@@ -22,7 +22,7 @@ test('model output without actual caption/video evidence never becomes a recipe'
   assert.deepEqual(result.missing,['ingredients','instructions'])
 })
 
-test('copied video link is tried automatically, blocked video offers screen recording', async () => {
+test('copied public link is tried automatically; blocked links report a retrieval problem', async () => {
   let called=''
   const result=await analyzePublicSocialVideo({url:fb},{
     downloader:async url=>{called=url;throw Error('blocked')},
@@ -31,7 +31,7 @@ test('copied video link is tried automatically, blocked video offers screen reco
   assert.equal(called,'https://www.facebook.com/share/r/1A8Sz2b3cf/')
   assert.equal(result.videoAnalyzed,false)
   assert.deepEqual(result.missing,['ingredients','instructions'])
-  assert.match(result.notice,/screen recording/i)
+  assert.match(result.notice,/could not be retrieved by yt-dlp/i)
 })
 
 test('uploaded video frames and multiple audio clips can populate a reviewed draft', async () => {
@@ -49,6 +49,42 @@ test('uploaded video frames and multiple audio clips can populate a reviewed dra
   assert.equal(result.framesRead,true)
   assert.equal(result.ingredients,'2 cups rice')
   assert.deepEqual(result.missing,[])
+})
+
+test('long Reel speech is analyzed beyond the old 110-second limit', async () => {
+  const offsets = []
+  const result = await analyzePublicSocialVideo({
+    url: ig, videoBuffer: Buffer.alloc(300), videoMime: 'video/mp4',
+  }, {
+    durationReader: async () => 181,
+    transcriber: async (_filename, _folder, start) => {
+      offsets.push(start)
+      return start === 180 ? 'Ingredients: 2 cups flour' : ''
+    },
+    visualReader: async () => '',
+    extractor: async ({ transcript }) => ({
+      name: 'Bread',
+      ingredients: transcript.includes('2 cups flour') ? ['2 cups flour'] : [],
+      instructions: [],
+    }),
+  })
+  assert.equal(result.videoAnalyzed, true)
+  assert.equal(result.ingredients, '2 cups flour')
+  assert.equal(offsets.at(-1), 180)
+  assert.equal(offsets.length, 11)
+})
+
+test('videos longer than ten minutes do not generate a made-up recipe', async () => {
+  const result = await analyzePublicSocialVideo({
+    url: ig, videoBuffer: Buffer.alloc(300), videoMime: 'video/mp4',
+  }, {
+    durationReader: async () => 601,
+    transcriber: async () => { throw Error('Must not transcribe') },
+    extractor: async () => null,
+  })
+  assert.equal(result.videoAnalyzed, false)
+  assert.deepEqual(result.missing, ['ingredients', 'instructions'])
+  assert.match(result.notice, /maximum 10 minutes/i)
 })
 
 test('creator description is imported automatically without caption paste', async () => {
