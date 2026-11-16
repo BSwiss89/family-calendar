@@ -21625,3 +21625,8 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   .recipe-social-import-actions{align-items:stretch;flex-direction:column}
   .recipe-social-import-actions button{width:100%}
 }
+
+.recipe-social-import-advanced{border:1px solid #c9daed;border-radius:10px;padding:9px;background:rgba(255,255,255,.65)}
+.recipe-social-import-advanced summary{cursor:pointer;font-weight:750;color:#225e97;padding:4px}
+.recipe-social-import-advanced label{display:block;margin-top:10px}
+.recipe-social-import-panel .event-field small{display:block;color:#516b84;font-size:12px;line-height:1.4;margin-top:4px}
