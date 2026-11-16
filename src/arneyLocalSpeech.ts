@@ -5,6 +5,9 @@ type LocalSpeechDependencies = {
   Recorder?: typeof MediaRecorder
   fetchImpl?: typeof fetch
   now?: () => number
+  stopDelayMs?: number
+  scheduleStop?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
+  clearStop?: (handle: ReturnType<typeof setTimeout>) => void
 }
 
 const preferredTypes = [
@@ -14,7 +17,7 @@ const preferredTypes = [
   'audio/ogg;codecs=opus',
 ]
 
-function browserDependencies(): Required<LocalSpeechDependencies> | null {
+function browserDependencies(): Required<Pick<LocalSpeechDependencies, 'getUserMedia' | 'Recorder' | 'fetchImpl' | 'now'>> | null {
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia ||
       typeof MediaRecorder === 'undefined' || typeof fetch === 'undefined') return null
   return {
@@ -58,6 +61,11 @@ export function beginArneyLocalSpeech(
   const fetchImpl = dependencies?.fetchImpl ?? defaults?.fetchImpl
   const now = dependencies?.now ?? defaults?.now
   if (!getUserMedia || !Recorder || !fetchImpl || !now) return null
+  // A small release tail protects the last syllable when the user lifts their finger.
+  // Captured audio is still uploaded once, only after explicit release.
+  const stopDelayMs = Math.max(0, Math.min(300, dependencies?.stopDelayMs ?? 180))
+  const scheduleStop = dependencies?.scheduleStop ?? ((callback, ms) => setTimeout(callback, ms))
+  const clearStop = dependencies?.clearStop ?? (handle => clearTimeout(handle))
 
   let recorder: MediaRecorder | null = null
   let stream: MediaStream | null = null
@@ -66,11 +74,14 @@ export function beginArneyLocalSpeech(
   let stopRequested = false
   let startedAt = 0
   let limitTimer: ReturnType<typeof setTimeout> | null = null
+  let stopTailTimer: ReturnType<typeof setTimeout> | null = null
   const chunks: Blob[] = []
 
   const stopTracks = () => {
     if (limitTimer !== null) clearTimeout(limitTimer)
     limitTimer = null
+    if (stopTailTimer !== null) clearStop(stopTailTimer)
+    stopTailTimer = null
     stream?.getTracks().forEach(track => {
       try { track.stop() } catch { /* already stopped */ }
     })
@@ -179,8 +190,14 @@ export function beginArneyLocalSpeech(
       if (finished || canceled || stopRequested) return
       stopRequested = true
       if (recorder?.state === 'recording') {
-        try { recorder.stop() }
-        catch { finish({ kind: 'error', reason: 'local-recording-failed' }) }
+        const stopRecorder = () => {
+          stopTailTimer = null
+          if (finished || canceled || recorder?.state !== 'recording') return
+          try { recorder.stop() }
+          catch { finish({ kind: 'error', reason: 'local-recording-failed' }) }
+        }
+        if (stopDelayMs === 0) stopRecorder()
+        else stopTailTimer = scheduleStop(stopRecorder, stopDelayMs)
       }
     },
     cancel: () => {

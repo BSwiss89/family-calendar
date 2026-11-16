@@ -26,6 +26,10 @@ jobs:
         run: npm run build
       - name: Verify Arney read-only planning and compact Quick Add
         run: node --test scripts/test-arney-planning.mjs
+      - name: Verify bounded free recipe search, photos, swipe previews and household-local ranking
+        run: |
+          node --test scripts/test-arney-online-recipe-search.mjs
+          node --test scripts/test-arney-recipe-preview.mjs
       - name: Verify visible date ranges from photographed flyers
         run: node --test scripts/test-photo-event-date-range.mjs
       - name: Verify Home layout editor and responsive widget sizing
