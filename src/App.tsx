@@ -3789,6 +3789,8 @@ const [socialRecipeImportOpen, setSocialRecipeImportOpen] = useState(false)
 const [socialRecipeImportUrl, setSocialRecipeImportUrl] = useState('')
 const [socialRecipeImportCaption, setSocialRecipeImportCaption] = useState('')
 const [socialRecipeImportComment, setSocialRecipeImportComment] = useState('')
+const socialRecipeAdvancedRef = useRef<HTMLDetailsElement | null>(null)
+const socialRecipeCommentInputRef = useRef<HTMLTextAreaElement | null>(null)
 const [socialRecipeCommentReport, setSocialRecipeCommentReport] =
   useState<SocialVideoRecipePreview['commentReport']>(undefined)
 const [socialRecipeVideoFile, setSocialRecipeVideoFile] = useState<File | null>(null)
@@ -23310,7 +23312,7 @@ resetMealPlannerScroll()
                       }}
                     />
                   </label>
-                  <details className="recipe-social-import-advanced">
+                  <details ref={socialRecipeAdvancedRef} className="recipe-social-import-advanced">
                     <summary>Advanced options (optional)</summary>
                     <label className="event-field">
                       Attach a local video file
@@ -23330,6 +23332,7 @@ resetMealPlannerScroll()
                       Paste a creator's recipe comment (if Arney cannot access it)
                       <textarea
                         className="event-input recipe-social-import-caption"
+                        ref={socialRecipeCommentInputRef}
                         placeholder="Paste the creator's pinned ingredients or instructions here"
                         value={socialRecipeImportComment}
                         maxLength={6000}
@@ -23377,9 +23380,24 @@ resetMealPlannerScroll()
                     </div>
                   )}
                   {socialRecipeCommentReport && (
-                    <p className="recipe-social-import-status" role="status">
+                    <div className="recipe-social-import-status" role="status">
                       <strong>Recipe comment check:</strong> {socialRecipeCommentReport.status}
-                    </p>
+                      {socialRecipeCommentReport.source === 'unavailable' && (
+                        <>
+                          <small>Instagram may show a pinned recipe in its app without exposing that comment to the public importer. Copy the creator's full comment and paste it here, then tap Analyze Recipe Link again.</small>
+                          <button
+                            className="recipe-social-comment-paste-button"
+                            type="button"
+                            onClick={() => {
+                              if (socialRecipeAdvancedRef.current) socialRecipeAdvancedRef.current.open = true
+                              socialRecipeCommentInputRef.current?.focus()
+                            }}
+                          >
+                            Paste pinned recipe comment
+                          </button>
+                        </>
+                      )}
+                    </div>
                   )}
                   {socialRecipeVideoReport && (
                     <div className={`recipe-social-video-check ${!socialRecipeVideoReport.videoOpened ||

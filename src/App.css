@@ -21619,6 +21619,9 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
   font-size:13px;
 }
 .recipe-social-import-status{border:1px solid #accbdc;background:#f3fafb;color:#244f66}
+.recipe-social-import-status small{display:block;margin-top:6px;font-size:12px;line-height:1.45}
+.recipe-social-comment-paste-button{display:block;width:100%;margin-top:10px;padding:10px 12px;border:1px solid #2264ac;border-radius:9px;background:#fff;color:#215c9f;font-size:14px;font-weight:750;cursor:pointer}
+.recipe-social-comment-paste-button:focus-visible{outline:3px solid #86b5ec;outline-offset:2px}
 .recipe-social-import-error{border:1px solid #e6b9b9;background:#fff7f7;color:#8a2d37}
 @media(max-width:540px){
   .recipe-social-import-toggle{font-size:14px}

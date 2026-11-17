@@ -58,6 +58,12 @@ const STEP_HEADING = /^(?:instructions?|directions?|method|steps?|how to (?:make
 // Creator descriptions often divide ingredient lists into multiple parts and
 // place a sauce/toppings section AFTER their first Instructions heading.
 // Those new ingredients must never be discarded as instructions.
+// Instagram creators may put a complete recipe in a verified or pasted
+// pinned comment without an "Ingredients" heading. Preserve explicit
+// component labels ("Chili Chicken Thighs", "Sticky Gochujang Glaze",
+// "To Serve") rather than treating them as ingredients or recipe titles.
+const COMMENT_INGREDIENT_PART_HEADING = /^(?:to serve|(?:[\p{L}\p{N}'’&-]+\s+){0,5}(?:chicken(?:\s+thighs?)?|thighs?|glaze|marinade|dressing|sauce|toppings?|garnish))\s*:\s*$/iu
+const COMMENT_RECIPE_MARKER = /^recipe\s*:?\s*$/i
 const INGREDIENT_PART_HEADING = /^(?:(?:for\s+(?:the\s+|a\s+)?)?(?:sauce|marinade|dressing|glaze|toppings?|garnish|seasoning(?:\s+mix)?|spice\s+(?:mix|blend)|filling|crust|chicken|rice|pasta|vegetables|veggies|salad|assembly|bowl|protein)(?:\s+ingredients?)?|(?:[\p{L}\p{N}'’&-]+(?:\s+[\p{L}\p{N}'’&-]+){0,4})\s+ingredients?)\s*(?:\([^)]{1,60}\))?\s*[:\-–—]?\s*$/iu
 const STRONG_INGREDIENT = /^(?:\d+(?:[.,]\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])\s*(?:g|kg|mg|grams?|ml|l|liters?|oz|lbs?|pounds?|cups?|tbsp|tsp|tablespoons?|teaspoons?|cloves?|slices?|pieces?)\b/i
 const TITLE_HEADING = /^(?:recipe|dish|title)\s*:\s*(.{3,120})$/i
@@ -70,7 +76,7 @@ function withoutListMarker(line) { return line.replace(LIST_MARKER, '').trim() }
 
 // Only use a fallback when the caption has no parseable section labels.
 // Keep these deterministic: never turn a general promotional sentence into a recipe.
-const COOKING_ACTION = /^(?:preheat|heat|cook|bake|fry|air.?fry|boil|simmer|grill|roast|toast|mix|stir|blend|whisk|combine|add|pour|season|marinate|chop|dice|slice|drain|serve|place|spread|brush|flip|transfer|cut|coat|sauté|saute|prepare|remove|let|top|finish|toss|put|cover)\b/i
+const COOKING_ACTION = /^(?:preheat|heat|cook|bake|fry|air.?fry|boil|simmer|grill|roast|toast|mix|stir|blend|whisk|combine|add|pour|season|marinate|chop|dice|slice|drain|serve|place|spread|brush|flip|transfer|cut|coat|sauté|saute|prepare|remove|let|line|top|finish|toss|put|cover)\b/i
 const MEASURED_INGREDIENT = /^(?:(?:\d+(?:[.,]\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])\s*(?:(?:g|kg|mg|ml|l|oz|lb|lbs|cups?|tbsp|tsp|tablespoons?|teaspoons?|cloves?|slices?|pinch(?:es)?|pieces?)\b|[a-z][a-z -]{2,70}\b))/i
 function extractCaptionFallback(lines, type) {
   const found = []
@@ -79,7 +85,7 @@ function extractCaptionFallback(lines, type) {
     if (DISCARD.test(line) || /\b(?:calories|carbs|protein|macros)\b/i.test(line)) continue
     const text = withoutListMarker(line)
     if (type === 'ingredients') {
-      const bullet = /^[-*•·▪◦]\s+/.test(line)
+      const bullet = /^[-*•·▪◦]\s*/.test(line)
       if (bullet && (MEASURED_INGREDIENT.test(text) ||
         (text.length <= 130 && !COOKING_ACTION.test(text) && !/:$/.test(text)))) found.push(text)
     } else {
@@ -122,7 +128,8 @@ function inferUnlabeledIngredientBlock(lines) {
   const limit = instructionsAt < 0 ? lines.length : instructionsAt
   if (lines.slice(0, limit).some(line =>
     INGREDIENT_HEADING.test(line.replace(/^[^\p{L}\p{N}]+/u, '')) ||
-    INGREDIENT_PART_HEADING.test(line.replace(/^[^\p{L}\p{N}]+/u, '')))) return null
+    INGREDIENT_PART_HEADING.test(line.replace(/^[^\p{L}\p{N}]+/u, '')) ||
+    COMMENT_INGREDIENT_PART_HEADING.test(line.replace(/^[^\p{L}\p{N}]+/u, '')))) return null
   const measured = []
   for (let i = 0; i < limit; i++) {
     if (looksLikeUnlabeledMeasuredIngredient(lines[i])) measured.push(i)
@@ -157,6 +164,7 @@ export function parseSocialRecipeCaption(value) {
   const lines = value.replace(/\r\n?/g, '\n').split('\n').map(cleanLine)
   const inferred = inferUnlabeledIngredientBlock(lines)
   let section = '', title = inferred?.title ?? '', explicitTitle = false, ingredientSection = ''
+  let numberedOnlyInstructions = false
   const ingredients = [], steps = [], ingredientParts = []
   const componentName = value => value.replace(/^for\s+(?:the\s+|a\s+)?/i,'')
     .replace(/\([^)]*\)/g,'').replace(/\s+ingredients?$/i,'')
@@ -179,6 +187,8 @@ export function parseSocialRecipeCaption(value) {
     }
     // Social captions often prefix section headings with cooking emojis.
     const headingLine = line.replace(/^[^\p{L}\p{N}]+/u, '')
+    // A standalone "📌 RECIPE:" is a marker, not a title or ingredient.
+    if (COMMENT_RECIPE_MARKER.test(headingLine)) continue
     let match = TITLE_HEADING.exec(headingLine)
     if (match) { title = match[1].trim(); explicitTitle = true; continue }
     match = INGREDIENT_HEADING.exec(headingLine)
@@ -191,7 +201,8 @@ export function parseSocialRecipeCaption(value) {
     }
     // Recipe component headings may appear before or after cooking directions.
     // Recognize only short standalone titles, not arbitrary prose.
-    if (INGREDIENT_PART_HEADING.test(headingLine)) {
+    if (INGREDIENT_PART_HEADING.test(headingLine) ||
+        COMMENT_INGREDIENT_PART_HEADING.test(headingLine)) {
       section = 'ingredients'
       ingredientSection = componentName(headingLine)
       continue
@@ -199,12 +210,22 @@ export function parseSocialRecipeCaption(value) {
     match = STEP_HEADING.exec(headingLine)
     if (match) {
       section = 'instructions'
+      numberedOnlyInstructions = false
       if (match[1] && /[\p{L}\p{N}]/u.test(match[1])) steps.push(withoutListMarker(match[1]))
       continue
     }
     if (DISCARD.test(line)) continue
-    if (section === 'ingredients' && /^\d{1,2}[.)]\s+/.test(line) &&
-        COOKING_ACTION.test(withoutListMarker(line))) section = 'instructions'
+    // Pinned comments often contain "•1. Line an air fryer rack..." with a
+    // bullet AND a numbered cooking step. The bullet is not an ingredient.
+    const numberedCookingLine = /^\s*(?:[-*•·▪◦]\s*)?\d{1,2}[.)]\s+(.+)$/.exec(line)
+    if (numberedCookingLine && (section === 'instructions' || COOKING_ACTION.test(numberedCookingLine[1]))) {
+      // With no Directions heading, only numbered lines are trustworthy steps.
+      // A trailing "Protein-packed meal prep!" is advertising, not a direction.
+      if (section !== 'instructions') numberedOnlyInstructions = true
+      section = 'instructions'
+      if (steps.length < 80) steps.push(numberedCookingLine[1].slice(0, 500))
+      continue
+    }
     // A separately bulleted measured ingredient that follows instructions
     // belongs in Ingredients, not simultaneously in the cooking directions.
     if (section === 'instructions' && /^[-*•·▪◦]\s+/.test(line) &&
@@ -218,7 +239,7 @@ export function parseSocialRecipeCaption(value) {
       continue
     }
     if (section === 'instructions') {
-      if (steps.length < 80) steps.push(withoutListMarker(line).slice(0, 500))
+      if (!numberedOnlyInstructions && steps.length < 80) steps.push(withoutListMarker(line).slice(0, 500))
       continue
     }
     // The first caption line is only a suggested title, never fabricated.

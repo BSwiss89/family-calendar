@@ -130,6 +130,53 @@ test('a reliable uploader marker can verify a comment but cannot fabricate a pin
   assert.equal(found.creatorVerified,true)
 })
 
+test('iPhone screenshot regression: caption is only promo, pasted pinned creator comment supplies real recipe', () => {
+  const caption = [
+    '🌶 SWEET CHILI GOCHUJANG CHICKEN ↓',
+    'So, you want maximum flavor but minimum effort? Try this easy 15 minute chicken meal prep!',
+    'Comment “yummy” or “need this” and I’ll send ALL of my cookbooks to you!',
+    'The full recipe is pinned in the comments below!',
+  ].join('\n')
+  const comment = [
+    '📌 RECIPE:',
+    'Chili Chicken Thighs:',
+    '•12 oz boneless & skinless chicken thighs',
+    '•1 tbsp: garlic powder, onion powder',
+    '•1/2 tbsp (7 mL) sugar-free Thai sweet chili sauce',
+    '•1 tsp paprika',
+    '•1/2 tsp salt',
+    '•1/4 tsp ground black pepper',
+    'Sticky Gochujang Glaze:',
+    '•1 1/2 tbsp (22 mL) Gochujang paste',
+    '•1 tbsp (15 mL): raw organic honey, low sodium soy sauce',
+    '•1 tsp rice vinegar',
+    '•1/2 tsp sesame oil (optional)',
+    'To Serve:',
+    '•cooked jasmine rice, divided',
+    '•Quick Pickled Veggies (recipe already on my page)',
+    '•sesame seeds',
+    '•green onion, finely chopped',
+    '•1. Line an air fryer rack with parchment and air fry the seasoned chicken for 15 minutes at 400°F.',
+    '•2. While that’s going, whisk Sticky Gochujang glaze and return coated chicken to the air fryer for 2 minutes.',
+    '•3. Chop chicken, top with sesame seeds and green onion. Serve alongside rice and pickled veggies.',
+  ].join('\n')
+  const result = groundedVideoDraft({
+    caption, comment,
+    transcript:'', visibleText:'',
+    structured:{name:'Chicken',ingredients:['chicken'],instructions:['Cook it.']},
+  })
+  assert.match(result.name, /SWEET CHILI GOCHUJANG CHICKEN/)
+  assert.equal(result.ingredients.split('\n').length, 14)
+  assert.match(result.ingredients, /12 oz boneless & skinless chicken thighs/)
+  assert.match(result.ingredients, /1 1\/2 tbsp \(22 mL\) Gochujang paste/)
+  assert.match(result.ingredients, /1 tbsp \(15 mL\): raw organic honey, low sodium soy sauce/)
+  assert.match(result.ingredients, /Quick Pickled Veggies/)
+  assert.equal(result.instructions.split('\n').length, 3)
+  assert.doesNotMatch(result.ingredients, /line an air fryer/i)
+  assert.deepEqual(result.missing, [])
+  assert.equal(result.servings, '')
+})
+
 test('creator comment adds missing ingredients and steps without replacing caption measurements', () => {
   const result = groundedVideoDraft({
     caption:'Sweet Potato Bowl\nIngredients:\n- 1 cup rice',
@@ -219,6 +266,8 @@ test('the video route remains authentication-gated, preview-only, and accepts at
   assert.ok(!route.includes('database.prepare('))
   assert.ok(client.includes("body.append('comment', socialRecipeImportComment)"))
   assert.ok(client.includes('Recipe comment check:'))
+  assert.ok(client.includes('Paste pinned recipe comment'))
+  assert.ok(client.includes('socialRecipeCommentInputRef.current?.focus()'))
   assert.ok(client.includes('onSubmit={saveRecipe}'))
 })
 

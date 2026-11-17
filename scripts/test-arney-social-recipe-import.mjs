@@ -44,6 +44,59 @@ test('refuses unrelated URLs, credentials, subdomain spoofing, redirect tricks, 
   ]) assert.throws(() => normalizeSocialRecipeUrl(url), TypeError, url)
 })
 
+test('iPhone regression: full creator-pinned gochujang chicken comment becomes 14 ingredients and three directions', () => {
+  const comment = [
+    '📌 RECIPE:',
+    'Chili Chicken Thighs:',
+    '•12 oz boneless & skinless chicken thighs',
+    '•1 tbsp: garlic powder, onion powder',
+    '•1/2 tbsp (7 mL) sugar-free Thai sweet chili sauce',
+    '•1 tsp paprika',
+    '•1/2 tsp salt',
+    '•1/4 tsp ground black pepper',
+    'Sticky Gochujang Glaze:',
+    '•1 1/2 tbsp (22 mL) Gochujang paste',
+    '•1 tbsp (15 mL): raw organic honey, low sodium soy sauce',
+    '•1 tsp rice vinegar',
+    '•1/2 tsp sesame oil (optional)',
+    'To Serve:',
+    '•cooked jasmine rice, divided',
+    '•Quick Pickled Veggies (recipe already on my page)',
+    '•sesame seeds',
+    '•green onion, finely chopped',
+    '•1. Line an air fryer rack with parchment. Season chicken and air fry for ~15 minutes at 400°F, flipping halfway.',
+    '•2. While that’s going, quickly whisk Sticky Gochujang glaze. Once chicken is cooked, remove from heat, coat generously in glaze, and return to air fryer for ~2 minutes to caramelize.',
+    '•3. Chop chicken, top with (optional) sesame seeds and green onion. Serve alongside (optional) rice and pickled veggies. Enjoy!',
+  ].join('\n')
+  const result = parseSocialRecipeCaption(comment)
+  assert.equal(result.name, '')
+  assert.deepEqual(result.ingredients.split('\n'), [
+    '12 oz boneless & skinless chicken thighs',
+    '1 tbsp: garlic powder, onion powder',
+    '1/2 tbsp (7 mL) sugar-free Thai sweet chili sauce',
+    '1 tsp paprika',
+    '1/2 tsp salt',
+    '1/4 tsp ground black pepper',
+    '1 1/2 tbsp (22 mL) Gochujang paste',
+    '1 tbsp (15 mL): raw organic honey, low sodium soy sauce',
+    '1 tsp rice vinegar',
+    '1/2 tsp sesame oil (optional)',
+    'cooked jasmine rice, divided',
+    'Quick Pickled Veggies (recipe already on my page)',
+    'sesame seeds',
+    'green onion, finely chopped',
+  ])
+  assert.equal(result.ingredientParts.length, 14)
+  assert.deepEqual([...new Set(result.ingredientParts.map(x => x.section))], [
+    'chili chicken thighs', 'sticky gochujang glaze', 'to serve',
+  ])
+  assert.equal(result.instructions.split('\n').length, 3)
+  assert.match(result.instructions, /^Line an air fryer rack with parchment/)
+  assert.match(result.instructions, /\nWhile that’s going,/)
+  assert.match(result.instructions, /\nChop chicken,/)
+  assert.doesNotMatch(result.ingredients, /Line an air fryer|While that’s going|Chop chicken/)
+})
+
 test('only clearly labeled caption sections become recipe fields, original quantities retained', () => {
   const caption = [
     'Creamy Garlic Chicken',
