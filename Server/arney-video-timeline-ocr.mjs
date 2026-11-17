@@ -187,8 +187,9 @@ export async function scanVideoTimeline(filename, folder, duration, { onProgress
       onProgress('Reading video text ('+result.ocrFramesRead+' of '+result.frames.length+' timeline frames)…')
   }
   result.ocrPartial ||= result.ocrFramesRead < result.frames.length
+  const allDistinct = collectDistinctScreenText(rows, MAX_FRAMES)
+  result.ocrPartial ||= allDistinct.length > 90
   result.events = collectDistinctScreenText(rows)
   result.ocrScreensDetected = result.events.length
-  result.ocrPartial ||= result.events.length >= 90
   return result
 }
