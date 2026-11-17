@@ -175,8 +175,9 @@ async function transcribeClip(filename, folder, start, seconds, stt) {
       '-c:a', 'pcm_s16le', '-f', 'wav', audio,
     ], { timeoutMs: 16_000 })
     const bytes = await fs.readFile(audio)
-    if (bytes.length < 100 || bytes.length > MAX_AUDIO_BYTES) return ''
-    if (!stt || typeof stt.url !== 'string' || typeof stt.token !== 'string') return ''
+    if (bytes.length < 100 || bytes.length > MAX_AUDIO_BYTES) return { text: '', responded: false }
+    if (!stt || typeof stt.url !== 'string' || typeof stt.token !== 'string')
+      return { text: '', responded: false }
     const result = await fetch(stt.url, {
       method: 'POST',
       headers: {
@@ -188,10 +189,13 @@ async function transcribeClip(filename, folder, start, seconds, stt) {
       body: bytes,
       signal: AbortSignal.timeout(16_000),
     })
-    if (!result.ok) return ''
+    if (!result.ok) return { text: '', responded: false }
     const data = await result.json()
-    return typeof data?.transcript === 'string' ? data.transcript.trim().slice(0, 2400) : ''
-  } catch { return '' }
+    return {
+      text: typeof data?.transcript === 'string' ? data.transcript.trim().slice(0, 2400) : '',
+      responded: true,
+    }
+  } catch { return { text: '', responded: false } }
   finally { await fs.rm(audio, { force: true }).catch(() => {}) }
 }
 
@@ -330,7 +334,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
     throw new TypeError('Choose an MP4, MOV, or WebM recording under 36 MB.')
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'arney-social-preview-'))
   let transcript = '', visibleText = '', recoveredCaption = '', videoAnalyzed = false, videoNotice = ''
-  let audioSegmentsChecked = 0, audioSegmentsWithText = 0
+  let audioSegmentsChecked = 0, audioSegmentsResponded = 0, audioSegmentsWithText = 0
   let framesSampled = 0, visionResponded = false, videoDurationSeconds = 0
   let publicVideoFile = '', publicCover = null, coverPhoto = null
   const speechServiceConfigured = Boolean(stt?.url && stt?.token)
@@ -394,9 +398,13 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         for (let start = 0; start < duration && start < MAX_SECONDS; start += AUDIO_SECONDS) {
           const seconds = Math.min(AUDIO_SECONDS, duration - start)
           if (seconds < 0.2) break
-          const words = await transcriber(filename, folder, start, seconds, stt)
+          const chunk = await transcriber(filename, folder, start, seconds, stt)
+          const words = typeof chunk === 'string' ? chunk :
+            typeof chunk?.text === 'string' ? chunk.text : ''
           audioSegmentsChecked++
-          if (words) { portions.push(words); audioSegmentsWithText++ }
+          if (typeof chunk === 'string' ? Boolean(words) : chunk?.responded === true)
+            audioSegmentsResponded++
+          if (words.trim()) { portions.push(words.trim()); audioSegmentsWithText++ }
           const completed = Math.floor(start / AUDIO_SECONDS) + 1
           if (completed % 3 === 0 || completed === totalClips)
             progress('audio', 'Transcribing video audio (' + completed + ' of ' + totalClips + ' sections)…')
@@ -478,6 +486,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         durationSeconds: videoDurationSeconds,
         speechServiceConfigured,
         audioSegmentsChecked,
+        audioSegmentsResponded,
         audioSegmentsWithText,
         framesSampled,
         visionResponded,
