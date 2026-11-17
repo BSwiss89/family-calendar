@@ -167,6 +167,17 @@ export function selectPublicCreatorRecipeComment(metadata) {
   // Search every comment ALREADY present in bounded yt-dlp metadata. Do not
   // request more Instagram pages to find an old creator recipe comment.
   const checked = Array.isArray(metadata?.comments) ? metadata.comments : []
+  // The remote order may be newest-first. Sort only the metadata already
+  // received: oldest timestamp first; undated comments retain relative order.
+  // This cannot make Instagram return comments that are absent from metadata.
+  const chronological = checked.slice().sort((a, b) => {
+    const aTime = Number(a?.timestamp), bTime = Number(b?.timestamp)
+    const aDated = Number.isFinite(aTime) && aTime > 0
+    const bDated = Number.isFinite(bTime) && bTime > 0
+    if (aDated && bDated) return aTime - bTime
+    if (aDated !== bDated) return aDated ? -1 : 1
+    return 0
+  })
   const uploaderIds = [metadata?.uploader_id, metadata?.channel_id]
     .map(normalizedAccount).filter(Boolean)
   // Instagram's yt-dlp metadata may expose the post owner's unique username
@@ -176,7 +187,7 @@ export function selectPublicCreatorRecipeComment(metadata) {
   const instagramHandle = metadata?.extractor_key === 'Instagram'
     ? normalizedAccount(metadata?.channel) : ''
   const validInstagramHandle = /^[a-z0-9._]{1,30}$/.test(instagramHandle)
-  const verified = checked.map(comment => {
+  const verified = chronological.map(comment => {
     if (!comment || typeof comment !== 'object' || Array.isArray(comment)) return null
     const text = typeof comment.text === 'string' ? comment.text.trim().slice(0, 6000) : ''
     // Display-name text is user-editable and cannot authenticate authorship.
