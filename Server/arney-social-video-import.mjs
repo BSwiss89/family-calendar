@@ -759,6 +759,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
   const audioFailureReasons = new Set()
   let framesSampled = 0, visionResponded = false, videoDurationSeconds = 0
   let timelineFramesChecked = 0, ocrFramesRead = 0, ocrScreensDetected = 0
+  let ocrEventsRetained = 0, ocrEventsCapped = false
   let ocrAvailable = false, ocrPartial = false
   let publicVideoFile = '', publicCover = null, coverPhoto = null
   let creatorComment = '', commentSource = 'unavailable'
@@ -923,7 +924,10 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
           ocrFramesRead = Number.isInteger(vision?.ocrFramesRead)
             ? Math.max(0, Math.min(300, vision.ocrFramesRead)) : 0
           ocrScreensDetected = Number.isInteger(vision?.ocrScreensDetected)
-            ? Math.max(0, Math.min(90, vision.ocrScreensDetected)) : 0
+            ? Math.max(0, Math.min(300, vision.ocrScreensDetected)) : 0
+          ocrEventsRetained = Number.isInteger(vision?.ocrEventsRetained)
+            ? Math.max(0, Math.min(90, vision.ocrEventsRetained)) : ocrScreensDetected
+          ocrEventsCapped = vision?.ocrEventsCapped === true
           ocrAvailable = vision?.ocrAvailable === true
           ocrPartial = vision?.ocrPartial === true
         }
@@ -968,6 +972,8 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
     const videoAdded = field => videoEvidencePresent && Array.isArray(structured?.[field])
       ? structured[field].filter(item => typeof item === 'string' && item.trim()).length : 0
     const newIngredients = videoAdded('videoIngredientsAdded')
+    const ocrCookingSettingsRecovered = videoEvidencePresent
+      ? extractOnScreenCookingSettings(visibleText).length : 0
     const newInstructions = videoAdded('videoInstructionsAdded')
     progress('cover', 'Checking whether the Reel has a usable cover photo…')
     if (!videoBuffer && downloader === downloadPublicVideo && captionReader === readPublicCaption)
@@ -1009,7 +1015,9 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
     if (videoAnalyzed && timelineFramesChecked && !ocrAvailable)
       noticeParts.push('Local screen-text OCR is not installed; selected vision frames were checked instead.')
     if (videoAnalyzed && ocrPartial)
-      noticeParts.push('Screen-text OCR stopped at its processing limit; later video text may be missing.')
+      noticeParts.push('Screen-text OCR did not finish every video frame; some visual text may be missing.')
+    if (videoAnalyzed && ocrEventsCapped)
+      noticeParts.push('The OCR frame scan completed, but noisy text variations were condensed before recipe analysis.')
     const videoStatus = !videoAnalyzed
       ? creatorComment && !recipeCaption
         ? 'Recipe comment available; the video could not be analyzed.'
@@ -1067,7 +1075,8 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
         audioSegmentsWithText,
         framesSampled,
         visionResponded,
-        timelineFramesChecked, ocrFramesRead, ocrScreensDetected, ocrAvailable, ocrPartial,
+        timelineFramesChecked, ocrFramesRead, ocrScreensDetected, ocrEventsRetained,
+        ocrEventsCapped, ocrAvailable, ocrPartial, ocrCookingSettingsRecovered,
         comparisonCompleted: videoAnalyzed && videoEvidencePresent &&
           structured !== null && structured !== undefined,
         newIngredients, newInstructions,
