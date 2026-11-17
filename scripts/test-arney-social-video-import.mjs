@@ -1068,3 +1068,47 @@ test('unavailable local OCR is reported and vision fallback is not claimed to be
   assert.match(result.videoReport.status,/OCR is not installed/i)
   assert.match(result.notice,/OCR is not installed/i)
 })
+
+
+test('long timeline OCR does not masquerade as an overlong pasted caption or discard late oven settings', async () => {
+  // Real TEST regression: caption and ingredients previewed, then the OCR
+  // fallback passed 12k characters to a parser capped at 10k, aborting before
+  // the final Instructions draft with "optional pasted caption is too long".
+  const visibleText = 'On-screen OCR at 1s:\n' +
+    'Mix chicken with the olive oil and seasoning.\n'.repeat(260) +
+    '\nOn-screen OCR at 24.5s:\nOven Bake\n200C/400F\n22-25 Min\nFlip halfway\n' +
+    '\nOn-screen OCR at 49.5s:\nOven Bake\n195C/385F\n45-50 Min\nMix onions halfway'
+  assert.ok(visibleText.length > 10_000 && visibleText.length < 14_000)
+  const updates = []
+  const result = await analyzePublicSocialVideo({
+    url: ig, videoBuffer: Buffer.alloc(300), videoMime: 'video/mp4',
+  }, {
+    captionReader: async () => 'High Protein Creamy Caramelized Onion Chicken Pasta\nIngredients:\n- 480g pasta',
+    durationReader: async () => 60,
+    transcriber: async () => ({text:'',responded:true,reason:'no-speech'}),
+    visualReader: async () => ({
+      text: visibleText,
+      framesSampled: 16, visionResponded: true,
+      timelineFramesChecked: 120, ocrFramesRead: 120,
+      ocrScreensDetected: 3, ocrAvailable: true, ocrPartial: false,
+    }),
+    extractor: async ({visibleText: evidence}) => {
+      assert.ok(evidence.length > 10_000)
+      return {
+        name: 'Caramelized Onion Chicken Pasta',
+        ingredients: ['480g pasta'], instructions: ['Bake with the settings on screen.'],
+        videoInstructionsAdded: [],
+      }
+    },
+    coverReader: async () => null,
+    onProgress: info => updates.push(info),
+  })
+  assert.equal(result.videoAnalyzed, true)
+  assert.match(result.ingredients, /480g pasta/)
+  assert.match(result.instructions, /200C\/400F.*22-25 Min/)
+  assert.match(result.instructions, /195C\/385F.*45-50 Min/)
+  assert.equal(result.videoReport.ocrFramesRead, 120)
+  assert.ok(updates.some(item => item.stage === 'draft'))
+  assert.doesNotMatch(result.notice, /pasted caption is too long/i)
+  assert.doesNotMatch(JSON.stringify(result.videoReport), /Mix chicken|200C\/400F/)
+})

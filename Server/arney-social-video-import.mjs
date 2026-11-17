@@ -614,7 +614,10 @@ export function groundedVideoDraft({ caption = '', comment = '', transcript = ''
   const name = usableRecipeTitle(fromCaption.name) || usableRecipeTitle(model.name)
   const videoEvidence = Boolean(transcript.trim() || visibleText.trim())
   const audioDraft = transcript.trim() ? parseSocialRecipeCaption(transcript.slice(0, 9000)) : null
-  const screenDraft = visibleText.trim() ? parseSocialRecipeCaption(visibleText.slice(0, 12_000)) : null
+  // OCR can yield 14,000 characters across a Reel; the legacy caption parser
+  // accepts at most 10,000. Bound only its fallback input, not the complete OCR
+  // evidence used for cooking settings and model comparison.
+  const screenDraft = visibleText.trim() ? parseSocialRecipeCaption(visibleText.slice(0, 10_000)) : null
   const spokenFacts = transcript.trim() ? extractSpokenRecipeFacts(transcript) : null
   // A verified creator comment can complete a caption that contains only a
   // teaser. Preserve existing caption lines and append distinct comment lines.
