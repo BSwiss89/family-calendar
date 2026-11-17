@@ -30,6 +30,30 @@ test('finds a creator recipe after 40 newer comments already in yt-dlp metadata'
   assert.equal(result.reason,'creator-comment-found')
 })
 
+test('prefers oldest returned creator recipe if Instagram does not report pin status', () => {
+  const result=selectPublicCreatorRecipeComment({
+    uploader_id:'chef',comments:[
+      {author_id:'chef',text:'Recipe: add 2 cups rice for the newer recipe',timestamp:1793000000},
+      {author_id:'viewer',text:'Love this recipe',timestamp:1792500000},
+      {author_id:'chef',text:'Ingredients: 1 cup rice. Instructions: Cook rice.',timestamp:1760000000},
+    ],
+  })
+  assert.match(result.text,/1 cup rice/)
+  assert.equal(result.source,'creator-comment')
+  assert.equal(result.commentsExamined,3)
+})
+
+test('pinned flag still takes priority over comment age', () => {
+  const result=selectPublicCreatorRecipeComment({
+    uploader_id:'chef',comments:[
+      {author_id:'chef',text:'Recipe: old instructions',timestamp:1760000000},
+      {author_id:'chef',text:'Ingredients: 2 cups rice',timestamp:1793000000,is_pinned:true},
+    ],
+  })
+  assert.equal(result.source,'creator-pinned')
+  assert.match(result.text,/2 cups rice/)
+})
+
 test('reports all returned comments examined when the creator is absent', () => {
   const metadata={uploader_id:'chef123',comments:Array.from({length:45},(_,i)=>({author_id:'viewer'+i,text:'Looks good'}))}
   const result=selectPublicCreatorRecipeComment(metadata)
