@@ -62,12 +62,11 @@ function cleanSeasoningAllocation(lines, ingredients) {
 }
 
 function stripUnsupportedPaperTowel(lines) {
-  const mentionsBakingPaper=lines.some(line=>/\b(?:baking|parchment)\s+paper\b/i.test(line))
   return lines.map(line=> /\bpaper towel\b/i.test(line) &&
       /\b(?:chicken|set aside)\b/i.test(line)
     ? line.replace(/\s*(?:with\s+)?paper towel\s+underneath\b[.,;]?/ig,'')
       .replace(/\b(?:on|over)\s+a?\s*paper towel\b[.,;]?/ig,'')
-      .replace(/[,.;\s]+$/,'') + (mentionsBakingPaper?' (keep the baking paper with the tray).':'.')
+      .replace(/[,.;\s]+$/,'')+'.'
     : line)
 }
 
