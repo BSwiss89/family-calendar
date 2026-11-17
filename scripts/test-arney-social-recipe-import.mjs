@@ -91,6 +91,73 @@ test('Jalal-style Instagram captions with emoji headings preserve quantities, se
   assert.equal(result.instructions, 'Trim excess fat from the chicken thighs.\nBake at 200C / 400F for 22-25 minutes.')
 })
 
+test('all description ingredient sections survive sauce, toppings and garnish headings after cooking steps', () => {
+  const description = [
+    'High Protein Chicken Bowls',
+    'Ingredients:',
+    '- 500g chicken breast',
+    '- 200g cooked rice',
+    'Instructions:',
+    '1. Cook the chicken for 20 minutes.',
+    '2. Combine chicken and rice.',
+    'SAUCE INGREDIENTS:',
+    '• 2 tbsp mayonnaise',
+    '• 1 tbsp sweet chili sauce',
+    'For the garnish:',
+    '- scallions to taste',
+    'Method:',
+    '3. Drizzle sauce and add scallions.',
+  ].join('\n')
+  const draft = parseSocialRecipeCaption(description)
+  assert.equal(draft.name,'High Protein Chicken Bowls')
+  assert.deepEqual(draft.ingredients.split('\n'), [
+    '500g chicken breast',
+    '200g cooked rice',
+    '2 tbsp mayonnaise',
+    '1 tbsp sweet chili sauce',
+    'scallions to taste',
+  ])
+  assert.deepEqual(draft.instructions.split('\n'), [
+    'Cook the chicken for 20 minutes.',
+    'Combine chicken and rice.',
+    'Drizzle sauce and add scallions.',
+  ])
+})
+
+test('measured ingredient bullets after a directions section cannot be silently omitted or treated as instructions', () => {
+  const draft = parseSocialRecipeCaption([
+    'Chicken Salad',
+    'Ingredients:',
+    '- 1 lb chicken',
+    'Directions:',
+    '1. Cook the chicken.',
+    '• 1 cup Greek yogurt',
+    '• 2 tsp mustard',
+    '2. Mix and serve.',
+  ].join('\n'))
+  assert.deepEqual(draft.ingredients.split('\n'), ['1 lb chicken', '1 cup Greek yogurt', '2 tsp mustard'])
+  assert.deepEqual(draft.instructions.split('\n'), ['Cook the chicken.', 'Mix and serve.'])
+})
+
+test('preserves sectioned description without requiring each subsection to say Ingredients', () => {
+  const draft = parseSocialRecipeCaption([
+    'Garlic Chicken',
+    'Ingredients (serves 4)',
+    '- 2 chicken thighs',
+    'For the marinade:',
+    '- 1 tbsp olive oil',
+    '- 2 tsp garlic',
+    'For the dressing:',
+    '- 2 tbsp yogurt',
+    'Instructions:',
+    '1. Mix and cook the chicken.',
+  ].join('\n'))
+  assert.equal(draft.ingredients.split('\n').length, 4)
+  assert.match(draft.ingredients,/olive oil/)
+  assert.match(draft.ingredients,/yogurt/)
+  assert.equal(draft.instructions, 'Mix and cook the chicken.')
+})
+
 test('unlabeled Bang Bang chicken Reel captions recover only stated bullets and numbered cooking steps', () => {
   const caption = [
     '😋 HIGH PROTEIN BANG BANG CHICKEN POWER BOWLS',
