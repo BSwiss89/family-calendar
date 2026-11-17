@@ -123,6 +123,14 @@ export function parseSocialRecipeCaption(value) {
     if (DISCARD.test(line)) continue
     if (section === 'ingredients' && /^\d{1,2}[.)]\s+/.test(line) &&
         COOKING_ACTION.test(withoutListMarker(line))) section = 'instructions'
+    // A separately bulleted measured ingredient that follows instructions
+    // belongs in Ingredients, not simultaneously in the cooking directions.
+    if (section === 'instructions' && /^[-*•·▪◦]\s+/.test(line) &&
+        STRONG_INGREDIENT.test(withoutListMarker(line)) &&
+        !COOKING_ACTION.test(withoutListMarker(line))) {
+      if (ingredients.length < 80) ingredients.push(withoutListMarker(line))
+      continue
+    }
     if (section === 'ingredients') {
       if (ingredients.length < 80 && line.length <= 260)
         ingredients.push(withoutListMarker(line))
