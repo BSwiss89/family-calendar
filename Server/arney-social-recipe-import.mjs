@@ -96,11 +96,11 @@ function extractCaptionFallback(lines, type) {
 // Only infer a list when several short, explicit quantity lines form a
 // contiguous recipe-like block before Instructions. Never treat intro prose,
 // the Reel's visible contents, or model guesses as measurements.
-const UNLABELED_AMOUNT = /^(?:\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?(?:\s+\d+\/\d+)?|\d+\/\d+|[¼½¾⅓⅔⅛⅜⅝⅞])\s+(?:[\p{L}][\p{L}\p{N}'’/-]*\s*){1,25}$/iu
+const UNLABELED_AMOUNT = /^(?:\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?(?:\s+\d+\/\d+)?|\d+\/\d+|[¼½¾⅓⅔⅛⅜⅝⅞])\s+(?:[\p{L}][\p{L}\p{N}'’,/-]*\s*){1,25}$/iu
 const NON_RECIPE_INTRO = /^(?:this (?:was|is|recipe)|we (?:made|love|tried)|i (?:made|love|tried)|save this|you (?:need|have)|follow|link in|so (?:good|easy)|who (?:else|wants)|here(?:'s| is))\b/i
 function likelyStandaloneRecipeTitle(line) {
   const candidate = line.trim().replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '')
-  return candidate.length >= 5 && candidate.length <= 100 &&
+  return candidate.length >= 3 && candidate.length <= 100 &&
     candidate.split(/\s+/).length <= 14 &&
     !NON_RECIPE_INTRO.test(candidate) &&
     !/[.!?;:]/.test(candidate) &&
