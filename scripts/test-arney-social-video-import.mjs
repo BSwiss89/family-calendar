@@ -101,6 +101,8 @@ test('verified creator-pinned comment survives blocked video, no transcripts, an
   assert.equal(result.commentReport.source,'creator-pinned')
   assert.equal(result.commentReport.pinnedConfirmed,true)
   assert.deepEqual(result.missing,[])
+  assert.match(result.videoReport.status,/Recipe comment available/i)
+  assert.doesNotMatch(result.notice,/Only the source link/i)
   assert.ok(!JSON.stringify(result.commentReport).includes('2 cups rice'))
 })
 
