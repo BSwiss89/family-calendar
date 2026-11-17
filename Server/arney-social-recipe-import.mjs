@@ -55,6 +55,11 @@ export function normalizeSocialRecipeUrl(value) {
 
 const INGREDIENT_HEADING = /^(?:ingredients?(?:\s+list)?|what you(?:'|’)ll need|what you need|you will need|you need|for the (?:chicken|sauce|pasta|rice|marinade|dressing|seasoning|bowl|vegetables|veggies))\s*(?:\([^)]{1,60}\))?\s*(?::|[-–—])?\s*(.*)$/i
 const STEP_HEADING = /^(?:instructions?|directions?|method|steps?|how to (?:make|cook)(?: this| it)?|preparation|how it's made|how to prepare|cooking instructions?)\s*(?::|[-–—])?\s*(.*)$/i
+// Creator descriptions often divide ingredient lists into multiple parts and
+// place a sauce/toppings section AFTER their first Instructions heading.
+// Those new ingredients must never be discarded as instructions.
+const INGREDIENT_PART_HEADING = /^(?:(?:for\s+(?:the\s+|a\s+)?)?(?:sauce|marinade|dressing|glaze|toppings?|garnish|seasoning(?:\s+mix)?|spice\s+(?:mix|blend)|filling|crust|chicken|rice|pasta|vegetables|veggies|salad|assembly|bowl|protein)(?:\s+ingredients?)?|(?:[\p{L}\p{N}'’&-]+(?:\s+[\p{L}\p{N}'’&-]+){0,4})\s+ingredients?)\s*(?:\([^)]{1,60}\))?\s*[:\-–—]?\s*)$/iu
+const STRONG_INGREDIENT = /^(?:\d+(?:[.,]\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])\s*(?:g|kg|mg|grams?|ml|l|liters?|oz|lbs?|pounds?|cups?|tbsp|tsp|tablespoons?|teaspoons?|cloves?|slices?|pieces?)\b/i
 const TITLE_HEADING = /^(?:recipe|dish|title)\s*:\s*(.{3,120})$/i
 const LIST_MARKER = /^\s*(?:[-*•·▪◦]\s*|\d{1,2}[.)]\s+)\s*/
 const DISCARD = /^(?:#.*|follow (?:me|us)|link in (?:my |our )?bio|save (?:this|for later)|(?:https?:\/\/|www\.)\S+)$/i
@@ -103,6 +108,12 @@ export function parseSocialRecipeCaption(value) {
       if (match[1] && /[\p{L}\p{N}]/u.test(match[1])) ingredients.push(withoutListMarker(match[1]))
       continue
     }
+    // Recipe component headings may appear before or after cooking directions.
+    // Recognize only short standalone titles, not arbitrary prose.
+    if (INGREDIENT_PART_HEADING.test(headingLine)) {
+      section = 'ingredients'
+      continue
+    }
     match = STEP_HEADING.exec(headingLine)
     if (match) {
       section = 'instructions'
@@ -126,9 +137,17 @@ export function parseSocialRecipeCaption(value) {
       title = line.replace(/^["'“”]+|["'“”]+$/g, '').trim()
     }
   }
-  // Captions sometimes omit headings; recover only explicitly bulleted ingredients
-  // and numbered cooking actions, never facts inferred from the video appearance.
-  if (!ingredients.length) ingredients.push(...extractCaptionFallback(lines, 'ingredients'))
+  // Always recover *clearly measured* bulleted ingredients even when another
+  // section was already parsed. The previous all-or-nothing fallback silently
+  // omitted separate ingredient groups after an Instructions heading.
+  const normalized = text => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  const seen = new Set(ingredients.map(normalized))
+  for (const item of extractCaptionFallback(lines, 'ingredients')) {
+    const key = normalized(item)
+    if (seen.has(key) || !STRONG_INGREDIENT.test(item) || ingredients.length >= 80) continue
+    ingredients.push(item)
+    seen.add(key)
+  }
   if (!steps.length) steps.push(...extractCaptionFallback(lines, 'instructions'))
   // Preserve creator-supplied serving count and nutrition without fabricating values.
   const servingsLabel = /\b(?:Makes|Serves)\s+(\d{1,3})\s+Servings?\b/i.exec(value)
