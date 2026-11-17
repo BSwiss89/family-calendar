@@ -66,6 +66,69 @@ test('only clearly labeled caption sections become recipe fields, original quant
   assert.equal(draft.suppliedCaption, true)
 })
 
+
+test('iPhone regression: social introduction is not title; all unbulleted measured ingredients stay intact', () => {
+  const caption = [
+    'This was 10 out of 10! We made a huge batch so if you want leftovers, try this!',
+    '',
+    'Caramelized Onion and Garlic Chicken Pasta',
+    '',
+    '3 large yellow onions, thinly sliced',
+    '2 heads garlic, halved crosswise',
+    '4 chicken breasts',
+    '1/3 cup olive oil, divided',
+    'Salt and freshly ground black pepper',
+    '2 tsp dried Italian seasoning',
+    '2 tsp paprika',
+    '1/2 tsp red pepper flakes, optional',
+    '2 lb pasta',
+    '1 cup heavy cream',
+    '1 cup freshly grated Parmesan, plus more for serving',
+    'Fresh parsley, chopped, for serving',
+    '1-2 cup reserved pasta water',
+    '',
+    'Instructions',
+    'Roast the onions and garlic: Heat oven to 400°F. In a large baking dish, toss the sliced onions with 2-3 tablespoons olive oil, salt and pepper.',
+    'Add the chicken: Season the chicken with the remaining olive oil, salt, pepper, Italian seasoning and red pepper flakes.',
+    'Cook the pasta: While the chicken bakes, cook the pasta in salted water until al dente.',
+    'Make the sauce: Mash the garlic into the onions, then stir in the cream, Parmesan and ½ cup pasta water.',
+  ].join('\n')
+  const result = parseSocialRecipeCaption(caption)
+  assert.equal(result.name, 'Caramelized Onion and Garlic Chicken Pasta')
+  const expected = [
+    '3 large yellow onions, thinly sliced',
+    '2 heads garlic, halved crosswise',
+    '4 chicken breasts',
+    '1/3 cup olive oil, divided',
+    'Salt and freshly ground black pepper',
+    '2 tsp dried Italian seasoning',
+    '2 tsp paprika',
+    '1/2 tsp red pepper flakes, optional',
+    '2 lb pasta',
+    '1 cup heavy cream',
+    '1 cup freshly grated Parmesan, plus more for serving',
+    'Fresh parsley, chopped, for serving',
+    '1-2 cup reserved pasta water',
+  ]
+  assert.deepEqual(result.ingredients.split('\n'), expected)
+  assert.equal(result.ingredientParts.length, expected.length)
+  assert.equal(result.instructions.split('\n').length, 4)
+  assert.doesNotMatch(result.name, /this was 10 out of 10/i)
+  assert.doesNotMatch(result.ingredients, /Roast the onions|Instructions/i)
+})
+
+test('not every numeral or unlabelled promotional paragraph is an ingredient list', () => {
+  const result = parseSocialRecipeCaption([
+    'This was 10 out of 10! We made 4 huge batches and shared with friends.',
+    'I made 3 mistakes on my first attempt.',
+    'Save this for later.',
+    'Instructions',
+    '1. See the original full recipe link.',
+  ].join('\n'))
+  assert.equal(result.name, '')
+  assert.equal(result.ingredients, '')
+})
+
 test('Jalal-style Instagram captions with emoji headings preserve quantities, servings and macros', () => {
   const caption = [
     'Creamy Peri Peri Chicken Pasta🍗🧀🍝',
