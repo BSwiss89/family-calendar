@@ -114,7 +114,7 @@ try {
     if (Test-Path -LiteralPath $backup) { throw 'Task backup name collision.' }
     [System.IO.File]::WriteAllText($backup,$before.XmlText,[System.Text.UTF8Encoding]::new($false))
     # schtasks /change /ri changes an existing repetition interval without replacing its principal.
-    # Do not supply /RU, /RP, passwords, a new action, or any task registration operation.
+    # Never supply credentials, a different principal, a new action, or task registration.
     $changeError = $null
     try {
         $null = & schtasks.exe /Change /TN $taskName /RI 1 2>&1
@@ -124,6 +124,12 @@ try {
     }
     $after = Get-TaskSnapshot
     $safe = Same-ExceptInterval $before $after
+    if ($changeError -and $after.Interval -eq 'PT1M') {
+        if (!(Test-Path -LiteralPath $hold)) {
+            Set-Content -LiteralPath $hold -Value "Windows reported schedule update failure even though it now polls every minute. Inspect task and backup $backup before resuming releases." -Encoding UTF8
+        }
+        throw 'POLLING_CHANGE_HOLD: Ambiguous Windows update result requires manual review.'
+    }
     if ($changeError -or !$safe -or
         $after.Interval -notin @('PT15M','PT1M') -or
         (Get-FileHash -LiteralPath $runner -Algorithm SHA256).Hash -ne $runnerHash -or
