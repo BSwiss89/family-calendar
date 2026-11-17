@@ -1556,6 +1556,7 @@ type SocialVideoRecipePreview = {
     durationSeconds: number
     speechServiceConfigured: boolean
     audioSegmentsChecked: number
+    audioSegmentsResponded: number
     audioSegmentsWithText: number
     framesSampled: number
     visionResponded: boolean
@@ -23347,7 +23348,7 @@ resetMealPlannerScroll()
                       <strong>Video backup check</strong>
                       <span>{socialRecipeVideoReport.status}</span>
                       <small>Audio: {socialRecipeVideoReport.speechServiceConfigured
-                        ? `${socialRecipeVideoReport.audioSegmentsWithText} of ${socialRecipeVideoReport.audioSegmentsChecked} sections had recognizable speech`
+                        ? `${socialRecipeVideoReport.audioSegmentsResponded} of ${socialRecipeVideoReport.audioSegmentsChecked} audio sections processed by local STT; ${socialRecipeVideoReport.audioSegmentsWithText} contained recognized speech`
                         : 'Local speech recognition unavailable'}</small>
                       <small>Video: {socialRecipeVideoReport.framesSampled} frames sampled; vision model {socialRecipeVideoReport.visionResponded ? 'responded' : 'did not return a result'}</small>
                       <small>Recipe comparison: {socialRecipeVideoReport.comparisonCompleted
