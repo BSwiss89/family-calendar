@@ -5,7 +5,7 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import sharp from 'sharp'
 import path from 'node:path'
-import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
+import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
 const fb = 'https://www.facebook.com/share/r/1A8Sz2b3cf/?mibextid=tracked'
@@ -867,4 +867,65 @@ test('video preview has authentication, no database writes and explicit Save Rec
   assert.ok(client.includes('setRecipeNotes(current => !current.trim() || current === previous ? notes : current)'))
   assert.ok(client.includes('onSubmit={saveRecipe}'))
   assert.ok(client.includes('Save Recipe'))
+})
+
+
+test('video sampling covers ordered cooking steps beyond four widely spaced frames', () => {
+  const short = socialVideoFrameTimes(10)
+  const medium = socialVideoFrameTimes(24)
+  const longer = socialVideoFrameTimes(72)
+  assert.equal(short.length, 4)
+  assert.equal(medium.length, 6)
+  assert.equal(longer.length, 8)
+  assert.ok(longer.every((time, i) => time > 0 && time < 72 &&
+    (i === 0 || time > longer[i - 1])))
+  assert.ok(longer[0] < 5 && longer.at(-1) > 67)
+  assert.deepEqual(socialVideoFrameTimes(0), [])
+  assert.deepEqual(socialVideoFrameTimes(Infinity), [])
+})
+
+test('video report distinguishes STT service failures, genuine silence and visual recipe steps', async () => {
+  const result = await analyzePublicSocialVideo({
+    url: ig, videoBuffer: Buffer.alloc(300), videoMime: 'video/mp4',
+  }, {
+    stt: { url: 'http://127.0.0.1:13981/transcribe', token: 'private-test-only' },
+    captionReader: async () => 'Recipe: Chicken Pasta\nIngredients:\n- 1 tsp olive oil',
+    durationReader: async () => 72,
+    transcriber: async (_filename, _folder, start) => {
+      if (start === 0) return { text: '', responded: false, reason: 'stt-timeout' }
+      if (start === 18) return { text: '', responded: true, reason: 'no-speech' }
+      return { text: 'Add olive oil and mix well.', responded: true, reason: 'recognized' }
+    },
+    visualReader: async () => ({
+      text: 'Video around 10-16 seconds: Olive Oil & Mix Well.',
+      framesSampled: 8, visionResponded: true,
+    }),
+    extractor: async ({ transcript, visibleText }) => {
+      assert.match(transcript, /mix well/i)
+      assert.match(visibleText, /Olive Oil/)
+      return { name: 'Chicken Pasta', ingredients: [], instructions: [],
+        videoIngredientsAdded: [], videoInstructionsAdded: ['Add olive oil and mix well.'] }
+    },
+    coverReader: async () => null,
+  })
+  assert.equal(result.videoReport.audioSegmentsChecked, 4)
+  assert.equal(result.videoReport.audioSegmentsResponded, 3)
+  assert.equal(result.videoReport.audioSegmentsWithText, 2)
+  assert.equal(result.videoReport.audioSegmentsSilent, 1)
+  assert.equal(result.videoReport.audioSegmentsFailed, 1)
+  assert.deepEqual(result.videoReport.audioFailureReasons, ['stt-timeout'])
+  assert.equal(result.videoReport.framesSampled, 8)
+  assert.equal(result.videoReport.visionResponded, true)
+  assert.match(result.instructions, /Add olive oil and mix well/)
+  assert.match(result.notice, /speech transcription failed in 1 audio section/i)
+  assert.ok(!Object.keys(result.videoReport).some(key => /transcript|speechExcerpt|visionExcerpt/.test(key)))
+})
+
+test('TEST UI reports actual failed STT requests rather than saying zero of four were processed', () => {
+  const client = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.match(client, /audioSegmentsFailed\s*\?\?\s*0/)
+  assert.match(client, /audioSegmentsSilent\s*\?\?\s*0/)
+  assert.match(client, /returned an STT response/)
+  assert.match(client, /Additional visual recipe details recovered/)
+  assert.doesNotMatch(client, /audio sections processed by local STT/)
 })
