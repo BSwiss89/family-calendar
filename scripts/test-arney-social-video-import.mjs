@@ -292,6 +292,7 @@ test('video report distinguishes actual recognized audio, visual response and ca
   assert.equal(captionOnly.videoReport.audioSegmentsChecked, 0)
   assert.equal(captionOnly.videoReport.audioSegmentsResponded, 0)
   assert.equal(captionOnly.videoReport.framesSampled, 0)
+  assert.equal(captionOnly.videoReport.comparisonCompleted, false)
   assert.match(captionOnly.videoReport.status, /Caption only/)
   assert.equal(captionOnly.photoDataUrl, null)
 })
