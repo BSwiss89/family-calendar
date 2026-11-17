@@ -879,6 +879,9 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
         ? 'Video opened, but no usable speech or on-screen text was recovered.'
         : !draft.ingredients || !draft.instructions
           ? 'Audio/video checked, but the recipe is incomplete. Do not save until reviewed.'
+          : audioSegmentsFailed > 0
+            ? 'Visual video details checked, but local speech transcription failed in ' +
+              audioSegmentsFailed + ' audio section(s). Review missing audio evidence.'
           : !visionResponded
             ? 'Spoken recipe details recovered; visual cross-check unavailable.'
             : structured
