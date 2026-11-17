@@ -97,6 +97,46 @@ test('iPhone regression: full creator-pinned gochujang chicken comment becomes 1
   assert.doesNotMatch(result.ingredients, /Line an air fryer|While that’s going|Chop chicken/)
 })
 
+test('iPhone Sesame Chicken Rice Bowls caption: 12 ingredients, ten bowls, four macros and reheating notes', () => {
+  const caption = [
+    'Sesame Chicken Rice Bowls',
+    '(Makes 10 Bowls)',
+    '',
+    'Macros Per Bowl:',
+    '- 400 Calories',
+    '- 45g Protein',
+    '- 39g Carbs',
+    '- 5g Fat',
+    '',
+    'Ingredients:',
+    '- 60oz Ground Chicken Breast (1700g)',
+    '- 0.75 Cup Soy Sauce (180g)',
+    '- 0.5 Cup No Sugar Added Ketchup (120g)',
+    '- 0.25 Cup Honey (80g)',
+    '- 0.5 Tbsp Sesame Oil (8g)',
+    '- 2 Tbsps Rice Vinegar (30g)',
+    '- 2 Tbsps Minced Garlic (20g)',
+    '- 1 Tbsp Red Pepper Flakes (Optional) (8g)',
+    '- Fresh Green Onions (60g)',
+    '- Sesame Seeds (20g)',
+    '- 2 Cups Dry White Rice (360g)',
+    '- 3 Cups Chicken Bone Broth (720g)',
+    '',
+    'Additional Notes: To reheat the meal preps from frozen, follow these steps. Add a few tablespoons of water to the container, cover with a wet paper towel, and microwave for around 5-6 minutes.',
+  ].join('\n')
+  const result = parseSocialRecipeCaption(caption)
+  assert.equal(result.name, 'Sesame Chicken Rice Bowls')
+  assert.equal(result.servings, '10')
+  assert.equal(result.ingredients.split('\n').length, 12)
+  assert.match(result.ingredients, /60oz Ground Chicken Breast \(1700g\)/)
+  assert.match(result.ingredients, /Fresh Green Onions \(60g\)/)
+  assert.match(result.ingredients, /3 Cups Chicken Bone Broth \(720g\)/)
+  assert.doesNotMatch(result.ingredients, /Calories|Protein|Carbs|5g Fat|Additional Notes|microwave/i)
+  assert.equal(result.instructions, '')
+  assert.match(result.notes, /Creator-reported macros per bowl: 400 Calories \| 45g Protein \| 39g Carbs \| 5g Fat/)
+  assert.match(result.notes, /Creator notes: To reheat.*microwave for around 5-6 minutes/i)
+})
+
 test('only clearly labeled caption sections become recipe fields, original quantities retained', () => {
   const caption = [
     'Creamy Garlic Chicken',
