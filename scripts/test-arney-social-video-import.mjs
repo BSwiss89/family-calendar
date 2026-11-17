@@ -7,7 +7,7 @@ import sharp from 'sharp'
 import path from 'node:path'
 import { timelineSamplingPlan, collectDistinctScreenText, selectTimelineVisualIndices, compactRecipeScreenEvidence } from '../Server/arney-video-timeline-ocr.mjs'
 import { refineSocialRecipeInstructions, filterRealRecipeConflicts } from '../Server/arney-recipe-step-quality.mjs'
-import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, extractOnScreenCookingSettings, classifyPublicVideoRetrievalFailure, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
+import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, extractOnScreenCookingSettings, classifyPublicVideoRetrievalFailure, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, postLocalWhisperAudio, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
 const fb = 'https://www.facebook.com/share/r/1A8Sz2b3cf/?mibextid=tracked'
@@ -1296,4 +1296,61 @@ test('caption missing a video-only detail is not mislabeled an evidence conflict
     'No conflict in time; video adds an explicit flip.',
     'Caption says 15 minutes but video says 35 minutes.',
   ]),['Caption says 15 minutes but video says 35 minutes.'])
+})
+
+
+test('local Whisper retries a brief transport failure once with original authenticated audio', async () => {
+  const calls=[]
+  const result=await postLocalWhisperAudio({
+    url:'http://127.0.0.1:13981/transcribe',token:'t'.repeat(48),
+  },Buffer.from('test-private-audio'),18,{
+    fetchImpl:async (url,options)=>{
+      calls.push({url,headers:options.headers,body:options.body})
+      if(calls.length===1)throw new Error('connect ECONNREFUSED')
+      return new Response(JSON.stringify({transcript:'Season the chicken'}),{status:200})
+    },
+    delay:async()=>{},
+  })
+  assert.equal(result.status,200)
+  assert.equal(calls.length,2)
+  assert.equal(calls[0].url,'http://127.0.0.1:13981/transcribe')
+  assert.equal(calls[0].headers.Authorization,'Bearer '+'t'.repeat(48))
+  assert.equal(calls[0].body,calls[1].body)
+})
+
+test('Whisper network retry never duplicates completed requests or timeout work', async () => {
+  let calls=0
+  const stt={url:'http://127.0.0.1:13981/transcribe',token:'x'.repeat(48)}
+  const payload=Buffer.alloc(100)
+  const unauthorized=await postLocalWhisperAudio(stt,payload,5,{
+    fetchImpl:async()=>{calls++;return new Response('{}',{status:401})},
+    delay:async()=>{throw Error('Must not retry completed HTTP request')},
+  })
+  assert.equal(unauthorized.status,401)
+  assert.equal(calls,1)
+  let timerCalls=0
+  await assert.rejects(postLocalWhisperAudio(stt,payload,5,{
+    fetchImpl:async()=>{timerCalls++;const e=new Error('timeout');e.name='TimeoutError';throw e},
+    delay:async()=>{throw Error('Never retry a timeout')},
+  }),{name:'TimeoutError'})
+  assert.equal(timerCalls,1)
+  let failedCalls=0
+  await assert.rejects(postLocalWhisperAudio(stt,payload,5,{
+    fetchImpl:async()=>{failedCalls++;throw Error('ECONNREFUSED')},
+    delay:async()=>{},
+  }),/ECONNREFUSED/)
+  assert.equal(failedCalls,2)
+})
+
+test('optional STT watchdog stays isolated to the existing scheduled task and never edits LIVE', () => {
+  const watcher=readFileSync(new URL('./monitor-arney-local-stt-test.ps1',import.meta.url),'utf8')
+  const installer=readFileSync(new URL('./install-arney-local-stt-recovery-test.ps1',import.meta.url),'utf8')
+  assert.match(watcher, /Start-ScheduledTask -TaskName \$taskName/)
+  assert.match(watcher, /LocalAddress -ne '127\.0\.0\.1'/)
+  assert.match(watcher, /'Ready'/)
+  assert.doesNotMatch(watcher,/Stop-Process|Stop-ScheduledTask|Unregister-ScheduledTask|C:\\ProgramData\\FamilyCalendar\\SecureLive/i)
+  assert.match(installer, /RepetitionInterval \(New-TimeSpan -Minutes 5\)/)
+  assert.match(installer, /if \(!\$Apply\)/)
+  assert.match(installer,/New-ScheduledTaskPrincipal -UserId 'SYSTEM'/)
+  assert.doesNotMatch(installer,/Stop-ScheduledTask|Stop-Process|Restart-Computer|Restart-Service/)
 })
