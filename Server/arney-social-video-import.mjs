@@ -80,9 +80,10 @@ export function selectPublicCreatorRecipeComment(metadata) {
   const verified = checked.map(comment => {
     if (!comment || typeof comment !== 'object' || Array.isArray(comment)) return null
     const text = typeof comment.text === 'string' ? comment.text.trim().slice(0, 6000) : ''
+    // Display-name text is user-editable and cannot authenticate authorship.
+    const authorId = normalizedAccount(comment.author_id)
     const isCreator = comment.author_is_uploader === true ||
-      (uploaderIds.length > 0 && [comment.author_id, comment.author]
-        .map(normalizedAccount).some(id => id && uploaderIds.includes(id)))
+      Boolean(authorId && uploaderIds.includes(authorId))
     if (!isCreator || text.length < 10 || !recipeCommentLikely(text)) return null
     return {
       text,
