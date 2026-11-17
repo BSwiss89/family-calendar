@@ -524,7 +524,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
     let draft = groundedVideoDraft({ caption: recipeCaption, transcript, visibleText, structured })
     const videoEvidencePresent = Boolean(transcript.trim() || visibleText.trim())
     let speechRecoveryUsed = false
-    if (videoEvidencePresent && (!draft.name || draft.missing.length)) {
+    if (videoEvidencePresent && draft.missing.length) {
       progress('speech-recovery', 'Double-checking spoken ingredients and cooking steps…')
       let recovered = null
       try { recovered = await speechExtractor({ transcript, visibleText }) }
