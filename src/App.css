@@ -21680,3 +21680,13 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 .recipe-social-video-check strong{font-size:13px;line-height:1.35}
 .recipe-social-video-check span{font-size:13px;line-height:1.4}
 .recipe-social-video-check small{font-size:12px;line-height:1.4;color:#45665a}
+
+/* A partial video check must not look like a fully successful green result. */
+.recipe-social-video-check.recipe-social-video-check-partial {
+  border-color:#d4b781;
+  background:#fff9ed;
+  color:#5b4827;
+}
+.recipe-social-video-check.recipe-social-video-check-partial small {
+  color:#75613b;
+}
