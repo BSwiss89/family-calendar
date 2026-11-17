@@ -117,19 +117,21 @@ export async function buildSocialCoverPreview(folder, videoFilename = '', { grab
   const candidates = coverCandidates.map(name => ({
     filename: path.join(folder, name), source: 'Reel cover',
   }))
-  if (videoFilename) {
-    const frame = path.join(folder, 'recipe-cover-frame.jpg')
-    try {
-      if (typeof grabFrame === 'function') await grabFrame(videoFilename, frame)
-      else await run('ffmpeg', [
-        '-nostdin', '-loglevel', 'error', '-y', '-ss', '1', '-i', videoFilename,
-        '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '5', frame,
-      ], { timeoutMs: 12_000 })
-      candidates.push({ filename: frame, source: 'Video frame' })
-    } catch { /* A thumbnail is optional. */ }
-  }
+  if (videoFilename) candidates.push({
+    filename: path.join(folder, 'recipe-cover-frame.jpg'),
+    source: 'Video frame', needsFrame: true,
+  })
   for (const candidate of candidates) {
     try {
+      // Generating a frame is a fallback, not an obligatory step when the
+      // original Reel cover has already been retrieved.
+      if (candidate.needsFrame) {
+        if (typeof grabFrame === 'function') await grabFrame(videoFilename, candidate.filename)
+        else await run('ffmpeg', [
+          '-nostdin', '-loglevel', 'error', '-y', '-ss', '1', '-i', videoFilename,
+          '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '5', candidate.filename,
+        ], { timeoutMs: 12_000 })
+      }
       const stat = await fs.stat(candidate.filename)
       if (!stat.isFile() || stat.size < 100 || stat.size > MAX_COVER_INPUT_BYTES) continue
       const photo = sharp(candidate.filename, { limitInputPixels: 6_000_000 })
