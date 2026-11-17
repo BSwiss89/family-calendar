@@ -534,7 +534,12 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
       // The public video/comment extractors may offer no comments at all;
       // continue with caption and video without presenting a false success.
       try {
-        const publicResult = await commentReader(source.url, folder)
+        // Injected downloaders/caption readers in deterministic tests must not
+        // accidentally invoke yt-dlp or the internet from the default comment
+        // reader. Real TEST imports still perform the best-effort public lookup.
+        const useComments = commentReader !== readPublicCreatorComment ||
+          (captionReader === readPublicCaption && downloader === downloadPublicVideo)
+        const publicResult = useComments ? await commentReader(source.url, folder) : null
         if (publicResult?.creatorVerified && typeof publicResult.text === 'string' &&
             publicResult.text.trim()) {
           creatorComment = publicResult.text.trim().slice(0, 6000)
