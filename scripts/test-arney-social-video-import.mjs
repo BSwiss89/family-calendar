@@ -6,6 +6,7 @@ import os from 'node:os'
 import sharp from 'sharp'
 import path from 'node:path'
 import { timelineSamplingPlan, collectDistinctScreenText, selectTimelineVisualIndices, compactRecipeScreenEvidence } from '../Server/arney-video-timeline-ocr.mjs'
+import { refineSocialRecipeInstructions, filterRealRecipeConflicts } from '../Server/arney-recipe-step-quality.mjs'
 import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, extractOnScreenCookingSettings, classifyPublicVideoRetrievalFailure, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
@@ -1207,4 +1208,92 @@ test('OCR text summary cap is not reported as a failed frame scan', async () => 
   assert.match(result.notice,/noisy text variations were condensed/i)
   assert.doesNotMatch(result.notice,/later video text may be missing/i)
   assert.doesNotMatch(JSON.stringify(result.videoReport),/200C\/400F|22-25 Min/)
+})
+
+
+test('recipe instructions keep ingredient totals and split measured seasoning between chicken and onions', () => {
+  const ingredients='1.2kg chicken breast\n2 tsp Italian Herb Seasoning Mix, 2 tsp Smoked Paprika, 1 tsp Salt, 1.5 tsp Garlic Powder, 1.5 tsp Onion Powder\n1 tsp olive oil\n3 large brown onions\n1 whole garlic bulb'
+  const instructions=[
+    'Season chicken with half of the Italian Herb Seasoning Mix (2 tsp), Smoked Paprika (2 tsp), Garlic Powder (1.5 tsp), Onion Powder (1.5 tsp), and Salt (1 tsp). Mix well with olive oil (1 tsp).',
+    'Place chicken on a tray and bake at 200°C/400°F for 22-25 minutes, flipping halfway through.',
+    'Remove chicken from oven, set aside with paper towel underneath.',
+    'Add the remaining seasoning mix to the tray.',
+    'Add sliced brown onions (3 large) and tomato paste (100g) to the tray.',
+    'Cut the top off a whole garlic bulb, squeeze out the garlic cloves, and add them to the tray.',
+    'Spray onions and garlic with cooking oil.',
+    'Bake at 195°C/385°F for 45-50 minutes, stirring onions halfway through.',
+    'Add grated Parmesan (60g), cream cheese (140g) and parsley.',
+    'Bake chicken at **200°C/400°F for 22-25 minutes**, flipping halfway through.',
+    'Oven bake at 200°C / 400°F for 22–25 minutes; flip halfway.',
+    'Oven bake at 195°C / 385°F for 45–50 minutes.',
+  ].join('\n')
+  const recipe=refineSocialRecipeInstructions({ingredients,instructions})
+  const steps=recipe.split('\n')
+  assert.match(steps[0],/Use half to season the chicken.*reserve the other half for the onions/i)
+  assert.doesNotMatch(steps[0],/paprika \(2 tsp\)|Garlic Powder \(1.5 tsp\)/i)
+  assert.match(ingredients,/2 tsp Smoked Paprika/)
+  assert.match(ingredients,/1.5 tsp Garlic Powder/)
+  const cut=steps.findIndex(x=>/Cut the top off the whole garlic bulb/i.test(x))
+  const bake=steps.findIndex(x=>/Bake at 195°C/i.test(x))
+  const squeeze=steps.findIndex(x=>/squeeze the roasted garlic cloves/i.test(x))
+  assert.ok(cut>=0 && bake>cut && squeeze>bake, recipe)
+  assert.ok(steps.findIndex(x=>/Add grated Parmesan/.test(x))>squeeze)
+  assert.equal((recipe.match(/200°C/g)||[]).length,1)
+  assert.equal((recipe.match(/195°C/g)||[]).length,1)
+  assert.doesNotMatch(recipe,/paper towel|oven bake at 200°C|oven bake at 195°C|\*\*/i)
+})
+
+test('recipe cleanup does not invent seasoning allocation or garlic movement in unrelated recipes', () => {
+  const unrelated=refineSocialRecipeInstructions({
+    ingredients:'3 cloves minced garlic\n1 onion\n2 tsp paprika',
+    instructions:'Squeeze the garlic into a pan.\nCook onion for 3 minutes.\nStir everything.',
+  })
+  assert.match(unrelated,/Squeeze the garlic into a pan/)
+  assert.doesNotMatch(unrelated,/whole garlic bulb|reserve the other half|roasted/)
+  assert.equal(refineSocialRecipeInstructions({ingredients:'chicken',instructions:''}),'')
+})
+
+test('real Reel video draft fixes garlic sequence while preserving parsed ingredient totals', () => {
+  const ingredients=[
+    '1.2KG Thinly Sliced Boneless & Skinless Chicken Breast (raw weight)',
+    '2 Tsp Italian Herb Seasoning Mix, 2 Tsp Smoked Paprika, 1 Tsp Salt, 1.5 Tsp Garlic Powder, 1.5 Tsp Onion Powder',
+    '1 Tsp Olive Oil',
+    '3 Large Sliced Brown Onions',
+    '100g Tomato Paste',
+    '1 Whole Garlic Bulb (Cut Top Off)',
+    '60g Freshly Grated Parmesan Cheese',
+    '140g Light Cream Cheese',
+    '480g Spiral Pasta',
+  ].join('\n')
+  const instructions=[
+    'Season chicken with half of the Italian Herb Seasoning Mix (2 tsp) and Smoked Paprika (2 tsp).',
+    'Bake chicken at 200°C/400°F for 22-25 minutes.',
+    'Add remaining seasoning mix to the tray.',
+    'Add sliced brown onions and tomato paste.',
+    'Cut the top off the whole garlic bulb, squeeze out the cloves and add them to the tray.',
+    'Bake onions at 195°C/385°F for 45-50 minutes.',
+    'Add 60g Parmesan, parsley, and 140g cream cheese.',
+    'Bake onions at **195°C/385°F for 45-50 minutes**.',
+  ]
+  const draft=groundedVideoDraft({
+    caption:'Creamy Caramelized Onion Chicken Pasta\nIngredients:\n'+ingredients,
+    visibleText:'On-screen OCR at 30s:\nOven Bake\n195C/385F\n45-50 Min',
+    structured:{instructions,videoInstructionsAdded:[],
+      conflicts:['Caption does not mention stirring onions halfway; video confirms it','No conflict in chicken bake time.']},
+  })
+  assert.match(draft.ingredients,/2 Tsp Smoked Paprika/i)
+  assert.match(draft.ingredients,/140g Light Cream Cheese/i)
+  const steps=draft.instructions.split('\n')
+  assert.ok(steps.findIndex(x=>/squeeze the roasted garlic cloves/i.test(x)) >
+    steps.findIndex(x=>/Bake onions at 195°C/i.test(x)))
+  assert.equal((draft.instructions.match(/195°C/g)||[]).length,1)
+  assert.equal(draft.conflicts.length,0)
+})
+
+test('caption missing a video-only detail is not mislabeled an evidence conflict', () => {
+  assert.deepEqual(filterRealRecipeConflicts([
+    'Caption does not specify the temperature, but video adds the bake setting.',
+    'No conflict in time; video adds an explicit flip.',
+    'Caption says 15 minutes but video says 35 minutes.',
+  ]),['Caption says 15 minutes but video says 35 minutes.'])
 })
