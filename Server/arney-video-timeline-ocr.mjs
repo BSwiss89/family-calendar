@@ -1,0 +1,178 @@
+// TEST-only OCR over a public video's complete timeline. No remote OCR, paid
+// service, browser cookies or permanent storage. All frame files live inside the
+// calling preview's private temporary directory and are deleted by its finally.
+import { spawn } from 'node:child_process'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import sharp from 'sharp'
+
+const MAX_FRAMES = 300
+const OCR_BUDGET_MS = 115_000
+
+export function timelineSamplingPlan(duration) {
+  if (!Number.isFinite(duration) || duration < 1 || duration > 600)
+    return { fps: 0, maxFrames: 0, plannedFrames: 0 }
+  // Short instructional Reels get two checks every second; longer clips are
+  // scanned across their entire duration at a bounded rate, never just the
+  // first minute. This is timeline sampling, not a claim to inspect every frame.
+  const fps = duration <= 120 ? 2 : duration <= 300 ? 1 : 0.5
+  return { fps, maxFrames: MAX_FRAMES,
+    plannedFrames: Math.min(MAX_FRAMES, Math.ceil(duration * fps)) }
+}
+
+export function normalizeScreenText(text = '') {
+  return String(text).toLowerCase().normalize('NFKC')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function sameScreenText(first, second) {
+  const a = normalizeScreenText(first), b = normalizeScreenText(second)
+  if (!a || !b) return false
+  if (a === b) return true
+  // Numbers are especially important for recipe text. A changed cooking
+  // time or oven temperature must never be discarded as a "near duplicate".
+  const numbers = text => (normalizeScreenText(text).match(/\d+/g) || []).join('|')
+  if (numbers(first) !== numbers(second)) return false
+  const wordsA = new Set(a.split(' ')), wordsB = new Set(b.split(' '))
+  const overlap = [...wordsA].filter(word => wordsB.has(word)).length
+  const similarity = overlap / Math.max(wordsA.size, wordsB.size)
+  return similarity >= 0.9 && Math.abs(a.length - b.length) < 16
+}
+
+export function collectDistinctScreenText(rows = [], maxEvents = 90) {
+  const events = []
+  for (const row of rows) {
+    const content = String(row?.text || '').replace(/\r/g, '')
+      .split('\n').map(line => line.replace(/\s+/g, ' ').trim())
+      .filter(line => line.length >= 3 && line.length < 165)
+      .slice(0, 16).join('\n').slice(0, 850)
+    if (!/[a-zA-Z]{2}/.test(content)) continue
+    if (events.length && sameScreenText(events.at(-1).text, content)) continue
+    events.push({ time: Number(row.time) || 0,
+      frameIndex: Number.isInteger(row.frameIndex) ? row.frameIndex : 0,
+      text: content })
+    if (events.length >= maxEvents) break
+  }
+  return events
+}
+
+export function selectTimelineVisualIndices(frameCount, events = [], maxImages = 16) {
+  if (!Number.isInteger(frameCount) || frameCount <= 0) return []
+  const count = Math.min(Math.max(1, maxImages), frameCount)
+  const picks = new Set()
+  const keyIndices = [...new Set(events.map(row => row.frameIndex)
+    .filter(i => Number.isInteger(i) && i >= 0 && i < frameCount))]
+  // Reserve four overview frames so the vision model also observes cooking
+  // actions that never appeared in OCR.
+  const eventLimit = Math.max(0, count - Math.min(4, count))
+  const evenly = (values, n) => Array.from({length:n}, (_,i) =>
+    values[Math.min(values.length - 1, Math.floor((i + 0.5) * values.length / n))])
+  if (keyIndices.length) for (const i of evenly(keyIndices,Math.min(eventLimit,keyIndices.length))) picks.add(i)
+  const overview = Array.from({length:frameCount}, (_,i)=>i)
+  for (const i of evenly(overview, Math.min(4,count))) picks.add(i)
+  for (const i of evenly(overview,count)) {
+    if (picks.size >= count) break
+    picks.add(i)
+  }
+  return [...picks].sort((a,b)=>a-b)
+}
+
+function tool(program, args, { timeoutMs = 20_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(program, args, {
+      shell: false, windowsHide: true, stdio: ['ignore','pipe','pipe'],
+    })
+    let stdout = '', stderr = '', ended = false, timedOut = false
+    const timer = setTimeout(() => { timedOut = true; child.kill() }, timeoutMs)
+    const finish = (error) => {
+      if (ended) return
+      ended = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve(stdout.trim())
+    }
+    child.on('error', () => finish(new Error('Local video tool unavailable.')))
+    child.stdout.on('data', data => { stdout = (stdout + String(data)).slice(-3500) })
+    child.stderr.on('data', data => { stderr = (stderr + String(data)).slice(-400) })
+    child.on('close', code => finish(code === 0 && !timedOut
+      ? null : new Error(timedOut ? 'Local video tool timeout.' : 'Local video tool failed.')))
+  })
+}
+
+async function tesseractCommand() {
+  const candidates = process.platform === 'win32'
+    ? [path.join(process.env.ProgramFiles || 'C:\\Program Files','Tesseract-OCR','tesseract.exe'),
+      'tesseract']
+    : ['tesseract']
+  for (const program of candidates) {
+    try {
+      if (path.isAbsolute(program)) await fs.access(program)
+      await tool(program,['--version'],{timeoutMs:4000})
+      return program
+    } catch { /* Optional local binary; visual Qwen fallback remains available. */ }
+  }
+  return ''
+}
+
+async function recognizeFrame(program, frame, output) {
+  // Upscale to improve legibility of thin overlay fonts; never write OCR data
+  // outside the private temp folder or send raw screen text to the browser.
+  try {
+    await sharp(frame, {limitInputPixels:5_000_000})
+      .resize({width:1280,withoutEnlargement:false})
+      .grayscale().normalize().sharpen()
+      .png().toFile(output)
+    return await tool(program,[output,'stdout','--psm','11','-l','eng'],{timeoutMs:5000})
+  } finally { await fs.rm(output,{force:true}).catch(()=>{}) }
+}
+
+export async function scanVideoTimeline(filename, folder, duration, { onProgress = null } = {}) {
+  const plan = timelineSamplingPlan(duration)
+  const result = {
+    frames: [], events: [], framesChecked: 0, ocrFramesRead: 0,
+    ocrScreensDetected: 0, ocrAvailable: false, ocrPartial: false,
+    plannedFrames: plan.plannedFrames,
+  }
+  if (!plan.fps) return result
+  const scanDir = path.join(folder,'timeline-scan')
+  await fs.mkdir(scanDir,{recursive:true})
+  const output = path.join(scanDir,'frame-%05d.jpg')
+  try {
+    await tool('ffmpeg',[
+      '-nostdin','-loglevel','error','-y','-i',filename,
+      '-vf','fps='+String(plan.fps)+',scale=960:-2','-q:v','5',
+      '-frames:v',String(plan.maxFrames),output,
+    ],{timeoutMs:90_000})
+  } catch { return result }
+  const files = (await fs.readdir(scanDir)).filter(name=>/^frame-\d{5}\.jpg$/.test(name)).sort()
+  result.frames = files.slice(0,MAX_FRAMES).map((name,index)=>({
+    filename:path.join(scanDir,name),index,time:Number(((index+0.5)/plan.fps).toFixed(2)),
+  }))
+  result.framesChecked = result.frames.length
+  if (!result.frames.length) return result
+  if (typeof onProgress==='function') onProgress('Checking '+result.framesChecked+' timeline frames for on-screen recipe text…')
+  const ocr = await tesseractCommand()
+  if (!ocr) return result
+  result.ocrAvailable = true
+  const started = Date.now()
+  const rows = []
+  const preprocessed = path.join(scanDir,'ocr-working.png')
+  for (const frame of result.frames) {
+    if (Date.now()-started > OCR_BUDGET_MS) {
+      result.ocrPartial = true
+      break
+    }
+    result.ocrFramesRead++
+    try {
+      const text = await recognizeFrame(ocr,frame.filename,preprocessed)
+      rows.push({time:frame.time,frameIndex:frame.index,text})
+    } catch { /* Unreadable frame is not evidence of missing recipe text. */ }
+    if (typeof onProgress==='function' &&
+        (result.ocrFramesRead % 40 === 0 || result.ocrFramesRead === result.frames.length))
+      onProgress('Reading video text ('+result.ocrFramesRead+' of '+result.frames.length+' timeline frames)…')
+  }
+  result.ocrPartial ||= result.ocrFramesRead < result.frames.length
+  result.events = collectDistinctScreenText(rows)
+  result.ocrScreensDetected = result.events.length
+  return result
+}
