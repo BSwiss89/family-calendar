@@ -355,6 +355,36 @@ async function inspectDuration(filename) {
   return duration
 }
 
+// A small bounded transport retry helps with laptop resume/network-service
+// startup races. Does not try to bypass an unavailable or unauthorized service.
+// A permanently stopped scheduled STT task is an OS issue handled separately.
+export async function postLocalWhisperAudio(stt, bytes, seconds, {
+  fetchImpl = fetch, delay = ms => new Promise(resolve => setTimeout(resolve, ms)),
+} = {}) {
+  if (!stt || typeof stt.url !== 'string' || typeof stt.token !== 'string')
+    throw new TypeError('Local STT connection is not configured.')
+  for (let attempt=0;attempt<2;attempt++) {
+    try {
+      return await fetchImpl(stt.url,{
+        method:'POST',
+        headers:{
+          Authorization:'Bearer '+stt.token,
+          'Content-Type':'audio/wav',
+          'Content-Length':String(bytes.length),
+          'X-Arney-Duration-Ms':String(Math.round(seconds*1000)),
+        },
+        body:bytes, signal:AbortSignal.timeout(40_000),
+      })
+    } catch (error) {
+      // Never repeat work that may have reached the model. Only network
+      // failures are retried, not a service timeout or completed response.
+      if (attempt===1 || error?.name==='TimeoutError' ||
+          error?.name==='AbortError') throw error
+      await delay(1000)
+    }
+  }
+}
+
 async function transcribeClip(filename, folder, start, seconds, stt) {
   const audio = path.join(folder, 'segment.wav')
   try {
@@ -372,18 +402,9 @@ async function transcribeClip(filename, folder, start, seconds, stt) {
       return { text: '', responded: false, reason: 'invalid-audio' }
     if (!stt || typeof stt.url !== 'string' || typeof stt.token !== 'string')
       return { text: '', responded: false, reason: 'stt-not-configured' }
-    // Laptop CPU Whisper can need longer than 16 seconds for an 18-second clip.
-    const result = await fetch(stt.url, {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + stt.token,
-        'Content-Type': 'audio/wav',
-        'Content-Length': String(bytes.length),
-        'X-Arney-Duration-Ms': String(Math.round(seconds * 1000)),
-      },
-      body: bytes,
-      signal: AbortSignal.timeout(40_000),
-    })
+    // Recover a brief local transport interruption once; persistent STT
+    // outage is reported honestly and must be repaired by the OS watchdog.
+    const result = await postLocalWhisperAudio(stt, bytes, seconds)
     // 422 means the service successfully heard the clip but recognized no
     // speech. Do not confuse silence/music with network or service failures.
     if (result.status === 422)
