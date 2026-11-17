@@ -71,6 +71,53 @@ export function collectDistinctScreenText(rows = [], maxEvents = 90) {
   return [...kept].sort((a,b)=>a-b).map(index=>events[index])
 }
 
+// Condense repeated/noisy OCR into a chronological, ingredient-and-cooking
+// focused evidence stream. Unlike raw per-frame OCR, this fits the local model
+// input without discarding the entire second half of the Reel.
+export function compactRecipeScreenEvidence(events = [], maxChars = 10_500) {
+  const cue = /\b(?:oven|bake|roast|preheat|grill|fry|cook|boil|simmer|mix|stir|whisk|flip|turn|halfway|add|pour|combine|drain|chop|slice|cut|squeeze|serve|spray|line|season|toss|marinate|cream|pasta|rice|chicken|beef|pork|onion|garlic|parmesan|cheese|butter|oil|sauce|tomato|flour|milk|water|salt|pepper|paprika|seasoning|spice|parsley|topping|ingredients?|instructions?|minutes?|mins?|seconds?|grams?|tsp|tbsp|cups?)\b|\b\d+(?:[.,]\d+)?\s*(?:g|kg|ml|oz|lb|°?\s*[CF])\b/i
+  const selected = []
+  for (const event of events) {
+    const lines = String(event.text||'').split('\n')
+      .map(x=>x.replace(/\s+/g,' ').trim())
+      .filter(x=>x.length>=4 && x.length<=120 && cue.test(x) &&
+        (x.match(/[a-zA-Z]/g)||[]).length>=3)
+      .slice(0,8)
+    if (!lines.length) continue
+    const text = lines.join('; ').slice(0,240)
+    const normalized = normalizeScreenText(text)
+    if (selected.length && selected.at(-1).key===normalized) continue
+    const priority = /\b(?:oven|bake|roast)\b|[12]\d{2}\s*°?\s*C|\b\d+\s*[-–]\s*\d+\s*min/i.test(text)
+      ? 2 : /\b\d+(?:[.,]\d+)?\s*(?:g|kg|ml|oz|lb|tsp|tbsp|cups?)\b/i.test(text) ? 1 : 0
+    selected.push({time:event.time,key:normalized,text,priority})
+  }
+  if (!selected.length) return ''
+  // Reserve space for measured actions and sample the rest across the entire
+  // timeline. Never let dozens of noisy early frames hide late instructions.
+  const maxEvents=Math.min(70,selected.length)
+  const weighted=selected.map((item,index)=>({index,priority:item.priority}))
+  const measured=weighted.filter(item=>item.priority>0)
+  const sample=(values,n)=> n<=0?[]:Array.from({length:n},(_,i)=>
+    values[Math.min(values.length-1,Math.floor((i+0.5)*values.length/n))])
+  const kept=new Set(sample(measured,Math.min(35,measured.length,maxEvents)).map(x=>x.index))
+  for(const item of sample(weighted,maxEvents)) {
+    if(kept.size>=maxEvents)break
+    kept.add(item.index)
+  }
+  for(const item of weighted) {
+    if(kept.size>=maxEvents)break
+    kept.add(item.index)
+  }
+  let output=''
+  for(const index of [...kept].sort((a,b)=>a-b)) {
+    const item=selected[index]
+    const line='On-screen OCR at '+item.time+'s:\n'+item.text+'\n'
+    if(output.length+line.length>maxChars)continue
+    output+=line
+  }
+  return output.trim()
+}
+
 export function selectTimelineVisualIndices(frameCount, events = [], maxImages = 16) {
   if (!Number.isInteger(frameCount) || frameCount <= 0) return []
   const count = Math.min(Math.max(1, maxImages), frameCount)
@@ -158,7 +205,8 @@ export async function scanVideoTimeline(filename, folder, duration, { onProgress
   const plan = timelineSamplingPlan(duration)
   const result = {
     frames: [], events: [], framesChecked: 0, ocrFramesRead: 0,
-    ocrScreensDetected: 0, ocrAvailable: false, ocrPartial: false,
+    ocrScreensDetected: 0, ocrEventsRetained: 0, ocrEventsCapped: false,
+    ocrAvailable: false, ocrPartial: false,
     plannedFrames: plan.plannedFrames,
   }
   if (!plan.fps) return result
@@ -201,8 +249,11 @@ export async function scanVideoTimeline(filename, folder, duration, { onProgress
   }
   result.ocrPartial ||= result.ocrFramesRead < result.frames.length
   const allDistinct = collectDistinctScreenText(rows, MAX_FRAMES)
-  result.ocrPartial ||= allDistinct.length > 90
   result.events = collectDistinctScreenText(rows)
-  result.ocrScreensDetected = result.events.length
+  // 'partial' means frames were actually skipped due to timeout, not merely
+  // that noisy OCR variants were condensed for the local model.
+  result.ocrScreensDetected = allDistinct.length
+  result.ocrEventsRetained = result.events.length
+  result.ocrEventsCapped = allDistinct.length > result.events.length
   return result
 }
