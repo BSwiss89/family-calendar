@@ -1550,6 +1550,14 @@ type SocialVideoRecipePreview = {
   notice: string
   photoDataUrl?: string | null
   photoSource?: string
+  commentReport?: {
+    status: string
+    source: 'creator-pinned' | 'creator-comment' | 'pasted' | 'unavailable'
+    used: boolean
+    creatorVerified: boolean
+    pinnedConfirmed: boolean
+    commentsExamined: number
+  }
   videoReport?: {
     status: string
     videoOpened: boolean
@@ -3780,6 +3788,9 @@ const [recipeFormOpen, setRecipeFormOpen] = useState(false)
 const [socialRecipeImportOpen, setSocialRecipeImportOpen] = useState(false)
 const [socialRecipeImportUrl, setSocialRecipeImportUrl] = useState('')
 const [socialRecipeImportCaption, setSocialRecipeImportCaption] = useState('')
+const [socialRecipeImportComment, setSocialRecipeImportComment] = useState('')
+const [socialRecipeCommentReport, setSocialRecipeCommentReport] =
+  useState<SocialVideoRecipePreview['commentReport']>(undefined)
 const [socialRecipeVideoFile, setSocialRecipeVideoFile] = useState<File | null>(null)
 const [socialRecipeImportLoading, setSocialRecipeImportLoading] = useState(false)
 const [socialRecipeImportStage, setSocialRecipeImportStage] = useState('')
@@ -7396,6 +7407,7 @@ async function previewSocialRecipeImport() {
   setSocialRecipeImportLoading(true)
   setSocialRecipeImportStage('Connecting to the public recipe link…')
   setSocialRecipeVideoReport(undefined)
+  setSocialRecipeCommentReport(undefined)
   setSocialRecipeImportError('')
   setSocialRecipeImportMessage('')
   // Live preview updates may arrive before the final AI comparison. Preserve
@@ -7451,6 +7463,7 @@ async function previewSocialRecipeImport() {
     applyDraft(data)
     setRecipeSourceUrl(data.sourceUrl)
     setSocialRecipeVideoReport(data.videoReport)
+    setSocialRecipeCommentReport(data.commentReport)
     void applyCover(data)
     setSocialRecipeImportMessage(data.platform + ' link attached. ' + data.notice)
   }
@@ -7458,6 +7471,7 @@ async function previewSocialRecipeImport() {
     const body = new FormData()
     body.append('url', socialRecipeImportUrl.trim())
     if (socialRecipeImportCaption.trim()) body.append('caption', socialRecipeImportCaption)
+    if (socialRecipeImportComment.trim()) body.append('comment', socialRecipeImportComment)
     if (socialRecipeVideoFile) body.append('video', socialRecipeVideoFile, socialRecipeVideoFile.name)
     const response = await fetch('/api/arney/social-recipe-video-preview', {
       method: 'POST',
@@ -7527,6 +7541,8 @@ function clearRecipeForm() {
   setSocialRecipeImportOpen(false)
   setSocialRecipeImportUrl('')
   setSocialRecipeImportCaption('')
+  setSocialRecipeImportComment('')
+  setSocialRecipeCommentReport(undefined)
   setSocialRecipeVideoFile(null)
   setSocialRecipeImportLoading(false)
   setSocialRecipeImportStage('')
@@ -23273,8 +23289,8 @@ resetMealPlannerScroll()
                 <div className="recipe-social-import-panel">
                   <p>
                     Paste a public Instagram or Facebook Reel link. Arney will retrieve the
-                    creator caption and always attempt video speech and on-screen analysis
-                    with our local laptop AI, even when the caption has a complete recipe.
+                    creator caption, check public creator comments, and attempt video speech
+                    and on-screen analysis using our local laptop AI.
                   </p>
                   <label className="event-field">
                     Instagram or Facebook post link
@@ -23290,6 +23306,7 @@ resetMealPlannerScroll()
                         setSocialRecipeImportMessage('')
                         setSocialRecipeImportError('')
                         setSocialRecipeVideoReport(undefined)
+                        setSocialRecipeCommentReport(undefined)
                       }}
                     />
                   </label>
@@ -23308,6 +23325,21 @@ resetMealPlannerScroll()
                         }}
                       />
                       <small>Not needed for accessible public Reels. MP4, MOV or WebM up to 36 MB.</small>
+                    </label>
+                    <label className="event-field">
+                      Paste a creator's recipe comment (if Arney cannot access it)
+                      <textarea
+                        className="event-input recipe-social-import-caption"
+                        placeholder="Paste the creator's pinned ingredients or instructions here"
+                        value={socialRecipeImportComment}
+                        maxLength={6000}
+                        onChange={event => {
+                          setSocialRecipeImportComment(event.target.value)
+                          setSocialRecipeCommentReport(undefined)
+                          setSocialRecipeImportMessage('')
+                        }}
+                      />
+                      <small>Optional. Arney first tries public creator comments automatically. Pasted comments cannot be verified as the creator's.</small>
                     </label>
                     <label className="event-field">
                       Paste caption text
@@ -23343,6 +23375,11 @@ resetMealPlannerScroll()
                         <small>Ingredients, steps, and servings will fill in as they're verified.</small>
                       </span>
                     </div>
+                  )}
+                  {socialRecipeCommentReport && (
+                    <p className="recipe-social-import-status" role="status">
+                      <strong>Recipe comment check:</strong> {socialRecipeCommentReport.status}
+                    </p>
                   )}
                   {socialRecipeVideoReport && (
                     <div className={`recipe-social-video-check ${!socialRecipeVideoReport.videoOpened ||

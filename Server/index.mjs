@@ -5048,7 +5048,7 @@ if (socialVideoAllowedOnTest({
 })) {
   const videoUpload = multer({
     storage: multer.memoryStorage(),
-    limits: { files: 1, fields: 2, fileSize: 36 * 1024 * 1024 },
+    limits: { files: 1, fields: 3, fileSize: 36 * 1024 * 1024 },
     fileFilter(_request, file, callback) {
       callback(null, ['video/mp4', 'video/quicktime', 'video/webm'].includes(file.mimetype))
     },
@@ -5080,8 +5080,9 @@ if (socialVideoAllowedOnTest({
   }, async (request, response) => {
     const body = request.body
     if (!body || typeof body !== 'object' ||
-        Object.keys(body).some(key => !['url', 'caption'].includes(key)) ||
-        typeof body.url !== 'string' || (body.caption !== undefined && typeof body.caption !== 'string')) {
+        Object.keys(body).some(key => !['url', 'caption', 'comment'].includes(key)) ||
+        typeof body.url !== 'string' || (body.caption !== undefined && typeof body.caption !== 'string') ||
+        (body.comment !== undefined && typeof body.comment !== 'string')) {
       return response.status(400).json({ error: 'Paste one public Instagram or Facebook link.' })
     }
     if (videoProcessing) return response.status(503).json({ error: 'Arney is analyzing another video.' })
@@ -5108,7 +5109,7 @@ if (socialVideoAllowedOnTest({
         port: PORT, rootFolder: path.resolve(__dirname, '..'),
       })
       const draft = await analyzePublicSocialVideo({
-        url: body.url, caption: body.caption ?? '',
+        url: body.url, caption: body.caption ?? '', comment: body.comment ?? '',
         videoBuffer: request.file?.buffer ?? null,
         videoMime: request.file?.mimetype ?? '',
       }, {

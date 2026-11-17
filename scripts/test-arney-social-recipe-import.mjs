@@ -1,4 +1,5 @@
 import test from 'node:test'
+import { consolidateRecipeIngredientAmounts } from '../Server/arney-recipe-ingredient-aggregation.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
@@ -89,6 +90,139 @@ test('Jalal-style Instagram captions with emoji headings preserve quantities, se
   assert.doesNotMatch(result.ingredients, /Makes 8 Servings/)
   assert.doesNotMatch(result.ingredients, /Instructions/)
   assert.equal(result.instructions, 'Trim excess fat from the chicken thighs.\nBake at 200C / 400F for 22-25 minutes.')
+})
+
+test('all description ingredient sections survive sauce, toppings and garnish headings after cooking steps', () => {
+  const description = [
+    'High Protein Chicken Bowls',
+    'Ingredients:',
+    '- 500g chicken breast',
+    '- 200g cooked rice',
+    'Instructions:',
+    '1. Cook the chicken for 20 minutes.',
+    '2. Combine chicken and rice.',
+    'SAUCE INGREDIENTS:',
+    '• 2 tbsp mayonnaise',
+    '• 1 tbsp sweet chili sauce',
+    'For the garnish:',
+    '- scallions to taste',
+    'Method:',
+    '3. Drizzle sauce and add scallions.',
+  ].join('\n')
+  const draft = parseSocialRecipeCaption(description)
+  assert.equal(draft.name,'High Protein Chicken Bowls')
+  assert.deepEqual(draft.ingredients.split('\n'), [
+    '500g chicken breast',
+    '200g cooked rice',
+    '2 tbsp mayonnaise',
+    '1 tbsp sweet chili sauce',
+    'scallions to taste',
+  ])
+  assert.deepEqual(draft.instructions.split('\n'), [
+    'Cook the chicken for 20 minutes.',
+    'Combine chicken and rice.',
+    'Drizzle sauce and add scallions.',
+  ])
+})
+
+test('measured ingredient bullets after a directions section cannot be silently omitted or treated as instructions', () => {
+  const draft = parseSocialRecipeCaption([
+    'Chicken Salad',
+    'Ingredients:',
+    '- 1 lb chicken',
+    'Directions:',
+    '1. Cook the chicken.',
+    '• 1 cup Greek yogurt',
+    '• 2 tsp mustard',
+    '2. Mix and serve.',
+  ].join('\n'))
+  assert.deepEqual(draft.ingredients.split('\n'), ['1 lb chicken', '1 cup Greek yogurt', '2 tsp mustard'])
+  assert.deepEqual(draft.instructions.split('\n'), ['Cook the chicken.', 'Mix and serve.'])
+})
+
+test('preserves sectioned description without requiring each subsection to say Ingredients', () => {
+  const draft = parseSocialRecipeCaption([
+    'Garlic Chicken',
+    'Ingredients (serves 4)',
+    '- 2 chicken thighs',
+    'For the marinade:',
+    '- 1 tbsp olive oil',
+    '- 2 tsp garlic',
+    'For the dressing:',
+    '- 2 tbsp yogurt',
+    'Instructions:',
+    '1. Mix and cook the chicken.',
+  ].join('\n'))
+  assert.equal(draft.ingredients.split('\n').length, 4)
+  assert.match(draft.ingredients,/olive oil/)
+  assert.match(draft.ingredients,/yogurt/)
+  assert.equal(draft.instructions, 'Mix and cook the chicken.')
+})
+
+test('consolidates sauce and marinade sriracha into one measured ingredient with a section breakdown', () => {
+  const caption = parseSocialRecipeCaption([
+    'Sweet Chili Chicken',
+    'For the sauce:',
+    '- 30g sriracha',
+    '- 100g mayonnaise',
+    'Instructions:',
+    '1. Whisk the sauce.',
+    'For the marinade:',
+    '- 70g sriracha',
+    '2. Marinate the chicken.',
+  ].join('\n'))
+  assert.deepEqual(caption.ingredientParts.filter(item => /sriracha/i.test(item.line)), [
+    { line: '30g sriracha', section: 'sauce' },
+    { line: '70g sriracha', section: 'marinade' },
+  ])
+  const result = consolidateRecipeIngredientAmounts(caption.ingredients, caption.ingredientParts)
+  assert.equal(result.ingredients, '100g sriracha\n100g mayonnaise')
+  assert.match(result.allocationNotes, /sriracha: 30g for sauce; 70g for marinade/i)
+  assert.equal(caption.instructions, 'Whisk the sauce.\nMarinate the chicken.')
+})
+
+test('uses exact compatible units without guessing that 20g equals 2 tbsp', () => {
+  const result = consolidateRecipeIngredientAmounts([
+    '30g sriracha',
+    '0.07kg sriracha',
+    '2 tbsp sriracha',
+    '150g raw chicken',
+    '200g cooked chicken',
+  ].join('\n'), [
+    {line:'30g sriracha',section:'sauce'},
+    {line:'0.07kg sriracha',section:'marinade'},
+  ])
+  assert.equal(result.ingredients, [
+    '100g sriracha',
+    '2 tbsp sriracha',
+    '150g raw chicken',
+    '200g cooked chicken',
+  ].join('\n'))
+  assert.match(result.allocationNotes,/30g for sauce; 70g for marinade/)
+})
+
+test('quantity descriptions with optional of combine safely without combining different ingredient names', () => {
+  const result = consolidateRecipeIngredientAmounts('30 grams of sriracha\n70g sriracha\n30g fresh chili sauce')
+  assert.equal(result.ingredients, '100g sriracha\n30g fresh chili sauce')
+})
+
+test('same ingredient with compatible count units is a single total; different descriptions stay separate', () => {
+  const result = consolidateRecipeIngredientAmounts([
+    '2 cloves garlic',
+    '3 cloves garlic',
+    '1 clove garlic powder',
+    '1 cup water',
+    '250ml water',
+  ].join('\n'))
+  assert.equal(result.ingredients,'5 cloves garlic\n1 clove garlic powder\n1 cup water\n250ml water')
+  assert.equal(result.allocationNotes,'')
+})
+
+test('does not silently drop unsupported amounts, non-numeric text, or different qualifiers', () => {
+  const input = 'salt to taste\n30g fresh sriracha\n70g dried sriracha\none bunch cilantro'
+  const result = consolidateRecipeIngredientAmounts(input)
+  assert.equal(result.ingredients, input)
+  assert.equal(result.allocationNotes,'')
 })
 
 test('unlabeled Bang Bang chicken Reel captions recover only stated bullets and numbered cooking steps', () => {
