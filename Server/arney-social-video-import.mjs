@@ -9,6 +9,7 @@ import { normalizeSocialRecipeUrl, parseSocialRecipeCaption } from './arney-soci
 import { consolidateRecipeIngredientAmounts } from './arney-recipe-ingredient-aggregation.mjs'
 import { scanVideoTimeline, selectTimelineVisualIndices, compactRecipeScreenEvidence } from './arney-video-timeline-ocr.mjs'
 import { refineSocialRecipeInstructions, filterRealRecipeConflicts } from './arney-recipe-step-quality.mjs'
+import { meaningfulCookingStepCount, extractObservedCookingSteps, canImproveRecipeDraft, organizeRecoveryEvidence } from './arney-recipe-evidence-fallback.mjs'
 
 const MAX_VIDEO_BYTES = 36 * 1024 * 1024 // User-supplied recordings only
 const MAX_LINK_VIDEO_BYTES = 72 * 1024 * 1024 // Temporary public link downloads
@@ -712,7 +713,7 @@ export function groundedVideoDraft({ caption = '', comment = '', transcript = ''
 // A narrow second attempt when the main caption/video comparison returned
 // a nutrition narrative instead of the actual recipe fields. Uses local Ollama
 // only, and never replaces verified creator-caption ingredients or steps.
-async function recoverSpokenRecipe({ transcript, visibleText }) {
+async function recoverSpokenRecipe({ transcript, visibleText, caption = '', comment = '' }) {
   if (!transcript.trim() && !visibleText.trim()) return null
   try {
     const response = await fetch(OLLAMA, {
@@ -721,11 +722,11 @@ async function recoverSpokenRecipe({ transcript, visibleText }) {
         model: 'ministral-3:8b', stream: false, think: false,
         format: 'json', options: { temperature: 0, num_predict: 950 },
         messages: [
-          { role: 'system', content: 'You are extracting cooking facts stated in a spoken recipe. Output a JSON object with name (string), ingredients (array of strings), instructions (array of strings), nutritionNotes (string). Extract ingredients even when the speaker does not use the word Ingredients. Preserve every explicitly spoken measurement. Convert clearly spoken cooking directions into concise ordered instruction strings. Do not infer ingredients, quantities, durations or steps that are not actually in the evidence. Ignore promotional remarks, commentary about the audio, and nutrition talk as cooking instructions. Empty arrays if the evidence truly contains no ingredients or cooking steps. Never write transcript analysis in nutritionNotes. If there is an exact creator-stated macro, use a short plain-text fact only.' },
-          { role: 'user', content: 'Spoken words:\n' + transcript.slice(0, 9000) + '\nVisible recipe text:\n' + visibleText.slice(0, 12_000) },
+          { role: 'system', content: 'You are recovering a cooking recipe from creator caption facts, any available spoken audio, and timestamped visual observations / on-screen text. Output JSON only: name (string), ingredients (array), instructions (array), nutritionNotes (string). The creator caption supplies the total ingredient amounts. Write ordered concise cooking actions only supported by the provided evidence; avoid repeated baking steps and do not move garlic squeezing before roasting. An action visually suggested but not explicitly spoken or written needs user verification. Never invent quantities, durations, steps or complete missing facts. When no steps are visible or spoken, use empty arrays. Ignore marketing and unrelated social text.' },
+          { role: 'user', content: organizeRecoveryEvidence({caption,comment,transcript,visibleText}) },
         ],
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(90_000),
     })
     if (!response.ok) return null
     const data = await response.json()
@@ -967,31 +968,56 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
     let draft = groundedVideoDraft({ caption: recipeCaption, comment: creatorComment, transcript, visibleText, structured })
     const videoEvidencePresent = Boolean(transcript.trim() || visibleText.trim())
     let speechRecoveryUsed = false
-    if (videoEvidencePresent && draft.missing.length) {
-      progress('speech-recovery', 'Double-checking spoken ingredients and cooking steps…')
+    let visualFallbackUsed = false
+    const sparseInstructions = meaningfulCookingStepCount(draft.instructions) < 2
+    // OCR oven temperatures made 'instructions' nonempty, so the previous
+    // draft.missing check skipped recovery even with NO recipe cooking steps.
+    // Retry an independent, smaller evidence organizer when the main local AI
+    // failed or the recipe has no meaningful actions beyond oven settings.
+    if (videoEvidencePresent && (draft.missing.length ||
+        (!structured && sparseInstructions))) {
+      progress('speech-recovery', 'Recovering ordered cooking actions from available video evidence…')
       let recovered = null
-      try { recovered = await speechExtractor({ transcript, visibleText }) }
-      catch { /* Keep the grounded draft on recovery failure. */ }
+      try { recovered = await speechExtractor({
+        caption:recipeCaption,comment:creatorComment,transcript,visibleText,
+      }) } catch { /* Keep the grounded draft on recovery failure. */ }
       if (recovered && typeof recovered === 'object' && !Array.isArray(recovered)) {
         const primary = structured && typeof structured === 'object' && !Array.isArray(structured)
           ? structured : {}
+        const priorInstructions = cleanLines(primary.instructions,80,500)
         const adjusted = {
           ...primary,
           name: usableRecipeTitle(primary.name) || usableRecipeTitle(recovered.name),
           ingredients: cleanLines(primary.ingredients, 80, 260)
             ? primary.ingredients : recovered.ingredients,
-          instructions: cleanLines(primary.instructions, 80, 500)
+          instructions: meaningfulCookingStepCount(priorInstructions) >= 2
             ? primary.instructions : recovered.instructions,
           nutritionNotes: verifiedNutritionNotes(primary.nutritionNotes)
             ? primary.nutritionNotes : recovered.nutritionNotes,
         }
-        const next = groundedVideoDraft({
+        const candidate = groundedVideoDraft({
           caption: recipeCaption, comment: creatorComment, transcript, visibleText, structured: adjusted,
         })
-        if ((next.ingredients && !draft.ingredients) || (next.instructions && !draft.instructions) ||
-            (next.name && !draft.name)) {
-          draft = next
+        if (canImproveRecipeDraft(draft,candidate)) {
+          draft = candidate
           speechRecoveryUsed = true
+        }
+      }
+      // A Qwen vision answer is useful provisional evidence even if Ministral
+      // cannot start after a model switch. Keep only observed cooking actions,
+      // never invent measurements, and flag incomplete cross-checks honestly.
+      if (!speechRecoveryUsed && !structured &&
+          meaningfulCookingStepCount(draft.instructions) < 2) {
+        const actions = extractObservedCookingSteps(visibleText)
+        if (actions.length) {
+          const candidate = groundedVideoDraft({
+            caption:recipeCaption,comment:creatorComment,transcript,visibleText,
+            structured:{instructions:actions},
+          })
+          if (canImproveRecipeDraft(draft,candidate)) {
+            draft=candidate
+            visualFallbackUsed=true
+          }
         }
       }
     }
@@ -1008,9 +1034,11 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
       publicCover = await coverReader(folder, publicVideoFile)
       coverPhoto = publicCover?.photoDataUrl || null
     } catch { /* Recipe drafts remain usable without a photo. */ }
-    progress('draft', structured
+    progress('draft', structured || speechRecoveryUsed
       ? 'Recipe evidence organized. Review the updated fields.'
-      : 'The local recipe organizer returned no structured details; displaying only verified text.',
+      : visualFallbackUsed
+        ? 'The recipe organizer was unavailable; provisional visual cooking observations were recovered for review.'
+        : 'The local recipe organizer returned no structured details; displaying only verified text.',
       { name: draft.name, ingredients: draft.ingredients,
         instructions: draft.instructions, servings: draft.servings, notes: draft.notes })
     const noticeParts = []
@@ -1033,8 +1061,11 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
       noticeParts.push('Check possible caption/video differences: ' + draft.conflicts.join('; ').slice(0, 600) + '.')
     if (draft.missing.length) {
       noticeParts.push('Still missing: ' + draft.missing.join(' and ') + '.')
-      if (!structured) noticeParts.push('The local AI could not organize enough recipe information.')
     }
+    if (videoEvidencePresent && !structured) noticeParts.push(
+      visualFallbackUsed ? 'The main local recipe organizer was unavailable; cooking actions are provisional visual observations and need review.' :
+      speechRecoveryUsed ? 'The main local recipe organizer was unavailable; a smaller evidence recovery was used.' :
+      'The local AI could not organize the cooking steps. Only independently recovered details are shown; the recipe may be incomplete.')
     if (videoAnalyzed && audioSegmentsFailed)
       noticeParts.push('Local speech transcription failed in ' + audioSegmentsFailed +
         ' audio section(s); video and caption results may be incomplete.')
@@ -1107,6 +1138,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
           structured !== null && structured !== undefined,
         newIngredients, newInstructions,
         speechRecoveryUsed,
+        visualFallbackUsed,
         conflicts: draft.conflicts,
       },
       notice: noticeParts.join(' '),
