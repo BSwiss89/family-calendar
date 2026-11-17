@@ -300,6 +300,8 @@ jobs:
       - name: Exercise isolated secure TEST supervisor pin and rollback fixtures
         shell: powershell
         run: .\scripts\test-secure-test-source-pins.ps1
+      - name: Verify TEST polling and status helpers preserve deployment safety
+        run: node --test scripts/test-secure-test-polling.mjs
       - name: Validate PowerShell script syntax
         shell: powershell
         run: |
