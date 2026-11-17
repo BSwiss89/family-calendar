@@ -490,7 +490,8 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         audioSegmentsWithText,
         framesSampled,
         visionResponded,
-        comparisonCompleted: structured !== null && structured !== undefined,
+        comparisonCompleted: videoAnalyzed && videoEvidencePresent &&
+          structured !== null && structured !== undefined,
         newIngredients, newInstructions,
         conflicts: draft.conflicts,
       },
