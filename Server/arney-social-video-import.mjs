@@ -159,6 +159,23 @@ async function downloadPublicVideo(sourceUrl, folder) {
   return { filename: path.join(folder, filename), caption }
 }
 
+// Caption-only and media metadata are sometimes different snapshots of the
+// same public description. When the later source has more explicit recipe lines,
+// preserve that fuller version instead of retaining the first partial caption.
+export function chooseMoreCompletePublicCaption(first = '', next = '') {
+  if (!next.trim()) return first
+  if (!first.trim()) return next.slice(0, 10_000)
+  const existing = parseSocialRecipeCaption(first.slice(0, 10_000))
+  const candidate = parseSocialRecipeCaption(next.slice(0, 10_000))
+  const count = text => text ? text.split('\n').filter(Boolean).length : 0
+  const score = recipe => count(recipe.ingredients) * 2 + count(recipe.instructions) * 2
+  const originalScore = score(existing), candidateScore = score(candidate)
+  if (candidateScore > originalScore ||
+      (candidateScore === originalScore && candidateScore > 0 && next.length > first.length * 1.15))
+    return next.slice(0, 10_000)
+  return first
+}
+
 // Use only files yt-dlp has already placed in its private temporary folder.
 // Never fetch an image URL from the user or from metadata, and never expose
 // arbitrary image hosts to the browser.
@@ -577,8 +594,19 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
       try {
         const fetched = await downloader(source.url, folder)
         filename = typeof fetched === 'string' ? fetched : fetched?.filename ?? ''
-        if (!recoveredCaption && typeof fetched?.caption === 'string')
-          recoveredCaption = fetched.caption.slice(0, 10_000)
+        if (typeof fetched?.caption === 'string') {
+          const moreComplete = chooseMoreCompletePublicCaption(recoveredCaption, fetched.caption)
+          if (moreComplete !== recoveredCaption) {
+            recoveredCaption = moreComplete
+            const refreshed = groundedVideoDraft({
+              caption: caption.trim() || recoveredCaption, comment: creatorComment,
+            })
+            progress('caption', 'Found a fuller public description. Updating the recipe ingredients and steps…', {
+              name: refreshed.name, ingredients: refreshed.ingredients,
+              instructions: refreshed.instructions, servings: refreshed.servings, notes: refreshed.notes,
+            })
+          }
+        }
       } catch (error) {
         videoNotice = error instanceof Error && error.message === 'This video is longer than the 10-minute analysis limit.'
           ? error.message
