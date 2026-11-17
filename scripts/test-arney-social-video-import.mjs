@@ -5,7 +5,7 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import sharp from 'sharp'
 import path from 'node:path'
-import { timelineSamplingPlan, collectDistinctScreenText, selectTimelineVisualIndices } from '../Server/arney-video-timeline-ocr.mjs'
+import { timelineSamplingPlan, collectDistinctScreenText, selectTimelineVisualIndices, compactRecipeScreenEvidence } from '../Server/arney-video-timeline-ocr.mjs'
 import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, extractOnScreenCookingSettings, classifyPublicVideoRetrievalFailure, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
@@ -1006,16 +1006,16 @@ test('explicit on-screen baking settings survive a small-model generic oven summ
   ].join('\n')
   const fromScreen = extractOnScreenCookingSettings(visibleText)
   assert.equal(fromScreen.length,2)
-  assert.match(fromScreen[0],/200C\/400F.*22-25.*Min/)
-  assert.match(fromScreen[1],/195C\/385F.*45-50 Min/)
+  assert.match(fromScreen[0],/200°C \/ 400°F.*22–25 minutes/)
+  assert.match(fromScreen[1],/195°C \/ 385°F.*45–50 minutes/)
   const draft=groundedVideoDraft({
     caption:'Caramelized Onion Chicken Pasta\nIngredients:\n- 480g pasta',
     visibleText,
     structured:{ name:'Caramelized Onion Chicken Pasta',ingredients:[],
       instructions:['Oven bake with settings on screen.'],videoInstructionsAdded:[] },
   })
-  assert.match(draft.instructions,/200C\/400F.*22-25/i)
-  assert.match(draft.instructions,/195C\/385F.*45-50/i)
+  assert.match(draft.instructions,/200°C \/ 400°F.*22–25/i)
+  assert.match(draft.instructions,/195°C \/ 385°F.*45–50/i)
   assert.match(draft.ingredients,/480g pasta/)
   assert.doesNotMatch(draft.instructions,/unverified|maybe/i)
 })
@@ -1045,7 +1045,7 @@ test('on-screen timeline scan reports honest OCR coverage without exposing scree
   assert.equal(result.videoReport.ocrAvailable,true)
   assert.equal(result.videoReport.ocrPartial,false)
   assert.equal(result.videoReport.framesSampled,16)
-  assert.match(result.instructions,/200C\/400F/)
+  assert.match(result.instructions,/200°C \/ 400°F/)
   assert.doesNotMatch(JSON.stringify(result.videoReport),/200C\/400F|22-25 Min|On-screen OCR at/)
 })
 
@@ -1105,8 +1105,8 @@ test('long timeline OCR does not masquerade as an overlong pasted caption or dis
   })
   assert.equal(result.videoAnalyzed, true)
   assert.match(result.ingredients, /480g pasta/)
-  assert.match(result.instructions, /200C\/400F.*22-25 Min/)
-  assert.match(result.instructions, /195C\/385F.*45-50 Min/)
+  assert.match(result.instructions, /200°C \/ 400°F.*22–25 minutes/)
+  assert.match(result.instructions, /195°C \/ 385°F.*45–50 minutes/)
   assert.equal(result.videoReport.ocrFramesRead, 120)
   assert.ok(updates.some(item => item.stage === 'draft'))
   assert.doesNotMatch(result.notice, /pasted caption is too long/i)
