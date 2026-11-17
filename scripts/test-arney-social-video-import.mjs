@@ -6,7 +6,8 @@ import os from 'node:os'
 import sharp from 'sharp'
 import path from 'node:path'
 import { timelineSamplingPlan, collectDistinctScreenText, selectTimelineVisualIndices, compactRecipeScreenEvidence } from '../Server/arney-video-timeline-ocr.mjs'
-import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, extractOnScreenCookingSettings, classifyPublicVideoRetrievalFailure, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
+import { refineSocialRecipeInstructions, filterRealRecipeConflicts } from '../Server/arney-recipe-step-quality.mjs'
+import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, extractOnScreenCookingSettings, classifyPublicVideoRetrievalFailure, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, postLocalWhisperAudio, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
 const fb = 'https://www.facebook.com/share/r/1A8Sz2b3cf/?mibextid=tracked'
@@ -1207,4 +1208,191 @@ test('OCR text summary cap is not reported as a failed frame scan', async () => 
   assert.match(result.notice,/noisy text variations were condensed/i)
   assert.doesNotMatch(result.notice,/later video text may be missing/i)
   assert.doesNotMatch(JSON.stringify(result.videoReport),/200C\/400F|22-25 Min/)
+})
+
+
+test('recipe instructions keep ingredient totals and split measured seasoning between chicken and onions', () => {
+  const ingredients='1.2kg chicken breast\n2 tsp Italian Herb Seasoning Mix, 2 tsp Smoked Paprika, 1 tsp Salt, 1.5 tsp Garlic Powder, 1.5 tsp Onion Powder\n1 tsp olive oil\n3 large brown onions\n1 whole garlic bulb'
+  const instructions=[
+    'Season chicken with half of the Italian Herb Seasoning Mix (2 tsp), Smoked Paprika (2 tsp), Garlic Powder (1.5 tsp), Onion Powder (1.5 tsp), and Salt (1 tsp). Mix well with olive oil (1 tsp).',
+    'Place chicken on a tray and bake at 200°C/400°F for 22-25 minutes, flipping halfway through.',
+    'Remove chicken from oven, set aside with paper towel underneath.',
+    'Add the remaining seasoning mix to the tray.',
+    'Add sliced brown onions (3 large) and tomato paste (100g) to the tray.',
+    'Cut the top off a whole garlic bulb, squeeze out the garlic cloves, and add them to the tray.',
+    'Spray onions and garlic with cooking oil.',
+    'Bake at 195°C/385°F for 45-50 minutes, stirring onions halfway through.',
+    'Add grated Parmesan (60g), cream cheese (140g) and parsley.',
+    'Bake chicken at **200°C/400°F for 22-25 minutes**, flipping halfway through.',
+    'Oven bake at 200°C / 400°F for 22–25 minutes; flip halfway.',
+    'Oven bake at 195°C / 385°F for 45–50 minutes.',
+  ].join('\n')
+  const recipe=refineSocialRecipeInstructions({ingredients,instructions,visibleText:'On-screen OCR at 18s:\nPlace chicken on tray with baking paper'})
+  const steps=recipe.split('\n')
+  assert.match(steps[0],/Use half to season the chicken.*reserve the other half for the onions/i)
+  assert.doesNotMatch(steps[0],/paprika \(2 tsp\)|Garlic Powder \(1.5 tsp\)/i)
+  assert.match(ingredients,/2 tsp Smoked Paprika/)
+  assert.match(ingredients,/1.5 tsp Garlic Powder/)
+  const cut=steps.findIndex(x=>/Cut the top off the whole garlic bulb/i.test(x))
+  const bake=steps.findIndex(x=>/Bake at 195°C/i.test(x))
+  const squeeze=steps.findIndex(x=>/squeeze the roasted garlic cloves/i.test(x))
+  assert.ok(cut>=0 && bake>cut && squeeze>bake, recipe)
+  assert.ok(steps.findIndex(x=>/Add grated Parmesan/.test(x))>squeeze)
+  assert.equal((recipe.match(/200°C/g)||[]).length,1)
+  assert.equal((recipe.match(/195°C/g)||[]).length,1)
+  assert.doesNotMatch(recipe,/paper towel|oven bake at 200°C|oven bake at 195°C|\*\*/i)
+})
+
+test('recipe cleanup does not invent seasoning allocation or garlic movement in unrelated recipes', () => {
+  const unrelated=refineSocialRecipeInstructions({
+    ingredients:'3 cloves minced garlic\n1 onion\n2 tsp paprika',
+    instructions:'Squeeze the garlic into a pan.\nCook onion for 3 minutes.\nStir everything.',
+  })
+  assert.match(unrelated,/Squeeze the garlic into a pan/)
+  assert.doesNotMatch(unrelated,/whole garlic bulb|reserve the other half|roasted/)
+  assert.equal(refineSocialRecipeInstructions({ingredients:'chicken',instructions:''}),'')
+})
+
+test('real Reel video draft fixes garlic sequence while preserving parsed ingredient totals', () => {
+  const ingredients=[
+    '1.2KG Thinly Sliced Boneless & Skinless Chicken Breast (raw weight)',
+    '2 Tsp Italian Herb Seasoning Mix, 2 Tsp Smoked Paprika, 1 Tsp Salt, 1.5 Tsp Garlic Powder, 1.5 Tsp Onion Powder',
+    '1 Tsp Olive Oil',
+    '3 Large Sliced Brown Onions',
+    '100g Tomato Paste',
+    '1 Whole Garlic Bulb (Cut Top Off)',
+    '60g Freshly Grated Parmesan Cheese',
+    '140g Light Cream Cheese',
+    '480g Spiral Pasta',
+  ].join('\n')
+  const instructions=[
+    'Season chicken with half of the Italian Herb Seasoning Mix (2 tsp) and Smoked Paprika (2 tsp).',
+    'Bake chicken at 200°C/400°F for 22-25 minutes.',
+    'Add remaining seasoning mix to the tray.',
+    'Add sliced brown onions and tomato paste.',
+    'Cut the top off the whole garlic bulb, squeeze out the cloves and add them to the tray.',
+    'Bake onions at 195°C/385°F for 45-50 minutes.',
+    'Add 60g Parmesan, parsley, and 140g cream cheese.',
+    'Bake onions at **195°C/385°F for 45-50 minutes**.',
+  ]
+  const draft=groundedVideoDraft({
+    caption:'Creamy Caramelized Onion Chicken Pasta\nIngredients:\n'+ingredients,
+    visibleText:'On-screen OCR at 30s:\nOven Bake\n195C/385F\n45-50 Min',
+    structured:{instructions,videoInstructionsAdded:[],
+      conflicts:['Caption does not mention stirring onions halfway; video confirms it','No conflict in chicken bake time.']},
+  })
+  assert.match(draft.ingredients,/2 Tsp Smoked Paprika/i)
+  assert.match(draft.ingredients,/140g Light Cream Cheese/i)
+  const steps=draft.instructions.split('\n')
+  assert.ok(steps.findIndex(x=>/squeeze the roasted garlic cloves/i.test(x)) >
+    steps.findIndex(x=>/Bake onions at 195°C/i.test(x)))
+  assert.equal((draft.instructions.match(/195°C/g)||[]).length,1)
+  assert.equal(draft.conflicts.length,0)
+})
+
+test('caption missing a video-only detail is not mislabeled an evidence conflict', () => {
+  assert.deepEqual(filterRealRecipeConflicts([
+    'Caption does not specify the temperature, but video adds the bake setting.',
+    'No conflict in time; video adds an explicit flip.',
+    'Caption says 15 minutes but video says 35 minutes.',
+  ]),['Caption says 15 minutes but video says 35 minutes.'])
+})
+
+
+test('local Whisper retries a brief transport failure once with original authenticated audio', async () => {
+  const calls=[]
+  const result=await postLocalWhisperAudio({
+    url:'http://127.0.0.1:13981/transcribe',token:'t'.repeat(48),
+  },Buffer.from('test-private-audio'),18,{
+    fetchImpl:async (url,options)=>{
+      calls.push({url,headers:options.headers,body:options.body})
+      if(calls.length===1)throw new Error('connect ECONNREFUSED')
+      return new Response(JSON.stringify({transcript:'Season the chicken'}),{status:200})
+    },
+    delay:async()=>{},
+  })
+  assert.equal(result.status,200)
+  assert.equal(calls.length,2)
+  assert.equal(calls[0].url,'http://127.0.0.1:13981/transcribe')
+  assert.equal(calls[0].headers.Authorization,'Bearer '+'t'.repeat(48))
+  assert.equal(calls[0].body,calls[1].body)
+})
+
+test('Whisper network retry never duplicates completed requests or timeout work', async () => {
+  let calls=0
+  const stt={url:'http://127.0.0.1:13981/transcribe',token:'x'.repeat(48)}
+  const payload=Buffer.alloc(100)
+  const unauthorized=await postLocalWhisperAudio(stt,payload,5,{
+    fetchImpl:async()=>{calls++;return new Response('{}',{status:401})},
+    delay:async()=>{throw Error('Must not retry completed HTTP request')},
+  })
+  assert.equal(unauthorized.status,401)
+  assert.equal(calls,1)
+  let timerCalls=0
+  await assert.rejects(postLocalWhisperAudio(stt,payload,5,{
+    fetchImpl:async()=>{timerCalls++;const e=new Error('timeout');e.name='TimeoutError';throw e},
+    delay:async()=>{throw Error('Never retry a timeout')},
+  }),{name:'TimeoutError'})
+  assert.equal(timerCalls,1)
+  let failedCalls=0
+  await assert.rejects(postLocalWhisperAudio(stt,payload,5,{
+    fetchImpl:async()=>{failedCalls++;throw Error('ECONNREFUSED')},
+    delay:async()=>{},
+  }),/ECONNREFUSED/)
+  assert.equal(failedCalls,2)
+})
+
+test('optional STT watchdog stays isolated to the existing scheduled task and never edits LIVE', () => {
+  const watcher=readFileSync(new URL('./monitor-arney-local-stt-test.ps1',import.meta.url),'utf8')
+  const installer=readFileSync(new URL('./install-arney-local-stt-recovery-test.ps1',import.meta.url),'utf8')
+  assert.match(watcher, /Start-ScheduledTask -TaskName \$taskName/)
+  assert.match(watcher, /LocalAddress -ne '127\.0\.0\.1'/)
+  assert.match(watcher, /'Ready'/)
+  assert.doesNotMatch(watcher,/Stop-Process|Stop-ScheduledTask|Unregister-ScheduledTask|C:\\ProgramData\\FamilyCalendar\\SecureLive/i)
+  assert.match(installer, /RepetitionInterval \(New-TimeSpan -Minutes 5\)/)
+  assert.match(installer, /if \(!\$Apply\)/)
+  assert.match(installer,/New-ScheduledTaskPrincipal -UserId 'SYSTEM'/)
+  assert.doesNotMatch(installer,/Stop-ScheduledTask|Stop-Process|Restart-Computer|Restart-Service/)
+})
+
+
+test('separate legitimate oven steps at same heat are never collapsed', () => {
+  const instructions=[
+    'Bake chicken at 200°C/400°F for 20 minutes.',
+    'Bake potatoes at 200°C/400°F for 40 minutes.',
+    'Bake chicken at 200°C/400°F for 20 minutes.',
+    'Bake onions at 200°C/400°F for 20 minutes.',
+  ].join('\n')
+  const refined=refineSocialRecipeInstructions({ingredients:'chicken\npotatoes\nonions',instructions})
+  assert.equal((refined.match(/200°C/g)||[]).length,3)
+  assert.match(refined,/chicken.*20 minutes/)
+  assert.match(refined,/potatoes.*40 minutes/)
+  assert.match(refined,/onions.*20 minutes/)
+})
+
+test('real video support is required before rewriting a possible paper towel instruction', () => {
+  const original='Set the chicken aside with paper towel underneath.'
+  assert.equal(refineSocialRecipeInstructions({
+    ingredients:'chicken',instructions:original,
+  }),original)
+  const backed=refineSocialRecipeInstructions({
+    ingredients:'chicken',instructions:original,
+    visibleText:'On-screen OCR at 18s:\nOnce cooked set chicken and baking paper aside',
+  })
+  assert.equal(backed,'Set the chicken aside.')
+})
+
+test('existing post-bake garlic squeeze is preserved without inserting a duplicate', () => {
+  const cooked=refineSocialRecipeInstructions({
+    ingredients:'one whole garlic bulb, sliced onions',
+    instructions:[
+      'Cut the top off the whole garlic bulb, squeeze out the cloves and add to tray.',
+      'Add sliced onions to tray.',
+      'Bake onions and garlic at 195°C/385°F for 45-50 minutes.',
+      'Once baked, squeeze the soft garlic cloves into the onion mixture.',
+      'Add cream cheese and stir.',
+    ].join('\n'),
+  })
+  assert.equal((cooked.match(/squeeze/gi)||[]).length,1)
+  assert.ok(cooked.indexOf('squeeze')>cooked.indexOf('Bake onions'))
 })
