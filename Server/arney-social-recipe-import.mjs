@@ -128,7 +128,8 @@ function inferUnlabeledIngredientBlock(lines) {
   const limit = instructionsAt < 0 ? lines.length : instructionsAt
   if (lines.slice(0, limit).some(line =>
     INGREDIENT_HEADING.test(line.replace(/^[^\p{L}\p{N}]+/u, '')) ||
-    INGREDIENT_PART_HEADING.test(line.replace(/^[^\p{L}\p{N}]+/u, '')))) return null
+    INGREDIENT_PART_HEADING.test(line.replace(/^[^\p{L}\p{N}]+/u, '')) ||
+    COMMENT_INGREDIENT_PART_HEADING.test(line.replace(/^[^\p{L}\p{N}]+/u, '')))) return null
   const measured = []
   for (let i = 0; i < limit; i++) {
     if (looksLikeUnlabeledMeasuredIngredient(lines[i])) measured.push(i)
@@ -215,7 +216,7 @@ export function parseSocialRecipeCaption(value) {
     // Pinned comments often contain "•1. Line an air fryer rack..." with a
     // bullet AND a numbered cooking step. The bullet is not an ingredient.
     const numberedCookingLine = /^\s*(?:[-*•·▪◦]\s*)?\d{1,2}[.)]\s+(.+)$/.exec(line)
-    if (numberedCookingLine && COOKING_ACTION.test(numberedCookingLine[1])) {
+    if (numberedCookingLine && (section === 'instructions' || COOKING_ACTION.test(numberedCookingLine[1]))) {
       section = 'instructions'
       if (steps.length < 80) steps.push(numberedCookingLine[1].slice(0, 500))
       continue
