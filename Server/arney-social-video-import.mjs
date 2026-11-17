@@ -10,6 +10,7 @@ import { consolidateRecipeIngredientAmounts } from './arney-recipe-ingredient-ag
 import { scanVideoTimeline, selectTimelineVisualIndices, compactRecipeScreenEvidence } from './arney-video-timeline-ocr.mjs'
 import { refineSocialRecipeInstructions, filterRealRecipeConflicts } from './arney-recipe-step-quality.mjs'
 import { runPrimaryRecipeOrganizer } from './arney-primary-recipe-organizer.mjs'
+import { readInstagramCreatorRecipePages } from './arney-instagram-comment-pages.mjs'
 
 const MAX_VIDEO_BYTES = 36 * 1024 * 1024 // User-supplied recordings only
 const MAX_LINK_VIDEO_BYTES = 72 * 1024 * 1024 // Temporary public link downloads
@@ -218,18 +219,28 @@ export function selectPublicCreatorRecipeComment(metadata) {
 }
 
 async function readPublicCreatorComment(sourceUrl, folder) {
-  // Check metadata already retrieved by caption/video reads first.
+  const isInstagram = normalizeSocialRecipeUrl(sourceUrl).platform === 'Instagram'
+  let reelMetadata = null
+  // Reuse yt-dlp's existing owner metadata from the caption step.
   for (const basename of ['caption-only.info.json', 'linked-video.info.json', 'comments-only.info.json']) {
     try {
       const filename = path.join(folder, basename)
       const stat = await fs.stat(filename)
       if (!stat.isFile() || stat.size > 512_000) continue
-      const result = selectPublicCreatorRecipeComment(JSON.parse(await fs.readFile(filename, 'utf8')))
+      const metadata = JSON.parse(await fs.readFile(filename, 'utf8'))
+      if (isInstagram && !reelMetadata && metadata?.extractor_key === 'Instagram')
+        reelMetadata = metadata
+      const result = selectPublicCreatorRecipeComment(metadata)
       if (result.text) return result
     } catch { /* Skip missing or malformed public metadata. */ }
   }
-  // One bounded, metadata-only attempt; --write-comments only requests what
-  // the site's yt-dlp extractor exposes without an authenticated session.
+  // Use one primary Instagram comment path with bounded cursor continuation,
+  // not another scraper or a chain of model fallbacks.
+  if (isInstagram)
+    return readInstagramCreatorRecipePages(sourceUrl, reelMetadata, {
+      selectComment: selectPublicCreatorRecipeComment,
+    })
+  // Keep Facebook's existing single metadata-only request unchanged.
   try {
     await run('yt-dlp', [
       '--ignore-config', '--no-playlist', '--skip-download',
@@ -800,6 +811,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
   let publicVideoFile = '', publicCover = null, coverPhoto = null
   let creatorComment = '', commentSource = 'unavailable'
   let pinnedCommentConfirmed = false, creatorCommentVerified = false, commentsExamined = 0
+  let commentPagesChecked = 0
   let commentRetrievalReason = 'not-checked'
   const speechServiceConfigured = Boolean(stt?.url && stt?.token)
   // Progress callbacks carry only reviewable recipe fields and human-readable
@@ -855,9 +867,11 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
           commentsExamined = Number.isInteger(publicResult.commentsExamined)
             ? Math.max(0, Math.min(10000, publicResult.commentsExamined)) : 0
           commentRetrievalReason = publicResult.reason || 'creator-comment-found'
+          commentPagesChecked = Number.isInteger(publicResult.pagesChecked) ? publicResult.pagesChecked : 0
         } else if (publicResult && Number.isInteger(publicResult.commentsExamined)) {
           commentsExamined = Math.max(0, Math.min(10000, publicResult.commentsExamined))
           commentRetrievalReason = publicResult.reason || (commentsExamined ? 'no-verified-creator-recipe-in-returned-comments' : 'comments-not-exposed')
+          commentPagesChecked = Number.isInteger(publicResult.pagesChecked) ? publicResult.pagesChecked : 0
         }
       } catch { /* Public comments are optional and never block the recipe. */ }
     }
@@ -1047,7 +1061,17 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
     if (!creatorComment && !comment.trim() && commentRetrievalReason === 'comments-not-exposed')
       noticeParts.push('Instagram did not expose public comments to the current extractor; pinned creator instructions could not be checked.')
     else if (!creatorComment && !comment.trim() && commentRetrievalReason === 'no-verified-creator-recipe-in-returned-comments')
-      noticeParts.push('The ' + commentsExamined + ' returned comments contained no verifiable creator recipe instructions; Instagram may not include pinned comments in its metadata.')
+      noticeParts.push('The ' + commentsExamined + ' comments checked across ' + commentPagesChecked + ' available page(s) contained no verifiable creator recipe instructions; Instagram may not include pinned comments.')
+    else if (!creatorComment && !comment.trim() && commentRetrievalReason === 'comment-page-limit')
+      noticeParts.push('No verified creator recipe in ' + commentsExamined + ' comments over ' + commentPagesChecked + ' pages. Stopped at the safe page limit; older comments may remain.')
+    else if (!creatorComment && !comment.trim() && commentRetrievalReason === 'comment-pagination-unavailable')
+      noticeParts.push('Instagram returned ' + commentsExamined + ' comments, but no usable continuation cursor. Older comments could not be checked.')
+    else if (!creatorComment && !comment.trim() && commentRetrievalReason === 'comment-rate-limited')
+      noticeParts.push('Instagram limited public comment requests. No additional comment pages were requested.')
+    else if (!creatorComment && !comment.trim() && commentRetrievalReason === 'comment-access-denied')
+      noticeParts.push('Instagram did not permit anonymous comment access. No login or extra scraping was attempted.')
+    else if (!creatorComment && !comment.trim() && commentRetrievalReason === 'creator-metadata-unavailable')
+      noticeParts.push('Creator identity was unavailable from the Reel metadata, so comments were not accepted as verified.')
     if (videoAnalyzed) {
       noticeParts.push(transcript || visibleText
         ? 'Video evidence was processed locally. Review all measurements and steps before saving.'
@@ -1117,6 +1141,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
         creatorVerified: creatorCommentVerified,
         pinnedConfirmed: pinnedCommentConfirmed,
         commentsExamined,
+        pagesChecked: commentPagesChecked,
       },
       videoReport: {
         status: videoStatus,
