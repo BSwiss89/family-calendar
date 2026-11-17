@@ -633,7 +633,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
       }
     }
     const recipeCaption = caption.trim() || recoveredCaption
-    progress('organize', 'Comparing the caption with the video and organizing recipe details…')
+    progress('organize', 'Organizing the caption, creator comment and available video evidence…')
     const structured = await extractor({ caption: recipeCaption, comment: creatorComment, transcript, visibleText })
     let draft = groundedVideoDraft({ caption: recipeCaption, comment: creatorComment, transcript, visibleText, structured })
     const videoEvidencePresent = Boolean(transcript.trim() || visibleText.trim())
@@ -678,7 +678,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
       coverPhoto = publicCover?.photoDataUrl || null
     } catch { /* Recipe drafts remain usable without a photo. */ }
     progress('draft', structured
-      ? 'Video and caption comparison finished. Review the updated fields.'
+      ? 'Recipe evidence organized. Review the updated fields.'
       : 'The local recipe organizer returned no structured details; displaying only verified text.',
       { name: draft.name, ingredients: draft.ingredients,
         instructions: draft.instructions, servings: draft.servings, notes: draft.notes })
@@ -696,7 +696,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
         ? 'Video evidence was processed locally. Review all measurements and steps before saving.'
         : 'Video opened, but no usable speech or on-screen recipe text was recovered.')
     } else if (videoNotice) noticeParts.push(videoNotice)
-    if (!videoAnalyzed && !caption.trim() && !recoveredCaption)
+    if (!videoAnalyzed && !caption.trim() && !recoveredCaption && !creatorComment)
       noticeParts.push('Only the source link is available so far.')
     if (draft.conflicts.length)
       noticeParts.push('Check possible caption/video differences: ' + draft.conflicts.join('; ').slice(0, 600) + '.')
@@ -705,7 +705,11 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
       if (!structured) noticeParts.push('The local AI could not organize enough recipe information.')
     }
     const videoStatus = !videoAnalyzed
-      ? 'Caption only — the video could not be analyzed.'
+      ? creatorComment && !recipeCaption
+        ? 'Recipe comment available; the video could not be analyzed.'
+        : creatorComment
+          ? 'Caption/comment details available; the video could not be analyzed.'
+          : 'Caption only — the video could not be analyzed.'
       : !videoEvidencePresent
         ? 'Video opened, but no usable speech or on-screen text was recovered.'
         : !draft.ingredients || !draft.instructions
