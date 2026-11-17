@@ -94,8 +94,17 @@ export function parseSocialRecipeCaption(value) {
   if (typeof value !== 'string' || value.length > MAX_CAPTION)
     throw new TypeError('The optional pasted caption is too long.')
   const lines = value.replace(/\r\n?/g, '\n').split('\n').map(cleanLine)
-  let section = '', title = '', explicitTitle = false
-  const ingredients = [], steps = []
+  let section = '', title = '', explicitTitle = false, ingredientSection = ''
+  const ingredients = [], steps = [], ingredientParts = []
+  const componentName = value => value.replace(/^for\s+(?:the\s+|a\s+)?/i,'')
+    .replace(/\([^)]*\)/g,'').replace(/\s+ingredients?$/i,'')
+    .replace(/[:\-–—]+$/,'').trim().toLowerCase()
+  function addIngredient(text) {
+    const ingredient = withoutListMarker(text)
+    if (!ingredient || ingredient.length > 260 || ingredients.length >= 80) return
+    ingredients.push(ingredient)
+    ingredientParts.push({ line: ingredient, section: ingredientSection })
+  }
   for (const line of lines) {
     if (!line) continue
     // Social captions often prefix section headings with cooking emojis.
@@ -105,13 +114,16 @@ export function parseSocialRecipeCaption(value) {
     match = INGREDIENT_HEADING.exec(headingLine)
     if (match) {
       section = 'ingredients'
-      if (match[1] && /[\p{L}\p{N}]/u.test(match[1])) ingredients.push(withoutListMarker(match[1]))
+      ingredientSection = /^for\s+(?:the\s+|a\s+)?/i.test(headingLine)
+        ? componentName(headingLine.replace(match[1] || '', '')) : ''
+      if (match[1] && /[\p{L}\p{N}]/u.test(match[1])) addIngredient(match[1])
       continue
     }
     // Recipe component headings may appear before or after cooking directions.
     // Recognize only short standalone titles, not arbitrary prose.
     if (INGREDIENT_PART_HEADING.test(headingLine)) {
       section = 'ingredients'
+      ingredientSection = componentName(headingLine)
       continue
     }
     match = STEP_HEADING.exec(headingLine)
@@ -128,12 +140,11 @@ export function parseSocialRecipeCaption(value) {
     if (section === 'instructions' && /^[-*•·▪◦]\s+/.test(line) &&
         STRONG_INGREDIENT.test(withoutListMarker(line)) &&
         !COOKING_ACTION.test(withoutListMarker(line))) {
-      if (ingredients.length < 80) ingredients.push(withoutListMarker(line))
+      addIngredient(line)
       continue
     }
     if (section === 'ingredients') {
-      if (ingredients.length < 80 && line.length <= 260)
-        ingredients.push(withoutListMarker(line))
+      addIngredient(line)
       continue
     }
     if (section === 'instructions') {
@@ -153,7 +164,8 @@ export function parseSocialRecipeCaption(value) {
   for (const item of extractCaptionFallback(lines, 'ingredients')) {
     const key = normalized(item)
     if (seen.has(key) || !STRONG_INGREDIENT.test(item) || ingredients.length >= 80) continue
-    ingredients.push(item)
+    ingredientSection = ''
+    addIngredient(item)
     seen.add(key)
   }
   if (!steps.length) steps.push(...extractCaptionFallback(lines, 'instructions'))
@@ -171,6 +183,7 @@ export function parseSocialRecipeCaption(value) {
     notes: macros ? 'Creator-reported macros per serving: ' + macros.slice(0, 250) : '',
     titleIsExplicit: explicitTitle,
     ingredients: ingredients.filter(Boolean).join('\n').slice(0, 7000),
+    ingredientParts,
     instructions: steps.filter(Boolean).join('\n').slice(0, 8000),
     suppliedCaption: Boolean(value.trim()),
   }
