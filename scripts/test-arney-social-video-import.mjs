@@ -47,7 +47,7 @@ test('public comment parser never mistakes a stranger pinned comment or unverifi
   const found = selectPublicCreatorRecipeComment({
     uploader_id: 'realchef',
     comments: [
-      {author:'Real Chef Fan',is_pinned:true,text:'Ingredients: 99 cups of sugar'},
+      {author:'realchef',is_pinned:true,text:'Ingredients: 99 cups of sugar'},
       {author:'Someone Else',pinned:true,text:'Directions: Bake for 99 hours'},
     ],
   })
