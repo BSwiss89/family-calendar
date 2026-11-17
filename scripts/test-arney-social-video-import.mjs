@@ -5,7 +5,7 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import sharp from 'sharp'
 import path from 'node:path'
-import { socialVideoAllowedOnTest, groundedVideoDraft, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
+import { socialVideoAllowedOnTest, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
 const fb = 'https://www.facebook.com/share/r/1A8Sz2b3cf/?mibextid=tracked'
@@ -22,6 +22,108 @@ test('model output without actual caption/video evidence never becomes a recipe'
   assert.equal(result.ingredients,'')
   assert.equal(result.instructions,'')
   assert.deepEqual(result.missing,['ingredients','instructions'])
+})
+
+
+test('regression from iPhone: spoken measurements and actions fill fields instead of transcript analysis in Notes', () => {
+  const transcript = 'First, add 1 pound of ground turkey. Then stir in 2 cups of rice. Cook for 10 minutes. 500 calories and 45g protein per serving.'
+  const draft = groundedVideoDraft({
+    caption: 'Recipe',
+    transcript,
+    structured: {
+      name: 'Recipe', ingredients: [], instructions: [],
+      nutritionNotes: 'Audio transcript explicitly states **500 calories, 45g protein** per serving (no fat/carb breakdown).',
+    },
+  })
+  assert.equal(draft.name, '')
+  assert.match(draft.ingredients, /1 pound of ground turkey/i)
+  assert.match(draft.ingredients, /2 cups of rice/i)
+  assert.match(draft.instructions, /add 1 pound of ground turkey/i)
+  assert.match(draft.instructions, /stir in 2 cups of rice/i)
+  assert.doesNotMatch(draft.ingredients, /45g protein|500 calories/i)
+  assert.equal(draft.notes, '')
+  assert.deepEqual(draft.missing, [])
+})
+
+test('spoken macros alone cannot turn into measured ingredients or recipe steps', () => {
+  const spoken = 'This meal is 500 calories and 45g protein.'
+  const draft = groundedVideoDraft({
+    caption: 'Recipe', transcript: spoken,
+    structured: { name: 'Recipe', ingredients: [], instructions: [],
+      nutritionNotes: 'Audio transcript explicitly states **500 calories, 45g protein**.' },
+  })
+  assert.equal(draft.name, '')
+  assert.equal(draft.ingredients, '')
+  assert.equal(draft.instructions, '')
+  assert.equal(draft.notes, '')
+  assert.deepEqual(draft.missing, ['ingredients', 'instructions'])
+  assert.deepEqual(extractSpokenRecipeFacts('500 calories, 45g protein per serving.'), {
+    ingredients: '', instructions: '',
+  })
+})
+
+test('small Ollama models may return newline strings rather than ingredient and instruction arrays', () => {
+  const draft = groundedVideoDraft({
+    caption: '', transcript: 'Use 2 cups rice. Stir rice and cook it.',
+    structured: { name: 'Spicy Rice',
+      ingredients: '- 2 cups rice\n- 1 tsp chili flakes',
+      instructions: '1. Stir rice.\n2. Cook until tender.',
+    },
+  })
+  assert.equal(draft.name, 'Spicy Rice')
+  assert.equal(draft.ingredients, '2 cups rice\n1 tsp chili flakes')
+  assert.equal(draft.instructions, 'Stir rice.\nCook until tender.')
+  assert.deepEqual(draft.missing, [])
+})
+
+test('focused local speech recovery completes cooking fields when four-frame vision is unavailable', async () => {
+  let retries = 0
+  const result = await analyzePublicSocialVideo({
+    url: ig, videoBuffer: Buffer.alloc(300), videoMime: 'video/mp4',
+  }, {
+    durationReader: async () => 36,
+    transcriber: async () => ({ text: 'We add rice and chicken. Cook everything.', responded: true }),
+    visualReader: async () => ({ text: '', framesSampled: 4, visionResponded: false }),
+    extractor: async () => ({ name: 'Recipe', ingredients: [], instructions: [],
+      nutritionNotes: 'Audio transcript explicitly states a recipe.' }),
+    speechExtractor: async evidence => {
+      retries++
+      assert.match(evidence.transcript, /add rice and chicken/i)
+      return { name: 'Chicken Rice', ingredients: ['Chicken', 'Rice'],
+        instructions: ['Add rice and chicken.', 'Cook everything.'] }
+    },
+    coverReader: async () => null,
+  })
+  assert.equal(retries, 1)
+  assert.equal(result.name, 'Chicken Rice')
+  assert.match(result.ingredients, /Chicken/)
+  assert.match(result.instructions, /Cook everything/)
+  assert.equal(result.videoReport.audioSegmentsChecked, 2)
+  assert.equal(result.videoReport.framesSampled, 4)
+  assert.equal(result.videoReport.visionResponded, false)
+  assert.equal(result.videoReport.speechRecoveryUsed, true)
+  assert.match(result.videoReport.status, /visual cross-check unavailable/i)
+  assert.deepEqual(result.missing, [])
+  assert.equal(result.notes, '')
+})
+
+test('partial video analysis reports incomplete recipe without making up nutritional macros as ingredients', async () => {
+  const result = await analyzePublicSocialVideo({
+    url: ig, videoBuffer: Buffer.alloc(300), videoMime: 'video/mp4',
+  }, {
+    durationReader: async () => 18,
+    transcriber: async () => ({ text: '500 calories and 45g protein per serving.', responded: true }),
+    visualReader: async () => ({ text: '', framesSampled: 4, visionResponded: false }),
+    extractor: async () => ({ name: 'Recipe', ingredients: [], instructions: [] }),
+    speechExtractor: async () => null,
+    coverReader: async () => null,
+  })
+  assert.deepEqual(result.missing, ['ingredients', 'instructions'])
+  assert.equal(result.name, '')
+  assert.equal(result.ingredients, '')
+  assert.equal(result.instructions, '')
+  assert.match(result.videoReport.status, /recipe is incomplete/i)
+  assert.equal(result.videoReport.speechRecoveryUsed, false)
 })
 
 test('copied public link is tried automatically; blocked links report a retrieval problem', async () => {

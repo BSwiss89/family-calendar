@@ -1561,6 +1561,7 @@ type SocialVideoRecipePreview = {
     framesSampled: number
     visionResponded: boolean
     comparisonCompleted: boolean
+    speechRecoveryUsed?: boolean
     newIngredients: number
     newInstructions: number
     conflicts: string[]
@@ -23344,7 +23345,11 @@ resetMealPlannerScroll()
                     </div>
                   )}
                   {socialRecipeVideoReport && (
-                    <div className="recipe-social-video-check" role="status">
+                    <div className={`recipe-social-video-check ${!socialRecipeVideoReport.videoOpened ||
+                      !socialRecipeVideoReport.visionResponded ||
+                      !socialRecipeVideoReport.comparisonCompleted ||
+                      socialRecipeImportMessage.includes('Still missing:')
+                        ? 'recipe-social-video-check-partial' : ''}`} role="status">
                       <strong>Video backup check</strong>
                       <span>{socialRecipeVideoReport.status}</span>
                       <small>Audio: {socialRecipeVideoReport.speechServiceConfigured
@@ -23353,6 +23358,9 @@ resetMealPlannerScroll()
                       <small>Video: {socialRecipeVideoReport.framesSampled} frames sampled; vision model {socialRecipeVideoReport.visionResponded ? 'responded' : 'did not return a result'}</small>
                       <small>Recipe comparison: {socialRecipeVideoReport.comparisonCompleted
                         ? 'completed' : 'unavailable'}; {socialRecipeVideoReport.newIngredients + socialRecipeVideoReport.newInstructions} additional video details suggested</small>
+                      {socialRecipeVideoReport.speechRecoveryUsed && (
+                        <small>Extra spoken-recipe recovery succeeded after the first AI pass.</small>
+                      )}
                       {socialRecipeVideoReport.conflicts.length > 0 && (
                         <small>Caption/video differences found — check the recipe notice.</small>
                       )}

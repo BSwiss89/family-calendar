@@ -208,7 +208,7 @@ async function visibleVideoText(filename, folder, duration) {
     try {
       await run('ffmpeg', [
         '-nostdin', '-loglevel', 'error', '-y', '-ss', String(time),
-        '-i', filename, '-frames:v', '1', '-vf', 'scale=640:-2',
+        '-i', filename, '-frames:v', '1', '-vf', 'scale=448:-2',
         '-q:v', '6', target,
       ], { timeoutMs: 12_000 })
       const bytes = await fs.readFile(target)
@@ -217,35 +217,93 @@ async function visibleVideoText(filename, folder, duration) {
     finally { await fs.rm(target, { force: true }).catch(() => {}) }
   }
   if (!frames.length) return { text: '', framesSampled: 0, visionResponded: false }
-  try {
+  // Four images may exceed a small local GPU's warm-up budget. A smaller
+  // two-frame retry makes vision best-effort instead of silently unavailable.
+  const visionPrompt = 'Read only visible recipe words: amounts, ingredient names, temperatures, and cooking steps. If an action is visually unambiguous, describe it briefly without guessing quantities. No invented steps or measurements. Plain text only.'
+  async function askVision(selected, timeoutMs) {
     const response = await fetch(OLLAMA, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'qwen3-vl:4b-instruct', stream: false, think: false,
-        options: { temperature: 0 },
-        messages: [{
-          role: 'user',
-          content: 'Transcribe only clearly visible on-screen words about the recipe (ingredients, quantities, steps). Do not infer unseen objects, add measurements or invent steps. Return plain text; return empty if no recipe text is visible.',
-          images: frames,
-        }],
+        options: { temperature: 0, num_predict: 320 },
+        messages: [{ role: 'user', content: visionPrompt, images: selected }],
       }),
-      signal: AbortSignal.timeout(40_000),
+      signal: AbortSignal.timeout(timeoutMs),
     })
-    if (!response.ok) return { text: '', framesSampled: frames.length, visionResponded: false }
+    if (!response.ok) return { text: '', available: response.status !== 404, responded: false }
     const data = await response.json()
     return {
       text: typeof data?.message?.content === 'string' ? data.message.content.slice(0, 6000) : '',
-      framesSampled: frames.length, visionResponded: true,
+      available: true,
+      responded: typeof data?.message?.content === 'string',
     }
-  } catch { return { text: '', framesSampled: frames.length, visionResponded: false } }
+  }
+  let vision = { text: '', available: true, responded: false }
+  try { vision = await askVision(frames, 65_000) } catch { /* Retry below. */ }
+  if (!vision.responded && vision.available && frames.length > 2) {
+    try { vision = await askVision([frames[0], frames[frames.length - 1]], 55_000) }
+    catch { /* Optional vision failure cannot discard the spoken recipe. */ }
+  }
+  return { text: vision.text, framesSampled: frames.length, visionResponded: vision.responded }
 }
 
 function cleanField(value, max) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
 function cleanLines(value, maxItems, maxLine) {
-  const list = Array.isArray(value) ? value : []
-  return list.slice(0, maxItems).map(item => cleanField(item, maxLine)).filter(Boolean).join('\n')
+  // Small local models sometimes return newline strings even when asked for
+  // JSON arrays. Do not throw away a complete recipe because of that shape.
+  const list = Array.isArray(value) ? value :
+    typeof value === 'string' ? value.split(/\r?\n/) : []
+  return list.slice(0, maxItems)
+    .map(item => cleanField(item, maxLine).replace(/^\s*(?:[-*•]|\d{1,2}[.)])\s+/, ''))
+    .filter(Boolean).join('\n')
+}
+
+function usableRecipeTitle(value) {
+  const title = cleanField(value, 110).replace(/^["'“”]+|["'“”]+$/g, '')
+  return /^(?:recipe|the recipe|untitled(?: recipe)?|cooking(?: video)?|food|meal|instagram(?: reel)?|facebook(?: reel)?)$/i.test(title)
+    ? '' : title
+}
+
+function verifiedNutritionNotes(value) {
+  const notes = cleanField(value, 350).replace(/\*\*/g, '').trim()
+  // Do not put model commentary about a video/transcript in recipe Notes.
+  // Only a short, directly stated nutrition fact is an appropriate note.
+  if (!notes || notes.length > 180 ||
+      /\b(?:transcript|caption|claims?|explicitly|evidence|breakdown|video|analysis|however|reported by|according to)\b/i.test(notes) ||
+      !/\b\d{1,4}\s*(?:kcal|calories?)\b|\b\d{1,3}\s*g\s*(?:protein|carbs?|fat)\b/i.test(notes))
+    return ''
+  return notes
+}
+
+// Recover only plainly spoken recipe actions or measured ingredients when a
+// local model omits them. Never turn nutrition macros into ingredients or
+// promotional speech into cooking directions. Preserve the original wording
+// so the person can review actual evidence.
+export function extractSpokenRecipeFacts(transcript = '') {
+  const chunks = transcript.replace(/[\r\n]+/g, '. ')
+    .split(/(?<=[.!?;])\s+|\s+(?=(?:then|next|after that|finally|first)\s+)/i)
+    .map(s => s.trim()).filter(Boolean).slice(0, 100)
+  const ingredients = [], instructions = []
+  const cooking = /\b(?:add|mix|stir|combine|cook|bake|preheat|fry|grill|roast|boil|simmer|chop|dice|slice|whisk|blend|season|marinate|pour|heat|toss|drain|serve|top|spread|cover|flip|place|transfer|air.?fry)\b/i
+  const measure = /\b(?:\d+(?:[.,]\d+)?|one|two|three|four|half|quarter|a)\s*(?:g|grams?|kg|ml|l|oz|ounces?|lbs?|pounds?|cups?|tablespoons?|teaspoons?|tbsp|tsp|cloves?|slices?)\b(?:\s+of)?\s+([a-z][a-z -]{2,55})/gi
+  const seen = new Set()
+  for (const original of chunks) {
+    if (original.length < 9 || original.length > 320) continue
+    const phrase = original.replace(/^(?:so|okay|now|and|then|next|first|after that)\s*[,.:]?\s*/i, '').trim()
+    if (/\b(?:follow me|subscribe|like and share|link in bio|comment below)\b/i.test(phrase)) continue
+    if (cooking.test(phrase) && instructions.length < 35) instructions.push(phrase)
+    for (const found of phrase.matchAll(measure)) {
+      const ingredient = found[0].trim().replace(/\s+(?:and|then|before|after|until|while|because|to)\b.*$/i, '').trim()
+      if (/\b(?:protein|carbs?|fat|calories|fiber|sodium)\b/i.test(ingredient)) continue
+      const key = ingredient.toLowerCase()
+      if (!seen.has(key) && ingredient.length < 125 && ingredients.length < 35) {
+        seen.add(key); ingredients.push(ingredient)
+      }
+    }
+  }
+  return { ingredients: ingredients.join('\n'), instructions: instructions.join('\n') }
 }
 
 function appendVideoDetails(base, additions, maxLines, maxLength, maxChars) {
@@ -268,14 +326,15 @@ export function groundedVideoDraft({ caption = '', transcript = '', visibleText 
   // Never accept model claims when there was no video or caption evidence.
   const model = evidence && structured && typeof structured === 'object' && !Array.isArray(structured)
     ? structured : {}
-  const name = fromCaption.name || cleanField(model.name, 110)
+  const name = usableRecipeTitle(fromCaption.name) || usableRecipeTitle(model.name)
   const videoEvidence = Boolean(transcript.trim() || visibleText.trim())
   const audioDraft = transcript.trim() ? parseSocialRecipeCaption(transcript.slice(0, 9000)) : null
   const screenDraft = visibleText.trim() ? parseSocialRecipeCaption(visibleText.slice(0, 6000)) : null
+  const spokenFacts = transcript.trim() ? extractSpokenRecipeFacts(transcript) : null
   const baseIngredients = fromCaption.ingredients || cleanLines(model.ingredients, 80, 260) ||
-    audioDraft?.ingredients || screenDraft?.ingredients || ''
+    audioDraft?.ingredients || screenDraft?.ingredients || spokenFacts?.ingredients || ''
   const baseInstructions = fromCaption.instructions || cleanLines(model.instructions, 80, 500) ||
-    audioDraft?.instructions || screenDraft?.instructions || ''
+    audioDraft?.instructions || screenDraft?.instructions || spokenFacts?.instructions || ''
   // Caption is the stable baseline. Append only non-repeated details identified in
   // actual speech/frames; the model must not replace confirmed quantities or steps.
   const ingredients = videoEvidence
@@ -291,11 +350,38 @@ export function groundedVideoDraft({ caption = '', transcript = '', visibleText 
   const servings = fromCaption.servings ||
     (videoServings >= 1 && videoServings <= 1000 ? String(videoServings) : '')
   const notes = fromCaption.notes ||
-    (videoEvidence ? cleanField(model.nutritionNotes, 350) : '')
+    (videoEvidence ? verifiedNutritionNotes(model.nutritionNotes) : '')
   return {
     name, ingredients, instructions, conflicts, servings, notes,
     missing: ['ingredients', 'instructions'].filter(field => !({ ingredients, instructions })[field]),
   }
+}
+
+// A narrow second attempt when the main caption/video comparison returned
+// a nutrition narrative instead of the actual recipe fields. Uses local Ollama
+// only, and never replaces verified creator-caption ingredients or steps.
+async function recoverSpokenRecipe({ transcript, visibleText }) {
+  if (!transcript.trim() && !visibleText.trim()) return null
+  try {
+    const response = await fetch(OLLAMA, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'ministral-3:8b', stream: false, think: false,
+        format: 'json', options: { temperature: 0, num_predict: 950 },
+        messages: [
+          { role: 'system', content: 'You are extracting cooking facts stated in a spoken recipe. Output a JSON object with name (string), ingredients (array of strings), instructions (array of strings), nutritionNotes (string). Extract ingredients even when the speaker does not use the word Ingredients. Preserve every explicitly spoken measurement. Convert clearly spoken cooking directions into concise ordered instruction strings. Do not infer ingredients, quantities, durations or steps that are not actually in the evidence. Ignore promotional remarks, commentary about the audio, and nutrition talk as cooking instructions. Empty arrays if the evidence truly contains no ingredients or cooking steps. Never write transcript analysis in nutritionNotes. If there is an exact creator-stated macro, use a short plain-text fact only.' },
+          { role: 'user', content: 'Spoken words:\n' + transcript.slice(0, 9000) + '\nVisible recipe text:\n' + visibleText.slice(0, 6000) },
+        ],
+      }),
+      signal: AbortSignal.timeout(60_000),
+    })
+    if (!response.ok) return null
+    const data = await response.json()
+    const parsed = JSON.parse(data?.message?.content || '{}')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return parsed.recipe && typeof parsed.recipe === 'object' && !Array.isArray(parsed.recipe)
+      ? parsed.recipe : parsed
+  } catch { return null }
 }
 
 async function structureEvidence({ caption, transcript, visibleText }) {
@@ -316,7 +402,11 @@ async function structureEvidence({ caption, transcript, visibleText }) {
     if (!response.ok) return null
     const data = await response.json()
     const content = data?.message?.content
-    return typeof content === 'string' ? JSON.parse(content) : null
+    if (typeof content !== 'string') return null
+    const parsed = JSON.parse(content)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return parsed.recipe && typeof parsed.recipe === 'object' && !Array.isArray(parsed.recipe)
+      ? parsed.recipe : parsed
   } catch { return null }
 }
 
@@ -325,6 +415,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
   durationReader = inspectDuration,
   transcriber = transcribeClip, visualReader = visibleVideoText, extractor = structureEvidence,
   onProgress = null, coverReader = buildSocialCoverPreview,
+  speechExtractor = recoverSpokenRecipe,
 } = {}) {
   const source = normalizeSocialRecipeUrl(url)
   if (typeof caption !== 'string' || caption.length > 10_000)
@@ -430,8 +521,37 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
     const recipeCaption = caption.trim() || recoveredCaption
     progress('organize', 'Comparing the caption with the video and organizing recipe details…')
     const structured = await extractor({ caption: recipeCaption, transcript, visibleText })
-    const draft = groundedVideoDraft({ caption: recipeCaption, transcript, visibleText, structured })
+    let draft = groundedVideoDraft({ caption: recipeCaption, transcript, visibleText, structured })
     const videoEvidencePresent = Boolean(transcript.trim() || visibleText.trim())
+    let speechRecoveryUsed = false
+    if (videoEvidencePresent && draft.missing.length) {
+      progress('speech-recovery', 'Double-checking spoken ingredients and cooking steps…')
+      let recovered = null
+      try { recovered = await speechExtractor({ transcript, visibleText }) }
+      catch { /* Keep the grounded draft on recovery failure. */ }
+      if (recovered && typeof recovered === 'object' && !Array.isArray(recovered)) {
+        const primary = structured && typeof structured === 'object' && !Array.isArray(structured)
+          ? structured : {}
+        const adjusted = {
+          ...primary,
+          name: usableRecipeTitle(primary.name) || usableRecipeTitle(recovered.name),
+          ingredients: cleanLines(primary.ingredients, 80, 260)
+            ? primary.ingredients : recovered.ingredients,
+          instructions: cleanLines(primary.instructions, 80, 500)
+            ? primary.instructions : recovered.instructions,
+          nutritionNotes: verifiedNutritionNotes(primary.nutritionNotes)
+            ? primary.nutritionNotes : recovered.nutritionNotes,
+        }
+        const next = groundedVideoDraft({
+          caption: recipeCaption, transcript, visibleText, structured: adjusted,
+        })
+        if ((next.ingredients && !draft.ingredients) || (next.instructions && !draft.instructions) ||
+            (next.name && !draft.name)) {
+          draft = next
+          speechRecoveryUsed = true
+        }
+      }
+    }
     const videoAdded = field => videoEvidencePresent && Array.isArray(structured?.[field])
       ? structured[field].filter(item => typeof item === 'string' && item.trim()).length : 0
     const newIngredients = videoAdded('videoIngredientsAdded')
@@ -467,10 +587,14 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
     const videoStatus = !videoAnalyzed
       ? 'Caption only — the video could not be analyzed.'
       : !videoEvidencePresent
-        ? 'Video opened, but no recipe speech or on-screen text was recovered.'
-        : structured
-          ? 'Video evidence captured and compared with the caption.'
-          : 'Video evidence captured; local comparison was unavailable.'
+        ? 'Video opened, but no usable speech or on-screen text was recovered.'
+        : !draft.ingredients || !draft.instructions
+          ? 'Audio/video checked, but the recipe is incomplete. Do not save until reviewed.'
+          : !visionResponded
+            ? 'Spoken recipe details recovered; visual cross-check unavailable.'
+            : structured
+              ? 'Video audio and sampled frames checked. Review the drafted recipe.'
+              : 'Video evidence recovered; AI comparison was unavailable.'
     return {
       platform: source.platform, sourceUrl: source.url,
       name: draft.name, ingredients: draft.ingredients, instructions: draft.instructions,
@@ -493,6 +617,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         comparisonCompleted: videoAnalyzed && videoEvidencePresent &&
           structured !== null && structured !== undefined,
         newIngredients, newInstructions,
+        speechRecoveryUsed,
         conflicts: draft.conflicts,
       },
       notice: noticeParts.join(' '),
