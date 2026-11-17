@@ -29,7 +29,7 @@ function quantity(value) {
 function parseIngredient(value) {
   const match = amountRx.exec(value.trim())
   if (!match) return null
-  const number = quantity(match[1]), name = match[3]?.trim()
+  const number = quantity(match[1]), name = match[3]?.trim().replace(/^of\s+/i, '')
   if (!Number.isFinite(number) || number <= 0 || number > 100000 ||
       !name || name.length > 160 || /^[0-9]/.test(name) ||
       /^(?:calories?|kcal|protein|carbs?|fat)\b/i.test(name)) return null
