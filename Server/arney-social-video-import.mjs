@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import sharp from 'sharp'
 import { normalizeSocialRecipeUrl, parseSocialRecipeCaption } from './arney-social-recipe-import.mjs'
 
 const MAX_VIDEO_BYTES = 36 * 1024 * 1024 // User-supplied recordings only
@@ -12,6 +13,8 @@ const MAX_SECONDS = 600 // Ten-minute limit
 const OLLAMA = 'http://127.0.0.1:11434/api/chat'
 const AUDIO_SECONDS = 18
 const MAX_AUDIO_BYTES = 2 * 1024 * 1024
+const MAX_COVER_INPUT_BYTES = 4 * 1024 * 1024
+const MAX_COVER_OUTPUT_BYTES = 70 * 1024
 
 export function socialVideoAllowedOnTest({ port, authMode, rootFolder } = {}) {
   return String(port) === '13002' && authMode === 'required' &&
@@ -88,6 +91,70 @@ async function downloadPublicVideo(sourceUrl, folder) {
   return { filename: path.join(folder, filename), caption }
 }
 
+// Use only files yt-dlp has already placed in its private temporary folder.
+// Never fetch an image URL from the user or from metadata, and never expose
+// arbitrary image hosts to the browser.
+// Cover fetching is optional and independent: a thumbnail failure must never
+// interfere with caption/video extraction, and never uses cookies or credentials.
+async function fetchPublicCoverOnly(sourceUrl, folder) {
+  try {
+    await run('yt-dlp', [
+      '--ignore-config', '--no-playlist', '--skip-download', '--write-thumbnail',
+      '--no-write-info-json', '--no-warnings',
+      '--output', path.join(folder, 'cover-only.%(ext)s'), sourceUrl,
+    ], { cwd: folder, timeoutMs: 22_000 })
+  } catch { /* Not all public Reels expose their original cover. */ }
+}
+
+export async function buildSocialCoverPreview(folder, videoFilename = '', { grabFrame = null } = {}) {
+  let files = []
+  try { files = await fs.readdir(folder) } catch { return null }
+  const coverCandidates = files
+    .filter(name => /^(?:cover-only|caption-only|linked-video)\.(?:webp|jpe?g|png)$/i.test(name))
+    .sort((a, b) => Number(!a.startsWith('cover-only')) - Number(!b.startsWith('cover-only')))
+  // Prefer the creator's Reel cover. Use a representative frame only when
+  // no public cover was saved and an actual authorized video is available.
+  const candidates = coverCandidates.map(name => ({
+    filename: path.join(folder, name), source: 'Reel cover',
+  }))
+  if (videoFilename) candidates.push({
+    filename: path.join(folder, 'recipe-cover-frame.jpg'),
+    source: 'Video frame', needsFrame: true,
+  })
+  for (const candidate of candidates) {
+    try {
+      // Generating a frame is a fallback, not an obligatory step when the
+      // original Reel cover has already been retrieved.
+      if (candidate.needsFrame) {
+        if (typeof grabFrame === 'function') await grabFrame(videoFilename, candidate.filename)
+        else await run('ffmpeg', [
+          '-nostdin', '-loglevel', 'error', '-y', '-ss', '1', '-i', videoFilename,
+          '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '5', candidate.filename,
+        ], { timeoutMs: 12_000 })
+      }
+      const stat = await fs.stat(candidate.filename)
+      if (!stat.isFile() || stat.size < 100 || stat.size > MAX_COVER_INPUT_BYTES) continue
+      const photo = sharp(candidate.filename, { limitInputPixels: 6_000_000 })
+      const optimized = await photo.rotate().resize({
+        width: 640, height: 640, fit: 'inside', withoutEnlargement: true,
+      }).webp({ quality: 72 }).toBuffer()
+      let buffer = optimized
+      if (buffer.length > MAX_COVER_OUTPUT_BYTES) {
+        buffer = await sharp(candidate.filename, { limitInputPixels: 6_000_000 })
+          .rotate().resize({ width: 420, height: 420, fit: 'inside' })
+          .webp({ quality: 58 }).toBuffer()
+      }
+      if (buffer.length > 0 && buffer.length <= MAX_COVER_OUTPUT_BYTES) {
+        return {
+          photoDataUrl: 'data:image/webp;base64,' + buffer.toString('base64'),
+          photoSource: candidate.source,
+        }
+      }
+    } catch { /* Damaged or unsupported images never block recipe extraction. */ }
+  }
+  return null
+}
+
 async function inspectDuration(filename) {
   const raw = await run('ffprobe', [
     '-v', 'error', '-show_entries', 'format=duration',
@@ -108,8 +175,9 @@ async function transcribeClip(filename, folder, start, seconds, stt) {
       '-c:a', 'pcm_s16le', '-f', 'wav', audio,
     ], { timeoutMs: 16_000 })
     const bytes = await fs.readFile(audio)
-    if (bytes.length < 100 || bytes.length > MAX_AUDIO_BYTES) return ''
-    if (!stt || typeof stt.url !== 'string' || typeof stt.token !== 'string') return ''
+    if (bytes.length < 100 || bytes.length > MAX_AUDIO_BYTES) return { text: '', responded: false }
+    if (!stt || typeof stt.url !== 'string' || typeof stt.token !== 'string')
+      return { text: '', responded: false }
     const result = await fetch(stt.url, {
       method: 'POST',
       headers: {
@@ -121,10 +189,13 @@ async function transcribeClip(filename, folder, start, seconds, stt) {
       body: bytes,
       signal: AbortSignal.timeout(16_000),
     })
-    if (!result.ok) return ''
+    if (!result.ok) return { text: '', responded: false }
     const data = await result.json()
-    return typeof data?.transcript === 'string' ? data.transcript.trim().slice(0, 2400) : ''
-  } catch { return '' }
+    return {
+      text: typeof data?.transcript === 'string' ? data.transcript.trim().slice(0, 2400) : '',
+      responded: true,
+    }
+  } catch { return { text: '', responded: false } }
   finally { await fs.rm(audio, { force: true }).catch(() => {}) }
 }
 
@@ -145,7 +216,7 @@ async function visibleVideoText(filename, folder, duration) {
     } catch { /* Missing frames should not block the transcript. */ }
     finally { await fs.rm(target, { force: true }).catch(() => {}) }
   }
-  if (!frames.length) return ''
+  if (!frames.length) return { text: '', framesSampled: 0, visionResponded: false }
   try {
     const response = await fetch(OLLAMA, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -160,10 +231,13 @@ async function visibleVideoText(filename, folder, duration) {
       }),
       signal: AbortSignal.timeout(40_000),
     })
-    if (!response.ok) return ''
+    if (!response.ok) return { text: '', framesSampled: frames.length, visionResponded: false }
     const data = await response.json()
-    return typeof data?.message?.content === 'string' ? data.message.content.slice(0, 6000) : ''
-  } catch { return '' }
+    return {
+      text: typeof data?.message?.content === 'string' ? data.message.content.slice(0, 6000) : '',
+      framesSampled: frames.length, visionResponded: true,
+    }
+  } catch { return { text: '', framesSampled: frames.length, visionResponded: false } }
 }
 
 function cleanField(value, max) {
@@ -250,7 +324,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
   stt = null, downloader = downloadPublicVideo, captionReader = readPublicCaption,
   durationReader = inspectDuration,
   transcriber = transcribeClip, visualReader = visibleVideoText, extractor = structureEvidence,
-  onProgress = null,
+  onProgress = null, coverReader = buildSocialCoverPreview,
 } = {}) {
   const source = normalizeSocialRecipeUrl(url)
   if (typeof caption !== 'string' || caption.length > 10_000)
@@ -260,6 +334,10 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
     throw new TypeError('Choose an MP4, MOV, or WebM recording under 36 MB.')
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'arney-social-preview-'))
   let transcript = '', visibleText = '', recoveredCaption = '', videoAnalyzed = false, videoNotice = ''
+  let audioSegmentsChecked = 0, audioSegmentsResponded = 0, audioSegmentsWithText = 0
+  let framesSampled = 0, visionResponded = false, videoDurationSeconds = 0
+  let publicVideoFile = '', publicCover = null, coverPhoto = null
+  const speechServiceConfigured = Boolean(stt?.url && stt?.token)
   // Progress callbacks carry only reviewable recipe fields and human-readable
   // stage labels. Transcripts, frames and downloaded bytes remain local.
   function progress(stage, message, draft = null) {
@@ -312,14 +390,21 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         if (!Number.isFinite(duration) || duration < 1 || duration > MAX_SECONDS)
           throw new Error('Video is too long.')
         videoAnalyzed = true
+        videoDurationSeconds = Math.round(duration)
+        publicVideoFile = filename
         const portions = []
         const totalClips = Math.ceil(duration / AUDIO_SECONDS)
         progress('audio', 'Transcribing video audio (0 of ' + totalClips + ' sections)…')
         for (let start = 0; start < duration && start < MAX_SECONDS; start += AUDIO_SECONDS) {
           const seconds = Math.min(AUDIO_SECONDS, duration - start)
           if (seconds < 0.2) break
-          const words = await transcriber(filename, folder, start, seconds, stt)
-          if (words) portions.push(words)
+          const chunk = await transcriber(filename, folder, start, seconds, stt)
+          const words = typeof chunk === 'string' ? chunk :
+            typeof chunk?.text === 'string' ? chunk.text : ''
+          audioSegmentsChecked++
+          if (typeof chunk === 'string' ? Boolean(words) : chunk?.responded === true)
+            audioSegmentsResponded++
+          if (words.trim()) { portions.push(words.trim()); audioSegmentsWithText++ }
           const completed = Math.floor(start / AUDIO_SECONDS) + 1
           if (completed % 3 === 0 || completed === totalClips)
             progress('audio', 'Transcribing video audio (' + completed + ' of ' + totalClips + ' sections)…')
@@ -328,7 +413,16 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         progress('frames', transcript
           ? 'Speech captured. Checking the video for on-screen recipe details…'
           : 'No usable speech was recovered. Checking on-screen recipe details…')
-        visibleText = await visualReader(filename, folder, duration)
+        const vision = await visualReader(filename, folder, duration)
+        if (typeof vision === 'string') {
+          visibleText = vision
+          visionResponded = Boolean(vision.trim())
+        } else {
+          visibleText = typeof vision?.text === 'string' ? vision.text : ''
+          framesSampled = Number.isInteger(vision?.framesSampled)
+            ? Math.max(0, Math.min(4, vision.framesSampled)) : 0
+          visionResponded = vision?.visionResponded === true
+        }
       } catch {
         videoNotice = 'The video could not be analyzed safely (maximum 10 minutes; linked video maximum 72 MB).'
       }
@@ -337,6 +431,18 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
     progress('organize', 'Comparing the caption with the video and organizing recipe details…')
     const structured = await extractor({ caption: recipeCaption, transcript, visibleText })
     const draft = groundedVideoDraft({ caption: recipeCaption, transcript, visibleText, structured })
+    const videoEvidencePresent = Boolean(transcript.trim() || visibleText.trim())
+    const videoAdded = field => videoEvidencePresent && Array.isArray(structured?.[field])
+      ? structured[field].filter(item => typeof item === 'string' && item.trim()).length : 0
+    const newIngredients = videoAdded('videoIngredientsAdded')
+    const newInstructions = videoAdded('videoInstructionsAdded')
+    progress('cover', 'Checking whether the Reel has a usable cover photo…')
+    if (!videoBuffer && downloader === downloadPublicVideo && captionReader === readPublicCaption)
+      await fetchPublicCoverOnly(source.url, folder)
+    try {
+      publicCover = await coverReader(folder, publicVideoFile)
+      coverPhoto = publicCover?.photoDataUrl || null
+    } catch { /* Recipe drafts remain usable without a photo. */ }
     progress('draft', structured
       ? 'Video and caption comparison finished. Review the updated fields.'
       : 'The local recipe organizer returned no structured details; displaying only verified text.',
@@ -358,6 +464,13 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
       noticeParts.push('Still missing: ' + draft.missing.join(' and ') + '.')
       if (!structured) noticeParts.push('The local AI could not organize enough recipe information.')
     }
+    const videoStatus = !videoAnalyzed
+      ? 'Caption only — the video could not be analyzed.'
+      : !videoEvidencePresent
+        ? 'Video opened, but no recipe speech or on-screen text was recovered.'
+        : structured
+          ? 'Video evidence captured and compared with the caption.'
+          : 'Video evidence captured; local comparison was unavailable.'
     return {
       platform: source.platform, sourceUrl: source.url,
       name: draft.name, ingredients: draft.ingredients, instructions: draft.instructions,
@@ -365,6 +478,23 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
       missing: draft.missing, videoAnalyzed, audioTranscribed: Boolean(transcript),
       framesRead: Boolean(visibleText), suppliedCaption: Boolean(caption.trim()),
       captionRecovered: Boolean(recoveredCaption && !caption.trim()),
+      photoDataUrl: coverPhoto,
+      photoSource: publicCover?.photoSource ?? '',
+      videoReport: {
+        status: videoStatus,
+        videoOpened: videoAnalyzed,
+        durationSeconds: videoDurationSeconds,
+        speechServiceConfigured,
+        audioSegmentsChecked,
+        audioSegmentsResponded,
+        audioSegmentsWithText,
+        framesSampled,
+        visionResponded,
+        comparisonCompleted: videoAnalyzed && videoEvidencePresent &&
+          structured !== null && structured !== undefined,
+        newIngredients, newInstructions,
+        conflicts: draft.conflicts,
+      },
       notice: noticeParts.join(' '),
     }
   } finally {

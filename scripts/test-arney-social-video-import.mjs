@@ -1,9 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { writeFile, mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
+import sharp from 'sharp'
 import path from 'node:path'
-import { socialVideoAllowedOnTest, groundedVideoDraft, analyzePublicSocialVideo } from '../Server/arney-social-video-import.mjs'
+import { socialVideoAllowedOnTest, groundedVideoDraft, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
 const fb = 'https://www.facebook.com/share/r/1A8Sz2b3cf/?mibextid=tracked'
@@ -241,6 +243,116 @@ test('creator description is imported automatically without caption paste', asyn
   assert.equal(result.instructions,'Simmer beans.')
   assert.equal(result.captionRecovered,true)
 })
+test('video report distinguishes actual recognized audio, visual response and caption-only results', async () => {
+  const events = []
+  const video = await analyzePublicSocialVideo({
+    url: ig, videoBuffer: Buffer.alloc(300), videoMime: 'video/mp4',
+  }, {
+    stt: { url: 'http://127.0.0.1:1234/transcribe', token: 'local-only' },
+    durationReader: async () => 36,
+    transcriber: async (_file, _folder, start) => ({
+      text: start === 0 ? 'Add smoked paprika.' : '', responded: true,
+    }),
+    visualReader: async () => ({ text: 'Bake for 25 minutes.', framesSampled: 4, visionResponded: true }),
+    extractor: async () => ({
+      name: 'Chicken Dinner',
+      ingredients: ['1 lb chicken'],
+      instructions: ['Bake chicken'],
+      videoIngredientsAdded: ['1 tsp smoked paprika'],
+      videoInstructionsAdded: ['Bake for 25 minutes.'],
+    }),
+    coverReader: async () => ({ photoDataUrl: 'data:image/webp;base64,AAAA', photoSource: 'Reel cover' }),
+    onProgress: info => events.push(info.stage),
+  })
+  assert.equal(video.videoReport.videoOpened, true)
+  assert.equal(video.videoReport.durationSeconds, 36)
+  assert.equal(video.videoReport.speechServiceConfigured, true)
+  assert.equal(video.videoReport.audioSegmentsChecked, 2)
+  assert.equal(video.videoReport.audioSegmentsResponded, 2)
+  assert.equal(video.videoReport.audioSegmentsWithText, 1)
+  assert.equal(video.videoReport.framesSampled, 4)
+  assert.equal(video.videoReport.visionResponded, true)
+  assert.equal(video.videoReport.comparisonCompleted, true)
+  assert.equal(video.videoReport.newIngredients, 1)
+  assert.equal(video.videoReport.newInstructions, 1)
+  assert.equal(video.photoSource, 'Reel cover')
+  assert.equal(video.photoDataUrl, 'data:image/webp;base64,AAAA')
+  assert.equal('speechExcerpt' in video.videoReport, false)
+  assert.equal('visionExcerpt' in video.videoReport, false)
+  assert.ok(events.includes('cover'))
+  assert.ok(video.ingredients.includes('smoked paprika'))
+
+  const captionOnly = await analyzePublicSocialVideo({ url: ig }, {
+    captionReader: async () => 'Recipe: Bread\\nIngredients:\\n- 1 cup flour\\nInstructions:\\n1. Bake.',
+    downloader: async () => { throw new Error('restricted') },
+    extractor: async () => ({ name: 'Bread', ingredients: ['1 cup flour'], instructions: ['Bake.'] }),
+    coverReader: async () => null,
+  })
+  assert.equal(captionOnly.videoReport.videoOpened, false)
+  assert.equal(captionOnly.videoReport.audioSegmentsChecked, 0)
+  assert.equal(captionOnly.videoReport.audioSegmentsResponded, 0)
+  assert.equal(captionOnly.videoReport.framesSampled, 0)
+  assert.equal(captionOnly.videoReport.comparisonCompleted, false)
+  assert.match(captionOnly.videoReport.status, /Caption only/)
+  assert.equal(captionOnly.photoDataUrl, null)
+})
+
+test('public Reel covers are sanitized into a small local WebP without video or transcript exposure', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'arney-cover-unit-'))
+  try {
+    const jpg = await sharp({
+      create: { width: 320, height: 220, channels: 3, background: '#3174a0' },
+    }).jpeg().toBuffer()
+    await writeFile(path.join(folder, 'cover-only.jpg'), jpg)
+    const result = await buildSocialCoverPreview(folder)
+    assert.equal(result.photoSource, 'Reel cover')
+    assert.ok(result.photoDataUrl.startsWith('data:image/webp;base64,'))
+    const bytes = Buffer.from(result.photoDataUrl.split(',')[1], 'base64')
+    assert.ok(bytes.length > 0 && bytes.length <= 70 * 1024)
+    const metadata = await sharp(bytes).metadata()
+    assert.equal(metadata.format, 'webp')
+    assert.ok(metadata.width <= 640)
+  } finally { await rm(folder, { recursive: true, force: true }) }
+})
+
+test('a video frame is the fallback when the platform gives no original cover', async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), 'arney-frame-unit-'))
+  let sampled = false
+  try {
+    const result = await buildSocialCoverPreview(folder, '/tmp/video-test.mp4', {
+      grabFrame: async (_input, output) => {
+        sampled = true
+        const jpg = await sharp({
+          create: { width: 240, height: 240, channels: 3, background: '#4a9f6b' },
+        }).jpeg().toBuffer()
+        await writeFile(output, jpg)
+      },
+    })
+    assert.equal(sampled, true)
+    assert.equal(result.photoSource, 'Video frame')
+    assert.ok(result.photoDataUrl.startsWith('data:image/webp;base64,'))
+  } finally { await rm(folder, { recursive: true, force: true }) }
+})
+
+test('the recipe editor shows simple video checks and prepares cover only for explicit Save Recipe', () => {
+  const client = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const server = readFileSync(new URL('../Server/index.mjs', import.meta.url), 'utf8')
+  assert.ok(client.includes('Video backup check'))
+  assert.ok(client.includes('audioSegmentsWithText'))
+  assert.ok(client.includes('framesSampled'))
+  assert.ok(client.includes('comparisonCompleted'))
+  assert.ok(!client.includes('speechExcerpt'))
+  assert.ok(!client.includes('visionExcerpt'))
+  assert.ok(client.includes("new File([blob], 'reel-recipe-cover.webp'"))
+  assert.ok(client.includes('setRecipeImageFile(current => current || file)'))
+  assert.ok(client.includes("formData.append("))
+  assert.ok(client.includes("onSubmit={saveRecipe}"))
+  const route = server.slice(server.indexOf('// TEST-only video analysis.'), server.indexOf('// Source photo bytes are requested ONLY'))
+  assert.ok(route.includes('socialVideoAllowedOnTest('))
+  assert.ok(route.includes('request.familyAccount'))
+  assert.ok(!route.includes('database.prepare('))
+})
+
 test('invalid hosts and recording formats stop before network fetch', async () => {
   let called=false
   await assert.rejects(()=>analyzePublicSocialVideo({url:'https://facebook.com.evil.test/reel/1234567'},{

@@ -1548,6 +1548,23 @@ type SocialVideoRecipePreview = {
   framesRead: boolean
   suppliedCaption: boolean
   notice: string
+  photoDataUrl?: string | null
+  photoSource?: string
+  videoReport?: {
+    status: string
+    videoOpened: boolean
+    durationSeconds: number
+    speechServiceConfigured: boolean
+    audioSegmentsChecked: number
+    audioSegmentsResponded: number
+    audioSegmentsWithText: number
+    framesSampled: number
+    visionResponded: boolean
+    comparisonCompleted: boolean
+    newIngredients: number
+    newInstructions: number
+    conflicts: string[]
+  }
 }
 
 type Recipe = {
@@ -3767,6 +3784,8 @@ const [socialRecipeImportLoading, setSocialRecipeImportLoading] = useState(false
 const [socialRecipeImportStage, setSocialRecipeImportStage] = useState('')
 const [socialRecipeImportMessage, setSocialRecipeImportMessage] = useState('')
 const [socialRecipeImportError, setSocialRecipeImportError] = useState('')
+const [socialRecipeVideoReport, setSocialRecipeVideoReport] =
+  useState<SocialVideoRecipePreview['videoReport']>(undefined)
 const [recipeFormSource, setRecipeFormSource] =
   useState<'recipes' | 'meal-picker'>('recipes')
 const [recipeName, setRecipeName] = useState('')
@@ -7375,6 +7394,7 @@ async function previewSocialRecipeImport() {
   }
   setSocialRecipeImportLoading(true)
   setSocialRecipeImportStage('Connecting to the public recipe link…')
+  setSocialRecipeVideoReport(undefined)
   setSocialRecipeImportError('')
   setSocialRecipeImportMessage('')
   // Live preview updates may arrive before the final AI comparison. Preserve
@@ -7412,6 +7432,27 @@ async function previewSocialRecipeImport() {
       applied.notes = notes
     }
   }
+  async function applyCover(data: SocialVideoRecipePreview) {
+    const preview = data.photoDataUrl
+    if (!preview?.startsWith('data:image/webp;base64,') || preview.length > 125_000) return
+    // A real user-selected picture always wins, including one selected
+    // while video analysis was running. Never save to disk on preview.
+    if (recipeImageFile || recipeImagePreview || recipePublicImageUrl) return
+    try {
+      const blob = await (await fetch(preview)).blob()
+      if (blob.type !== 'image/webp' || blob.size === 0 || blob.size > 70 * 1024) return
+      const file = new File([blob], 'reel-recipe-cover.webp', { type: 'image/webp' })
+      setRecipeImageFile(current => current || file)
+      setRecipeImagePreview(current => current || preview)
+    } catch { /* Photo is optional and must not break recipe extraction. */ }
+  }
+  function finalizeSocialRecipe(data: SocialVideoRecipePreview) {
+    applyDraft(data)
+    setRecipeSourceUrl(data.sourceUrl)
+    setSocialRecipeVideoReport(data.videoReport)
+    void applyCover(data)
+    setSocialRecipeImportMessage(data.platform + ' link attached. ' + data.notice)
+  }
   try {
     const body = new FormData()
     body.append('url', socialRecipeImportUrl.trim())
@@ -7445,9 +7486,7 @@ async function previewSocialRecipeImport() {
           if (item.message) setSocialRecipeImportStage(item.message)
           if (item.draft) applyDraft(item.draft)
         } else if (item.type === 'result' && item.data) {
-          applyDraft(item.data)
-          setRecipeSourceUrl(item.data.sourceUrl)
-          setSocialRecipeImportMessage(item.data.platform + ' link attached. ' + item.data.notice)
+          finalizeSocialRecipe(item.data)
           completed = true
         } else if (item.type === 'error') {
           throw new Error(item.message || 'Recipe analysis stopped unexpectedly.')
@@ -7470,9 +7509,7 @@ async function previewSocialRecipeImport() {
     } else {
       // Older cached TEST clients and legacy JSON responses remain supported.
       const data: SocialVideoRecipePreview = await response.json()
-      applyDraft(data)
-      setRecipeSourceUrl(data.sourceUrl)
-      setSocialRecipeImportMessage(data.platform + ' link attached. ' + data.notice)
+      finalizeSocialRecipe(data)
     }
   } catch (error) {
     setSocialRecipeImportError(
@@ -7494,6 +7531,7 @@ function clearRecipeForm() {
   setSocialRecipeImportStage('')
   setSocialRecipeImportMessage('')
   setSocialRecipeImportError('')
+  setSocialRecipeVideoReport(undefined)
   setRecipeName('')
   setRecipeImageFile(null)
   setRecipeImagePreview('')
@@ -23250,6 +23288,7 @@ resetMealPlannerScroll()
                         setSocialRecipeImportUrl(event.target.value)
                         setSocialRecipeImportMessage('')
                         setSocialRecipeImportError('')
+                        setSocialRecipeVideoReport(undefined)
                       }}
                     />
                   </label>
@@ -23302,6 +23341,21 @@ resetMealPlannerScroll()
                         <small>{socialRecipeImportStage || 'Reading the public link…'}</small>
                         <small>Ingredients, steps, and servings will fill in as they're verified.</small>
                       </span>
+                    </div>
+                  )}
+                  {socialRecipeVideoReport && (
+                    <div className="recipe-social-video-check" role="status">
+                      <strong>Video backup check</strong>
+                      <span>{socialRecipeVideoReport.status}</span>
+                      <small>Audio: {socialRecipeVideoReport.speechServiceConfigured
+                        ? `${socialRecipeVideoReport.audioSegmentsResponded} of ${socialRecipeVideoReport.audioSegmentsChecked} audio sections processed by local STT; ${socialRecipeVideoReport.audioSegmentsWithText} contained recognized speech`
+                        : 'Local speech recognition unavailable'}</small>
+                      <small>Video: {socialRecipeVideoReport.framesSampled} frames sampled; vision model {socialRecipeVideoReport.visionResponded ? 'responded' : 'did not return a result'}</small>
+                      <small>Recipe comparison: {socialRecipeVideoReport.comparisonCompleted
+                        ? 'completed' : 'unavailable'}; {socialRecipeVideoReport.newIngredients + socialRecipeVideoReport.newInstructions} additional video details suggested</small>
+                      {socialRecipeVideoReport.conflicts.length > 0 && (
+                        <small>Caption/video differences found — check the recipe notice.</small>
+                      )}
                     </div>
                   )}
                   {socialRecipeImportError && (
