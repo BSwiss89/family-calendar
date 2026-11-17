@@ -24,11 +24,24 @@ export function socialVideoAllowedOnTest({ port, authMode, rootFolder } = {}) {
     !/family-calendar-live/i.test(rootFolder)
 }
 
+// Return only fixed error categories to the recipe preview. Raw downloader
+// output can contain signed media URLs and must never reach the iPhone or logs.
+export function classifyPublicVideoRetrievalFailure(output = '') {
+  const value = String(output).slice(-4000)
+  if (/login required|log[\s-]?in|required to log in|sign in|cookies.*required|authentication required|private.*(video|post|account)/i.test(value)) return 'login-required'
+  if (/\b429\b|rate[\s-]?limit|too many requests/i.test(value)) return 'rate-limited'
+  if (/\b403\b|forbidden|access denied/i.test(value)) return 'access-denied'
+  if (/\b404\b|not found|video is unavailable|post.*unavailable/i.test(value)) return 'unavailable-media'
+  if (/\b5\d\d\b|internal server error|bad gateway|service unavailable/i.test(value)) return 'upstream-error'
+  if (/timed?\s*out|timeout|connection reset|network.*error|connection aborted|temporar|remote end closed|connection refused|unable to establish/i.test(value)) return 'temporary-network'
+  return 'unknown-retrieval-error'
+}
+
 function run(program, args, { cwd, timeoutMs = 25_000 } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { cwd, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] })
-    let stdout = '', stderr = '', complete = false
-    const timer = setTimeout(() => child.kill(), timeoutMs)
+    let stdout = '', stderr = '', complete = false, timedOut = false
+    const timer = setTimeout(() => { timedOut = true; child.kill() }, timeoutMs)
     function finish(error) {
       if (complete) return
       complete = true
@@ -36,12 +49,23 @@ function run(program, args, { cwd, timeoutMs = 25_000 } = {}) {
       if (error) reject(error)
       else resolve(stdout.trim())
     }
-    child.on('error', () => finish(new Error(program + ' is unavailable on the TEST laptop.')))
+    child.on('error', () => {
+      const error = new Error(program + ' is unavailable on the TEST laptop.')
+      error.failureCode = 'executable-unavailable'
+      finish(error)
+    })
     child.stdout.on('data', chunk => { stdout = (stdout + String(chunk)).slice(-5000) })
     child.stderr.on('data', chunk => { stderr = (stderr + String(chunk)).slice(-2000) })
-    child.on('close', code => finish(code === 0 ? null : new Error(program + ' could not process this video.')))
+    child.on('close', code => {
+      if (code === 0 && !timedOut) return finish(null)
+      const error = new Error(program + ' could not process this video.')
+      error.failureCode = timedOut ? 'process-timeout'
+        : classifyPublicVideoRetrievalFailure(stderr || stdout)
+      finish(error)
+    })
   })
 }
+
 
 // Best-effort public-page metadata fallback for Instagram descriptions when the
 // yt-dlp metadata command cannot access a Reel. No login/cookies, extra hosts,
@@ -194,20 +218,34 @@ async function downloadPublicVideo(sourceUrl, folder) {
   // Only a canonical, allowlisted Instagram/Facebook URL reaches the downloader.
   // No credential store, browser cookies, playlists, user-defined arguments,
   // arbitrary remote URLs, or scraper output is exposed to the browser.
-  const downloaderOutput = await run('yt-dlp', [
-    '--ignore-config', '--no-playlist', '--no-progress', '--no-warnings',
-    '--write-info-json', '--no-write-thumbnail', '--max-filesize', '72m',
-    // Instagram sometimes omits duration; accept missing metadata and verify the actual file with ffprobe.
-    '--match-filter', 'duration <=? 600', '--format', 'best[height<=480]/best',
-    '--output', path.join(folder, 'linked-video.%(ext)s'), sourceUrl,
-  ], { cwd: folder, timeoutMs: 120_000 })
+  let downloaderOutput = ''
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      downloaderOutput = await run('yt-dlp', [
+        '--ignore-config', '--no-playlist', '--no-progress', '--no-warnings',
+        '--write-info-json', '--no-write-thumbnail', '--max-filesize', '72m',
+        // Instagram sometimes omits duration; validate actual duration with ffprobe after download.
+        '--match-filter', 'duration <=? 600', '--format', 'best[height<=480]/best',
+        '--output', path.join(folder, 'linked-video.%(ext)s'), sourceUrl,
+      ], { cwd: folder, timeoutMs: 120_000 })
+      break
+    } catch (error) {
+      // An occasional interrupted transport may succeed on one retry. Never
+      // hammer Instagram on a rate limit, failed authorization or missing media.
+      if (attempt === 0 &&
+          ['temporary-network', 'upstream-error'].includes(error?.failureCode)) continue
+      throw error
+    }
+  }
   const entries = await fs.readdir(folder)
   const filename = entries.find(name => /^linked-video\.(?:mp4|m4v|mov|webm|mkv)$/i.test(name))
   // yt-dlp returns exit code 0 even when its filter skips a long Reel.
   if (!filename) {
     if (/does not pass filter/i.test(downloaderOutput))
       throw new Error('This video is longer than the 10-minute analysis limit.')
-    throw new Error('yt-dlp did not save an accessible video from this link.')
+    const error = new Error('yt-dlp did not save an accessible video from this link.')
+    error.failureCode = 'no-video-file'
+    throw error
   }
   let caption = ''
   try {
@@ -733,9 +771,13 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
           }
         }
       } catch (error) {
+        // Safe categories only; never expose downloader stderr or signed URLs.
+        const code = typeof error?.failureCode === 'string' &&
+          /^(?:executable-unavailable|process-timeout|login-required|rate-limited|access-denied|unavailable-media|upstream-error|temporary-network|unknown-retrieval-error|no-video-file)$/.test(error.failureCode)
+          ? error.failureCode : 'unknown-retrieval-error'
         videoNotice = error instanceof Error && error.message === 'This video is longer than the 10-minute analysis limit.'
           ? error.message
-          : 'The public video could not be retrieved by yt-dlp on TEST. Check its availability or the downloader setup.'
+          : 'The public video could not be retrieved by yt-dlp on TEST (reason: ' + code + ').'
       }
     }
     if (filename) {
