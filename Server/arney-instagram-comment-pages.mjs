@@ -142,7 +142,9 @@ export async function readInstagramCreatorRecipePages(sourceUrl, metadata, {
       return missing('comment-rate-limited', foundComments.length, pagesChecked)
     if (!response.ok)
       return missing('comment-http-error', foundComments.length, pagesChecked)
-    const body = await readBoundedJson(response)
+    let body
+    try { body = await readBoundedJson(response) }
+    catch { return missing('comment-network-unavailable', foundComments.length, pagesChecked) }
     const parsed = pageFromResponse(body)
     if (!parsed) return missing('comment-invalid-page', foundComments.length, pagesChecked)
     for (const comment of parsed.comments) {
