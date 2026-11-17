@@ -208,7 +208,7 @@ async function visibleVideoText(filename, folder, duration) {
     try {
       await run('ffmpeg', [
         '-nostdin', '-loglevel', 'error', '-y', '-ss', String(time),
-        '-i', filename, '-frames:v', '1', '-vf', 'scale=640:-2',
+        '-i', filename, '-frames:v', '1', '-vf', 'scale=448:-2',
         '-q:v', '6', target,
       ], { timeoutMs: 12_000 })
       const bytes = await fs.readFile(target)
@@ -217,27 +217,34 @@ async function visibleVideoText(filename, folder, duration) {
     finally { await fs.rm(target, { force: true }).catch(() => {}) }
   }
   if (!frames.length) return { text: '', framesSampled: 0, visionResponded: false }
-  try {
+  // Four images may exceed a small local GPU's warm-up budget. A smaller
+  // two-frame retry makes vision best-effort instead of silently unavailable.
+  const visionPrompt = 'Read only visible recipe words: amounts, ingredient names, temperatures, and cooking steps. If an action is visually unambiguous, describe it briefly without guessing quantities. No invented steps or measurements. Plain text only.'
+  async function askVision(selected, timeoutMs) {
     const response = await fetch(OLLAMA, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'qwen3-vl:4b-instruct', stream: false, think: false,
-        options: { temperature: 0 },
-        messages: [{
-          role: 'user',
-          content: 'Transcribe only clearly visible on-screen words about the recipe (ingredients, quantities, steps). Do not infer unseen objects, add measurements or invent steps. Return plain text; return empty if no recipe text is visible.',
-          images: frames,
-        }],
+        options: { temperature: 0, num_predict: 320 },
+        messages: [{ role: 'user', content: visionPrompt, images: selected }],
       }),
-      signal: AbortSignal.timeout(40_000),
+      signal: AbortSignal.timeout(timeoutMs),
     })
-    if (!response.ok) return { text: '', framesSampled: frames.length, visionResponded: false }
+    if (!response.ok) return { text: '', available: response.status !== 404, responded: false }
     const data = await response.json()
     return {
       text: typeof data?.message?.content === 'string' ? data.message.content.slice(0, 6000) : '',
-      framesSampled: frames.length, visionResponded: true,
+      available: true,
+      responded: typeof data?.message?.content === 'string',
     }
-  } catch { return { text: '', framesSampled: frames.length, visionResponded: false } }
+  }
+  let vision = { text: '', available: true, responded: false }
+  try { vision = await askVision(frames, 65_000) } catch { /* Retry below. */ }
+  if (!vision.responded && vision.available && frames.length > 2) {
+    try { vision = await askVision([frames[0], frames[frames.length - 1]], 55_000) }
+    catch { /* Optional vision failure cannot discard the spoken recipe. */ }
+  }
+  return { text: vision.text, framesSampled: frames.length, visionResponded: vision.responded }
 }
 
 function cleanField(value, max) {
@@ -350,6 +357,33 @@ export function groundedVideoDraft({ caption = '', transcript = '', visibleText 
   }
 }
 
+// A narrow second attempt when the main caption/video comparison returned
+// a nutrition narrative instead of the actual recipe fields. Uses local Ollama
+// only, and never replaces verified creator-caption ingredients or steps.
+async function recoverSpokenRecipe({ transcript, visibleText }) {
+  if (!transcript.trim() && !visibleText.trim()) return null
+  try {
+    const response = await fetch(OLLAMA, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'ministral-3:8b', stream: false, think: false,
+        format: 'json', options: { temperature: 0, num_predict: 950 },
+        messages: [
+          { role: 'system', content: 'You are extracting cooking facts stated in a spoken recipe. Output a JSON object with name (string), ingredients (array of strings), instructions (array of strings), nutritionNotes (string). Extract ingredients even when the speaker does not use the word Ingredients. Preserve every explicitly spoken measurement. Convert clearly spoken cooking directions into concise ordered instruction strings. Do not infer ingredients, quantities, durations or steps that are not actually in the evidence. Ignore promotional remarks, commentary about the audio, and nutrition talk as cooking instructions. Empty arrays if the evidence truly contains no ingredients or cooking steps. Never write transcript analysis in nutritionNotes. If there is an exact creator-stated macro, use a short plain-text fact only.' },
+          { role: 'user', content: 'Spoken words:\n' + transcript.slice(0, 9000) + '\nVisible recipe text:\n' + visibleText.slice(0, 6000) },
+        ],
+      }),
+      signal: AbortSignal.timeout(60_000),
+    })
+    if (!response.ok) return null
+    const data = await response.json()
+    const parsed = JSON.parse(data?.message?.content || '{}')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return parsed.recipe && typeof parsed.recipe === 'object' && !Array.isArray(parsed.recipe)
+      ? parsed.recipe : parsed
+  } catch { return null }
+}
+
 async function structureEvidence({ caption, transcript, visibleText }) {
   if (![caption, transcript, visibleText].some(value => value?.trim())) return null
   try {
@@ -368,7 +402,11 @@ async function structureEvidence({ caption, transcript, visibleText }) {
     if (!response.ok) return null
     const data = await response.json()
     const content = data?.message?.content
-    return typeof content === 'string' ? JSON.parse(content) : null
+    if (typeof content !== 'string') return null
+    const parsed = JSON.parse(content)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return parsed.recipe && typeof parsed.recipe === 'object' && !Array.isArray(parsed.recipe)
+      ? parsed.recipe : parsed
   } catch { return null }
 }
 
@@ -377,6 +415,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
   durationReader = inspectDuration,
   transcriber = transcribeClip, visualReader = visibleVideoText, extractor = structureEvidence,
   onProgress = null, coverReader = buildSocialCoverPreview,
+  speechExtractor = recoverSpokenRecipe,
 } = {}) {
   const source = normalizeSocialRecipeUrl(url)
   if (typeof caption !== 'string' || caption.length > 10_000)
@@ -482,8 +521,37 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
     const recipeCaption = caption.trim() || recoveredCaption
     progress('organize', 'Comparing the caption with the video and organizing recipe details…')
     const structured = await extractor({ caption: recipeCaption, transcript, visibleText })
-    const draft = groundedVideoDraft({ caption: recipeCaption, transcript, visibleText, structured })
+    let draft = groundedVideoDraft({ caption: recipeCaption, transcript, visibleText, structured })
     const videoEvidencePresent = Boolean(transcript.trim() || visibleText.trim())
+    let speechRecoveryUsed = false
+    if (videoEvidencePresent && (!draft.name || draft.missing.length)) {
+      progress('speech-recovery', 'Double-checking spoken ingredients and cooking steps…')
+      let recovered = null
+      try { recovered = await speechExtractor({ transcript, visibleText }) }
+      catch { /* Keep the grounded draft on recovery failure. */ }
+      if (recovered && typeof recovered === 'object' && !Array.isArray(recovered)) {
+        const primary = structured && typeof structured === 'object' && !Array.isArray(structured)
+          ? structured : {}
+        const adjusted = {
+          ...primary,
+          name: usableRecipeTitle(primary.name) || usableRecipeTitle(recovered.name),
+          ingredients: cleanLines(primary.ingredients, 80, 260)
+            ? primary.ingredients : recovered.ingredients,
+          instructions: cleanLines(primary.instructions, 80, 500)
+            ? primary.instructions : recovered.instructions,
+          nutritionNotes: verifiedNutritionNotes(primary.nutritionNotes)
+            ? primary.nutritionNotes : recovered.nutritionNotes,
+        }
+        const next = groundedVideoDraft({
+          caption: recipeCaption, transcript, visibleText, structured: adjusted,
+        })
+        if ((next.ingredients && !draft.ingredients) || (next.instructions && !draft.instructions) ||
+            (next.name && !draft.name)) {
+          draft = next
+          speechRecoveryUsed = true
+        }
+      }
+    }
     const videoAdded = field => videoEvidencePresent && Array.isArray(structured?.[field])
       ? structured[field].filter(item => typeof item === 'string' && item.trim()).length : 0
     const newIngredients = videoAdded('videoIngredientsAdded')
@@ -519,10 +587,14 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
     const videoStatus = !videoAnalyzed
       ? 'Caption only — the video could not be analyzed.'
       : !videoEvidencePresent
-        ? 'Video opened, but no recipe speech or on-screen text was recovered.'
-        : structured
-          ? 'Video evidence captured and compared with the caption.'
-          : 'Video evidence captured; local comparison was unavailable.'
+        ? 'Video opened, but no usable speech or on-screen text was recovered.'
+        : !draft.ingredients || !draft.instructions
+          ? 'Audio/video checked, but the recipe is incomplete. Do not save until reviewed.'
+          : !visionResponded
+            ? 'Spoken recipe details recovered; visual cross-check unavailable.'
+            : structured
+              ? 'Video audio and sampled frames checked. Review the drafted recipe.'
+              : 'Video evidence recovered; AI comparison was unavailable.'
     return {
       platform: source.platform, sourceUrl: source.url,
       name: draft.name, ingredients: draft.ingredients, instructions: draft.instructions,
@@ -545,6 +617,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         comparisonCompleted: videoAnalyzed && videoEvidencePresent &&
           structured !== null && structured !== undefined,
         newIngredients, newInstructions,
+        speechRecoveryUsed,
         conflicts: draft.conflicts,
       },
       notice: noticeParts.join(' '),
