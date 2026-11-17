@@ -59,6 +59,73 @@ async function readPublicCaption(sourceUrl, folder) {
   } catch { return '' }
 }
 
+// Public comments are best-effort. Never use login cookies or a Meta token.
+// yt-dlp does not consistently support comments on Instagram/Facebook; do not
+// interpret missing metadata as evidence that the creator never commented.
+// We accept only comments identified as the uploader's by source metadata,
+// never arbitrary top/pinned comments from unrelated accounts.
+function normalizedAccount(value) {
+  return typeof value === 'string' || typeof value === 'number'
+    ? String(value).trim().replace(/^@/, '').toLowerCase() : ''
+}
+
+function recipeCommentLikely(text) {
+  return /(?:\bingredients?\b|\b(?:recipe|instructions?|directions?|method|steps?)\s*:|\b(?:preheat|cook|stir|add|mix|bake|grill|fry|air.?fry|combine|season|whisk|heat|marinate|serve)\b|\b\d+(?:[.,]\d+)?\s*(?:cups?|tbsp|tsp|grams?|g|oz|lbs?|ml|minutes?|mins?|°[fc])\b)/i.test(text)
+}
+
+export function selectPublicCreatorRecipeComment(metadata) {
+  const checked = Array.isArray(metadata?.comments) ? metadata.comments.slice(0, 60) : []
+  const uploaderIds = [metadata?.uploader_id, metadata?.channel_id]
+    .map(normalizedAccount).filter(Boolean)
+  const verified = checked.map(comment => {
+    if (!comment || typeof comment !== 'object' || Array.isArray(comment)) return null
+    const text = typeof comment.text === 'string' ? comment.text.trim().slice(0, 6000) : ''
+    const isCreator = comment.author_is_uploader === true ||
+      (uploaderIds.length > 0 && [comment.author_id, comment.author]
+        .map(normalizedAccount).some(id => id && uploaderIds.includes(id)))
+    if (!isCreator || text.length < 10 || !recipeCommentLikely(text)) return null
+    return {
+      text,
+      pinned: comment.is_pinned === true || comment.pinned === true,
+    }
+  }).filter(Boolean).sort((a, b) => Number(b.pinned) - Number(a.pinned))
+  const selected = verified[0]
+  return {
+    text: selected?.text ?? '',
+    source: selected ? (selected.pinned ? 'creator-pinned' : 'creator-comment') : 'unavailable',
+    pinnedConfirmed: Boolean(selected?.pinned),
+    creatorVerified: Boolean(selected),
+    commentsExamined: checked.length,
+  }
+}
+
+async function readPublicCreatorComment(sourceUrl, folder) {
+  // Check metadata already retrieved by caption/video reads first.
+  for (const basename of ['caption-only.info.json', 'linked-video.info.json', 'comments-only.info.json']) {
+    try {
+      const filename = path.join(folder, basename)
+      const stat = await fs.stat(filename)
+      if (!stat.isFile() || stat.size > 512_000) continue
+      const result = selectPublicCreatorRecipeComment(JSON.parse(await fs.readFile(filename, 'utf8')))
+      if (result.text) return result
+    } catch { /* Skip missing or malformed public metadata. */ }
+  }
+  // One bounded, metadata-only attempt; --write-comments only requests what
+  // the site's yt-dlp extractor exposes without an authenticated session.
+  try {
+    await run('yt-dlp', [
+      '--ignore-config', '--no-playlist', '--skip-download',
+      '--write-info-json', '--write-comments', '--no-write-thumbnail',
+      '--no-warnings',
+      '--output', path.join(folder, 'comments-only.%(ext)s'), sourceUrl,
+    ], { cwd: folder, timeoutMs: 18_000 })
+    const infoFile = path.join(folder, 'comments-only.info.json')
+    const stat = await fs.stat(infoFile)
+    if (!stat.isFile() || stat.size > 512_000) throw new Error('Comment metadata exceeds safe limit.')
+    return selectPublicCreatorRecipeComment(JSON.parse(await fs.readFile(infoFile, 'utf8')))
+  } catch { return { text: '', source: 'unavailable', pinnedConfirmed: false, creatorVerified: false, commentsExamined: 0 } }
+}
+
 async function downloadPublicVideo(sourceUrl, folder) {
   // Only a canonical, allowlisted Instagram/Facebook URL reaches the downloader.
   // No credential store, browser cookies, playlists, user-defined arguments,
