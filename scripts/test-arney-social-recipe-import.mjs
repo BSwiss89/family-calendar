@@ -201,6 +201,11 @@ test('uses exact compatible units without guessing that 20g equals 2 tbsp', () =
   assert.match(result.allocationNotes,/30g for sauce; 70g for marinade/)
 })
 
+test('quantity descriptions with optional of combine safely without combining different ingredient names', () => {
+  const result = consolidateRecipeIngredientAmounts('30 grams of sriracha\n70g sriracha\n30g fresh chili sauce')
+  assert.equal(result.ingredients, '100g sriracha\n30g fresh chili sauce')
+})
+
 test('same ingredient with compatible count units is a single total; different descriptions stay separate', () => {
   const result = consolidateRecipeIngredientAmounts([
     '2 cloves garlic',
