@@ -196,8 +196,12 @@ export function groundedVideoDraft({ caption = '', transcript = '', visibleText 
     ? structured : {}
   const name = fromCaption.name || cleanField(model.name, 110)
   const videoEvidence = Boolean(transcript.trim() || visibleText.trim())
-  const baseIngredients = fromCaption.ingredients || cleanLines(model.ingredients, 80, 260)
-  const baseInstructions = fromCaption.instructions || cleanLines(model.instructions, 80, 500)
+  const audioDraft = transcript.trim() ? parseSocialRecipeCaption(transcript.slice(0, 9000)) : null
+  const screenDraft = visibleText.trim() ? parseSocialRecipeCaption(visibleText.slice(0, 6000)) : null
+  const baseIngredients = fromCaption.ingredients || cleanLines(model.ingredients, 80, 260) ||
+    audioDraft?.ingredients || screenDraft?.ingredients || ''
+  const baseInstructions = fromCaption.instructions || cleanLines(model.instructions, 80, 500) ||
+    audioDraft?.instructions || screenDraft?.instructions || ''
   // Caption is the stable baseline. Append only non-repeated details identified in
   // actual speech/frames; the model must not replace confirmed quantities or steps.
   const ingredients = videoEvidence
@@ -233,7 +237,7 @@ async function structureEvidence({ caption, transcript, visibleText }) {
           { role: 'user', content: 'Caption:\n' + caption.slice(0, 8000) + '\nAudio transcript:\n' + transcript.slice(0, 9000) + '\nVisible video words:\n' + visibleText.slice(0, 6000) },
         ],
       }),
-      signal: AbortSignal.timeout(40_000),
+      signal: AbortSignal.timeout(75_000),
     })
     if (!response.ok) return null
     const data = await response.json()
@@ -246,6 +250,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
   stt = null, downloader = downloadPublicVideo, captionReader = readPublicCaption,
   durationReader = inspectDuration,
   transcriber = transcribeClip, visualReader = visibleVideoText, extractor = structureEvidence,
+  onProgress = null,
 } = {}) {
   const source = normalizeSocialRecipeUrl(url)
   if (typeof caption !== 'string' || caption.length > 10_000)
@@ -255,14 +260,32 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
     throw new TypeError('Choose an MP4, MOV, or WebM recording under 36 MB.')
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'arney-social-preview-'))
   let transcript = '', visibleText = '', recoveredCaption = '', videoAnalyzed = false, videoNotice = ''
+  // Progress callbacks carry only reviewable recipe fields and human-readable
+  // stage labels. Transcripts, frames and downloaded bytes remain local.
+  function progress(stage, message, draft = null) {
+    if (typeof onProgress !== 'function') return
+    try { onProgress({ stage, message, ...(draft ? { draft } : {}) }) }
+    catch { /* An unavailable streaming client must not break cleanup. */ }
+  }
   try {
+    progress('caption', 'Reading the creator description…')
     // Always attempt a caption read first when none was pasted, but continue to
     // analyze the video even when the caption already has a full recipe.
     if (!caption.trim()) {
       try { recoveredCaption = (await captionReader(source.url, folder)).slice(0, 10_000) }
       catch { /* Still attempt media retrieval and video extraction. */ }
     }
+    const captionDraft = groundedVideoDraft({ caption: caption.trim() || recoveredCaption })
+    progress('caption', (caption.trim() || recoveredCaption)
+      ? 'Creator description read. Recipe fields are appearing below.'
+      : 'No usable creator description yet. Checking the video for recipe details.',
+      { name: captionDraft.name, ingredients: captionDraft.ingredients,
+        instructions: captionDraft.instructions, servings: captionDraft.servings,
+        notes: captionDraft.notes })
     let filename = ''
+    progress('video', videoBuffer
+      ? 'Checking the attached video…'
+      : 'Retrieving the public video for speech and on-screen details…')
     if (videoBuffer) {
       filename = path.join(folder, 'uploaded-video.' +
         (videoMime === 'video/quicktime' ? 'mov' : videoMime === 'video/webm' ? 'webm' : 'mp4'))
@@ -290,34 +313,51 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
           throw new Error('Video is too long.')
         videoAnalyzed = true
         const portions = []
+        const totalClips = Math.ceil(duration / AUDIO_SECONDS)
+        progress('audio', 'Transcribing video audio (0 of ' + totalClips + ' sections)…')
         for (let start = 0; start < duration && start < MAX_SECONDS; start += AUDIO_SECONDS) {
           const seconds = Math.min(AUDIO_SECONDS, duration - start)
           if (seconds < 0.2) break
           const words = await transcriber(filename, folder, start, seconds, stt)
           if (words) portions.push(words)
+          const completed = Math.floor(start / AUDIO_SECONDS) + 1
+          if (completed % 3 === 0 || completed === totalClips)
+            progress('audio', 'Transcribing video audio (' + completed + ' of ' + totalClips + ' sections)…')
         }
         transcript = portions.join('\n').slice(0, 9000)
+        progress('frames', transcript
+          ? 'Speech captured. Checking the video for on-screen recipe details…'
+          : 'No usable speech was recovered. Checking on-screen recipe details…')
         visibleText = await visualReader(filename, folder, duration)
       } catch {
         videoNotice = 'The video could not be analyzed safely (maximum 10 minutes; linked video maximum 72 MB).'
       }
     }
     const recipeCaption = caption.trim() || recoveredCaption
+    progress('organize', 'Comparing the caption with the video and organizing recipe details…')
     const structured = await extractor({ caption: recipeCaption, transcript, visibleText })
     const draft = groundedVideoDraft({ caption: recipeCaption, transcript, visibleText, structured })
+    progress('draft', structured
+      ? 'Video and caption comparison finished. Review the updated fields.'
+      : 'The local recipe organizer returned no structured details; displaying only verified text.',
+      { name: draft.name, ingredients: draft.ingredients,
+        instructions: draft.instructions, servings: draft.servings, notes: draft.notes })
     const noticeParts = []
     if (recoveredCaption && !caption.trim())
       noticeParts.push('Creator description was retrieved automatically.')
     if (videoAnalyzed) {
       noticeParts.push(transcript || visibleText
-        ? 'Video was processed locally. Check all AI-extracted measurements and steps before saving.'
+        ? 'Video evidence was processed locally. Review all measurements and steps before saving.'
         : 'Video opened, but no usable speech or on-screen recipe text was recovered.')
     } else if (videoNotice) noticeParts.push(videoNotice)
     if (!videoAnalyzed && !caption.trim() && !recoveredCaption)
       noticeParts.push('Only the source link is available so far.')
     if (draft.conflicts.length)
       noticeParts.push('Check possible caption/video differences: ' + draft.conflicts.join('; ').slice(0, 600) + '.')
-    if (draft.missing.length) noticeParts.push('Still missing: ' + draft.missing.join(' and ') + '.')
+    if (draft.missing.length) {
+      noticeParts.push('Still missing: ' + draft.missing.join(' and ') + '.')
+      if (!structured) noticeParts.push('The local AI could not organize enough recipe information.')
+    }
     return {
       platform: source.platform, sourceUrl: source.url,
       name: draft.name, ingredients: draft.ingredients, instructions: draft.instructions,

@@ -53,8 +53,8 @@ export function normalizeSocialRecipeUrl(value) {
   }
 }
 
-const INGREDIENT_HEADING = /^(?:ingredients?|what you(?:'|’)ll need|you will need)\s*(?:\([^)]{1,60}\))?\s*(?::|[-–—])?\s*(.*)$/i
-const STEP_HEADING = /^(?:instructions?|directions?|method|steps?|how to (?:make|cook)(?: this| it)?|preparation)\s*(?::|[-–—])?\s*(.*)$/i
+const INGREDIENT_HEADING = /^(?:ingredients?(?:\s+list)?|what you(?:'|’)ll need|what you need|you will need|you need|for the (?:chicken|sauce|pasta|rice|marinade|dressing|seasoning|bowl|vegetables|veggies))\s*(?:\([^)]{1,60}\))?\s*(?::|[-–—])?\s*(.*)$/i
+const STEP_HEADING = /^(?:instructions?|directions?|method|steps?|how to (?:make|cook)(?: this| it)?|preparation|how it's made|how to prepare|cooking instructions?)\s*(?::|[-–—])?\s*(.*)$/i
 const TITLE_HEADING = /^(?:recipe|dish|title)\s*:\s*(.{3,120})$/i
 const LIST_MARKER = /^\s*(?:[-*•·▪◦]\s*|\d{1,2}[.)]\s+)\s*/
 const DISCARD = /^(?:#.*|follow (?:me|us)|link in (?:my |our )?bio|save (?:this|for later)|(?:https?:\/\/|www\.)\S+)$/i
@@ -62,6 +62,28 @@ function cleanLine(line) {
   return line.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim()
 }
 function withoutListMarker(line) { return line.replace(LIST_MARKER, '').trim() }
+
+// Only use a fallback when the caption has no parseable section labels.
+// Keep these deterministic: never turn a general promotional sentence into a recipe.
+const COOKING_ACTION = /^(?:preheat|heat|cook|bake|fry|air.?fry|boil|simmer|grill|roast|toast|mix|stir|blend|whisk|combine|add|pour|season|marinate|chop|dice|slice|drain|serve|place|spread|brush|flip|transfer|cut|coat|sauté|saute|prepare|remove|let|top|finish|toss|put|cover)\b/i
+const MEASURED_INGREDIENT = /^(?:(?:\d+(?:[.,]\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])\s*(?:(?:g|kg|mg|ml|l|oz|lb|lbs|cups?|tbsp|tsp|tablespoons?|teaspoons?|cloves?|slices?|pinch(?:es)?|pieces?)\b|[a-z][a-z -]{2,70}\b))/i
+function extractCaptionFallback(lines, type) {
+  const found = []
+  for (const line of lines) {
+    if (found.length >= 80 || line.length > (type === 'ingredients' ? 260 : 500)) continue
+    if (DISCARD.test(line) || /\b(?:calories|carbs|protein|macros)\b/i.test(line)) continue
+    const text = withoutListMarker(line)
+    if (type === 'ingredients') {
+      const bullet = /^[-*•·▪◦]\s+/.test(line)
+      if (bullet && (MEASURED_INGREDIENT.test(text) ||
+        (text.length <= 130 && !COOKING_ACTION.test(text) && !/:$/.test(text)))) found.push(text)
+    } else {
+      const numbered = /^\d{1,2}[.)]\s+/.test(line)
+      if (numbered && COOKING_ACTION.test(text)) found.push(text)
+    }
+  }
+  return found
+}
 
 export function parseSocialRecipeCaption(value) {
   if (typeof value !== 'string' || value.length > MAX_CAPTION)
@@ -78,16 +100,18 @@ export function parseSocialRecipeCaption(value) {
     match = INGREDIENT_HEADING.exec(headingLine)
     if (match) {
       section = 'ingredients'
-      if (match[1]) ingredients.push(withoutListMarker(match[1]))
+      if (match[1] && /[\p{L}\p{N}]/u.test(match[1])) ingredients.push(withoutListMarker(match[1]))
       continue
     }
     match = STEP_HEADING.exec(headingLine)
     if (match) {
       section = 'instructions'
-      if (match[1]) steps.push(withoutListMarker(match[1]))
+      if (match[1] && /[\p{L}\p{N}]/u.test(match[1])) steps.push(withoutListMarker(match[1]))
       continue
     }
     if (DISCARD.test(line)) continue
+    if (section === 'ingredients' && /^\d{1,2}[.)]\s+/.test(line) &&
+        COOKING_ACTION.test(withoutListMarker(line))) section = 'instructions'
     if (section === 'ingredients') {
       if (ingredients.length < 80 && line.length <= 260)
         ingredients.push(withoutListMarker(line))
@@ -102,6 +126,10 @@ export function parseSocialRecipeCaption(value) {
       title = line.replace(/^["'“”]+|["'“”]+$/g, '').trim()
     }
   }
+  // Captions sometimes omit headings; recover only explicitly bulleted ingredients
+  // and numbered cooking actions, never facts inferred from the video appearance.
+  if (!ingredients.length) ingredients.push(...extractCaptionFallback(lines, 'ingredients'))
+  if (!steps.length) steps.push(...extractCaptionFallback(lines, 'instructions'))
   // Preserve creator-supplied serving count and nutrition without fabricating values.
   const servingsLabel = /\b(?:Makes|Serves)\s+(\d{1,3})\s+Servings?\b/i.exec(value)
   const servingsTotal = /\(\s*(\d{1,3})\s+Total\s*\)/i.exec(value)

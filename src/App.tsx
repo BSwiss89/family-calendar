@@ -3764,6 +3764,7 @@ const [socialRecipeImportUrl, setSocialRecipeImportUrl] = useState('')
 const [socialRecipeImportCaption, setSocialRecipeImportCaption] = useState('')
 const [socialRecipeVideoFile, setSocialRecipeVideoFile] = useState<File | null>(null)
 const [socialRecipeImportLoading, setSocialRecipeImportLoading] = useState(false)
+const [socialRecipeImportStage, setSocialRecipeImportStage] = useState('')
 const [socialRecipeImportMessage, setSocialRecipeImportMessage] = useState('')
 const [socialRecipeImportError, setSocialRecipeImportError] = useState('')
 const [recipeFormSource, setRecipeFormSource] =
@@ -7369,12 +7370,48 @@ function reviewArneyPublicRecipe(recipe: PublicRecipe) {
 async function previewSocialRecipeImport() {
   if (socialRecipeImportLoading) return
   if (socialRecipeVideoFile && socialRecipeVideoFile.size > 36 * 1024 * 1024) {
-    setSocialRecipeImportError('Choose a shorter recording under 36 MB.')
+    setSocialRecipeImportError('Choose a video under 36 MB.')
     return
   }
   setSocialRecipeImportLoading(true)
+  setSocialRecipeImportStage('Connecting to the public recipe link…')
   setSocialRecipeImportError('')
   setSocialRecipeImportMessage('')
+  // Live preview updates may arrive before the final AI comparison. Preserve
+  // fields edited by the person while the import is running.
+  const applied = { name: '', ingredients: '', instructions: '', servings: '', notes: '' }
+  function applyDraft(draft: Partial<SocialVideoRecipePreview>) {
+    const name = draft.name
+    if (name && name !== applied.name) {
+      const previous = applied.name
+      setRecipeName(current => !current.trim() || current === previous ? name : current)
+      applied.name = name
+    }
+    const ingredients = draft.ingredients
+    if (ingredients && ingredients !== applied.ingredients) {
+      const previous = applied.ingredients
+      setRecipeIngredients(current => !current.trim() || current === previous ? ingredients : current)
+      applied.ingredients = ingredients
+    }
+    const instructions = draft.instructions
+    if (instructions && instructions !== applied.instructions) {
+      const previous = applied.instructions
+      setRecipeInstructions(current => !current.trim() || current === previous ? instructions : current)
+      applied.instructions = instructions
+    }
+    const servings = draft.servings
+    if (servings && servings !== applied.servings) {
+      const previous = applied.servings
+      setRecipeServings(current => !current.trim() || current === previous ? servings : current)
+      applied.servings = servings
+    }
+    const notes = draft.notes
+    if (notes && notes !== applied.notes) {
+      const previous = applied.notes
+      setRecipeNotes(current => !current.trim() || current === previous ? notes : current)
+      applied.notes = notes
+    }
+  }
   try {
     const body = new FormData()
     body.append('url', socialRecipeImportUrl.trim())
@@ -7383,24 +7420,67 @@ async function previewSocialRecipeImport() {
     const response = await fetch('/api/arney/social-recipe-video-preview', {
       method: 'POST',
       body,
+      headers: { Accept: 'application/x-ndjson' },
       credentials: 'same-origin',
     })
-    const data: SocialVideoRecipePreview & { error?: string } = await response.json()
-    if (!response.ok) throw new Error(data.error || 'Could not analyze this social recipe.')
-    // Draft only: entered recipe fields and chosen photos always win.
-    setRecipeName(current => current.trim() || data.name)
-    setRecipeIngredients(current => current.trim() || data.ingredients)
-    setRecipeInstructions(current => current.trim() || data.instructions)
-    setRecipeServings(current => current.trim() || data.servings || '')
-    setRecipeNotes(current => current.trim() || data.notes || '')
-    setRecipeSourceUrl(data.sourceUrl)
-    setSocialRecipeImportMessage(data.platform + ' link attached. ' + data.notice)
+    if (!response.ok) {
+      const errorData: { error?: string } = await response.json()
+      throw new Error(errorData.error || 'Could not analyze this social recipe.')
+    }
+    if ((response.headers.get('content-type') || '').includes('application/x-ndjson')) {
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('Could not read live recipe progress.')
+      const decoder = new TextDecoder()
+      let remainder = ''
+      let completed = false
+      function consumeLine(line: string) {
+        if (!line.trim()) return
+        const item = JSON.parse(line) as {
+          type: 'progress' | 'result' | 'error'
+          message?: string
+          draft?: Partial<SocialVideoRecipePreview>
+          data?: SocialVideoRecipePreview
+        }
+        if (item.type === 'progress') {
+          if (item.message) setSocialRecipeImportStage(item.message)
+          if (item.draft) applyDraft(item.draft)
+        } else if (item.type === 'result' && item.data) {
+          applyDraft(item.data)
+          setRecipeSourceUrl(item.data.sourceUrl)
+          setSocialRecipeImportMessage(item.data.platform + ' link attached. ' + item.data.notice)
+          completed = true
+        } else if (item.type === 'error') {
+          throw new Error(item.message || 'Recipe analysis stopped unexpectedly.')
+        }
+      }
+      while (true) {
+        const { value, done } = await reader.read()
+        remainder += done ? decoder.decode() : decoder.decode(value, { stream: true })
+        if (remainder.length > 150_000) throw new Error('Recipe preview was too large.')
+        let newline = remainder.indexOf('\n')
+        while (newline >= 0) {
+          consumeLine(remainder.slice(0, newline))
+          remainder = remainder.slice(newline + 1)
+          newline = remainder.indexOf('\n')
+        }
+        if (done) break
+      }
+      if (remainder.trim()) consumeLine(remainder)
+      if (!completed) throw new Error('Recipe analysis ended before it returned a final draft.')
+    } else {
+      // Older cached TEST clients and legacy JSON responses remain supported.
+      const data: SocialVideoRecipePreview = await response.json()
+      applyDraft(data)
+      setRecipeSourceUrl(data.sourceUrl)
+      setSocialRecipeImportMessage(data.platform + ' link attached. ' + data.notice)
+    }
   } catch (error) {
     setSocialRecipeImportError(
       error instanceof Error ? error.message : 'Could not analyze this social recipe.'
     )
   } finally {
     setSocialRecipeImportLoading(false)
+    setSocialRecipeImportStage('')
   }
 }
 
@@ -7411,6 +7491,7 @@ function clearRecipeForm() {
   setSocialRecipeImportCaption('')
   setSocialRecipeVideoFile(null)
   setSocialRecipeImportLoading(false)
+  setSocialRecipeImportStage('')
   setSocialRecipeImportMessage('')
   setSocialRecipeImportError('')
   setRecipeName('')
@@ -23213,6 +23294,16 @@ resetMealPlannerScroll()
                     </button>
                     <small>Preview only. You must review and tap Save Recipe.</small>
                   </div>
+                  {socialRecipeImportLoading && (
+                    <div className="recipe-social-import-progress" role="status" aria-live="polite">
+                      <span className="recipe-social-import-pulse" aria-hidden="true" />
+                      <span>
+                        <strong>Arney is building your recipe</strong>
+                        <small>{socialRecipeImportStage || 'Reading the public link…'}</small>
+                        <small>Ingredients, steps, and servings will fill in as they're verified.</small>
+                      </span>
+                    </div>
+                  )}
                   {socialRecipeImportError && (
                     <p className="recipe-social-import-error" role="alert">
                       {socialRecipeImportError}

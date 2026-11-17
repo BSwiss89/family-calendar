@@ -164,6 +164,66 @@ test('always processes video even with a complete caption and appends missing vi
   assert.deepEqual(result.missing,[])
 })
 
+test('streamed recipe progress exposes caption fields before any video processing', async () => {
+  const events = []
+  let downloaded = false
+  const result = await analyzePublicSocialVideo({ url: ig }, {
+    captionReader: async () => [
+      'Recipe: Bang Bang Chicken Power Bowl',
+      'Ingredients:',
+      '- 500g chicken breast',
+      'Instructions:',
+      '1. Bake chicken at 400F for 22 minutes.',
+    ].join('\n'),
+    downloader: async (_url, folder) => {
+      assert.equal(events.some(event => event.stage === 'caption' &&
+        event.draft?.ingredients === '500g chicken breast'), true)
+      downloaded = true
+      const filename = path.join(folder, 'progressive-video.mp4')
+      await writeFile(filename, Buffer.alloc(300))
+      return { filename }
+    },
+    durationReader: async () => 37,
+    transcriber: async () => 'Add 1 tbsp peri peri sauce.',
+    visualReader: async () => 'Cook at 400F.',
+    extractor: async () => ({
+      videoIngredientsAdded: ['1 tbsp peri peri sauce'],
+      videoInstructionsAdded: ['Finish with fresh herbs.'],
+      conflicts: [],
+    }),
+    onProgress: event => events.push(event),
+  })
+  assert.equal(downloaded, true)
+  assert.equal(events[0].stage, 'caption')
+  assert.equal(events.some(event => event.stage === 'video'), true)
+  assert.equal(events.some(event => event.stage === 'audio'), true)
+  assert.equal(events.some(event => event.stage === 'frames'), true)
+  assert.equal(events.some(event => event.stage === 'organize'), true)
+  assert.equal(events.at(-1).stage, 'draft')
+  assert.equal(result.ingredients, '500g chicken breast\n1 tbsp peri peri sauce')
+  assert.match(result.instructions, /Finish with fresh herbs/)
+})
+
+test('progressive route preserves legacy JSON and requires explicit streaming opt-in', () => {
+  const server = readFileSync(new URL('../Server/index.mjs', import.meta.url), 'utf8')
+  const client = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const start = server.indexOf('// TEST-only video analysis.')
+  const end = server.indexOf('// Source photo bytes are requested ONLY', start)
+  const route = server.slice(start, end)
+  assert.ok(route.includes("request.get('Accept')"))
+  assert.ok(route.includes('application/x-ndjson'))
+  assert.ok(route.includes("writeProgress('progress', event)"))
+  assert.ok(route.includes("writeProgress('result', { data: draft })"))
+  assert.ok(route.includes('response.json(draft)'))
+  assert.ok(!route.includes('database.prepare('))
+  assert.ok(client.includes("headers: { Accept: 'application/x-ndjson' }"))
+  assert.ok(client.includes("response.body?.getReader()"))
+  assert.ok(client.includes('function applyDraft('))
+  assert.ok(client.includes('current === previous'))
+  assert.ok(client.includes('socialRecipeImportStage'))
+  assert.ok(client.includes('recipe-social-import-progress'))
+})
+
 test('creator description is imported automatically without caption paste', async () => {
   let seen=''
   const result=await analyzePublicSocialVideo({url:ig},{
@@ -204,8 +264,8 @@ test('video preview has authentication, no database writes and explicit Save Rec
   assert.ok(!route.includes('database.prepare('))
   assert.ok(client.includes('/api/arney/social-recipe-video-preview'))
   assert.ok(client.includes('setRecipeSourceUrl(data.sourceUrl)'))
-  assert.ok(client.includes('setRecipeServings(current => current.trim() || data.servings'))
-  assert.ok(client.includes('setRecipeNotes(current => current.trim() || data.notes'))
+  assert.ok(client.includes('setRecipeServings(current => !current.trim() || current === previous ? servings : current)'))
+  assert.ok(client.includes('setRecipeNotes(current => !current.trim() || current === previous ? notes : current)'))
   assert.ok(client.includes('onSubmit={saveRecipe}'))
   assert.ok(client.includes('Save Recipe'))
 })
