@@ -318,15 +318,21 @@ async function inspectDuration(filename) {
 async function transcribeClip(filename, folder, start, seconds, stt) {
   const audio = path.join(folder, 'segment.wav')
   try {
-    await run('ffmpeg', [
-      '-nostdin', '-loglevel', 'error', '-y', '-ss', String(start), '-i', filename,
-      '-t', String(seconds), '-vn', '-ac', '1', '-ar', '16000',
-      '-c:a', 'pcm_s16le', '-f', 'wav', audio,
-    ], { timeoutMs: 16_000 })
+    try {
+      await run('ffmpeg', [
+        '-nostdin', '-loglevel', 'error', '-y', '-ss', String(start), '-i', filename,
+        '-t', String(seconds), '-vn', '-ac', '1', '-ar', '16000',
+        '-c:a', 'pcm_s16le', '-f', 'wav', audio,
+      ], { timeoutMs: 20_000 })
+    } catch {
+      return { text: '', responded: false, reason: 'audio-extraction-failed' }
+    }
     const bytes = await fs.readFile(audio)
-    if (bytes.length < 100 || bytes.length > MAX_AUDIO_BYTES) return { text: '', responded: false }
+    if (bytes.length < 100 || bytes.length > MAX_AUDIO_BYTES)
+      return { text: '', responded: false, reason: 'invalid-audio' }
     if (!stt || typeof stt.url !== 'string' || typeof stt.token !== 'string')
-      return { text: '', responded: false }
+      return { text: '', responded: false, reason: 'stt-not-configured' }
+    // Laptop CPU Whisper can need longer than 16 seconds for an 18-second clip.
     const result = await fetch(stt.url, {
       method: 'POST',
       headers: {
@@ -336,64 +342,96 @@ async function transcribeClip(filename, folder, start, seconds, stt) {
         'X-Arney-Duration-Ms': String(Math.round(seconds * 1000)),
       },
       body: bytes,
-      signal: AbortSignal.timeout(16_000),
+      signal: AbortSignal.timeout(40_000),
     })
-    if (!result.ok) return { text: '', responded: false }
-    const data = await result.json()
-    return {
-      text: typeof data?.transcript === 'string' ? data.transcript.trim().slice(0, 2400) : '',
-      responded: true,
+    // 422 means the service successfully heard the clip but recognized no
+    // speech. Do not confuse silence/music with network or service failures.
+    if (result.status === 422)
+      return { text: '', responded: true, reason: 'no-speech' }
+    if (!result.ok) return {
+      text: '', responded: false,
+      reason: result.status === 401 || result.status === 403 ? 'stt-auth-rejected'
+        : result.status === 503 ? 'stt-unavailable' : 'stt-service-error',
     }
-  } catch { return { text: '', responded: false } }
-  finally { await fs.rm(audio, { force: true }).catch(() => {}) }
+    const data = await result.json()
+    const text = typeof data?.transcript === 'string' ? data.transcript.trim().slice(0, 2400) : ''
+    return { text, responded: true, reason: text ? 'recognized' : 'no-speech' }
+  } catch (error) {
+    return {
+      text: '', responded: false,
+      reason: error?.name === 'TimeoutError' || error?.name === 'AbortError'
+        ? 'stt-timeout' : 'stt-connection-failed',
+    }
+  } finally { await fs.rm(audio, { force: true }).catch(() => {}) }
+}
+
+// Sample across the whole Reel, including intermediate cooking screens. Each
+// bounded local Ollama request sees at most four time-ordered frames, rather
+// than asking a small 4B vision model to interpret an oversized image batch.
+export function socialVideoFrameTimes(duration) {
+  if (!Number.isFinite(duration) || duration < 1) return []
+  const count = duration < 12 ? 4 : duration < 36 ? 6 : 8
+  return Array.from({ length: count }, (_, i) =>
+    Number(Math.min(duration - 0.05, Math.max(0.1, (i + 0.5) * duration / count)).toFixed(2)))
 }
 
 async function visibleVideoText(filename, folder, duration) {
-  // Distribute frames through the whole Reel instead of only its first minute.
-  const times = [Math.min(6, duration * 0.1), duration * 0.35, duration * 0.65, duration * 0.9]
+  const times = socialVideoFrameTimes(duration)
   const frames = []
   for (const [i, time] of times.entries()) {
     const target = path.join(folder, 'frame-' + i + '.jpg')
     try {
       await run('ffmpeg', [
         '-nostdin', '-loglevel', 'error', '-y', '-ss', String(time),
-        '-i', filename, '-frames:v', '1', '-vf', 'scale=448:-2',
-        '-q:v', '6', target,
+        '-i', filename, '-frames:v', '1', '-vf', 'scale=576:-2',
+        '-q:v', '5', target,
       ], { timeoutMs: 12_000 })
       const bytes = await fs.readFile(target)
-      if (bytes.length > 0 && bytes.length < 800_000) frames.push(bytes.toString('base64'))
-    } catch { /* Missing frames should not block the transcript. */ }
+      if (bytes.length > 0 && bytes.length < 800_000)
+        frames.push({ time, image: bytes.toString('base64') })
+    } catch { /* A missing frame must not discard other visual evidence. */ }
     finally { await fs.rm(target, { force: true }).catch(() => {}) }
   }
   if (!frames.length) return { text: '', framesSampled: 0, visionResponded: false }
-  // Four images may exceed a small local GPU's warm-up budget. A smaller
-  // two-frame retry makes vision best-effort instead of silently unavailable.
-  const visionPrompt = 'Read only visible recipe words: amounts, ingredient names, temperatures, and cooking steps. If an action is visually unambiguous, describe it briefly without guessing quantities. No invented steps or measurements. Plain text only.'
+  const visionPrompt = 'These are video frames in chronological order, not a single picture. Read every visible recipe instruction, ingredient, measurement, temperature or duration. Distinguish visible overlay text from inferred actions. If an action is visually unambiguous, describe it briefly. Preserve the order of steps. Do not invent details. Return concise plain text.'
   async function askVision(selected, timeoutMs) {
     const response = await fetch(OLLAMA, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'qwen3-vl:4b-instruct', stream: false, think: false,
-        options: { temperature: 0, num_predict: 320 },
-        messages: [{ role: 'user', content: visionPrompt, images: selected }],
+        options: { temperature: 0, num_predict: 420 },
+        messages: [{ role: 'user',
+          content: visionPrompt + '\nFrame times (seconds): ' +
+            selected.map(frame => frame.time).join(', '),
+          images: selected.map(frame => frame.image),
+        }],
       }),
       signal: AbortSignal.timeout(timeoutMs),
     })
     if (!response.ok) return { text: '', available: response.status !== 404, responded: false }
     const data = await response.json()
-    return {
-      text: typeof data?.message?.content === 'string' ? data.message.content.slice(0, 6000) : '',
-      available: true,
-      responded: typeof data?.message?.content === 'string',
+    const text = typeof data?.message?.content === 'string'
+      ? data.message.content.trim().slice(0, 3200) : ''
+    return { text, available: true, responded: Boolean(text) }
+  }
+  const passages = []
+  let responded = false
+  for (let i = 0; i < frames.length; i += 4) {
+    const batch = frames.slice(i, i + 4)
+    let vision = { text: '', available: true, responded: false }
+    try { vision = await askVision(batch, 65_000) } catch { /* Try fewer frames. */ }
+    if (!vision.responded && vision.available && batch.length > 2) {
+      try { vision = await askVision([batch[0], batch[batch.length - 1]], 45_000) }
+      catch { /* Partial evidence remains useful. */ }
+    }
+    if (vision.responded) {
+      responded = true
+      passages.push('Video around ' + batch[0].time + '-' + batch[batch.length - 1].time +
+        ' seconds: ' + vision.text)
     }
   }
-  let vision = { text: '', available: true, responded: false }
-  try { vision = await askVision(frames, 65_000) } catch { /* Retry below. */ }
-  if (!vision.responded && vision.available && frames.length > 2) {
-    try { vision = await askVision([frames[0], frames[frames.length - 1]], 55_000) }
-    catch { /* Optional vision failure cannot discard the spoken recipe. */ }
-  }
-  return { text: vision.text, framesSampled: frames.length, visionResponded: vision.responded }
+  return { text: passages.join('\n').slice(0, 6000),
+    framesSampled: frames.length, visionResponded: responded }
 }
 
 function cleanField(value, max) {
@@ -594,6 +632,8 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'arney-social-preview-'))
   let transcript = '', visibleText = '', recoveredCaption = '', videoAnalyzed = false, videoNotice = ''
   let audioSegmentsChecked = 0, audioSegmentsResponded = 0, audioSegmentsWithText = 0
+  let audioSegmentsFailed = 0, audioSegmentsSilent = 0
+  const audioFailureReasons = new Set()
   let framesSampled = 0, visionResponded = false, videoDurationSeconds = 0
   let publicVideoFile = '', publicCover = null, coverPhoto = null
   let creatorComment = '', commentSource = 'unavailable'
@@ -720,9 +760,18 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
           const words = typeof chunk === 'string' ? chunk :
             typeof chunk?.text === 'string' ? chunk.text : ''
           audioSegmentsChecked++
-          if (typeof chunk === 'string' ? Boolean(words) : chunk?.responded === true)
-            audioSegmentsResponded++
+          const responded = typeof chunk === 'string'
+            ? Boolean(words) : chunk?.responded === true
+          if (responded) audioSegmentsResponded++
+          else {
+            audioSegmentsFailed++
+            // Never send private speech or service error bodies to the client.
+            const reason = typeof chunk?.reason === 'string' ? chunk.reason : 'unknown-failure'
+            if (/^(?:audio-extraction-failed|invalid-audio|stt-not-configured|stt-auth-rejected|stt-unavailable|stt-service-error|stt-timeout|stt-connection-failed|unknown-failure)$/.test(reason))
+              audioFailureReasons.add(reason)
+          }
           if (words.trim()) { portions.push(words.trim()); audioSegmentsWithText++ }
+          else if (responded) audioSegmentsSilent++
           const completed = Math.floor(start / AUDIO_SECONDS) + 1
           if (completed % 3 === 0 || completed === totalClips)
             progress('audio', 'Transcribing video audio (' + completed + ' of ' + totalClips + ' sections)…')
@@ -738,7 +787,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
         } else {
           visibleText = typeof vision?.text === 'string' ? vision.text : ''
           framesSampled = Number.isInteger(vision?.framesSampled)
-            ? Math.max(0, Math.min(4, vision.framesSampled)) : 0
+            ? Math.max(0, Math.min(8, vision.framesSampled)) : 0
           visionResponded = vision?.visionResponded === true
         }
       } catch {
@@ -817,6 +866,9 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
       noticeParts.push('Still missing: ' + draft.missing.join(' and ') + '.')
       if (!structured) noticeParts.push('The local AI could not organize enough recipe information.')
     }
+    if (videoAnalyzed && audioSegmentsFailed)
+      noticeParts.push('Local speech transcription failed in ' + audioSegmentsFailed +
+        ' audio section(s); video and caption results may be incomplete.')
     const videoStatus = !videoAnalyzed
       ? creatorComment && !recipeCaption
         ? 'Recipe comment available; the video could not be analyzed.'
@@ -827,6 +879,9 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
         ? 'Video opened, but no usable speech or on-screen text was recovered.'
         : !draft.ingredients || !draft.instructions
           ? 'Audio/video checked, but the recipe is incomplete. Do not save until reviewed.'
+          : audioSegmentsFailed > 0
+            ? 'Visual video details checked, but local speech transcription failed in ' +
+              audioSegmentsFailed + ' audio section(s). Review missing audio evidence.'
           : !visionResponded
             ? 'Spoken recipe details recovered; visual cross-check unavailable.'
             : structured
@@ -860,6 +915,8 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
         videoOpened: videoAnalyzed,
         durationSeconds: videoDurationSeconds,
         speechServiceConfigured,
+        audioSegmentsFailed, audioSegmentsSilent,
+        audioFailureReasons: Array.from(audioFailureReasons).slice(0, 6),
         audioSegmentsChecked,
         audioSegmentsResponded,
         audioSegmentsWithText,
