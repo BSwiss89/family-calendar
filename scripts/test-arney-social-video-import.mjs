@@ -5,7 +5,7 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import sharp from 'sharp'
 import path from 'node:path'
-import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
+import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, classifyPublicVideoRetrievalFailure, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
 const fb = 'https://www.facebook.com/share/r/1A8Sz2b3cf/?mibextid=tracked'
@@ -928,4 +928,32 @@ test('TEST UI reports actual failed STT requests rather than saying zero of four
   assert.match(client, /returned an STT response/)
   assert.match(client, /Additional visual recipe details recovered/)
   assert.doesNotMatch(client, /audio sections processed by local STT/)
+})
+
+
+test('Instagram downloader diagnostics classify public failures without exposing raw URLs', () => {
+  assert.equal(classifyPublicVideoRetrievalFailure('ERROR: HTTP Error 429: Too Many Requests'), 'rate-limited')
+  assert.equal(classifyPublicVideoRetrievalFailure('ERROR: Login required for this post'), 'login-required')
+  assert.equal(classifyPublicVideoRetrievalFailure('ERROR: HTTP Error 403: Forbidden'), 'access-denied')
+  assert.equal(classifyPublicVideoRetrievalFailure('ERROR: HTTP Error 404: Not Found'), 'unavailable-media')
+  assert.equal(classifyPublicVideoRetrievalFailure('ERROR: HTTP Error 503: Service Unavailable'), 'upstream-error')
+  assert.equal(classifyPublicVideoRetrievalFailure('ERROR: Connection reset by peer'), 'temporary-network')
+  assert.equal(classifyPublicVideoRetrievalFailure('ERROR: unrecognized [signed-token-url]'), 'unknown-retrieval-error')
+})
+
+test('failed public video import reports a safe reason code, not private downloader output', async () => {
+  const result = await analyzePublicSocialVideo({ url: ig }, {
+    captionReader: async () => 'Recipe: Test Pasta\nIngredients:\n- 1 cup pasta',
+    downloader: async () => {
+      const error = new Error('HTTP 403: https://private.invalid/media?token=secret123')
+      error.failureCode = 'access-denied'
+      throw error
+    },
+    extractor: async () => null,
+    coverReader: async () => null,
+  })
+  assert.equal(result.videoAnalyzed, false)
+  assert.equal(result.ingredients, '1 cup pasta')
+  assert.match(result.notice, /reason: access-denied/)
+  assert.doesNotMatch(result.notice, /secret123|private.invalid|HTTP 403/)
 })
