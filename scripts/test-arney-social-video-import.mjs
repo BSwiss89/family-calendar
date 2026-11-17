@@ -5,7 +5,7 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import sharp from 'sharp'
 import path from 'node:path'
-import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
+import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
 const fb = 'https://www.facebook.com/share/r/1A8Sz2b3cf/?mibextid=tracked'
@@ -25,6 +25,38 @@ test('model output without actual caption/video evidence never becomes a recipe'
 })
 
 
+
+test('automated caption metadata with more sauce ingredients replaces a partial first description', () => {
+  const first = 'Honey Chicken\nIngredients:\n- 500g chicken\nDirections:\n1. Cook chicken.'
+  const fuller = 'Honey Chicken\nIngredients:\n- 500g chicken\nDirections:\n1. Cook chicken.\nSauce Ingredients:\n- 2 tbsp honey\n- 1 tsp garlic'
+  assert.equal(chooseMoreCompletePublicCaption(first, fuller), fuller)
+  assert.equal(chooseMoreCompletePublicCaption(fuller, first), fuller)
+  assert.equal(chooseMoreCompletePublicCaption('', fuller), fuller)
+  assert.equal(chooseMoreCompletePublicCaption(first, ''), first)
+})
+
+test('social import upgrades a partial first caption using fuller downloaded metadata and previews added ingredients', async () => {
+  const first = 'Chicken Bowls\nIngredients:\n- 500g chicken\nDirections:\n1. Cook chicken.'
+  const fuller = 'Chicken Bowls\nIngredients:\n- 500g chicken\nDirections:\n1. Cook chicken.\nSauce Ingredients:\n- 2 tbsp mayonnaise\n- 1 tsp garlic'
+  const updates = []
+  const result = await analyzePublicSocialVideo({ url: ig }, {
+    captionReader: async () => first,
+    commentReader: async () => ({creatorVerified:false}),
+    downloader: async () => ({ filename: 'mock-video.mp4', caption: fuller }),
+    durationReader: async () => 0,
+    extractor: async evidence => {
+      assert.equal(evidence.caption, fuller)
+      return null
+    },
+    coverReader: async () => null,
+    onProgress: progress => updates.push(progress),
+  })
+  assert.match(result.ingredients,/500g chicken/)
+  assert.match(result.ingredients,/2 tbsp mayonnaise/)
+  assert.match(result.ingredients,/1 tsp garlic/)
+  assert.ok(updates.some(p => /fuller public description/i.test(p.message)))
+  assert.match(result.instructions,/Cook chicken/)
+})
 
 test('public comment parser prioritizes a pinned and verified creator recipe', () => {
   const found = selectPublicCreatorRecipeComment({
