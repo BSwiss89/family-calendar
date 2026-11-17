@@ -1566,6 +1566,9 @@ type SocialVideoRecipePreview = {
     audioSegmentsChecked: number
     audioSegmentsResponded: number
     audioSegmentsWithText: number
+    audioSegmentsFailed?: number
+    audioSegmentsSilent?: number
+    audioFailureReasons?: string[]
     framesSampled: number
     visionResponded: boolean
     comparisonCompleted: boolean
@@ -23408,13 +23411,18 @@ resetMealPlannerScroll()
                       <strong>Video backup check</strong>
                       <span>{socialRecipeVideoReport.status}</span>
                       <small>Audio: {socialRecipeVideoReport.speechServiceConfigured
-                        ? `${socialRecipeVideoReport.audioSegmentsResponded} of ${socialRecipeVideoReport.audioSegmentsChecked} audio sections processed by local STT; ${socialRecipeVideoReport.audioSegmentsWithText} contained recognized speech`
-                        : 'Local speech recognition unavailable'}</small>
+                        ? `${socialRecipeVideoReport.audioSegmentsResponded} of ${socialRecipeVideoReport.audioSegmentsChecked} audio sections returned an STT response; ${socialRecipeVideoReport.audioSegmentsWithText} contained recognized speech; ${socialRecipeVideoReport.audioSegmentsSilent ?? 0} returned no speech; ${socialRecipeVideoReport.audioSegmentsFailed ?? 0} failed`
+                        : 'Local speech recognition is not configured'}</small>
+                      {(socialRecipeVideoReport.audioFailureReasons?.length ?? 0) > 0 && (
+                        <small>Local audio issue(s): {socialRecipeVideoReport.audioFailureReasons?.join(', ')}. No transcript content is displayed.</small>
+                      )}
                       <small>Video: {socialRecipeVideoReport.framesSampled} frames sampled; vision model {socialRecipeVideoReport.visionResponded ? 'responded' : 'did not return a result'}</small>
                       <small>Recipe comparison: {socialRecipeVideoReport.comparisonCompleted
                         ? 'completed' : 'unavailable'}; {socialRecipeVideoReport.newIngredients + socialRecipeVideoReport.newInstructions} additional video details suggested</small>
                       {socialRecipeVideoReport.speechRecoveryUsed && (
-                        <small>Extra spoken-recipe recovery succeeded after the first AI pass.</small>
+                        <small>{socialRecipeVideoReport.audioSegmentsWithText > 0
+                          ? 'Additional spoken/visual recipe details recovered after the first AI pass.'
+                          : 'Additional visual recipe details recovered after the first AI pass (no speech was transcribed).'}</small>
                       )}
                       {socialRecipeVideoReport.conflicts.length > 0 && (
                         <small>Caption/video differences found — check the recipe notice.</small>
