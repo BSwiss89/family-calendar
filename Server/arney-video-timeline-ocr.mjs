@@ -130,15 +130,28 @@ async function tesseractCommand() {
 }
 
 async function recognizeFrame(program, frame, output) {
-  // Upscale to improve legibility of thin overlay fonts; never write OCR data
-  // outside the private temp folder or send raw screen text to the browser.
+  // Preserve the original color/outlined subtitles: aggressive grayscale
+  // sharpening can erase small hyphenated cook times (e.g. "22-25 Min").
+  // Only retry with enhanced contrast if the original OCR looks sparse.
+  let original = ''
+  try { original = await tool(program,[frame,'stdout','--psm','11','-l','eng'],{timeoutMs:5000}) }
+  catch { /* Try enhancement only when the original could not be read. */ }
+  if (original.trim().length >= 45) return original
   try {
-    await sharp(frame, {limitInputPixels:5_000_000})
+    await sharp(frame,{limitInputPixels:5_000_000})
       .resize({width:1280,withoutEnlargement:false})
       .grayscale().normalize().sharpen()
       .png().toFile(output)
-    return await tool(program,[output,'stdout','--psm','11','-l','eng'],{timeoutMs:5000})
-  } finally { await fs.rm(output,{force:true}).catch(()=>{}) }
+    const enhanced = await tool(program,[output,'stdout','--psm','11','-l','eng'],{timeoutMs:5000})
+    // Do not discard the original reading when it has a temperature or time.
+    const cookingScore = text =>
+      Number(/\b(?:oven|bake|roast|mix|stir|add)\b/i.test(text))*20 +
+      Number(/\d+\s*°?\s*[CF]\b/i.test(text))*20 +
+      Number(/\d+\s*(?:[-–]\s*\d+)?\s*['’]?\s*min\b/i.test(text))*20 +
+      Math.min(40,text.trim().length)
+    return cookingScore(enhanced)>cookingScore(original) ? enhanced : original
+  } catch { return original }
+  finally { await fs.rm(output,{force:true}).catch(()=>{}) }
 }
 
 export async function scanVideoTimeline(filename, folder, duration, { onProgress = null } = {}) {
