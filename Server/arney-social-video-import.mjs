@@ -164,7 +164,8 @@ function recipeCommentLikely(text) {
 }
 
 export function selectPublicCreatorRecipeComment(metadata) {
-  const checked = Array.isArray(metadata?.comments) ? metadata.comments.slice(0, 60) : []
+  // Inspect only the first visible batch returned by the extractor; never chase comment pages.
+  const checked = Array.isArray(metadata?.comments) ? metadata.comments.slice(0, 10) : []
   const uploaderIds = [metadata?.uploader_id, metadata?.channel_id]
     .map(normalizedAccount).filter(Boolean)
   const verified = checked.map(comment => {
@@ -187,6 +188,7 @@ export function selectPublicCreatorRecipeComment(metadata) {
     pinnedConfirmed: Boolean(selected?.pinned),
     creatorVerified: Boolean(selected),
     commentsExamined: checked.length,
+    reason: checked.length ? (selected ? 'creator-comment-found' : 'no-verified-creator-recipe-in-first-10') : 'comments-not-exposed',
   }
 }
 
@@ -214,7 +216,10 @@ async function readPublicCreatorComment(sourceUrl, folder) {
     const stat = await fs.stat(infoFile)
     if (!stat.isFile() || stat.size > 512_000) throw new Error('Comment metadata exceeds safe limit.')
     return selectPublicCreatorRecipeComment(JSON.parse(await fs.readFile(infoFile, 'utf8')))
-  } catch { return { text: '', source: 'unavailable', pinnedConfirmed: false, creatorVerified: false, commentsExamined: 0 } }
+  } catch (error) {
+    return { text: '', source: 'unavailable', pinnedConfirmed: false, creatorVerified: false,
+      commentsExamined: 0, reason: error?.failureCode || 'comment-metadata-unavailable' }
+  }
 }
 
 async function downloadPublicVideo(sourceUrl, folder) {
@@ -770,6 +775,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
   let publicVideoFile = '', publicCover = null, coverPhoto = null
   let creatorComment = '', commentSource = 'unavailable'
   let pinnedCommentConfirmed = false, creatorCommentVerified = false, commentsExamined = 0
+  let commentRetrievalReason = 'not-checked'
   const speechServiceConfigured = Boolean(stt?.url && stt?.token)
   // Progress callbacks carry only reviewable recipe fields and human-readable
   // stage labels. Transcripts, frames and downloaded bytes remain local.
@@ -822,9 +828,11 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
           pinnedCommentConfirmed = publicResult.pinnedConfirmed === true
           creatorCommentVerified = true
           commentsExamined = Number.isInteger(publicResult.commentsExamined)
-            ? Math.max(0, Math.min(60, publicResult.commentsExamined)) : 0
+            ? Math.max(0, Math.min(10, publicResult.commentsExamined)) : 0
+          commentRetrievalReason = publicResult.reason || 'creator-comment-found'
         } else if (publicResult && Number.isInteger(publicResult.commentsExamined)) {
-          commentsExamined = Math.max(0, Math.min(60, publicResult.commentsExamined))
+          commentsExamined = Math.max(0, Math.min(10, publicResult.commentsExamined))
+          commentRetrievalReason = publicResult.reason || (commentsExamined ? 'no-verified-creator-recipe-in-first-10' : 'comments-not-exposed')
         }
       } catch { /* Public comments are optional and never block the recipe. */ }
     }
@@ -1011,6 +1019,10 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
       noticeParts.push('A verified creator comment contributed recipe information; pin status could not be confirmed.')
     else if (commentSource === 'pasted')
       noticeParts.push('Your pasted comment was used as unverified, editable recipe evidence.')
+    if (!creatorComment && !comment.trim() && commentRetrievalReason === 'comments-not-exposed')
+      noticeParts.push('Instagram did not expose public comments to the current extractor; pinned creator instructions could not be checked.')
+    else if (!creatorComment && !comment.trim() && commentRetrievalReason === 'no-verified-creator-recipe-in-first-10')
+      noticeParts.push('The first 10 available comments contained no verifiable creator recipe instructions; pinned-comment order is not guaranteed.')
     if (videoAnalyzed) {
       noticeParts.push(transcript || visibleText
         ? 'Video evidence was processed locally. Review all measurements and steps before saving.'
