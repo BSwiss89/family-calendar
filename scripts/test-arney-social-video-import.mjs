@@ -5,7 +5,7 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import sharp from 'sharp'
 import path from 'node:path'
-import { socialVideoAllowedOnTest, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
+import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
 const fb = 'https://www.facebook.com/share/r/1A8Sz2b3cf/?mibextid=tracked'
@@ -24,6 +24,136 @@ test('model output without actual caption/video evidence never becomes a recipe'
   assert.deepEqual(result.missing,['ingredients','instructions'])
 })
 
+
+
+test('public comment parser prioritizes a pinned and verified creator recipe', () => {
+  const found = selectPublicCreatorRecipeComment({
+    uploader_id: 'chef_amy',
+    comments: [
+      {author_id:'random_user',is_pinned:true,text:'Ingredients: 8 cups sugar. Bake for 4 hours.'},
+      {author_id:'chef_amy',text:'Ingredients: 1 cup rice. Cook until tender.'},
+      {author_id:'chef_amy',pinned:true,text:'Ingredients:\n- 2 cups rice\nInstructions:\n1. Cook the rice.'},
+    ],
+  })
+  assert.equal(found.pinnedConfirmed,true)
+  assert.equal(found.creatorVerified,true)
+  assert.equal(found.source,'creator-pinned')
+  assert.match(found.text,/2 cups rice/)
+  assert.doesNotMatch(found.text,/8 cups sugar/)
+  assert.equal(found.commentsExamined,3)
+})
+
+test('public comment parser never mistakes a stranger pinned comment or unverified display name for the creator', () => {
+  const found = selectPublicCreatorRecipeComment({
+    uploader_id: 'realchef',
+    comments: [
+      {author:'Real Chef Fan',is_pinned:true,text:'Ingredients: 99 cups of sugar'},
+      {author:'Someone Else',pinned:true,text:'Directions: Bake for 99 hours'},
+    ],
+  })
+  assert.equal(found.text,'')
+  assert.equal(found.source,'unavailable')
+  assert.equal(found.creatorVerified,false)
+})
+
+test('a reliable uploader marker can verify a comment but cannot fabricate a pinned flag', () => {
+  const found = selectPublicCreatorRecipeComment({
+    comments: [{author_is_uploader:true,text:'Ingredients: 2 eggs\nInstructions: Whisk eggs.'}],
+  })
+  assert.equal(found.source,'creator-comment')
+  assert.equal(found.pinnedConfirmed,false)
+  assert.equal(found.creatorVerified,true)
+})
+
+test('creator comment adds missing ingredients and steps without replacing caption measurements', () => {
+  const result = groundedVideoDraft({
+    caption:'Sweet Potato Bowl\nIngredients:\n- 1 cup rice',
+    comment:'Ingredients:\n- 2 eggs\nInstructions:\n1. Cook the rice.\n2. Fry the eggs.',
+    structured:null,
+  })
+  assert.match(result.ingredients,/1 cup rice/)
+  assert.match(result.ingredients,/2 eggs/)
+  assert.match(result.instructions,/Cook the rice/)
+  assert.match(result.instructions,/Fry the eggs/)
+  assert.deepEqual(result.missing,[])
+})
+
+test('verified creator-pinned comment survives blocked video, no transcripts, and no caption', async () => {
+  let called = 0
+  const result = await analyzePublicSocialVideo({ url: ig }, {
+    captionReader: async () => '',
+    downloader: async () => {throw new Error('Unavailable video')},
+    commentReader: async () => {
+      called++
+      return {creatorVerified:true,pinnedConfirmed:true,commentsExamined:5,
+        text:'Ingredients:\n- 2 cups rice\n- 1 tablespoon butter\nInstructions:\n1. Cook the rice.\n2. Stir in butter.'}
+    },
+    extractor: async ({comment}) => {
+      assert.match(comment,/2 cups rice/)
+      return null
+    },
+    coverReader: async () => null,
+  })
+  assert.equal(called,1)
+  assert.match(result.ingredients,/2 cups rice/)
+  assert.match(result.ingredients,/butter/)
+  assert.match(result.instructions,/Cook the rice/)
+  assert.equal(result.commentReport.source,'creator-pinned')
+  assert.equal(result.commentReport.pinnedConfirmed,true)
+  assert.deepEqual(result.missing,[])
+  assert.ok(!JSON.stringify(result.commentReport).includes('2 cups rice'))
+})
+
+test('user-pasted comment is used but never claimed to be authenticated or pinned', async () => {
+  const result = await analyzePublicSocialVideo({
+    url: ig,
+    comment:'Ingredients:\n- 3 cups beans\nInstructions:\n1. Heat the beans.',
+  }, {
+    captionReader: async () => '',
+    downloader: async () => {throw Error('blocked')},
+    commentReader: async () => {throw Error('must not query when user pasted')},
+    extractor: async () => null,
+    coverReader: async () => null,
+  })
+  assert.match(result.ingredients,/3 cups beans/)
+  assert.match(result.instructions,/Heat the beans/)
+  assert.equal(result.commentReport.source,'pasted')
+  assert.equal(result.commentReport.creatorVerified,false)
+  assert.equal(result.commentReport.pinnedConfirmed,false)
+  assert.deepEqual(result.missing,[])
+})
+
+test('missing comment metadata is not misreported as a verified pinned recipe', async () => {
+  const result = await analyzePublicSocialVideo({ url: fb }, {
+    captionReader: async () => '',
+    downloader: async () => {throw Error('blocked')},
+    commentReader: async () => ({creatorVerified:false,pinnedConfirmed:false,
+      commentsExamined:9,text:'Ingredients: 9 cups sugar'}),
+    extractor: async () => null,
+    coverReader: async () => null,
+  })
+  assert.equal(result.ingredients,'')
+  assert.equal(result.instructions,'')
+  assert.equal(result.commentReport.source,'unavailable')
+  assert.equal(result.commentReport.creatorVerified,false)
+  assert.match(result.commentReport.status,/paste/i)
+})
+
+test('the video route remains authentication-gated, preview-only, and accepts at most one manual comment', () => {
+  const server=readFileSync(new URL('../Server/index.mjs',import.meta.url),'utf8')
+  const client=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8')
+  const start=server.indexOf('// TEST-only video analysis.')
+  const end=server.indexOf('// Source photo bytes are requested ONLY',start)
+  const route=server.slice(start,end)
+  assert.match(route,/socialVideoAllowedOnTest\(/)
+  assert.match(route,/request\.familyAccount/)
+  assert.match(route,/Object\.keys\(body\)\.some\(key => !\['url', 'caption', 'comment'\]\.includes\(key\)\)/)
+  assert.match(route,/comment: body\.comment \?\? ''/)
+  assert.ok(!route.includes('database.prepare('))
+  assert.ok(client.includes("body.append('comment', socialRecipeImportComment)"))
+  assert.ok(client.includes('Recipe comment check:'))
+  assert.ok(client.includes('onSubmit={saveRecipe}'))
+})
 
 test('regression from iPhone: spoken measurements and actions fill fields instead of transcript analysis in Notes', () => {
   const transcript = 'First, add 1 pound of ground turkey. Then stir in 2 cups of rice. Cook for 10 minutes. 500 calories and 45g protein per serving.'
