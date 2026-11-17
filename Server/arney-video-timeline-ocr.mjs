@@ -51,9 +51,24 @@ export function collectDistinctScreenText(rows = [], maxEvents = 90) {
     events.push({ time: Number(row.time) || 0,
       frameIndex: Number.isInteger(row.frameIndex) ? row.frameIndex : 0,
       text: content })
-    if (events.length >= maxEvents) break
   }
-  return events
+  if (events.length <= maxEvents) return events
+  // Never stop reading at the first 90 text changes. Prioritize measured oven
+  // settings and spread the rest across the *entire* video timeline.
+  const measured = events.map((row,index)=>({row,index}))
+    .filter(({row})=>/\b(?:oven|bake|roast|preheat)\b/i.test(row.text) &&
+      /\d/.test(row.text))
+  const even = (items,n)=>Array.from({length:n},(_,i)=>
+    items[Math.min(items.length-1,Math.floor((i+0.5)*items.length/n))])
+  const kept = new Set(even(measured,Math.min(36,measured.length,maxEvents)).map(item=>item.index))
+  for (const item of even(events.map((row,index)=>({row,index})),maxEvents))
+    if (kept.size < maxEvents) kept.add(item.index)
+  // If the timeline grid overlapped important settings, fill with other frames.
+  for (const item of events.map((row,index)=>({row,index}))) {
+    if (kept.size >= maxEvents) break
+    kept.add(item.index)
+  }
+  return [...kept].sort((a,b)=>a-b).map(index=>events[index])
 }
 
 export function selectTimelineVisualIndices(frameCount, events = [], maxImages = 16) {
@@ -174,5 +189,6 @@ export async function scanVideoTimeline(filename, folder, duration, { onProgress
   result.ocrPartial ||= result.ocrFramesRead < result.frames.length
   result.events = collectDistinctScreenText(rows)
   result.ocrScreensDetected = result.events.length
+  result.ocrPartial ||= result.events.length >= 90
   return result
 }
