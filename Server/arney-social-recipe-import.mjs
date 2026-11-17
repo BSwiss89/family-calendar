@@ -64,6 +64,9 @@ const STEP_HEADING = /^(?:instructions?|directions?|method|steps?|how to (?:make
 // "To Serve") rather than treating them as ingredients or recipe titles.
 const COMMENT_INGREDIENT_PART_HEADING = /^(?:to serve|(?:[\p{L}\p{N}'’&-]+\s+){0,5}(?:chicken(?:\s+thighs?)?|thighs?|glaze|marinade|dressing|sauce|toppings?|garnish))\s*:\s*$/iu
 const COMMENT_RECIPE_MARKER = /^recipe\s*:?\s*$/i
+const MACROS_HEADING = /^(?:macros?|nutrition(?:al)?(?:\s+facts?)?)(?:\s+per\s+(?:bowl|serving|portion|meal))?\s*:?\s*$/i
+const CREATOR_NOTE_HEADING = /^(?:additional\s+notes?|reheating\s+(?:notes?|instructions?)|storage\s+notes?)\s*:\s*(.*)$/i
+const MACRO_FACT = /^(?:[-*•·▪◦]\s*)?\d+(?:[.,]\d+)?\s*(?:g\s*)?(?:calories?|kcal|protein|carbs?|fat)\b/i
 const INGREDIENT_PART_HEADING = /^(?:(?:for\s+(?:the\s+|a\s+)?)?(?:sauce|marinade|dressing|glaze|toppings?|garnish|seasoning(?:\s+mix)?|spice\s+(?:mix|blend)|filling|crust|chicken|rice|pasta|vegetables|veggies|salad|assembly|bowl|protein)(?:\s+ingredients?)?|(?:[\p{L}\p{N}'’&-]+(?:\s+[\p{L}\p{N}'’&-]+){0,4})\s+ingredients?)\s*(?:\([^)]{1,60}\))?\s*[:\-–—]?\s*$/iu
 const STRONG_INGREDIENT = /^(?:\d+(?:[.,]\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])\s*(?:g|kg|mg|grams?|ml|l|liters?|oz|lbs?|pounds?|cups?|tbsp|tsp|tablespoons?|teaspoons?|cloves?|slices?|pieces?)\b/i
 const TITLE_HEADING = /^(?:recipe|dish|title)\s*:\s*(.{3,120})$/i
@@ -82,7 +85,7 @@ function extractCaptionFallback(lines, type) {
   const found = []
   for (const line of lines) {
     if (found.length >= 80 || line.length > (type === 'ingredients' ? 260 : 500)) continue
-    if (DISCARD.test(line) || /\b(?:calories|carbs|protein|macros)\b/i.test(line)) continue
+    if (DISCARD.test(line) || /\b(?:calories|carbs|protein|fat|kcal|macros)\b/i.test(line)) continue
     const text = withoutListMarker(line)
     if (type === 'ingredients') {
       const bullet = /^[-*•·▪◦]\s*/.test(line)
@@ -165,7 +168,7 @@ export function parseSocialRecipeCaption(value) {
   const inferred = inferUnlabeledIngredientBlock(lines)
   let section = '', title = inferred?.title ?? '', explicitTitle = false, ingredientSection = ''
   let numberedOnlyInstructions = false
-  const ingredients = [], steps = [], ingredientParts = []
+  const ingredients = [], steps = [], ingredientParts = [], nutritionFacts = [], creatorNotes = []
   const componentName = value => value.replace(/^for\s+(?:the\s+|a\s+)?/i,'')
     .replace(/\([^)]*\)/g,'').replace(/\s+ingredients?$/i,'')
     .replace(/[:\-–—]+$/,'').trim().toLowerCase()
@@ -189,6 +192,13 @@ export function parseSocialRecipeCaption(value) {
     const headingLine = line.replace(/^[^\p{L}\p{N}]+/u, '')
     // A standalone "📌 RECIPE:" is a marker, not a title or ingredient.
     if (COMMENT_RECIPE_MARKER.test(headingLine)) continue
+    if (MACROS_HEADING.test(headingLine)) { section = 'nutrition'; continue }
+    const noteHeading = CREATOR_NOTE_HEADING.exec(headingLine)
+    if (noteHeading) {
+      section = 'notes'
+      if (noteHeading[1].trim()) creatorNotes.push(noteHeading[1].trim())
+      continue
+    }
     let match = TITLE_HEADING.exec(headingLine)
     if (match) { title = match[1].trim(); explicitTitle = true; continue }
     match = INGREDIENT_HEADING.exec(headingLine)
@@ -215,6 +225,14 @@ export function parseSocialRecipeCaption(value) {
       continue
     }
     if (DISCARD.test(line)) continue
+    if (section === 'nutrition') {
+      if (nutritionFacts.length < 8 && MACRO_FACT.test(line)) nutritionFacts.push(withoutListMarker(line))
+      continue
+    }
+    if (section === 'notes') {
+      if (creatorNotes.length < 5) creatorNotes.push(line)
+      continue
+    }
     // Pinned comments often contain "•1. Line an air fryer rack..." with a
     // bullet AND a numbered cooking step. The bullet is not an ingredient.
     const numberedCookingLine = /^\s*(?:[-*•·▪◦]\s*)?\d{1,2}[.)]\s+(.+)$/.exec(line)
@@ -261,7 +279,7 @@ export function parseSocialRecipeCaption(value) {
   }
   if (!steps.length) steps.push(...extractCaptionFallback(lines, 'instructions'))
   // Preserve creator-supplied serving count and nutrition without fabricating values.
-  const servingsLabel = /\b(?:Makes|Serves)\s+(\d{1,3})\s+Servings?\b/i.exec(value)
+  const servingsLabel = /\b(?:Makes|Serves)\s+(\d{1,3})\s+(?:servings?|bowls?|portions?|meals?)\b/i.exec(value)
   const servingsTotal = /\(\s*(\d{1,3})\s+Total\s*\)/i.exec(value)
   const servings = Number(servingsLabel?.[1] || servingsTotal?.[1] || 0)
   const macros = lines.find(line =>
@@ -271,7 +289,14 @@ export function parseSocialRecipeCaption(value) {
   return {
     name: title.slice(0, 110),
     servings: servings >= 1 && servings <= 1000 ? String(servings) : '',
-    notes: macros ? 'Creator-reported macros per serving: ' + macros.slice(0, 250) : '',
+    notes: [
+      macros ? 'Creator-reported macros per serving: ' + macros.slice(0, 250)
+        : nutritionFacts.length >= 2
+          ? 'Creator-reported macros per ' + (/per\s+bowl/i.test(value) ? 'bowl' : 'serving') + ': ' +
+            nutritionFacts.join(' | ').slice(0, 250)
+          : '',
+      creatorNotes.length ? 'Creator notes: ' + creatorNotes.join(' ').slice(0, 450) : '',
+    ].filter(Boolean).join('\n\n'),
     titleIsExplicit: explicitTitle,
     ingredients: ingredients.filter(Boolean).join('\n').slice(0, 7000),
     ingredientParts,
