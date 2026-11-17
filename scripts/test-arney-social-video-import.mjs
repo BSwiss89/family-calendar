@@ -7,6 +7,7 @@ import sharp from 'sharp'
 import path from 'node:path'
 import { timelineSamplingPlan, collectDistinctScreenText, selectTimelineVisualIndices, compactRecipeScreenEvidence } from '../Server/arney-video-timeline-ocr.mjs'
 import { refineSocialRecipeInstructions, filterRealRecipeConflicts } from '../Server/arney-recipe-step-quality.mjs'
+import { buildPrimaryRecipeRequest, checkPrimaryRecipeShape, runPrimaryRecipeOrganizer } from '../Server/arney-primary-recipe-organizer.mjs'
 import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, extractOnScreenCookingSettings, classifyPublicVideoRetrievalFailure, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, postLocalWhisperAudio, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
@@ -1395,4 +1396,106 @@ test('existing post-bake garlic squeeze is preserved without inserting a duplica
   })
   assert.equal((cooked.match(/squeeze/gi)||[]).length,1)
   assert.ok(cooked.indexOf('squeeze')>cooked.indexOf('Bake onions'))
+})
+
+
+test('primary Ministral request uses a strict string-array JSON schema and sufficient output budget',async()=>{
+  const seen=[]
+  const requestEvidence={
+    caption:'Chicken pasta 6 servings\nIngredients: 1.2kg chicken, 3 onions, 1 whole garlic bulb, 140g cream cheese',
+    transcript:'First roast the whole garlic bulb with onions. Afterwards squeeze the roasted garlic out.',
+    visibleText:'On-screen OCR at 20s:\n200°C / 400°F 22-25 Min\nVisual cooking actions around 10-25 seconds: Put onions and whole garlic into the oven.',
+  }
+  const payload=buildPrimaryRecipeRequest(requestEvidence)
+  assert.equal(payload.model,'ministral-3:8b')
+  assert.equal(payload.format.type,'object')
+  assert.equal(payload.format.additionalProperties,false)
+  assert.equal(payload.format.properties.instructions.items.type,'string')
+  assert.ok(payload.options.num_predict>500)
+  assert.match(payload.messages[1].content,/roasted garlic out/)
+  assert.match(payload.messages[1].content,/200°C/)
+  assert.match(payload.messages[1].content,/Put onions and whole garlic/)
+  const expected={
+    name:'Creamy Chicken Pasta',
+    ingredients:['1.2kg chicken','3 onions','1 whole garlic bulb','140g cream cheese'],
+    instructions:[
+      'Season chicken.',
+      'Bake the chicken.',
+      'Bake onions with the whole garlic bulb.',
+      'Squeeze roasted garlic into the sauce.',
+      'Mix with cream cheese and serve.',
+    ],
+    videoIngredientsAdded:[],videoInstructionsAdded:[],
+    conflicts:[],servings:'6',nutritionNotes:'',
+  }
+  const actual=await runPrimaryRecipeOrganizer(requestEvidence,{
+    onStatus:status=>seen.push(status),
+    fetchImpl:async(url,config)=>{
+      assert.equal(url,'http://127.0.0.1:11434/api/chat')
+      assert.equal(config.method,'POST')
+      const body=JSON.parse(config.body)
+      assert.deepEqual(body.format,payload.format)
+      return new Response(JSON.stringify({
+        done_reason:'stop',message:{content:JSON.stringify(expected)},
+      }),{status:200,headers:{'content-type':'application/json'}})
+    },
+  })
+  assert.deepEqual(actual,expected)
+  assert.deepEqual(seen,['ok'])
+  assert.equal(checkPrimaryRecipeShape(expected),true)
+})
+
+test('primary recipe stage reports truncated and invalid model results instead of accepting two oven facts',async()=>{
+  const evidence={caption:'Ingredients: chicken and onions',visibleText:'200°C / 400°F 22-25 min'}
+  const cases=[
+    {reason:'output-truncated',body:{done_reason:'length',message:{content:'{"instructions":["Bake'}}},
+    {reason:'invalid-json',body:{done_reason:'stop',message:{content:'{"instructions":["Bake'}}},
+    {reason:'wrong-json-shape',body:{done_reason:'stop',message:{content:JSON.stringify({
+      name:'Recipe',instructions:[{step:1,action:'Bake'}],
+      ingredients:[],videoIngredientsAdded:[],videoInstructionsAdded:[],
+      conflicts:[],servings:'',nutritionNotes:'',
+    })}}},
+    {reason:'empty-output',body:{done_reason:'stop',message:{content:''}}},
+  ]
+  for (const item of cases) {
+    const statuses=[]
+    const answer=await runPrimaryRecipeOrganizer(evidence,{
+      onStatus:s=>statuses.push(s),
+      fetchImpl:async()=>new Response(JSON.stringify(item.body),{status:200}),
+    })
+    assert.equal(answer,null)
+    assert.deepEqual(statuses,[item.reason])
+  }
+})
+
+test('primary recipe stage handles unavailable Ollama, timeout, and missing evidence without exposing text',async()=>{
+  const e={caption:'Ingredients: Chicken, onions'}
+  for (const [error,status] of [[new Error('connect ECONNREFUSED'),'request-failed'],
+    [Object.assign(new Error('timeout'),{name:'TimeoutError'}),'timeout']]) {
+    const observed=[]
+    const response=await runPrimaryRecipeOrganizer(e,{
+      onStatus:s=>observed.push(s),fetchImpl:async()=>{throw error},
+    })
+    assert.equal(response,null)
+    assert.deepEqual(observed,[status])
+  }
+  const missing=[]
+  const nothing=await runPrimaryRecipeOrganizer({},{
+    onStatus:s=>missing.push(s),fetchImpl:async()=>{throw Error('Should not contact Ollama')},
+  })
+  assert.equal(nothing,null)
+  assert.deepEqual(missing,['no-evidence'])
+})
+
+test('primary recipe prompt preserves late visual actions while bounding oversized OCR input',()=>{
+  const req=buildPrimaryRecipeRequest({
+    caption:'1.2kg chicken\n1 garlic bulb\n140g cream cheese',
+    visibleText:'On-screen OCR at 0s:\n'+('chicken and garlic 200C 400F\n'.repeat(600))+
+      'Visual cooking actions around 45-59 seconds: Squeeze the roasted garlic, then combine cooked pasta with sauce.',
+  })
+  const supplied=req.messages[1].content
+  assert.ok(supplied.length<19300)
+  assert.match(supplied,/Squeeze the roasted garlic/)
+  assert.match(supplied,/1.2kg chicken/)
+  assert.equal(req.format.properties.videoInstructionsAdded.items.type,'string')
 })
