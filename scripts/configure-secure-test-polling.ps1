@@ -84,6 +84,22 @@ $before = Get-TaskSnapshot
 Assert-Task $before $identity.Name -RequireIdle
 $checkedAt = Get-Date -Format o
 Write-Host "TEST_POLL_PREFLIGHT=PASS | checked_at=$checkedAt | current=$($before.Interval) | target=PT1M | task_identity=UNCHANGED | changes_made=NONE"
+# Faster polling must not accelerate an unreviewed direct push to an unprotected branch.
+# GitHub's public branch snapshot must expose an enforced Windows build check.
+if ($Apply -and $before.Interval -ne 'PT1M') {
+    $uri = 'https://api.github.com/repos/BSwiss89/family-calendar/branches/test-release'
+    try {
+        $branchState = Invoke-RestMethod -Uri $uri -Headers @{ 'User-Agent'='FamilyCalendar-SafePolling-Preflight'; 'Accept'='application/vnd.github+json' } -TimeoutSec 15
+    } catch {
+        throw 'Cannot verify GitHub TEST branch protection. No schedule change.'
+    }
+    $requiredContexts = @($branchState.protection.required_status_checks.contexts)
+    $requiredContexts += @($branchState.protection.required_status_checks.checks | ForEach-Object { $_.context })
+    if ($branchState.name -ne 'test-release' -or $branchState.protected -ne $true -or
+        -not ($requiredContexts -contains 'frontend-build')) {
+        throw 'GitHub test-release lacks verified branch protection and the required Windows build check. No faster polling.'
+    }
+}
 if (!$Apply -or $before.Interval -eq 'PT1M') {
     if ($Apply -and $before.Interval -eq 'PT1M') {
         Write-Host "TEST_POLL_APPLY=ALREADY_CONFIGURED | checked_at=$checkedAt | interval=PT1M"
