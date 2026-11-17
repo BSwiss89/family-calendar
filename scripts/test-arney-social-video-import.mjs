@@ -5,7 +5,8 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import sharp from 'sharp'
 import path from 'node:path'
-import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, classifyPublicVideoRetrievalFailure, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
+import { timelineSamplingPlan, collectDistinctScreenText, selectTimelineVisualIndices } from '../Server/arney-video-timeline-ocr.mjs'
+import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, extractOnScreenCookingSettings, classifyPublicVideoRetrievalFailure, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
 const fb = 'https://www.facebook.com/share/r/1A8Sz2b3cf/?mibextid=tracked'
@@ -956,4 +957,114 @@ test('failed public video import reports a safe reason code, not private downloa
   assert.equal(result.ingredients, '1 cup pasta')
   assert.match(result.notice, /reason: access-denied/)
   assert.doesNotMatch(result.notice, /secret123|private.invalid|HTTP 403/)
+})
+
+
+test('full video timeline checks short Reels twice per second and scans long videos end-to-end', () => {
+  assert.deepEqual(timelineSamplingPlan(60), {fps:2,maxFrames:300,plannedFrames:120})
+  assert.deepEqual(timelineSamplingPlan(181), {fps:1,maxFrames:300,plannedFrames:181})
+  assert.deepEqual(timelineSamplingPlan(600), {fps:0.5,maxFrames:300,plannedFrames:300})
+  assert.equal(timelineSamplingPlan(601).plannedFrames,0)
+  assert.equal(timelineSamplingPlan(-1).plannedFrames,0)
+  const indices = selectTimelineVisualIndices(120,[
+    {frameIndex:8},{frameIndex:20},{frameIndex:72},{frameIndex:107},
+  ],16)
+  assert.ok(indices.length>=12 && indices.length<=16)
+  assert.ok(indices.includes(8) && indices.includes(107))
+  assert.ok(indices.some(n=>n<20) && indices.some(n=>n>100))
+  assert.ok(indices.every((n,i)=>i===0 || n>indices[i-1]))
+})
+
+test('OCR deduplicates held captions without merging different baking temperatures or times', () => {
+  const rows = [
+    {time:1,frameIndex:1,text:'Oven Bake\n200C/400F\n22-25 Min\nFlip halfway'},
+    {time:1.5,frameIndex:2,text:'Oven  Bake\n200C/400F\n22-25 Min\nFlip halfway'},
+    {time:8,frameIndex:16,text:'Oven Bake\n195C/385F\n45-50 Min\nMix onions halfway'},
+    {time:8.5,frameIndex:17,text:'Oven Bake\n195C/385F\n45-50 Min\nMix onions halfway'},
+  ]
+  const events=collectDistinctScreenText(rows)
+  assert.equal(events.length,2)
+  assert.equal(events[0].time,1)
+  assert.equal(events[1].time,8)
+  assert.match(events[0].text,/200C\/400F/)
+  assert.match(events[1].text,/195C\/385F/)
+})
+
+test('explicit on-screen baking settings survive a small-model generic oven summary', () => {
+  const visibleText = [
+    'On-screen OCR at 19.5s:',
+    'Oven Bake',
+    '200C/400F',
+    "22-25'Min",
+    'Flip halfway',
+    '',
+    'On-screen OCR at 38.5s:',
+    'Oven Bake',
+    '195C/385F',
+    '45-50 Min',
+    'Mix onions halfway',
+  ].join('\n')
+  const fromScreen = extractOnScreenCookingSettings(visibleText)
+  assert.equal(fromScreen.length,2)
+  assert.match(fromScreen[0],/200C\/400F.*22-25.*Min/)
+  assert.match(fromScreen[1],/195C\/385F.*45-50 Min/)
+  const draft=groundedVideoDraft({
+    caption:'Caramelized Onion Chicken Pasta\nIngredients:\n- 480g pasta',
+    visibleText,
+    structured:{ name:'Caramelized Onion Chicken Pasta',ingredients:[],
+      instructions:['Oven bake with settings on screen.'],videoInstructionsAdded:[] },
+  })
+  assert.match(draft.instructions,/200C\/400F.*22-25/i)
+  assert.match(draft.instructions,/195C\/385F.*45-50/i)
+  assert.match(draft.ingredients,/480g pasta/)
+  assert.doesNotMatch(draft.instructions,/unverified|maybe/i)
+})
+
+test('on-screen timeline scan reports honest OCR coverage without exposing screenshot words in status', async () => {
+  const visibleText='On-screen OCR at 11s:\nOven Bake\n200C/400F\n22-25 Min'
+  const result=await analyzePublicSocialVideo({
+    url:ig,videoBuffer:Buffer.alloc(300),videoMime:'video/mp4',
+  },{
+    durationReader:async()=>60,
+    transcriber:async()=>({text:'',responded:true,reason:'no-speech'}),
+    visualReader:async()=>({
+      text:visibleText,framesSampled:16,visionResponded:true,
+      timelineFramesChecked:120,ocrFramesRead:120,ocrScreensDetected:1,
+      ocrAvailable:true,ocrPartial:false,
+    }),
+    extractor:async()=>({
+      name:'Chicken Pasta',ingredients:['480g pasta'],
+      instructions:['Bake according to video settings.'],
+      videoInstructionsAdded:[],
+    }),
+    coverReader:async()=>null,
+  })
+  assert.equal(result.videoReport.timelineFramesChecked,120)
+  assert.equal(result.videoReport.ocrFramesRead,120)
+  assert.equal(result.videoReport.ocrScreensDetected,1)
+  assert.equal(result.videoReport.ocrAvailable,true)
+  assert.equal(result.videoReport.ocrPartial,false)
+  assert.equal(result.videoReport.framesSampled,16)
+  assert.match(result.instructions,/200C\/400F/)
+  assert.doesNotMatch(JSON.stringify(result.videoReport),/200C\/400F|22-25 Min|On-screen OCR at/)
+})
+
+test('unavailable local OCR is reported and vision fallback is not claimed to be a full text scan', async () => {
+  const result=await analyzePublicSocialVideo({
+    url:ig,videoBuffer:Buffer.alloc(300),videoMime:'video/mp4',
+  },{
+    durationReader:async()=>18,
+    transcriber:async()=>({text:'Add the chicken.',responded:true}),
+    visualReader:async()=>({
+      text:'Visual cooking actions around 10s: Chicken placed on parchment.',
+      framesSampled:16,visionResponded:true,timelineFramesChecked:36,
+      ocrFramesRead:0,ocrScreensDetected:0,ocrAvailable:false,ocrPartial:false,
+    }),
+    extractor:async()=>({name:'Chicken',ingredients:['chicken'],
+      instructions:['Place chicken on parchment.']}),
+    coverReader:async()=>null,
+  })
+  assert.equal(result.videoReport.ocrAvailable,false)
+  assert.match(result.videoReport.status,/OCR is not installed/i)
+  assert.match(result.notice,/OCR is not installed/i)
 })

@@ -34,3 +34,27 @@ Paste one public Instagram or Facebook Reel URL. Arney first retrieves the creat
 
 ## Limitations
 Meta oEmbed returns embeddable HTML, not a reliable public video download or spoken recipe transcript. Public link extraction is best effort and may stop working when platforms change. Private, restricted and protected content should not be bypassed.
+
+## Full-timeline on-screen reading pilot (PR #224, TEST only)
+
+- FFmpeg samples across the **entire video timeline**, instead of eight widely spaced frames: 2 FPS for videos up to 2 minutes, 1 FPS up to 5 minutes, 0.5 FPS up to 10 minutes, maximum 300 timeline frames. It does NOT inspect all source frames.
+- Locally installed Tesseract reads on-screen text from preprocessed 1280px frames. Repeated text screens are deduplicated, changed oven temperatures/times retained as separate events, and a bounded 115-second OCR budget and 90 distinct-screen retention cap are reported honestly.
+- Qwen3-VL checks up to 16 frames selected from text changes and timeline overview. If Tesseract is missing, Qwen still runs but the preview explicitly says OCR is unavailable.
+- Creator caption, creator comment, Whisper transcript, OCR text and selected Qwen visual cooking actions feed the recipe organizer. Explicit OCR cooking temperatures and durations are retained directly in editable Instructions even if the organizer summarizes them generically.
+- No paid services, Meta login, cookies, persistent video files, automatic Save, household permission changes, or changes to LIVE. Media/audio/OCR work happens only in the existing authenticated TEST preview temporary directory.
+
+### One-time optional local OCR requirement
+
+The TEST source PR never silently installs software on the laptop. Windows Tesseract is commonly available as the UB Mannheim build (winget package UB-Mannheim.TesseractOCR, verify with winget search Tesseract before installing). By default the worker looks at C:\Program Files\Tesseract-OCR\tesseract.exe, then PATH. English OCR language data is required. The user must explicitly approve and perform any installation; no cloud account is required.
+
+Read-only one-line test:
+
+    $p='C:\Program Files\Tesseract-OCR\tesseract.exe'; $c=Get-Command tesseract -ErrorAction SilentlyContinue; $v=if(Test-Path $p){$p}elseif($c){$c.Source}else{''}; if($v){Write-Host 'TESSERACT_PRESENT=True'; & $v --version 2>&1 | Select-Object -First 1; Write-Host "TESSERACT_ENGLISH=$([bool]((& $v --list-langs 2>$null) -match '^eng$'))"}else{Write-Host 'TESSERACT_PRESENT=False'}
+
+### TEST acceptance
+
+1. Exact-head GitHub Windows CI and browser tests PASS, then owner approval, post-merge push CI PASS, guarded Windows TEST deployment with auth and backup. LIVE unchanged.
+2. Confirm Tesseract is available to the TEST server task account or report OCR unavailable and maintain a Qwen-only fallback.
+3. Retest the same pasta Reel on iPhone: 200C/400F for 22-25 minutes; 195C/385F for 45-50 minutes. Check ingredient quantities and ordered cooking steps, accounting for OCR mistakes.
+4. Verify timeline frames, OCR reads, distinct text screens, selected vision frames and STT sections independently. The exact details must appear in editable Instructions; no raw frame/transcript is displayed in status.
+5. Test missing OCR, no speech, >2-minute video, >10-minute rejection, blocked public link, no duplicate ingredient allocations and no automatic saves.

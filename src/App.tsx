@@ -1571,6 +1571,11 @@ type SocialVideoRecipePreview = {
     audioFailureReasons?: string[]
     framesSampled: number
     visionResponded: boolean
+    timelineFramesChecked?: number
+    ocrFramesRead?: number
+    ocrScreensDetected?: number
+    ocrAvailable?: boolean
+    ocrPartial?: boolean
     comparisonCompleted: boolean
     speechRecoveryUsed?: boolean
     newIngredients: number
@@ -23406,6 +23411,8 @@ resetMealPlannerScroll()
                     <div className={`recipe-social-video-check ${!socialRecipeVideoReport.videoOpened ||
                       (socialRecipeVideoReport.audioSegmentsFailed ?? 0) > 0 ||
                       !socialRecipeVideoReport.visionResponded ||
+                      ((socialRecipeVideoReport.timelineFramesChecked ?? 0) > 0 && !socialRecipeVideoReport.ocrAvailable) ||
+                      socialRecipeVideoReport.ocrPartial ||
                       !socialRecipeVideoReport.comparisonCompleted ||
                       socialRecipeImportMessage.includes('Still missing:')
                         ? 'recipe-social-video-check-partial' : ''}`} role="status">
@@ -23417,7 +23424,12 @@ resetMealPlannerScroll()
                       {(socialRecipeVideoReport.audioFailureReasons?.length ?? 0) > 0 && (
                         <small>Local audio issue(s): {socialRecipeVideoReport.audioFailureReasons?.join(', ')}. No transcript content is displayed.</small>
                       )}
-                      <small>Video: {socialRecipeVideoReport.framesSampled} frames sampled; vision model {socialRecipeVideoReport.visionResponded ? 'responded' : 'did not return a result'}</small>
+                      <small>On-screen text: {(socialRecipeVideoReport.timelineFramesChecked ?? 0) > 0
+                        ? `${socialRecipeVideoReport.timelineFramesChecked} timeline frames checked; ${socialRecipeVideoReport.ocrAvailable
+                          ? `${socialRecipeVideoReport.ocrFramesRead ?? 0} OCR reads, ${socialRecipeVideoReport.ocrScreensDetected ?? 0} distinct text screens${socialRecipeVideoReport.ocrPartial ? ' (partial scan)' : ''}`
+                          : 'local OCR unavailable (using vision frames instead)'}`
+                        : 'timeline scan unavailable'}</small>
+                      <small>Visual cooking analysis: {socialRecipeVideoReport.framesSampled} selected frames; vision model {socialRecipeVideoReport.visionResponded ? 'responded' : 'did not return a result'}</small>
                       <small>Recipe comparison: {socialRecipeVideoReport.comparisonCompleted
                         ? 'completed' : 'unavailable'}; {socialRecipeVideoReport.newIngredients + socialRecipeVideoReport.newInstructions} additional video details suggested</small>
                       {socialRecipeVideoReport.speechRecoveryUsed && (
