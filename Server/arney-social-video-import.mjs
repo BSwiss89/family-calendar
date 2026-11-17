@@ -164,8 +164,20 @@ function recipeCommentLikely(text) {
 }
 
 export function selectPublicCreatorRecipeComment(metadata) {
-  // Inspect only the first visible batch returned by the extractor; never chase comment pages.
-  const checked = Array.isArray(metadata?.comments) ? metadata.comments.slice(0, 10) : []
+  // Search every comment ALREADY present in bounded yt-dlp metadata. Do not
+  // request more Instagram pages to find an old creator recipe comment.
+  const checked = Array.isArray(metadata?.comments) ? metadata.comments : []
+  // The remote order may be newest-first. Sort only the metadata already
+  // received: oldest timestamp first; undated comments retain relative order.
+  // This cannot make Instagram return comments that are absent from metadata.
+  const chronological = checked.slice().sort((a, b) => {
+    const aTime = Number(a?.timestamp), bTime = Number(b?.timestamp)
+    const aDated = Number.isFinite(aTime) && aTime > 0
+    const bDated = Number.isFinite(bTime) && bTime > 0
+    if (aDated && bDated) return aTime - bTime
+    if (aDated !== bDated) return aDated ? -1 : 1
+    return 0
+  })
   const uploaderIds = [metadata?.uploader_id, metadata?.channel_id]
     .map(normalizedAccount).filter(Boolean)
   // Instagram's yt-dlp metadata may expose the post owner's unique username
@@ -175,7 +187,7 @@ export function selectPublicCreatorRecipeComment(metadata) {
   const instagramHandle = metadata?.extractor_key === 'Instagram'
     ? normalizedAccount(metadata?.channel) : ''
   const validInstagramHandle = /^[a-z0-9._]{1,30}$/.test(instagramHandle)
-  const verified = checked.map(comment => {
+  const verified = chronological.map(comment => {
     if (!comment || typeof comment !== 'object' || Array.isArray(comment)) return null
     const text = typeof comment.text === 'string' ? comment.text.trim().slice(0, 6000) : ''
     // Display-name text is user-editable and cannot authenticate authorship.
@@ -201,7 +213,7 @@ export function selectPublicCreatorRecipeComment(metadata) {
     pinnedConfirmed: Boolean(selected?.pinned),
     creatorVerified: Boolean(selected),
     commentsExamined: checked.length,
-    reason: checked.length ? (selected ? 'creator-comment-found' : 'no-verified-creator-recipe-in-first-10') : 'comments-not-exposed',
+    reason: checked.length ? (selected ? 'creator-comment-found' : 'no-verified-creator-recipe-in-returned-comments') : 'comments-not-exposed',
   }
 }
 
@@ -841,11 +853,11 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
           pinnedCommentConfirmed = publicResult.pinnedConfirmed === true
           creatorCommentVerified = true
           commentsExamined = Number.isInteger(publicResult.commentsExamined)
-            ? Math.max(0, Math.min(10, publicResult.commentsExamined)) : 0
+            ? Math.max(0, Math.min(10000, publicResult.commentsExamined)) : 0
           commentRetrievalReason = publicResult.reason || 'creator-comment-found'
         } else if (publicResult && Number.isInteger(publicResult.commentsExamined)) {
-          commentsExamined = Math.max(0, Math.min(10, publicResult.commentsExamined))
-          commentRetrievalReason = publicResult.reason || (commentsExamined ? 'no-verified-creator-recipe-in-first-10' : 'comments-not-exposed')
+          commentsExamined = Math.max(0, Math.min(10000, publicResult.commentsExamined))
+          commentRetrievalReason = publicResult.reason || (commentsExamined ? 'no-verified-creator-recipe-in-returned-comments' : 'comments-not-exposed')
         }
       } catch { /* Public comments are optional and never block the recipe. */ }
     }
@@ -1034,8 +1046,8 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
       noticeParts.push('Your pasted comment was used as unverified, editable recipe evidence.')
     if (!creatorComment && !comment.trim() && commentRetrievalReason === 'comments-not-exposed')
       noticeParts.push('Instagram did not expose public comments to the current extractor; pinned creator instructions could not be checked.')
-    else if (!creatorComment && !comment.trim() && commentRetrievalReason === 'no-verified-creator-recipe-in-first-10')
-      noticeParts.push('The first 10 available comments contained no verifiable creator recipe instructions; pinned-comment order is not guaranteed.')
+    else if (!creatorComment && !comment.trim() && commentRetrievalReason === 'no-verified-creator-recipe-in-returned-comments')
+      noticeParts.push('The ' + commentsExamined + ' returned comments contained no verifiable creator recipe instructions; Instagram may not include pinned comments in its metadata.')
     if (videoAnalyzed) {
       noticeParts.push(transcript || visibleText
         ? 'Video evidence was processed locally. Review all measurements and steps before saving.'

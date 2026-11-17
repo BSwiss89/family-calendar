@@ -13,15 +13,53 @@ test('selects a verified creator-pinned recipe from the first ten comments', () 
   assert.equal(result.commentsExamined, 2)
 })
 
-test('never selects a creator comment beyond the initial ten', () => {
-  const metadata = { uploader_id: 'chef123', comments: [
-    ...Array.from({length:10}, (_, i) => ({author_id:'other',text:'Great video '+i})),
-    {author_id:'chef123',text:'Recipe: add 2 cups pasta',is_pinned:true},
+test('finds a creator recipe after 40 newer comments already in yt-dlp metadata', () => {
+  const metadata = { extractor_key:'Instagram', channel:'fitfoodiestasia', uploader_id:'fitfoodiestasia', comments: [
+    ...Array.from({length:40}, (_, i) => ({
+      author_id:'viewer'+i, author:'viewer'+i, text:'Great video '+i,
+      timestamp:1790000000+i,
+    })),
+    {author_id:'192837465',author:'fitfoodiestasia',text:'Ingredients: 2 eggs and 200g pasta. Instructions: Mix and cook for 10 minutes.', timestamp:1760000000},
   ] }
   const result = selectPublicCreatorRecipeComment(metadata)
-  assert.equal(result.text, '')
-  assert.equal(result.commentsExamined, 10)
-  assert.equal(result.reason, 'no-verified-creator-recipe-in-first-10')
+  assert.equal(result.creatorVerified,true)
+  assert.equal(result.text.includes('200g pasta'),true)
+  assert.equal(result.source,'creator-comment')
+  assert.equal(result.pinnedConfirmed,false)
+  assert.equal(result.commentsExamined,41)
+  assert.equal(result.reason,'creator-comment-found')
+})
+
+test('prefers oldest returned creator recipe if Instagram does not report pin status', () => {
+  const result=selectPublicCreatorRecipeComment({
+    uploader_id:'chef',comments:[
+      {author_id:'chef',text:'Recipe: add 2 cups rice for the newer recipe',timestamp:1793000000},
+      {author_id:'viewer',text:'Love this recipe',timestamp:1792500000},
+      {author_id:'chef',text:'Ingredients: 1 cup rice. Instructions: Cook rice.',timestamp:1760000000},
+    ],
+  })
+  assert.match(result.text,/1 cup rice/)
+  assert.equal(result.source,'creator-comment')
+  assert.equal(result.commentsExamined,3)
+})
+
+test('pinned flag still takes priority over comment age', () => {
+  const result=selectPublicCreatorRecipeComment({
+    uploader_id:'chef',comments:[
+      {author_id:'chef',text:'Recipe: old instructions',timestamp:1760000000},
+      {author_id:'chef',text:'Ingredients: 2 cups rice',timestamp:1793000000,is_pinned:true},
+    ],
+  })
+  assert.equal(result.source,'creator-pinned')
+  assert.match(result.text,/2 cups rice/)
+})
+
+test('reports all returned comments examined when the creator is absent', () => {
+  const metadata={uploader_id:'chef123',comments:Array.from({length:45},(_,i)=>({author_id:'viewer'+i,text:'Looks good'}))}
+  const result=selectPublicCreatorRecipeComment(metadata)
+  assert.equal(result.text,'')
+  assert.equal(result.commentsExamined,45)
+  assert.equal(result.reason,'no-verified-creator-recipe-in-returned-comments')
 })
 
 test('distinguishes missing comment metadata from no qualifying first-ten comment', () => {
