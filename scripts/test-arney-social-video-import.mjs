@@ -58,6 +58,39 @@ test('social import upgrades a partial first caption using fuller downloaded met
   assert.match(result.instructions,/Cook chicken/)
 })
 
+test('social video preview gives shopping-friendly total plus sauce/marinade allocation in Notes', () => {
+  const draft = groundedVideoDraft({
+    caption: [
+      'Spicy Chicken Bowl',
+      'For the sauce:',
+      '- 30g sriracha',
+      'For the marinade:',
+      '- 70g sriracha',
+      'Ingredients:',
+      '- 300g chicken',
+      'Instructions:',
+      '1. Marinate the chicken.',
+      '2. Whisk the sauce.',
+    ].join('\n'),
+    structured: { name: 'Spicy Chicken Bowl', ingredients: [], instructions: [] },
+  })
+  assert.equal(draft.ingredients, '100g sriracha\n300g chicken')
+  assert.match(draft.notes, /Ingredient breakdown:\nsriracha: 30g for sauce; 70g for marinade/i)
+  assert.equal(draft.instructions, 'Marinate the chicken.\nWhisk the sauce.')
+  assert.deepEqual(draft.missing, [])
+})
+
+test('creator comments with a new marinade measurement can extend the caption total', () => {
+  const draft = groundedVideoDraft({
+    caption:'Rice Bowl\nFor the sauce:\n- 30g sriracha\nInstructions:\n1. Mix sauce.',
+    comment:'For the marinade:\n- 70g sriracha\n- 1 tsp garlic',
+    structured:null,
+  })
+  assert.match(draft.ingredients,/100g sriracha/)
+  assert.match(draft.ingredients,/1 tsp garlic/)
+  assert.match(draft.notes,/30g for sauce; 70g for marinade/)
+})
+
 test('public comment parser prioritizes a pinned and verified creator recipe', () => {
   const found = selectPublicCreatorRecipeComment({
     uploader_id: 'chef_amy',
