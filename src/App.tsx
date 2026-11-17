@@ -23404,6 +23404,7 @@ resetMealPlannerScroll()
                   )}
                   {socialRecipeVideoReport && (
                     <div className={`recipe-social-video-check ${!socialRecipeVideoReport.videoOpened ||
+                      (socialRecipeVideoReport.audioSegmentsFailed ?? 0) > 0 ||
                       !socialRecipeVideoReport.visionResponded ||
                       !socialRecipeVideoReport.comparisonCompleted ||
                       socialRecipeImportMessage.includes('Still missing:')
