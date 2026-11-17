@@ -48,7 +48,7 @@ async function readPublicCaption(sourceUrl, folder) {
   try {
     await run('yt-dlp', [
       '--ignore-config', '--no-playlist', '--skip-download',
-      '--no-warnings', '--write-info-json', '--write-thumbnail',
+      '--no-warnings', '--write-info-json', '--no-write-thumbnail',
       '--output', path.join(folder, 'caption-only.%(ext)s'), sourceUrl,
     ], { cwd: folder, timeoutMs: 35_000 })
     const filename = path.join(folder, 'caption-only.info.json')
@@ -65,7 +65,7 @@ async function downloadPublicVideo(sourceUrl, folder) {
   // arbitrary remote URLs, or scraper output is exposed to the browser.
   const downloaderOutput = await run('yt-dlp', [
     '--ignore-config', '--no-playlist', '--no-progress', '--no-warnings',
-    '--write-info-json', '--write-thumbnail', '--max-filesize', '72m',
+    '--write-info-json', '--no-write-thumbnail', '--max-filesize', '72m',
     // Instagram sometimes omits duration; accept missing metadata and verify the actual file with ffprobe.
     '--match-filter', 'duration <=? 600', '--format', 'best[height<=480]/best',
     '--output', path.join(folder, 'linked-video.%(ext)s'), sourceUrl,
@@ -94,12 +94,24 @@ async function downloadPublicVideo(sourceUrl, folder) {
 // Use only files yt-dlp has already placed in its private temporary folder.
 // Never fetch an image URL from the user or from metadata, and never expose
 // arbitrary image hosts to the browser.
+// Cover fetching is optional and independent: a thumbnail failure must never
+// interfere with caption/video extraction, and never uses cookies or credentials.
+async function fetchPublicCoverOnly(sourceUrl, folder) {
+  try {
+    await run('yt-dlp', [
+      '--ignore-config', '--no-playlist', '--skip-download', '--write-thumbnail',
+      '--no-write-info-json', '--no-warnings',
+      '--output', path.join(folder, 'cover-only.%(ext)s'), sourceUrl,
+    ], { cwd: folder, timeoutMs: 22_000 })
+  } catch { /* Not all public Reels expose their original cover. */ }
+}
+
 export async function buildSocialCoverPreview(folder, videoFilename = '', { grabFrame = null } = {}) {
   let files = []
   try { files = await fs.readdir(folder) } catch { return null }
   const coverCandidates = files
-    .filter(name => /^(?:caption-only|linked-video)\.(?:webp|jpe?g|png)$/i.test(name))
-    .sort((a, b) => Number(a.startsWith('caption-only')) - Number(b.startsWith('caption-only')))
+    .filter(name => /^(?:cover-only|caption-only|linked-video)\.(?:webp|jpe?g|png)$/i.test(name))
+    .sort((a, b) => Number(!a.startsWith('cover-only')) - Number(!b.startsWith('cover-only')))
   // Prefer the creator's Reel cover. Use a representative frame only when
   // no public cover was saved and an actual authorized video is available.
   const candidates = coverCandidates.map(name => ({
@@ -409,10 +421,14 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
     progress('organize', 'Comparing the caption with the video and organizing recipe details…')
     const structured = await extractor({ caption: recipeCaption, transcript, visibleText })
     const draft = groundedVideoDraft({ caption: recipeCaption, transcript, visibleText, structured })
-    const baseline = groundedVideoDraft({ caption: recipeCaption })
-    const count = value => value ? value.split('\n').filter(Boolean).length : 0
-    const newIngredients = Math.max(0, count(draft.ingredients) - count(baseline.ingredients))
-    const newInstructions = Math.max(0, count(draft.instructions) - count(baseline.instructions))
+    const videoEvidencePresent = Boolean(transcript.trim() || visibleText.trim())
+    const videoAdded = field => videoEvidencePresent && Array.isArray(structured?.[field])
+      ? structured[field].filter(item => typeof item === 'string' && item.trim()).length : 0
+    const newIngredients = videoAdded('videoIngredientsAdded')
+    const newInstructions = videoAdded('videoInstructionsAdded')
+    progress('cover', 'Checking whether the Reel has a usable cover photo…')
+    if (!videoBuffer && downloader === downloadPublicVideo && captionReader === readPublicCaption)
+      await fetchPublicCoverOnly(source.url, folder)
     try {
       publicCover = await coverReader(folder, publicVideoFile)
       coverPhoto = publicCover?.photoDataUrl || null
@@ -438,7 +454,6 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
       noticeParts.push('Still missing: ' + draft.missing.join(' and ') + '.')
       if (!structured) noticeParts.push('The local AI could not organize enough recipe information.')
     }
-    const videoEvidencePresent = Boolean(transcript.trim() || visibleText.trim())
     const videoStatus = !videoAnalyzed
       ? 'Caption only — the video could not be analyzed.'
       : !videoEvidencePresent
@@ -462,10 +477,8 @@ export async function analyzePublicSocialVideo({ url, caption = '', videoBuffer 
         speechServiceConfigured,
         audioSegmentsChecked,
         audioSegmentsWithText,
-        speechExcerpt: transcript.slice(0, 450),
         framesSampled,
         visionResponded,
-        visionExcerpt: visibleText.slice(0, 450),
         comparisonCompleted: structured !== null && structured !== undefined,
         newIngredients, newInstructions,
         conflicts: draft.conflicts,
