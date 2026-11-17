@@ -429,7 +429,7 @@ export function extractOnScreenCookingSettings(visibleText = '') {
     // them from the structured recipe.
     const heat = /\b(?:oven|bake|roast|air.?fry|grill|temperature|preheat)\b/i.test(whole)
       || /\b\d{2,3}\s*°?\s*[CF]\b/i.test(whole)
-    const duration = /\b\d+(?:\s*[-–]\s*\d+)?\s*(?:min(?:ute)?s?|hrs?|hours?)\b/i.test(whole)
+    const duration = /\b\d+(?:\s*[-–]\s*\d+)?\s*['’]?\s*(?:min(?:ute)?s?|hrs?|hours?)\b/i.test(whole)
       || /\b\d+\s*[-–]\s*\d+\s*min\b/i.test(whole)
     if (!heat || !duration) continue
     const fact = clean.slice(0, 6).join('; ').slice(0, 380)
