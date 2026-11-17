@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { normalizeSocialRecipeUrl, parseSocialRecipeCaption } from './arney-social-recipe-import.mjs'
+import { consolidateRecipeIngredientAmounts } from './arney-recipe-ingredient-aggregation.mjs'
 
 const MAX_VIDEO_BYTES = 36 * 1024 * 1024 // User-supplied recordings only
 const MAX_LINK_VIDEO_BYTES = 72 * 1024 * 1024 // Temporary public link downloads
@@ -431,9 +432,13 @@ export function groundedVideoDraft({ caption = '', comment = '', transcript = ''
     audioDraft?.instructions || screenDraft?.instructions || spokenFacts?.instructions || ''
   // Caption is the stable baseline. Append only non-repeated details identified in
   // actual speech/frames; the model must not replace confirmed quantities or steps.
-  const ingredients = videoEvidence
+  const ingredientLines = videoEvidence
     ? appendVideoDetails(baseIngredients, model.videoIngredientsAdded, 80, 260, 7000)
     : baseIngredients
+  const consolidated = consolidateRecipeIngredientAmounts(ingredientLines, [
+    ...fromCaption.ingredientParts, ...fromComment.ingredientParts,
+  ])
+  const ingredients = consolidated.ingredients
   const instructions = videoEvidence
     ? appendVideoDetails(baseInstructions, model.videoInstructionsAdded, 80, 500, 8000)
     : baseInstructions
@@ -443,8 +448,11 @@ export function groundedVideoDraft({ caption = '', comment = '', transcript = ''
     ? Number(model.servings) : 0
   const servings = fromCaption.servings || fromComment.servings ||
     (videoServings >= 1 && videoServings <= 1000 ? String(videoServings) : '')
-  const notes = fromCaption.notes || fromComment.notes ||
+  const nutrition = fromCaption.notes || fromComment.notes ||
     (videoEvidence ? verifiedNutritionNotes(model.nutritionNotes) : '')
+  // Ingredient totals are shopping-list friendly; the original measured
+  // allocations remain visible in the recipe Notes for preparing each part.
+  const notes = [nutrition, consolidated.allocationNotes].filter(Boolean).join('\n\n').slice(0, 2500)
   return {
     name, ingredients, instructions, conflicts, servings, notes,
     missing: ['ingredients', 'instructions'].filter(field => !({ ingredients, instructions })[field]),
