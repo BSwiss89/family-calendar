@@ -1227,7 +1227,7 @@ test('recipe instructions keep ingredient totals and split measured seasoning be
     'Oven bake at 200°C / 400°F for 22–25 minutes; flip halfway.',
     'Oven bake at 195°C / 385°F for 45–50 minutes.',
   ].join('\n')
-  const recipe=refineSocialRecipeInstructions({ingredients,instructions})
+  const recipe=refineSocialRecipeInstructions({ingredients,instructions,visibleText:'On-screen OCR at 18s:\nPlace chicken on tray with baking paper'})
   const steps=recipe.split('\n')
   assert.match(steps[0],/Use half to season the chicken.*reserve the other half for the onions/i)
   assert.doesNotMatch(steps[0],/paprika \(2 tsp\)|Garlic Powder \(1.5 tsp\)/i)
@@ -1353,4 +1353,46 @@ test('optional STT watchdog stays isolated to the existing scheduled task and ne
   assert.match(installer, /if \(!\$Apply\)/)
   assert.match(installer,/New-ScheduledTaskPrincipal -UserId 'SYSTEM'/)
   assert.doesNotMatch(installer,/Stop-ScheduledTask|Stop-Process|Restart-Computer|Restart-Service/)
+})
+
+
+test('separate legitimate oven steps at same heat are never collapsed', () => {
+  const instructions=[
+    'Bake chicken at 200°C/400°F for 20 minutes.',
+    'Bake potatoes at 200°C/400°F for 40 minutes.',
+    'Bake chicken at 200°C/400°F for 20 minutes.',
+    'Bake onions at 200°C/400°F for 20 minutes.',
+  ].join('\n')
+  const refined=refineSocialRecipeInstructions({ingredients:'chicken\npotatoes\nonions',instructions})
+  assert.equal((refined.match(/200°C/g)||[]).length,3)
+  assert.match(refined,/chicken.*20 minutes/)
+  assert.match(refined,/potatoes.*40 minutes/)
+  assert.match(refined,/onions.*20 minutes/)
+})
+
+test('real video support is required before rewriting a possible paper towel instruction', () => {
+  const original='Set the chicken aside with paper towel underneath.'
+  assert.equal(refineSocialRecipeInstructions({
+    ingredients:'chicken',instructions:original,
+  }),original)
+  const backed=refineSocialRecipeInstructions({
+    ingredients:'chicken',instructions:original,
+    visibleText:'On-screen OCR at 18s:\nOnce cooked set chicken and baking paper aside',
+  })
+  assert.equal(backed,'Set the chicken aside.')
+})
+
+test('existing post-bake garlic squeeze is preserved without inserting a duplicate', () => {
+  const cooked=refineSocialRecipeInstructions({
+    ingredients:'one whole garlic bulb, sliced onions',
+    instructions:[
+      'Cut the top off the whole garlic bulb, squeeze out the cloves and add to tray.',
+      'Add sliced onions to tray.',
+      'Bake onions and garlic at 195°C/385°F for 45-50 minutes.',
+      'Once baked, squeeze the soft garlic cloves into the onion mixture.',
+      'Add cream cheese and stir.',
+    ].join('\n'),
+  })
+  assert.equal((cooked.match(/squeeze/gi)||[]).length,1)
+  assert.ok(cooked.indexOf('squeeze')>cooked.indexOf('Bake onions'))
 })
