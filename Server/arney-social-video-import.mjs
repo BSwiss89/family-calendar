@@ -168,13 +168,26 @@ export function selectPublicCreatorRecipeComment(metadata) {
   const checked = Array.isArray(metadata?.comments) ? metadata.comments.slice(0, 10) : []
   const uploaderIds = [metadata?.uploader_id, metadata?.channel_id]
     .map(normalizedAccount).filter(Boolean)
+  // Instagram's yt-dlp metadata may expose the post owner's unique username
+  // under channel, while author_id is a numeric Instagram account ID. Confirm
+  // equality of provider-reported usernames ONLY for the Instagram extractor;
+  // arbitrary display names from other platforms are not identity evidence.
+  const instagramHandle = metadata?.extractor_key === 'Instagram'
+    ? normalizedAccount(metadata?.channel) : ''
+  const validInstagramHandle = /^[a-z0-9._]{1,30}$/.test(instagramHandle)
   const verified = checked.map(comment => {
     if (!comment || typeof comment !== 'object' || Array.isArray(comment)) return null
     const text = typeof comment.text === 'string' ? comment.text.trim().slice(0, 6000) : ''
     // Display-name text is user-editable and cannot authenticate authorship.
     const authorId = normalizedAccount(comment.author_id)
+    const matchingInstagramHandle = validInstagramHandle &&
+      normalizedAccount(comment.author) === instagramHandle &&
+      // A conflicting pair of numeric account IDs cannot be overridden by
+      // username equality; when IDs are not comparable, the handle can verify.
+      (!/^\d+$/.test(authorId) || !uploaderIds.some(id => /^\d+$/.test(id)) ||
+        uploaderIds.includes(authorId))
     const isCreator = comment.author_is_uploader === true ||
-      Boolean(authorId && uploaderIds.includes(authorId))
+      Boolean(authorId && uploaderIds.includes(authorId)) || matchingInstagramHandle
     if (!isCreator || text.length < 10 || !recipeCommentLikely(text)) return null
     return {
       text,
