@@ -90,11 +90,73 @@ function extractCaptionFallback(lines, type) {
   return found
 }
 
+
+// Some creators write "introduction -> recipe title -> plain ingredient list
+// -> Instructions" without an Ingredients heading or bullet markers.
+// Only infer a list when several short, explicit quantity lines form a
+// contiguous recipe-like block before Instructions. Never treat intro prose,
+// the Reel's visible contents, or model guesses as measurements.
+const UNLABELED_AMOUNT = /^(?:\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?(?:\s+\d+\/\d+)?|\d+\/\d+|[¼½¾⅓⅔⅛⅜⅝⅞])\s+(?:[\p{L}][\p{L}\p{N}'’/-]*\s*){1,25}$/iu
+const NON_RECIPE_INTRO = /^(?:this (?:was|is|recipe)|we (?:made|love|tried)|i (?:made|love|tried)|save this|you (?:need|have)|follow|link in|so (?:good|easy)|who (?:else|wants)|here(?:'s| is))\b/i
+function likelyStandaloneRecipeTitle(line) {
+  const candidate = line.trim().replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '')
+  return candidate.length >= 5 && candidate.length <= 100 &&
+    candidate.split(/\s+/).length <= 14 &&
+    !NON_RECIPE_INTRO.test(candidate) &&
+    !/[.!?;:]/.test(candidate) &&
+    !/^\d/.test(candidate) &&
+    !/^(?:macros?|calories|servings?|ingredients?|instructions?|directions?|recipe)\b/i.test(candidate) &&
+    !COOKING_ACTION.test(candidate) &&
+    !DISCARD.test(candidate)
+}
+function looksLikeUnlabeledMeasuredIngredient(line) {
+  if (!line || line.length > 170 || /[.!?]$/.test(line) || /:\s+\S/.test(line)) return false
+  const text = withoutListMarker(line)
+  return UNLABELED_AMOUNT.test(text) &&
+    !COOKING_ACTION.test(text) &&
+    !/^\d+(?:[.,]\d+)?\s*(?:calories?|kcal|protein|carbs?|fat)\b/i.test(text)
+}
+function inferUnlabeledIngredientBlock(lines) {
+  // Explicit headings keep using the existing, stronger section parser.
+  const instructionsAt = lines.findIndex(line => STEP_HEADING.test(line.replace(/^[^\p{L}\p{N}]+/u, '')))
+  const limit = instructionsAt < 0 ? lines.length : instructionsAt
+  if (lines.slice(0, limit).some(line =>
+    INGREDIENT_HEADING.test(line.replace(/^[^\p{L}\p{N}]+/u, '')) ||
+    INGREDIENT_PART_HEADING.test(line.replace(/^[^\p{L}\p{N}]+/u, '')))) return null
+  const measured = []
+  for (let i = 0; i < limit; i++) {
+    if (looksLikeUnlabeledMeasuredIngredient(lines[i])) measured.push(i)
+  }
+  if (measured.length < 3) return null
+  // A long unrelated block of numeric claims is not an ingredient list.
+  const first = measured[0], last = measured.at(-1)
+  if (last - first > 30 || !measured.some((n, i) => i > 0 && n - measured[i - 1] <= 2)) return null
+  const indices = new Set(measured)
+  for (let i = first; i <= last; i++) {
+    const text = lines[i]
+    if (!text || indices.has(i)) continue
+    // Allow short unmeasured items such as "Salt and pepper" or "Fresh parsley".
+    if (text.length <= 130 && !NON_RECIPE_INTRO.test(text) &&
+        !COOKING_ACTION.test(withoutListMarker(text)) &&
+        !/[!?]$/.test(text) && !/:\s+\S/.test(text) &&
+        !DISCARD.test(text)) indices.add(i)
+  }
+  // No unmeasured prose outside the measured block becomes an ingredient.
+  let title = ''
+  for (let i = first - 1; i >= 0; i--) {
+    if (!lines[i]) continue
+    if (likelyStandaloneRecipeTitle(lines[i])) title = lines[i].trim()
+    break
+  }
+  return { indices, title }
+}
+
 export function parseSocialRecipeCaption(value) {
   if (typeof value !== 'string' || value.length > MAX_CAPTION)
     throw new TypeError('The optional pasted caption is too long.')
   const lines = value.replace(/\r\n?/g, '\n').split('\n').map(cleanLine)
-  let section = '', title = '', explicitTitle = false, ingredientSection = ''
+  const inferred = inferUnlabeledIngredientBlock(lines)
+  let section = '', title = inferred?.title ?? '', explicitTitle = false, ingredientSection = ''
   const ingredients = [], steps = [], ingredientParts = []
   const componentName = value => value.replace(/^for\s+(?:the\s+|a\s+)?/i,'')
     .replace(/\([^)]*\)/g,'').replace(/\s+ingredients?$/i,'')
@@ -105,8 +167,16 @@ export function parseSocialRecipeCaption(value) {
     ingredients.push(ingredient)
     ingredientParts.push({ line: ingredient, section: ingredientSection })
   }
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex]
     if (!line) continue
+    // A verified quantity-based list takes priority over model-extracted guesses.
+    if (inferred?.indices.has(lineIndex)) {
+      section = 'ingredients'
+      ingredientSection = ''
+      addIngredient(line)
+      continue
+    }
     // Social captions often prefix section headings with cooking emojis.
     const headingLine = line.replace(/^[^\p{L}\p{N}]+/u, '')
     let match = TITLE_HEADING.exec(headingLine)
@@ -152,7 +222,7 @@ export function parseSocialRecipeCaption(value) {
       continue
     }
     // The first caption line is only a suggested title, never fabricated.
-    if (!title && line.length >= 4 && line.length <= 110 && !/^[#@]/.test(line)) {
+    if (!title && likelyStandaloneRecipeTitle(line)) {
       title = line.replace(/^["'“”]+|["'“”]+$/g, '').trim()
     }
   }
