@@ -1580,6 +1580,7 @@ type SocialVideoRecipePreview = {
     ocrAvailable?: boolean
     ocrPartial?: boolean
     comparisonCompleted: boolean
+    recipeOrganizerStatus?: string
     speechRecoveryUsed?: boolean
     newIngredients: number
     newInstructions: number
@@ -23438,6 +23439,7 @@ resetMealPlannerScroll()
                       <small>Visual cooking analysis: {socialRecipeVideoReport.framesSampled} selected frames; vision model {socialRecipeVideoReport.visionResponded ? 'responded' : 'did not return a result'}</small>
                       <small>Recipe comparison: {socialRecipeVideoReport.comparisonCompleted
                         ? 'completed' : 'unavailable'}; {socialRecipeVideoReport.newIngredients + socialRecipeVideoReport.newInstructions} additional video details suggested</small>
+                      <small>Primary recipe organizer: {socialRecipeVideoReport.recipeOrganizerStatus ?? (socialRecipeVideoReport.comparisonCompleted ? 'ok' : 'unavailable')}</small>
                       {socialRecipeVideoReport.speechRecoveryUsed && (
                         <small>{socialRecipeVideoReport.audioSegmentsWithText > 0
                           ? 'Additional spoken/visual recipe details recovered after the first AI pass.'
