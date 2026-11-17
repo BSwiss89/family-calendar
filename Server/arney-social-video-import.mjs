@@ -43,6 +43,68 @@ function run(program, args, { cwd, timeoutMs = 25_000 } = {}) {
   })
 }
 
+// Best-effort public-page metadata fallback for Instagram descriptions when the
+// yt-dlp metadata command cannot access a Reel. No login/cookies, extra hosts,
+// redirects, comment scraping, or media requests. HTML is bounded and discarded.
+const PUBLIC_CAPTION_HTML_BYTES = 512 * 1024
+function decodePublicHtmlEntities(value) {
+  const named = { amp:'&', quot:'"', apos:"'", lt:'<', gt:'>', nbsp:' ', ndash:'–', mdash:'—', hellip:'…', rsquo:'’', ldquo:'“', rdquo:'”' }
+  return value.replace(/&(#(?:x[0-9a-f]{1,6}|[0-9]{1,7})|amp|quot|apos|lt|gt|nbsp|ndash|mdash|hellip|rsquo|ldquo|rdquo);/gi, (_, entity) => {
+    if (entity[0] !== '#') return named[entity.toLowerCase()] || _
+    const n = entity[1].toLowerCase() === 'x' ? parseInt(entity.slice(2), 16) : Number(entity.slice(1))
+    return Number.isInteger(n) && n > 0 && n <= 0x10ffff && (n >= 32 || n === 10 || n === 13 || n === 9)
+      ? String.fromCodePoint(n) : ' '
+  })
+}
+export function extractPublicInstagramCaption(html = '') {
+  if (typeof html !== 'string' || html.length > PUBLIC_CAPTION_HTML_BYTES) return ''
+  const candidates = []
+  for (const tag of html.match(/<meta\b[^>]*>/gi) || []) {
+    const attributes = {}
+    for (const m of tag.matchAll(/([a-z_:][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi))
+      attributes[m[1].toLowerCase()] = m[2] ?? m[3] ?? m[4] ?? ''
+    const key = (attributes.property || attributes.name || '').toLowerCase()
+    if (!['og:description', 'twitter:description', 'description'].includes(key) || !attributes.content) continue
+    let value = decodePublicHtmlEntities(attributes.content).trim()
+    // Common public OG wrapper: "123 likes, 4 comments - creator on Instagram: \"<caption>\"".
+    const wrapper = /\bon Instagram\s*:\s*["“]?([\s\S]*)/i.exec(value)
+    if (wrapper) value = wrapper[1].replace(/["”]\s*$/, '').trim()
+    if (value.length >= 8 && value.length <= 10000) candidates.push(value)
+  }
+  let best = ''
+  for (const caption of candidates) best = chooseMoreCompletePublicCaption(best, caption)
+  return best
+}
+export async function readPublicInstagramPageCaption(sourceUrl, fetchPage = fetch) {
+  const source = normalizeSocialRecipeUrl(sourceUrl)
+  if (source.platform !== 'Instagram') return ''
+  let response
+  try {
+    response = await fetchPage(source.url, {
+      method:'GET', redirect:'error', credentials:'omit',
+      headers:{ Accept:'text/html' }, signal:AbortSignal.timeout(6500),
+    })
+    if (!response.ok || !/^text\/html\b/i.test(response.headers.get('content-type') || '') ||
+        Number(response.headers.get('content-length') || 0) > PUBLIC_CAPTION_HTML_BYTES)
+      return ''
+    const chunks = []
+    let bytes = 0
+    const reader = response.body?.getReader()
+    if (!reader) return ''
+    try {
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        bytes += value.byteLength
+        if (bytes > PUBLIC_CAPTION_HTML_BYTES) return ''
+        chunks.push(value)
+      }
+    } finally { await reader.cancel().catch(() => {}) }
+    return extractPublicInstagramCaption(new TextDecoder().decode(Buffer.concat(chunks.map(x => Buffer.from(x)))))
+  } catch { return '' }
+  finally { await response?.body?.cancel?.().catch(() => {}) }
+}
+
 async function readPublicCaption(sourceUrl, folder) {
   // Read the creator's public description independently of the media download.
   // A blocked, oversized or unknown-duration video must not hide its recipe caption.
@@ -169,7 +231,8 @@ export function chooseMoreCompletePublicCaption(first = '', next = '') {
   const existing = parseSocialRecipeCaption(first.slice(0, 10_000))
   const candidate = parseSocialRecipeCaption(next.slice(0, 10_000))
   const count = text => text ? text.split('\n').filter(Boolean).length : 0
-  const score = recipe => count(recipe.ingredients) * 2 + count(recipe.instructions) * 2
+  const score = recipe => count(recipe.ingredients) * 2 + count(recipe.instructions) * 2 +
+    Number(Boolean(recipe.servings)) + Number(Boolean(recipe.notes)) + Number(Boolean(recipe.name))
   const originalScore = score(existing), candidateScore = score(candidate)
   if (candidateScore > originalScore ||
       (candidateScore === originalScore && candidateScore > 0 && next.length > first.length * 1.15))
@@ -514,6 +577,7 @@ async function structureEvidence({ caption, comment = '', transcript, visibleTex
 
 export async function analyzePublicSocialVideo({ url, caption = '', comment = '', videoBuffer = null, videoMime = '' } = {}, {
   stt = null, downloader = downloadPublicVideo, captionReader = readPublicCaption,
+  publicPageCaptionReader = readPublicInstagramPageCaption,
   commentReader = readPublicCreatorComment, durationReader = inspectDuration,
   transcriber = transcribeClip, visualReader = visibleVideoText, extractor = structureEvidence,
   onProgress = null, coverReader = buildSocialCoverPreview,
@@ -548,7 +612,20 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
     // analyze the video even when the caption already has a full recipe.
     if (!caption.trim()) {
       try { recoveredCaption = (await captionReader(source.url, folder)).slice(0, 10_000) }
-      catch { /* Still attempt media retrieval and video extraction. */ }
+      catch { /* Still attempt public-page metadata and video extraction. */ }
+      const current = parseSocialRecipeCaption(recoveredCaption)
+      // yt-dlp may fail or provide an introductory-only caption. Public HTML
+      // metadata is an independent, anonymous attempt; user-pasted text wins.
+      // Mocked tests do not contact Instagram unless they explicitly inject it.
+      if (source.platform === 'Instagram' &&
+          (!recoveredCaption.trim() || current.ingredients.split('\n').filter(Boolean).length < 2) &&
+          (captionReader === readPublicCaption || publicPageCaptionReader !== readPublicInstagramPageCaption)) {
+        try {
+          const pageCaption = await publicPageCaptionReader(source.url)
+          if (typeof pageCaption === 'string')
+            recoveredCaption = chooseMoreCompletePublicCaption(recoveredCaption, pageCaption)
+        } catch { /* Public HTML may be login-gated; continue with safe evidence. */ }
+      }
     }
     progress('comments', comment.trim()
       ? 'Using your pasted recipe comment…'

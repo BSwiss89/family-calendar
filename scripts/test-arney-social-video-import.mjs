@@ -5,7 +5,7 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import sharp from 'sharp'
 import path from 'node:path'
-import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
+import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
 const fb = 'https://www.facebook.com/share/r/1A8Sz2b3cf/?mibextid=tracked'
@@ -25,6 +25,101 @@ test('model output without actual caption/video evidence never becomes a recipe'
 })
 
 
+
+const sesameCaption = [
+  'Sesame Chicken Rice Bowls',
+  '(Makes 10 Bowls)',
+  'Macros Per Bowl:',
+  '- 400 Calories',
+  '- 45g Protein',
+  '- 39g Carbs',
+  '- 5g Fat',
+  'Ingredients:',
+  '- 60oz Ground Chicken Breast (1700g)',
+  '- 0.75 Cup Soy Sauce (180g)',
+  '- 0.5 Cup No Sugar Added Ketchup (120g)',
+  '- 0.25 Cup Honey (80g)',
+  '- 0.5 Tbsp Sesame Oil (8g)',
+  '- 2 Tbsps Rice Vinegar (30g)',
+  '- 2 Tbsps Minced Garlic (20g)',
+  '- 1 Tbsp Red Pepper Flakes (Optional) (8g)',
+  '- Fresh Green Onions (60g)',
+  '- Sesame Seeds (20g)',
+  '- 2 Cups Dry White Rice (360g)',
+  '- 3 Cups Chicken Bone Broth (720g)',
+  'Additional Notes: To reheat from frozen, add water, cover and microwave for around 5-6 minutes.',
+].join('\n')
+
+test('public Instagram OG description recovers the actual recipe from HTML-escaped metadata, not likes wrapper', () => {
+  const wrapped = '1,000 likes, 42 comments - chef on Instagram: "' + sesameCaption + '"'
+  const escaped = wrapped.replaceAll('&', '&amp;').replaceAll('"', '&quot;')
+    .replaceAll('\n', '&#10;')
+  const html = '<!doctype html><html><head><meta content="' + escaped +
+    '" property="og:description"><meta name="description" content="Join Instagram and sign in."></head></html>'
+  const result = extractPublicInstagramCaption(html)
+  assert.equal(result, sesameCaption)
+  const draft = groundedVideoDraft({caption:result})
+  assert.equal(draft.name, 'Sesame Chicken Rice Bowls')
+  assert.equal(draft.ingredients.split('\n').length, 12)
+  assert.equal(draft.servings,'10')
+  assert.match(draft.notes,/400 Calories.*45g Protein.*39g Carbs.*5g Fat/)
+  assert.match(draft.notes,/To reheat/)
+  assert.equal(draft.instructions,'')
+})
+
+test('Instagram public page fallback uses canonical URL, no cookies or redirects and enforces page limits', async () => {
+  let called = 0
+  const responseHTML = '<meta name="description" content="' + sesameCaption.replaceAll('\n','&#10;') + '">'
+  const result = await readPublicInstagramPageCaption('https://instagram.com/reel/ABCDE_fghi1/?igsh=tracking',
+    async (url, options) => {
+      called++
+      assert.equal(url,'https://www.instagram.com/reel/ABCDE_fghi1/')
+      assert.equal(options.redirect,'error')
+      assert.equal(options.credentials,'omit')
+      assert.deepEqual(options.headers,{Accept:'text/html'})
+      return new Response(responseHTML,{status:200,headers:{'content-type':'text/html; charset=utf-8'}})
+    })
+  assert.equal(called,1)
+  assert.equal(result,sesameCaption)
+  assert.equal(await readPublicInstagramPageCaption('https://instagram.com/reel/ABCDE_fghi1/',
+    async()=>new Response('login',{status:403,headers:{'content-type':'text/html'}})), '')
+  assert.equal(await readPublicInstagramPageCaption('https://instagram.com/reel/ABCDE_fghi1/',
+    async()=>new Response('<meta name="description" content="bad">',{headers:{'content-type':'application/json'}})), '')
+  assert.equal(await readPublicInstagramPageCaption('https://instagram.com/reel/ABCDE_fghi1/',
+    async()=>new Response('a'.repeat(600_000),{headers:{'content-type':'text/html'}})), '')
+  assert.equal(await readPublicInstagramPageCaption('https://facebook.com/reel/123456789/',async()=>{throw Error('must not fetch Facebook')}), '')
+  await assert.rejects(()=>readPublicInstagramPageCaption('https://instagram.com.evil.invalid/reel/ABCDE_fghi1/',async()=>{}),TypeError)
+})
+
+test('failed yt-dlp description and video still recover all Sesame Chicken Rice Bowl caption details independently', async () => {
+  let pageReads=0,videoAttempts=0,descriptions=0
+  const events=[]
+  const result = await analyzePublicSocialVideo({url:'https://www.instagram.com/reel/ABCDE_fghi1/'},{
+    captionReader:async()=>{descriptions++;return ''},
+    publicPageCaptionReader:async()=>{pageReads++;return sesameCaption},
+    commentReader:async()=>({creatorVerified:false,commentsExamined:0}),
+    downloader:async()=>{videoAttempts++;throw Error('yt-dlp unavailable')},
+    extractor:async()=>null,
+    coverReader:async()=>null,
+    onProgress:info=>events.push(info.stage),
+  })
+  assert.equal(pageReads,1)
+  assert.equal(descriptions,1)
+  assert.equal(videoAttempts,1)
+  assert.equal(result.name,'Sesame Chicken Rice Bowls')
+  assert.equal(result.ingredients.split('\n').length,12)
+  assert.equal(result.servings,'10')
+  assert.match(result.notes,/400 Calories/)
+  assert.match(result.notes,/microwave/)
+  assert.equal(result.instructions,'')
+  assert.deepEqual(result.missing,['instructions'])
+  assert.equal(result.captionRecovered,true)
+  assert.equal(result.audioTranscribed,false)
+  assert.equal(result.videoReport.audioSegmentsChecked,0)
+  assert.equal(result.videoReport.framesSampled,0)
+  assert.match(result.notice,/description was retrieved automatically/)
+  assert.ok(events.includes('caption')&&events.includes('draft'))
+})
 
 test('automated caption metadata with more sauce ingredients replaces a partial first description', () => {
   const first = 'Honey Chicken\nIngredients:\n- 500g chicken\nDirections:\n1. Cook chicken.'
