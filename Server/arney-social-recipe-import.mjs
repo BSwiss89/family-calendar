@@ -58,7 +58,7 @@ const STEP_HEADING = /^(?:instructions?|directions?|method|steps?|how to (?:make
 // Creator descriptions often divide ingredient lists into multiple parts and
 // place a sauce/toppings section AFTER their first Instructions heading.
 // Those new ingredients must never be discarded as instructions.
-const INGREDIENT_PART_HEADING = /^(?:(?:for\s+(?:the\s+|a\s+)?)?(?:sauce|marinade|dressing|glaze|toppings?|garnish|seasoning(?:\s+mix)?|spice\s+(?:mix|blend)|filling|crust|chicken|rice|pasta|vegetables|veggies|salad|assembly|bowl|protein)(?:\s+ingredients?)?|(?:[\p{L}\p{N}'’&-]+(?:\s+[\p{L}\p{N}'’&-]+){0,4})\s+ingredients?)\s*(?:\([^)]{1,60}\))?\s*[:\-–—]?\s*)$/iu
+const INGREDIENT_PART_HEADING = /^(?:(?:for\s+(?:the\s+|a\s+)?)?(?:sauce|marinade|dressing|glaze|toppings?|garnish|seasoning(?:\s+mix)?|spice\s+(?:mix|blend)|filling|crust|chicken|rice|pasta|vegetables|veggies|salad|assembly|bowl|protein)(?:\s+ingredients?)?|(?:[\p{L}\p{N}'’&-]+(?:\s+[\p{L}\p{N}'’&-]+){0,4})\s+ingredients?)\s*(?:\([^)]{1,60}\))?\s*[:\-–—]?\s*$/iu
 const STRONG_INGREDIENT = /^(?:\d+(?:[.,]\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])\s*(?:g|kg|mg|grams?|ml|l|liters?|oz|lbs?|pounds?|cups?|tbsp|tsp|tablespoons?|teaspoons?|cloves?|slices?|pieces?)\b/i
 const TITLE_HEADING = /^(?:recipe|dish|title)\s*:\s*(.{3,120})$/i
 const LIST_MARKER = /^\s*(?:[-*•·▪◦]\s*|\d{1,2}[.)]\s+)\s*/
