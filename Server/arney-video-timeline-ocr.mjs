@@ -82,7 +82,10 @@ export function compactRecipeScreenEvidence(events = [], maxChars = 10_500) {
     const lines = String(event.text||'').split('\n')
       .map(x=>x.replace(/\s+/g,' ').trim())
       .filter(x=>x.length>=4 && x.length<=120 && cue.test(x) &&
-        (x.match(/[a-zA-Z]/g)||[]).length>=3)
+        ((x.match(/[a-zA-Z]/g)||[]).length>=3 ||
+          // Compact temperature pairs like "195C/385F" have only two letters.
+          // They are critical evidence, not OCR junk.
+          /\b\d{3}\s*°?\s*C\s*[/|]\s*\d{3}\s*°?\s*F(?:x)?\b/i.test(x)))
       .slice(0,8)
     if (!lines.length) continue
     const text = lines.join('; ').slice(0,240)
