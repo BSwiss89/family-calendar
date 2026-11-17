@@ -305,7 +305,7 @@ test('public Reel covers are sanitized into a small local WebP without video or 
     await writeFile(path.join(folder, 'cover-only.jpg'), jpg)
     const result = await buildSocialCoverPreview(folder)
     assert.equal(result.photoSource, 'Reel cover')
-    assert.match(result.photoDataUrl, /^data:image\\/webp;base64,/)
+    assert.ok(result.photoDataUrl.startsWith('data:image/webp;base64,'))
     const bytes = Buffer.from(result.photoDataUrl.split(',')[1], 'base64')
     assert.ok(bytes.length > 0 && bytes.length <= 70 * 1024)
     const metadata = await sharp(bytes).metadata()
@@ -329,7 +329,7 @@ test('a video frame is the fallback when the platform gives no original cover', 
     })
     assert.equal(sampled, true)
     assert.equal(result.photoSource, 'Video frame')
-    assert.match(result.photoDataUrl, /^data:image\\/webp;base64,/)
+    assert.ok(result.photoDataUrl.startsWith('data:image/webp;base64,'))
   } finally { await rm(folder, { recursive: true, force: true }) }
 })
 
