@@ -32,7 +32,7 @@ function Get-TaskSnapshot {
     }
     return [pscustomobject]@{ Task=$task; Xml=$xml; XmlText=$xmlText; Interval=$intervals[0].InnerText; IntervalNode=$intervals[0] }
 }
-function Assert-Task([object]$snapshot,[string]$identity) {
+function Assert-Task([object]$snapshot,[string]$identity,[switch]$RequireIdle) {
     $task = $snapshot.Task
     $actions = @($task.Actions)
     if ($task.TaskPath -ne '\' -or $actions.Count -ne 1 -or
@@ -40,7 +40,8 @@ function Assert-Task([object]$snapshot,[string]$identity) {
         $task.Principal.LogonType.ToString() -ne 'Password' -or
         $task.Principal.RunLevel.ToString() -ne 'Highest' -or
         $task.Settings.MultipleInstances.ToString() -ne 'IgnoreNew' -or
-        $task.State.ToString() -ne 'Ready' -or
+        $task.State.ToString() -notin @('Ready','Running') -or
+        ($RequireIdle -and $task.State.ToString() -ne 'Ready') -or
         $actions[0].Execute -notlike '*\powershell.exe' -or
         $actions[0].Arguments -notlike ('*-File "' + $runner + '"*') -or
         -not [string]::Equals([string]$actions[0].WorkingDirectory,$state,[StringComparison]::OrdinalIgnoreCase)) {
@@ -80,7 +81,7 @@ foreach ($oldName in @('Family Calendar Auto Preview','Family Calendar Auto Depl
     }
 }
 $before = Get-TaskSnapshot
-Assert-Task $before $identity.Name
+Assert-Task $before $identity.Name -RequireIdle
 $checkedAt = Get-Date -Format o
 Write-Host "TEST_POLL_PREFLIGHT=PASS | checked_at=$checkedAt | current=$($before.Interval) | target=PT1M | task_identity=UNCHANGED | changes_made=NONE"
 if (!$Apply -or $before.Interval -eq 'PT1M') {
@@ -103,7 +104,7 @@ try {
         throw 'Secure TEST deployment started or is on hold; refusing schedule change.'
     }
     $before = Get-TaskSnapshot
-    Assert-Task $before $identity.Name
+    Assert-Task $before $identity.Name -RequireIdle
     if ($before.Interval -ne 'PT15M') { throw 'Polling interval changed during preflight.' }
     $runnerHash = (Get-FileHash -LiteralPath $runner -Algorithm SHA256).Hash
     $testSha = Get-Head $test
