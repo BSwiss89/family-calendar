@@ -691,7 +691,7 @@ export function groundedVideoDraft({ caption = '', comment = '', transcript = ''
   // Correct repeated oven settings and obvious cooking-order slips only when
   // there is usable video evidence. Never modify a caption-only recipe draft.
   const instructions = videoEvidence
-    ? refineSocialRecipeInstructions({instructions:accumulatedInstructions,ingredients})
+    ? refineSocialRecipeInstructions({instructions:accumulatedInstructions,ingredients,caption,visibleText,transcript})
     : accumulatedInstructions
   const conflicts = videoEvidence ? filterRealRecipeConflicts(model.conflicts) : []
   const videoServings = videoEvidence && Number.isSafeInteger(Number(model.servings))
