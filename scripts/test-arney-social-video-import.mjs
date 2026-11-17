@@ -222,6 +222,50 @@ test('the video route remains authentication-gated, preview-only, and accepts at
   assert.ok(client.includes('onSubmit={saveRecipe}'))
 })
 
+
+test('caption with introductory praise and unbulleted pasta ingredients overrides partial AI guesses', () => {
+  const caption = [
+    'This was 10 out of 10! We made a huge batch so if you want seconds...',
+    'Caramelized Onion and Garlic Chicken Pasta',
+    '3 large yellow onions, thinly sliced',
+    '2 heads garlic, halved crosswise',
+    '4 chicken breasts',
+    '1/3 cup olive oil, divided',
+    'Salt and freshly ground black pepper',
+    '2 tsp dried Italian seasoning',
+    '2 tsp paprika',
+    '1/2 tsp red pepper flakes, optional',
+    '2 lb pasta',
+    '1 cup heavy cream',
+    '1 cup freshly grated Parmesan, plus more for serving',
+    'Fresh parsley, chopped, for serving',
+    '1-2 cup reserved pasta water',
+    'Instructions',
+    'Roast the onions and garlic: Heat oven to 400°F.',
+    'Add the chicken: Season and bake until cooked through.',
+    'Cook the pasta: Cook until al dente.',
+    'Make the sauce: Stir in cream, Parmesan and pasta water.',
+  ].join('\n')
+  const draft = groundedVideoDraft({
+    caption,
+    transcript:'The onions look good and the oil from the can is hot.',
+    structured:{
+      name:'This was 10 out of 10! We made a huge batch so if you want seconds...',
+      ingredients:['oil from can', 'onions'],
+      instructions:['Roast the onions and garlic: Heat oven to 400°F.'],
+    },
+  })
+  assert.equal(draft.name, 'Caramelized Onion and Garlic Chicken Pasta')
+  assert.equal(draft.ingredients.split('\n').length, 13)
+  assert.match(draft.ingredients,/4 chicken breasts/)
+  assert.match(draft.ingredients,/1 cup heavy cream/)
+  assert.match(draft.ingredients,/1 cup freshly grated Parmesan/)
+  assert.match(draft.ingredients,/Fresh parsley, chopped/)
+  assert.doesNotMatch(draft.ingredients,/oil from can/)
+  assert.match(draft.instructions,/Make the sauce:/)
+  assert.deepEqual(draft.missing, [])
+})
+
 test('regression from iPhone: spoken measurements and actions fill fields instead of transcript analysis in Notes', () => {
   const transcript = 'First, add 1 pound of ground turkey. Then stir in 2 cups of rice. Cook for 10 minutes. 500 calories and 45g protein per serving.'
   const draft = groundedVideoDraft({
