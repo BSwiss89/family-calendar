@@ -33,6 +33,8 @@ test('deployment scheduling cannot change account, action, original runner or LI
   assert.match(polling, /POLLING_CHANGE_HOLD/);
   assert.match(polling, /Get-FileHash -LiteralPath \$runner -Algorithm SHA256/);
   assert.match(polling, /Get-Head \$live/);
+  assert.match(polling, /branchState\.protected -ne \$true/);
+  assert.match(polling, /requiredContexts -contains 'frontend-build'/);
   assert.match(polling, /Get-Head \$test/);
 });
 
