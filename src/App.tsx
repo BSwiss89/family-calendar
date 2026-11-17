@@ -1574,6 +1574,9 @@ type SocialVideoRecipePreview = {
     timelineFramesChecked?: number
     ocrFramesRead?: number
     ocrScreensDetected?: number
+    ocrEventsRetained?: number
+    ocrEventsCapped?: boolean
+    ocrCookingSettingsRecovered?: number
     ocrAvailable?: boolean
     ocrPartial?: boolean
     comparisonCompleted: boolean
@@ -23426,9 +23429,12 @@ resetMealPlannerScroll()
                       )}
                       <small>On-screen text: {(socialRecipeVideoReport.timelineFramesChecked ?? 0) > 0
                         ? `${socialRecipeVideoReport.timelineFramesChecked} timeline frames checked; ${socialRecipeVideoReport.ocrAvailable
-                          ? `${socialRecipeVideoReport.ocrFramesRead ?? 0} OCR reads, ${socialRecipeVideoReport.ocrScreensDetected ?? 0} distinct text screens${socialRecipeVideoReport.ocrPartial ? ' (partial scan)' : ''}`
+                          ? `${socialRecipeVideoReport.ocrFramesRead ?? 0} OCR reads; ${socialRecipeVideoReport.ocrEventsRetained ?? socialRecipeVideoReport.ocrScreensDetected ?? 0} text events retained${socialRecipeVideoReport.ocrEventsCapped ? ' (noisy variations condensed)' : ''}${socialRecipeVideoReport.ocrPartial ? ' (some frames not scanned)' : ''}`
                           : 'local OCR unavailable (using vision frames instead)'}`
                         : 'timeline scan unavailable'}</small>
+                      {(socialRecipeVideoReport.ocrCookingSettingsRecovered ?? 0) > 0 && (
+                        <small>Oven settings: {socialRecipeVideoReport.ocrCookingSettingsRecovered} numeric cooking setting(s) reconstructed from OCR; verify the amounts and times before saving.</small>
+                      )}
                       <small>Visual cooking analysis: {socialRecipeVideoReport.framesSampled} selected frames; vision model {socialRecipeVideoReport.visionResponded ? 'responded' : 'did not return a result'}</small>
                       <small>Recipe comparison: {socialRecipeVideoReport.comparisonCompleted
                         ? 'completed' : 'unavailable'}; {socialRecipeVideoReport.newIngredients + socialRecipeVideoReport.newInstructions} additional video details suggested</small>

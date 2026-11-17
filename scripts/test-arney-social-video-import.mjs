@@ -5,7 +5,7 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import sharp from 'sharp'
 import path from 'node:path'
-import { timelineSamplingPlan, collectDistinctScreenText, selectTimelineVisualIndices } from '../Server/arney-video-timeline-ocr.mjs'
+import { timelineSamplingPlan, collectDistinctScreenText, selectTimelineVisualIndices, compactRecipeScreenEvidence } from '../Server/arney-video-timeline-ocr.mjs'
 import { socialVideoAllowedOnTest, selectPublicCreatorRecipeComment, chooseMoreCompletePublicCaption, socialVideoFrameTimes, extractOnScreenCookingSettings, classifyPublicVideoRetrievalFailure, extractPublicInstagramCaption, readPublicInstagramPageCaption, groundedVideoDraft, extractSpokenRecipeFacts, analyzePublicSocialVideo, buildSocialCoverPreview } from '../Server/arney-social-video-import.mjs'
 
 const ig = 'https://www.instagram.com/reel/ABCDE_fghi1/?igsh=tracking'
@@ -1006,16 +1006,16 @@ test('explicit on-screen baking settings survive a small-model generic oven summ
   ].join('\n')
   const fromScreen = extractOnScreenCookingSettings(visibleText)
   assert.equal(fromScreen.length,2)
-  assert.match(fromScreen[0],/200C\/400F.*22-25.*Min/)
-  assert.match(fromScreen[1],/195C\/385F.*45-50 Min/)
+  assert.match(fromScreen[0],/200°C \/ 400°F.*22–25 minutes/)
+  assert.match(fromScreen[1],/195°C \/ 385°F.*45–50 minutes/)
   const draft=groundedVideoDraft({
     caption:'Caramelized Onion Chicken Pasta\nIngredients:\n- 480g pasta',
     visibleText,
     structured:{ name:'Caramelized Onion Chicken Pasta',ingredients:[],
       instructions:['Oven bake with settings on screen.'],videoInstructionsAdded:[] },
   })
-  assert.match(draft.instructions,/200C\/400F.*22-25/i)
-  assert.match(draft.instructions,/195C\/385F.*45-50/i)
+  assert.match(draft.instructions,/200°C \/ 400°F.*22–25/i)
+  assert.match(draft.instructions,/195°C \/ 385°F.*45–50/i)
   assert.match(draft.ingredients,/480g pasta/)
   assert.doesNotMatch(draft.instructions,/unverified|maybe/i)
 })
@@ -1045,7 +1045,7 @@ test('on-screen timeline scan reports honest OCR coverage without exposing scree
   assert.equal(result.videoReport.ocrAvailable,true)
   assert.equal(result.videoReport.ocrPartial,false)
   assert.equal(result.videoReport.framesSampled,16)
-  assert.match(result.instructions,/200C\/400F/)
+  assert.match(result.instructions,/200°C \/ 400°F/)
   assert.doesNotMatch(JSON.stringify(result.videoReport),/200C\/400F|22-25 Min|On-screen OCR at/)
 })
 
@@ -1105,10 +1105,106 @@ test('long timeline OCR does not masquerade as an overlong pasted caption or dis
   })
   assert.equal(result.videoAnalyzed, true)
   assert.match(result.ingredients, /480g pasta/)
-  assert.match(result.instructions, /200C\/400F.*22-25 Min/)
-  assert.match(result.instructions, /195C\/385F.*45-50 Min/)
+  assert.match(result.instructions, /200°C \/ 400°F.*22–25 minutes/)
+  assert.match(result.instructions, /195°C \/ 385°F.*45–50 minutes/)
   assert.equal(result.videoReport.ocrFramesRead, 120)
   assert.ok(updates.some(item => item.stage === 'draft'))
   assert.doesNotMatch(result.notice, /pasted caption is too long/i)
   assert.doesNotMatch(JSON.stringify(result.videoReport), /Mix chicken|200C\/400F/)
+})
+
+
+test('noisy Reel OCR produces two clean settings, prefers ranged durations and rejects corrupted heat', () => {
+  const source = [
+    'On-screen OCR at 20s:',
+    'Oven/Bake:/200C/400F',
+    '22" 25\u0027Min',
+    'flip halfway; ae hs; Aidt abs; ates',
+    'On-screen OCR at 22s:',
+    'Oven Bake: 200C/400F',
+    '25 Min',
+    'flip halfway',
+    'On-screen OCR at 38s:',
+    'Oven Bake: 195C/385Fx',
+    '45-50 Min',
+    'mix onions halfway',
+    'On-screen OCR at 40s:',
+    'Oven Bake: 1930/5857',
+    '50 Min',
+    'mix halfway',
+  ].join('\n')
+  const settings=extractOnScreenCookingSettings(source)
+  assert.equal(settings.length,2)
+  assert.match(settings[0],/200°C \/ 400°F for 22–25 minutes; flip halfway/)
+  assert.match(settings[1],/195°C \/ 385°F for 45–50 minutes; mix halfway/)
+  assert.ok(settings.every(step=>!step.includes('1930') &&
+    !step.includes('5857') && !step.includes('Aidt')))
+})
+
+test('OCR adjacent screen variants do not duplicate cooking temperatures in editable instructions', () => {
+  const visibleText=[
+    'On-screen OCR at 3s:\nOven Bake\n200C/400F\n22-25 Min',
+    'On-screen OCR at 4s:\nOven Bake\n200C/400F\n25 Min',
+    'On-screen OCR at 30s:\nOven Bake\n195C/385F\n45-50 Min',
+    'On-screen OCR at 32s:\nOven Bake\n195C/385F\n50 Min',
+  ].join('\n')
+  const draft=groundedVideoDraft({
+    caption:'Creamy Chicken Pasta\nIngredients:\n- 480g pasta',
+    visibleText,
+    structured:{ingredients:[],instructions:['Bake with the settings on screen.'],
+      videoInstructionsAdded:[]},
+  })
+  assert.match(draft.ingredients,/480g pasta/)
+  assert.equal((draft.instructions.match(/200°C/g)||[]).length,1)
+  assert.equal((draft.instructions.match(/195°C/g)||[]).length,1)
+  assert.doesNotMatch(draft.instructions,/5857|1930|Aidt/)
+})
+
+test('112 OCR scans retain priority measured ingredients and late oven settings without UI clutter', () => {
+  const rows=Array.from({length:112},(_,i)=>({
+    time:i/2,frameIndex:i,text:'Instagram video '+i+' likes\n'+
+      (i===107?'60g Parmesan Cheese\n480g pasta':
+        i===110?'Oven Bake\n195C/385F\n45-50 Min':
+          'Cooking recipe '+i+' views and clicks'),
+  }))
+  const retained=collectDistinctScreenText(rows)
+  const all=collectDistinctScreenText(rows,300)
+  assert.equal(all.length,112)
+  assert.equal(retained.length,90)
+  assert.ok(retained.some(e=>e.frameIndex===107 && e.text.includes('Parmesan')))
+  assert.ok(retained.some(e=>e.frameIndex===110 && e.text.includes('195C')))
+  const evidence=compactRecipeScreenEvidence(retained)
+  assert.match(evidence,/60g Parmesan Cheese/)
+  assert.match(evidence,/195C\/385F/)
+  assert.ok(evidence.length<10_500)
+  assert.doesNotMatch(evidence,/Instagram video 0 likes|Cooking recipe 0 views and clicks/)
+})
+
+test('OCR text summary cap is not reported as a failed frame scan', async () => {
+  const result=await analyzePublicSocialVideo({
+    url:ig,videoBuffer:Buffer.alloc(300),videoMime:'video/mp4',
+  },{
+    durationReader:async()=>56,
+    transcriber:async()=>({text:'',responded:true,reason:'no-speech'}),
+    visualReader:async()=>({
+      text:'On-screen OCR at 20s:\nOven Bake\n200C/400F\n22-25 Min',
+      framesSampled:16,visionResponded:true,
+      timelineFramesChecked:112,ocrFramesRead:112,ocrScreensDetected:112,
+      ocrEventsRetained:90,ocrEventsCapped:true,
+      ocrAvailable:true,ocrPartial:false,
+    }),
+    extractor:async()=>({name:'Creamy Pasta',ingredients:['480g pasta'],instructions:[],
+      videoInstructionsAdded:[]}),
+    coverReader:async()=>null,
+  })
+  assert.equal(result.videoReport.ocrFramesRead,112)
+  assert.equal(result.videoReport.ocrScreensDetected,112)
+  assert.equal(result.videoReport.ocrEventsRetained,90)
+  assert.equal(result.videoReport.ocrEventsCapped,true)
+  assert.equal(result.videoReport.ocrPartial,false)
+  assert.equal(result.videoReport.ocrCookingSettingsRecovered,1)
+  assert.match(result.instructions,/200°C \/ 400°F for 22–25 minutes/)
+  assert.match(result.notice,/noisy text variations were condensed/i)
+  assert.doesNotMatch(result.notice,/later video text may be missing/i)
+  assert.doesNotMatch(JSON.stringify(result.videoReport),/200C\/400F|22-25 Min/)
 })

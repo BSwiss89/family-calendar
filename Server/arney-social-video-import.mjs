@@ -7,7 +7,7 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { normalizeSocialRecipeUrl, parseSocialRecipeCaption } from './arney-social-recipe-import.mjs'
 import { consolidateRecipeIngredientAmounts } from './arney-recipe-ingredient-aggregation.mjs'
-import { scanVideoTimeline, selectTimelineVisualIndices } from './arney-video-timeline-ocr.mjs'
+import { scanVideoTimeline, selectTimelineVisualIndices, compactRecipeScreenEvidence } from './arney-video-timeline-ocr.mjs'
 
 const MAX_VIDEO_BYTES = 36 * 1024 * 1024 // User-supplied recordings only
 const MAX_LINK_VIDEO_BYTES = 72 * 1024 * 1024 // Temporary public link downloads
@@ -414,32 +414,52 @@ export function socialVideoFrameTimes(duration) {
 }
 
 export function extractOnScreenCookingSettings(visibleText = '') {
-  // Only the explicit OCR evidence can directly add an oven setting. Qwen's
-  // inferred visual actions alone must not become invented temperatures.
-  const steps = []
-  const sections = String(visibleText).split(/(?=^On-screen OCR at \d+(?:\.\d+)?s:\s*$)/gm)
-  for (const section of sections) {
-    if (!/^On-screen OCR at \d+(?:\.\d+)?s:/i.test(section.trim())) continue
-    const lines = section.split('\n').slice(1, 16).map(line => line.trim())
-      .filter(line => line.length >= 3 && line.length <= 140)
-    const clean = lines.filter(line => !/\b(?:followers?|follow|comment|likes?|subscribe|instagram|reel|share|profile)\b/i.test(line))
-    const whole = clean.join(' ')
-    // Avoid fragile guesses from OCR alone. Explicit heat and timing are the
-    // details the old sampler missed, and they are useful even if Qwen omits
-    // them from the structured recipe.
-    const heat = /\b(?:oven|bake|roast|air.?fry|grill|temperature|preheat)\b/i.test(whole)
-      || /\b\d{2,3}\s*°?\s*[CF]\b/i.test(whole)
-    const duration = /\b\d+(?:\s*[-–]\s*\d+)?\s*['’]?\s*(?:min(?:ute)?s?|hrs?|hours?)\b/i.test(whole)
-      || /\b\d+\s*[-–]\s*\d+\s*min\b/i.test(whole)
-    if (!heat || !duration) continue
-    const fact = clean.slice(0, 6).join('; ').slice(0, 380)
-    if (fact && !steps.some(item => item.toLowerCase() === fact.toLowerCase()))
-      steps.push(fact)
-    if (steps.length >= 25) break
+  // OCR text is untrusted and often noisy. Preserve only plausible, explicitly
+  // measured temperature/duration pairs, never copy raw OCR fragments straight
+  // into saved cooking directions.
+  const byHeat = new Map()
+  for (const section of String(visibleText).split(/(?=^On-screen OCR at \d+(?:\.\d+)?s:\s*$)/gm)) {
+    const match = /^On-screen OCR at (\d+(?:\.\d+)?)s:\s*$/m.exec(section)
+    if (!match) continue
+    const body = section.slice(match.index + match[0].length).split('\n')
+      .filter(line => !/^On-screen OCR at \d/i.test(line)).slice(0,20).join(' ')
+    // Adjacent Celsius/Fahrenheit values must agree within 18°F. This rejects
+    // distorted OCR like "1930/5857" without guessing corrected temperatures.
+    const temp = /(?:^|[^\d])(\d{3})\s*°?\s*C\s*[/|]\s*(\d{3})\s*°?\s*F(?:x)?\b/i.exec(body)
+    if (!temp) continue
+    const c=Number(temp[1]), f=Number(temp[2])
+    if (c<130 || c>260 || f<270 || f>510 || Math.abs((c*9/5+32)-f)>18) continue
+    let time=null
+    const ranged = /\b(\d{1,3})\s*[-–—]\s*(\d{1,3})\s*['’]?\s*(?:min(?:ute)?s?)\b/i.exec(body)
+      || /\b(\d{1,3})\s*["“”]\s*(\d{1,3})\s*['’]?\s*(?:min(?:ute)?s?)\b/i.exec(body)
+    if (ranged) {
+      const low=Number(ranged[1]),high=Number(ranged[2])
+      if (low>=1 && high>=low && high<=180 && high-low<=60) time={low,high,range:true}
+    } else {
+      const single=/\b(\d{1,3})\s*['’]?\s*(?:min(?:ute)?s?)\b/i.exec(body)
+      if (single && Number(single[1])>0 && Number(single[1])<=180)
+        time={low:Number(single[1]),high:Number(single[1]),range:false}
+    }
+    if (!time) continue
+    const key=c+':'+f
+    const existing=byHeat.get(key)
+    const flip=/\bflip\b|turn.{0,12}halfway/i.test(body)
+    const mix=/\bmix\b|\bstir\b/i.test(body) && /halfway/i.test(body)
+    const score=Number(time.range)*5+Number(flip||mix)*2
+    if (!existing) byHeat.set(key,{
+      c,f,time,score,at:Number(match[1]),flip,mix,
+    })
+    else {
+      existing.flip ||= flip
+      existing.mix ||= mix
+      if(score>existing.score) {existing.time=time;existing.score=score}
+    }
   }
-  return steps
+  return [...byHeat.values()].sort((a,b)=>a.at-b.at).slice(0,12)
+    .map(x => 'Oven bake at '+x.c+'°C / '+x.f+'°F for '+
+      (x.time.range ? x.time.low+'–'+x.time.high : String(x.time.low))+
+      ' minutes'+(x.flip ? '; flip halfway' : x.mix ? '; mix halfway' : '')+'.')
 }
-
 async function visibleVideoText(filename, folder, duration, onProgress = null) {
   const scan = await scanVideoTimeline(filename, folder, duration, {
     onProgress: message => {
@@ -474,12 +494,12 @@ async function visibleVideoText(filename, folder, duration, onProgress = null) {
     } catch { /* Keep other frames. */ }
     finally { await fs.rm(filenameOut,{force:true}).catch(()=>{}) }
   }
-  const ocrText = scan.events.map(screen =>
-    'On-screen OCR at '+screen.time+'s:\n'+screen.text).join('\n\n').slice(0, 11_000)
+  const ocrText = compactRecipeScreenEvidence(scan.events, 10_500)
   if (!selected.length) return {
     text:ocrText,framesSampled:0,visionResponded:false,
     timelineFramesChecked:scan.framesChecked,ocrFramesRead:scan.ocrFramesRead,
-    ocrScreensDetected:scan.ocrScreensDetected,ocrAvailable:scan.ocrAvailable,
+    ocrScreensDetected:scan.ocrScreensDetected,ocrEventsRetained:scan.ocrEventsRetained,
+    ocrEventsCapped:scan.ocrEventsCapped,ocrAvailable:scan.ocrAvailable,
     ocrPartial:scan.ocrPartial,
   }
   const visionPrompt = 'You are examining a chronological group of frames from a cooking video. The locally extracted on-screen OCR text is processed separately. Describe VISIBLY CONFIRMED cooking actions, the ingredient being handled and any clear written instructions, temperatures, durations or amounts. Preserve order and exact numbers. Do not guess, fill in obscured words or say "use settings on screen" when text is readable. Concise plain text per frame, no invented steps.'
@@ -526,7 +546,8 @@ async function visibleVideoText(filename, folder, duration, onProgress = null) {
     text:[ocrText,passages.join('\n')].filter(Boolean).join('\n').slice(0,14_000),
     framesSampled:selected.length,visionResponded:responded,
     timelineFramesChecked:scan.framesChecked,ocrFramesRead:scan.ocrFramesRead,
-    ocrScreensDetected:scan.ocrScreensDetected,ocrAvailable:scan.ocrAvailable,
+    ocrScreensDetected:scan.ocrScreensDetected,ocrEventsRetained:scan.ocrEventsRetained,
+    ocrEventsCapped:scan.ocrEventsCapped,ocrAvailable:scan.ocrAvailable,
     ocrPartial:scan.ocrPartial,
   }
 }
@@ -738,6 +759,7 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
   const audioFailureReasons = new Set()
   let framesSampled = 0, visionResponded = false, videoDurationSeconds = 0
   let timelineFramesChecked = 0, ocrFramesRead = 0, ocrScreensDetected = 0
+  let ocrEventsRetained = 0, ocrEventsCapped = false
   let ocrAvailable = false, ocrPartial = false
   let publicVideoFile = '', publicCover = null, coverPhoto = null
   let creatorComment = '', commentSource = 'unavailable'
@@ -902,7 +924,10 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
           ocrFramesRead = Number.isInteger(vision?.ocrFramesRead)
             ? Math.max(0, Math.min(300, vision.ocrFramesRead)) : 0
           ocrScreensDetected = Number.isInteger(vision?.ocrScreensDetected)
-            ? Math.max(0, Math.min(90, vision.ocrScreensDetected)) : 0
+            ? Math.max(0, Math.min(300, vision.ocrScreensDetected)) : 0
+          ocrEventsRetained = Number.isInteger(vision?.ocrEventsRetained)
+            ? Math.max(0, Math.min(90, vision.ocrEventsRetained)) : ocrScreensDetected
+          ocrEventsCapped = vision?.ocrEventsCapped === true
           ocrAvailable = vision?.ocrAvailable === true
           ocrPartial = vision?.ocrPartial === true
         }
@@ -947,6 +972,8 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
     const videoAdded = field => videoEvidencePresent && Array.isArray(structured?.[field])
       ? structured[field].filter(item => typeof item === 'string' && item.trim()).length : 0
     const newIngredients = videoAdded('videoIngredientsAdded')
+    const ocrCookingSettingsRecovered = videoEvidencePresent
+      ? extractOnScreenCookingSettings(visibleText).length : 0
     const newInstructions = videoAdded('videoInstructionsAdded')
     progress('cover', 'Checking whether the Reel has a usable cover photo…')
     if (!videoBuffer && downloader === downloadPublicVideo && captionReader === readPublicCaption)
@@ -988,7 +1015,9 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
     if (videoAnalyzed && timelineFramesChecked && !ocrAvailable)
       noticeParts.push('Local screen-text OCR is not installed; selected vision frames were checked instead.')
     if (videoAnalyzed && ocrPartial)
-      noticeParts.push('Screen-text OCR stopped at its processing limit; later video text may be missing.')
+      noticeParts.push('Screen-text OCR did not finish every video frame; some visual text may be missing.')
+    if (videoAnalyzed && ocrEventsCapped)
+      noticeParts.push('The OCR frame scan completed, but noisy text variations were condensed before recipe analysis.')
     const videoStatus = !videoAnalyzed
       ? creatorComment && !recipeCaption
         ? 'Recipe comment available; the video could not be analyzed.'
@@ -1046,7 +1075,8 @@ export async function analyzePublicSocialVideo({ url, caption = '', comment = ''
         audioSegmentsWithText,
         framesSampled,
         visionResponded,
-        timelineFramesChecked, ocrFramesRead, ocrScreensDetected, ocrAvailable, ocrPartial,
+        timelineFramesChecked, ocrFramesRead, ocrScreensDetected, ocrEventsRetained,
+        ocrEventsCapped, ocrAvailable, ocrPartial, ocrCookingSettingsRecovered,
         comparisonCompleted: videoAnalyzed && videoEvidencePresent &&
           structured !== null && structured !== undefined,
         newIngredients, newInstructions,
