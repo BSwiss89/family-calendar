@@ -164,6 +164,7 @@ export function parseSocialRecipeCaption(value) {
   const lines = value.replace(/\r\n?/g, '\n').split('\n').map(cleanLine)
   const inferred = inferUnlabeledIngredientBlock(lines)
   let section = '', title = inferred?.title ?? '', explicitTitle = false, ingredientSection = ''
+  let numberedOnlyInstructions = false
   const ingredients = [], steps = [], ingredientParts = []
   const componentName = value => value.replace(/^for\s+(?:the\s+|a\s+)?/i,'')
     .replace(/\([^)]*\)/g,'').replace(/\s+ingredients?$/i,'')
@@ -209,6 +210,7 @@ export function parseSocialRecipeCaption(value) {
     match = STEP_HEADING.exec(headingLine)
     if (match) {
       section = 'instructions'
+      numberedOnlyInstructions = false
       if (match[1] && /[\p{L}\p{N}]/u.test(match[1])) steps.push(withoutListMarker(match[1]))
       continue
     }
@@ -217,6 +219,9 @@ export function parseSocialRecipeCaption(value) {
     // bullet AND a numbered cooking step. The bullet is not an ingredient.
     const numberedCookingLine = /^\s*(?:[-*•·▪◦]\s*)?\d{1,2}[.)]\s+(.+)$/.exec(line)
     if (numberedCookingLine && (section === 'instructions' || COOKING_ACTION.test(numberedCookingLine[1]))) {
+      // With no Directions heading, only numbered lines are trustworthy steps.
+      // A trailing "Protein-packed meal prep!" is advertising, not a direction.
+      if (section !== 'instructions') numberedOnlyInstructions = true
       section = 'instructions'
       if (steps.length < 80) steps.push(numberedCookingLine[1].slice(0, 500))
       continue
@@ -234,7 +239,7 @@ export function parseSocialRecipeCaption(value) {
       continue
     }
     if (section === 'instructions') {
-      if (steps.length < 80) steps.push(withoutListMarker(line).slice(0, 500))
+      if (!numberedOnlyInstructions && steps.length < 80) steps.push(withoutListMarker(line).slice(0, 500))
       continue
     }
     // The first caption line is only a suggested title, never fabricated.
