@@ -184,7 +184,7 @@ export function selectPublicCreatorRecipeComment(metadata) {
       normalizedAccount(comment.author) === instagramHandle &&
       // A conflicting pair of numeric account IDs cannot be overridden by
       // username equality; when IDs are not comparable, the handle can verify.
-      (!/^\\d+$/.test(authorId) || !uploaderIds.some(id => /^\\d+$/.test(id)) ||
+      (!/^\d+$/.test(authorId) || !uploaderIds.some(id => /^\d+$/.test(id)) ||
         uploaderIds.includes(authorId))
     const isCreator = comment.author_is_uploader === true ||
       Boolean(authorId && uploaderIds.includes(authorId)) || matchingInstagramHandle
