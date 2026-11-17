@@ -21664,3 +21664,19 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 @media(prefers-reduced-motion:reduce){
   .recipe-social-import-pulse{animation:none}
 }
+
+/* Recipe social import: concise, non-transcript verification of the local video backup. */
+.recipe-social-video-check{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  margin:0;
+  padding:11px 12px;
+  border:1px solid #afcfbf;
+  border-radius:10px;
+  background:#f3f9f6;
+  color:#294f3e;
+}
+.recipe-social-video-check strong{font-size:13px;line-height:1.35}
+.recipe-social-video-check span{font-size:13px;line-height:1.4}
+.recipe-social-video-check small{font-size:12px;line-height:1.4;color:#45665a}
