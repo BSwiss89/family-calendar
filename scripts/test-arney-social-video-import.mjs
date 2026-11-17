@@ -250,7 +250,9 @@ test('video report distinguishes actual recognized audio, visual response and ca
   }, {
     stt: { url: 'http://127.0.0.1:1234/transcribe', token: 'local-only' },
     durationReader: async () => 36,
-    transcriber: async (_file, _folder, start) => start === 0 ? 'Add smoked paprika.' : '',
+    transcriber: async (_file, _folder, start) => ({
+      text: start === 0 ? 'Add smoked paprika.' : '', responded: true,
+    }),
     visualReader: async () => ({ text: 'Bake for 25 minutes.', framesSampled: 4, visionResponded: true }),
     extractor: async () => ({
       name: 'Chicken Dinner',
@@ -266,6 +268,7 @@ test('video report distinguishes actual recognized audio, visual response and ca
   assert.equal(video.videoReport.durationSeconds, 36)
   assert.equal(video.videoReport.speechServiceConfigured, true)
   assert.equal(video.videoReport.audioSegmentsChecked, 2)
+  assert.equal(video.videoReport.audioSegmentsResponded, 2)
   assert.equal(video.videoReport.audioSegmentsWithText, 1)
   assert.equal(video.videoReport.framesSampled, 4)
   assert.equal(video.videoReport.visionResponded, true)
@@ -287,6 +290,7 @@ test('video report distinguishes actual recognized audio, visual response and ca
   })
   assert.equal(captionOnly.videoReport.videoOpened, false)
   assert.equal(captionOnly.videoReport.audioSegmentsChecked, 0)
+  assert.equal(captionOnly.videoReport.audioSegmentsResponded, 0)
   assert.equal(captionOnly.videoReport.framesSampled, 0)
   assert.match(captionOnly.videoReport.status, /Caption only/)
   assert.equal(captionOnly.photoDataUrl, null)
