@@ -1,4 +1,5 @@
 import test from 'node:test'
+import { consolidateRecipeIngredientAmounts } from '../Server/arney-recipe-ingredient-aggregation.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
@@ -156,6 +157,67 @@ test('preserves sectioned description without requiring each subsection to say I
   assert.match(draft.ingredients,/olive oil/)
   assert.match(draft.ingredients,/yogurt/)
   assert.equal(draft.instructions, 'Mix and cook the chicken.')
+})
+
+test('consolidates sauce and marinade sriracha into one measured ingredient with a section breakdown', () => {
+  const caption = parseSocialRecipeCaption([
+    'Sweet Chili Chicken',
+    'For the sauce:',
+    '- 30g sriracha',
+    '- 100g mayonnaise',
+    'Instructions:',
+    '1. Whisk the sauce.',
+    'For the marinade:',
+    '- 70g sriracha',
+    '2. Marinate the chicken.',
+  ].join('\n'))
+  assert.deepEqual(caption.ingredientParts.filter(item => /sriracha/i.test(item.line)), [
+    { line: '30g sriracha', section: 'sauce' },
+    { line: '70g sriracha', section: 'marinade' },
+  ])
+  const result = consolidateRecipeIngredientAmounts(caption.ingredients, caption.ingredientParts)
+  assert.equal(result.ingredients, '100g sriracha\n100g mayonnaise')
+  assert.match(result.allocationNotes, /sriracha: 30g for sauce; 70g for marinade/i)
+  assert.equal(caption.instructions, 'Whisk the sauce.\nMarinate the chicken.')
+})
+
+test('uses exact compatible units without guessing that 20g equals 2 tbsp', () => {
+  const result = consolidateRecipeIngredientAmounts([
+    '30g sriracha',
+    '0.07kg sriracha',
+    '2 tbsp sriracha',
+    '150g raw chicken',
+    '200g cooked chicken',
+  ].join('\n'), [
+    {line:'30g sriracha',section:'sauce'},
+    {line:'0.07kg sriracha',section:'marinade'},
+  ])
+  assert.equal(result.ingredients, [
+    '100g sriracha',
+    '2 tbsp sriracha',
+    '150g raw chicken',
+    '200g cooked chicken',
+  ].join('\n'))
+  assert.match(result.allocationNotes,/30g for sauce; 70g for marinade/)
+})
+
+test('same ingredient with compatible count units is a single total; different descriptions stay separate', () => {
+  const result = consolidateRecipeIngredientAmounts([
+    '2 cloves garlic',
+    '3 cloves garlic',
+    '1 clove garlic powder',
+    '1 cup water',
+    '250ml water',
+  ].join('\n'))
+  assert.equal(result.ingredients,'5 cloves garlic\n1 clove garlic powder\n1 cup water\n250ml water')
+  assert.equal(result.allocationNotes,'')
+})
+
+test('does not silently drop unsupported amounts, non-numeric text, or different qualifiers', () => {
+  const input = 'salt to taste\n30g fresh sriracha\n70g dried sriracha\none bunch cilantro'
+  const result = consolidateRecipeIngredientAmounts(input)
+  assert.equal(result.ingredients, input)
+  assert.equal(result.allocationNotes,'')
 })
 
 test('unlabeled Bang Bang chicken Reel captions recover only stated bullets and numbered cooking steps', () => {
