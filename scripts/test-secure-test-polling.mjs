@@ -9,7 +9,7 @@ const report = readFileSync(new URL('./report-secure-test-deployment.ps1', impor
 const updater = readFileSync(new URL('./secure-test-auto-deploy.ps1', import.meta.url), 'utf8');
 
 test('schedule change is explicit, one minute and only for existing TEST updater', () => {
-  assert.match(polling, /param\(\[switch\]\$Apply,\[switch\]\$SelfTestPrincipal\)/);
+  assert.match(polling, /param\(\[switch\]\$Apply,\[switch\]\$ApplyNative,\[switch\]\$SelfTestPrincipal\)/);
   assert.match(polling, /if \(!\$Apply -or \$before\.Interval -eq 'PT1M'\)/);
   assert.match(polling, /'Family Calendar Secure TEST Auto Deploy'/);
   assert.match(polling, /& schtasks\.exe \/Change \/TN \$taskName \/RI 1/);
@@ -20,6 +20,17 @@ test('schedule change is explicit, one minute and only for existing TEST updater
   assert.match(polling, /\$changeError = "schtasks exit code \$changeExitCode; Windows says: \$changeDetails"/);
   assert.match(polling, /\$ErrorActionPreference = \$originalErrorAction/);
   assert.doesNotMatch(polling, /\$changeError = 'Windows rejected the task update'/);
+  assert.match(polling, /\$changeRequested = \[bool\]\(\$Apply -or \$ApplyNative\)/);
+  assert.match(polling, /if \(\$Apply -and \$ApplyNative\)/);
+  assert.match(polling, /\$triggers = @\(\$before\.Task\.Triggers\)/);
+  assert.match(polling, /CimClassName -ne 'MSFT_TaskTimeTrigger'/);
+  assert.match(polling, /Repetition\.Duration -ne 'P3650D'/);
+  assert.match(polling, /Repetition\.Interval = 'PT1M'/);
+  assert.match(polling, /Set-ScheduledTask -TaskPath '\\\\' -TaskName \$taskName -Trigger \$triggers -ErrorAction Stop/);
+  assert.match(polling, /\$changeError = "Set-ScheduledTask rejected trigger-only update:/);
+  assert.match(polling, /if \(\$changeError -and \$after\.Interval -eq 'PT1M'\)/);
+  assert.match(polling, /\$safe = Same-ExceptInterval \$before \$after/);
+  assert.doesNotMatch(polling, /-User\s| -Password\s|-Principal\s|-Action\s|-Settings\s/);
   assert.match(polling, /'PT15M','PT1M'/);
   assert.match(polling, /current=\$\(\$before\.Interval\).*changes_made=NONE/);
   assert.doesNotMatch(polling, /(?:Register|Unregister|Start|Stop|Disable|Enable)-ScheduledTask/);
