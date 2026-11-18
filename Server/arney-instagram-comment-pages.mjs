@@ -123,7 +123,7 @@ export async function readInstagramCreatorRecipePages(sourceUrl, metadata, {
     let response
     try {
       response = await fetchImpl(url.href, {
-        method:'GET',redirect:'error',credentials:'omit',
+        method:'GET',redirect:'manual',credentials:'omit',
         headers:{
           Accept:'application/json',
           'X-IG-App-ID':'936619743392459',
@@ -136,6 +136,20 @@ export async function readInstagramCreatorRecipePages(sourceUrl, metadata, {
       })
     } catch { return missing('comment-network-unavailable', foundComments.length, pagesChecked) }
     pagesChecked++
+    // Never follow a redirect, including Instagram's login challenge.
+    // A manual redirect exposes only its status and destination; do not send
+    // cookies or attempt the login page.
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers?.get('location')
+      let loginRedirect = false
+      try {
+        const destination = new URL(location || '', url.href)
+        loginRedirect = destination.origin === API_ORIGIN &&
+          destination.pathname.startsWith('/accounts/login')
+      } catch { /* Malformed redirect stays blocked. */ }
+      return missing(loginRedirect ? 'comment-login-required' : 'comment-redirect-blocked',
+        foundComments.length, pagesChecked)
+    }
     if (response.status === 401 || response.status === 403)
       return missing('comment-access-denied', foundComments.length, pagesChecked)
     if (response.status === 429)
