@@ -13,6 +13,13 @@ test('schedule change is explicit, one minute and only for existing TEST updater
   assert.match(polling, /if \(!\$Apply -or \$before\.Interval -eq 'PT1M'\)/);
   assert.match(polling, /'Family Calendar Secure TEST Auto Deploy'/);
   assert.match(polling, /& schtasks\.exe \/Change \/TN \$taskName \/RI 1/);
+  assert.match(polling, /\$originalErrorAction = \$ErrorActionPreference/);
+  assert.match(polling, /\$ErrorActionPreference = 'Continue'/);
+  assert.match(polling, /\$changeOutput = @\(& schtasks\.exe \/Change \/TN \$taskName \/RI 1 2>&1\)/);
+  assert.match(polling, /\$changeExitCode = \$LASTEXITCODE/);
+  assert.match(polling, /\$changeError = "schtasks exit code \$changeExitCode; Windows says: \$changeDetails"/);
+  assert.match(polling, /\$ErrorActionPreference = \$originalErrorAction/);
+  assert.doesNotMatch(polling, /\$changeError = 'Windows rejected the task update'/);
   assert.match(polling, /'PT15M','PT1M'/);
   assert.match(polling, /current=\$\(\$before\.Interval\).*changes_made=NONE/);
   assert.doesNotMatch(polling, /(?:Register|Unregister|Start|Stop|Disable|Enable)-ScheduledTask/);
