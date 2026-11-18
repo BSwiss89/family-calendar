@@ -9,7 +9,7 @@ const report = readFileSync(new URL('./report-secure-test-deployment.ps1', impor
 const updater = readFileSync(new URL('./secure-test-auto-deploy.ps1', import.meta.url), 'utf8');
 
 test('schedule change is explicit, one minute and only for existing TEST updater', () => {
-  assert.match(polling, /param\(\[switch\]\$Apply\)/);
+  assert.match(polling, /param\(\[switch\]\$Apply,\[switch\]\$SelfTestPrincipal\)/);
   assert.match(polling, /if \(!\$Apply -or \$before\.Interval -eq 'PT1M'\)/);
   assert.match(polling, /'Family Calendar Secure TEST Auto Deploy'/);
   assert.match(polling, /& schtasks\.exe \/Change \/TN \$taskName \/RI 1/);
@@ -22,6 +22,13 @@ test('schedule change is explicit, one minute and only for existing TEST updater
 
 test('deployment scheduling cannot change account, action, original runner or LIVE', () => {
   assert.match(polling, /\$task\.Principal\.UserId/);
+  assert.match(polling, /Test-TaskPrincipalIsCurrentUser/);
+  assert.match(polling, /Security\.Principal\.NTAccount/);
+  assert.match(polling, /Translate\(\[Security\.Principal\.SecurityIdentifier\]\)/);
+  assert.match(polling, /GetCurrent\(\)\.User/);
+  assert.match(polling, /throw 'Could not independently verify the scheduled-task account SID\.'/);
+  assert.match(polling, /TEST_TASK_PRINCIPAL_SID_SELFTEST=PASS/);
+  assert.doesNotMatch(polling, /\[string\]::Equals\(\[string\]\$task\.Principal\.UserId,\$identity/);
   assert.match(polling, /\$task\.Principal\.LogonType\.ToString\(\) -ne 'Password'/);
   assert.match(polling, /\$task\.Principal\.RunLevel\.ToString\(\) -ne 'Highest'/);
   assert.match(polling, /\$task\.Settings\.MultipleInstances\.ToString\(\) -ne 'IgnoreNew'/);
