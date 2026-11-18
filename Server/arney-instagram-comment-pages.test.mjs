@@ -30,7 +30,7 @@ test('follows an explicit public Instagram cursor and stops when an older creato
     assert.match(target.pathname,/^\/api\/v1\/media\/[0-9]+\/comments\/$/)
     assert.equal(target.searchParams.get('sort_order'),'recent')
     assert.equal(init.credentials,'omit')
-    assert.equal(init.redirect,'error')
+    assert.equal(init.redirect,'manual')
     assert.equal(init.headers.Cookie,undefined)
     if(visits.length===1) {
       assert.equal(target.searchParams.get('min_id'),null)
