@@ -1,7 +1,7 @@
 # Change ONLY the existing secure TEST updater's polling interval.
 # Read-only by default. Does not install a new task, change accounts or touch LIVE.
 [CmdletBinding()]
-param([switch]$Apply)
+param([switch]$Apply,[switch]$SelfTestPrincipal)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -32,11 +32,47 @@ function Get-TaskSnapshot {
     }
     return [pscustomobject]@{ Task=$task; Xml=$xml; XmlText=$xmlText; Interval=$intervals[0].InnerText; IntervalNode=$intervals[0] }
 }
-function Assert-Task([object]$snapshot,[string]$identity,[switch]$RequireIdle) {
+# Windows may display the same task owner as "bobby" or "LAPTOP1502\bobby".
+# Compare the SID. An unresolvable principal must fail closed.
+function Test-TaskPrincipalIsCurrentUser([string]$taskUser) {
+    if ([string]::IsNullOrWhiteSpace($taskUser)) { throw 'Scheduled-task principal is missing.' }
+    try {
+        if ($taskUser -match '^S-\d+-\d+(?:-\d+)+$') {
+            $taskSid = [Security.Principal.SecurityIdentifier]::new($taskUser)
+        } else {
+            $taskSid = ([Security.Principal.NTAccount]::new($taskUser)).Translate([Security.Principal.SecurityIdentifier])
+        }
+        $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        if ($null -eq $currentSid) { throw 'Current Windows SID unavailable.' }
+        return [string]::Equals($taskSid.Value,$currentSid.Value,[StringComparison]::Ordinal)
+    } catch {
+        throw 'Could not independently verify the scheduled-task account SID.'
+    }
+}
+
+# Isolated CI regression; no access to installed Calendar services.
+if ($SelfTestPrincipal) {
+    if ($Apply) { throw 'Principal self-test cannot be combined with -Apply.' }
+    $current = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $shortName = ($current.Name -split '\\')[-1]
+    if (!(Test-TaskPrincipalIsCurrentUser $current.Name) -or
+        !(Test-TaskPrincipalIsCurrentUser $shortName) -or
+        !(Test-TaskPrincipalIsCurrentUser $current.User.Value) -or
+        (Test-TaskPrincipalIsCurrentUser 'S-1-5-21-0-0-0-1234567')) {
+        throw 'Windows principal SID matching regression failed.'
+    }
+    $rejected = $false
+    try { $null = Test-TaskPrincipalIsCurrentUser 'NonexistentCalendarUser_123456_987654' }
+    catch { $rejected = $true }
+    if (!$rejected) { throw 'Unresolvable account was not rejected.' }
+    Write-Host 'TEST_TASK_PRINCIPAL_SID_SELFTEST=PASS | qualified=PASS | short_name=PASS | sid=PASS | wrong_sid=BLOCKED | unknown_user=BLOCKED | changes_made=NONE'
+    return
+}
+function Assert-Task([object]$snapshot,[switch]$RequireIdle) {
     $task = $snapshot.Task
     $actions = @($task.Actions)
     if ($task.TaskPath -ne '\' -or $actions.Count -ne 1 -or
-        -not [string]::Equals([string]$task.Principal.UserId,$identity,[StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-TaskPrincipalIsCurrentUser ([string]$task.Principal.UserId)) -or
         $task.Principal.LogonType.ToString() -ne 'Password' -or
         $task.Principal.RunLevel.ToString() -ne 'Highest' -or
         $task.Settings.MultipleInstances.ToString() -ne 'IgnoreNew' -or
@@ -81,7 +117,7 @@ foreach ($oldName in @('Family Calendar Auto Preview','Family Calendar Auto Depl
     }
 }
 $before = Get-TaskSnapshot
-Assert-Task $before $identity.Name -RequireIdle
+Assert-Task $before -RequireIdle
 $checkedAt = Get-Date -Format o
 Write-Host "TEST_POLL_PREFLIGHT=PASS | checked_at=$checkedAt | current=$($before.Interval) | target=PT1M | task_identity=UNCHANGED | changes_made=NONE"
 # Faster polling must not accelerate an unreviewed direct push to an unprotected branch.
@@ -120,7 +156,7 @@ try {
         throw 'Secure TEST deployment started or is on hold; refusing schedule change.'
     }
     $before = Get-TaskSnapshot
-    Assert-Task $before $identity.Name -RequireIdle
+    Assert-Task $before -RequireIdle
     if ($before.Interval -ne 'PT15M') { throw 'Polling interval changed during preflight.' }
     $runnerHash = (Get-FileHash -LiteralPath $runner -Algorithm SHA256).Hash
     $testSha = Get-Head $test
@@ -165,7 +201,7 @@ try {
     if ($after.Interval -ne 'PT1M') {
         throw "POLLING_CHANGE_NOT_APPLIED: Windows retained $($after.Interval); original task XML: $backup"
     }
-    Assert-Task $after $identity.Name
+    Assert-Task $after
     Write-Host ("TEST_POLL_APPLY=PASS | checked_at=" + (Get-Date -Format o) + " | interval=PT1M | task_identity=UNCHANGED | live_sha=$liveSha | test_sha=$testSha | backup=$backup")
 } finally {
     if ($locked) { $mutex.ReleaseMutex() }
