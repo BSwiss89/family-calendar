@@ -108,6 +108,33 @@ test('does not retry Instagram rate limits, login rejection, or invalid response
   assert.equal(bad.reason,'comment-invalid-page')
 })
 
+test('recognizes login redirect without following or retrying Instagram', async () => {
+  let calls=0
+  const result=await readInstagramCreatorRecipePages(url,meta,{...options,
+    fetchImpl:async(uri,init)=>{
+      calls++
+      assert.equal(init.redirect,'manual')
+      assert.equal(init.credentials,'omit')
+      return new Response('',{status:302,headers:{location:'/accounts/login/'}})
+    },
+  })
+  assert.equal(result.reason,'comment-login-required')
+  assert.equal(result.pagesChecked,1)
+  assert.equal(result.commentsExamined,0)
+  assert.equal(calls,1)
+})
+
+test('blocks non-login redirects without following other hosts', async () => {
+  let calls=0
+  const result=await readInstagramCreatorRecipePages(url,meta,{...options,
+    fetchImpl:async()=>{calls++;return new Response('',{
+      status:302,headers:{location:'https://elsewhere.example/collect'},
+    })},
+  })
+  assert.equal(result.reason,'comment-redirect-blocked')
+  assert.equal(calls,1)
+})
+
 test('does not request Instagram when creator metadata or source URL is untrusted', async () => {
   let calls=0
   const fetchImpl=async()=>{calls++;throw Error('Must not fetch')}
