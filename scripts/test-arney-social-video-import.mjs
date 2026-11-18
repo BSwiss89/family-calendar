@@ -219,6 +219,37 @@ test('public comment parser never mistakes a stranger pinned comment or unverifi
   assert.equal(found.creatorVerified,false)
 })
 
+test('Instagram owner and comment matching usernames verify a creator when IDs use different forms', () => {
+  const found = selectPublicCreatorRecipeComment({
+    extractor_key:'Instagram',channel:'chef.amy',uploader_id:'chef.amy',
+    comments:[
+      {author:'a.different.chef',author_id:'123456',is_pinned:true,text:'Recipe: 10 cups sugar'},
+      {author:'chef.amy',author_id:'192837465',text:'Ingredients: 2 eggs. Instructions: Whisk them.'},
+    ],
+  })
+  assert.equal(found.creatorVerified,true)
+  assert.equal(found.source,'creator-comment')
+  assert.equal(found.pinnedConfirmed,false)
+  assert.match(found.text,/2 eggs/)
+  assert.equal(found.commentsExamined,2)
+})
+
+test('Instagram username cannot override conflicting numeric creator IDs', () => {
+  const found = selectPublicCreatorRecipeComment({
+    extractor_key:'Instagram',channel:'chef.amy',uploader_id:'111',
+    comments:[{author:'chef.amy',author_id:'222',is_pinned:true,text:'Recipe: 10 cups sugar'}],
+  })
+  assert.equal(found.creatorVerified,false)
+})
+
+test('Instagram handle comparison does not enable display-name matching on other sites', () => {
+  const found = selectPublicCreatorRecipeComment({
+    extractor_key:'Facebook',channel:'chef.amy',uploader_id:'chef.amy',
+    comments:[{author:'chef.amy',author_id:'999',is_pinned:true,text:'Recipe: 10 cups sugar'}],
+  })
+  assert.equal(found.creatorVerified,false)
+})
+
 test('a reliable uploader marker can verify a comment but cannot fabricate a pinned flag', () => {
   const found = selectPublicCreatorRecipeComment({
     comments: [{author_is_uploader:true,text:'Ingredients: 2 eggs\nInstructions: Whisk eggs.'}],
