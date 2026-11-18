@@ -169,11 +169,24 @@ try {
     # schtasks /change /ri changes an existing repetition interval without replacing its principal.
     # Never supply credentials, a different principal, a new action, or task registration.
     $changeError = $null
+    # Windows PowerShell 5.1 can convert a native program's stderr into a
+    # terminating ErrorRecord when the caller sets ErrorActionPreference=Stop.
+    # Capture schtasks output and exit code without suppressing the diagnostic.
+    # This temporary preference applies ONLY to the original guarded change.
+    $originalErrorAction = $ErrorActionPreference
     try {
-        $null = & schtasks.exe /Change /TN $taskName /RI 1 2>&1
-        if ($LASTEXITCODE -ne 0) { $changeError = "schtasks exit code $LASTEXITCODE" }
+        $ErrorActionPreference = 'Continue'
+        $changeOutput = @(& schtasks.exe /Change /TN $taskName /RI 1 2>&1)
+        $changeExitCode = $LASTEXITCODE
+        if ($changeExitCode -ne 0) {
+            $changeDetails = (($changeOutput | ForEach-Object { $_.ToString() }) -join ' ').Trim()
+            if ($changeDetails.Length -gt 800) { $changeDetails = $changeDetails.Substring(0,800) }
+            $changeError = "schtasks exit code $changeExitCode; Windows says: $changeDetails"
+        }
     } catch {
-        $changeError = 'Windows rejected the task update'
+        $changeError = "schtasks invocation failed: $($_.Exception.Message)"
+    } finally {
+        $ErrorActionPreference = $originalErrorAction
     }
     $after = Get-TaskSnapshot
     $safe = Same-ExceptInterval $before $after
