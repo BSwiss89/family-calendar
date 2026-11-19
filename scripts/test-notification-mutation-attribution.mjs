@@ -275,3 +275,44 @@ test('acknowledged notices and Ask Again Later are not changed by attribution',t
   assert.equal(reconcile(db).queued,0)
   assert.deepEqual(notices(db),pending)
 })
+
+test('prior TEST outbox rows upgrade without losing delivery history or changing old notices',t=>{
+  const db=setup(t,{pilot:false})
+  db.exec([
+    'CREATE TABLE assignment_notification_outbox(',
+    'id INTEGER PRIMARY KEY,event_id INTEGER NOT NULL,person_id INTEGER NOT NULL,',
+    "kind TEXT NOT NULL,created_at INTEGER NOT NULL,delivered_at INTEGER,",
+    'delivery_attempts INTEGER NOT NULL DEFAULT 0) STRICT;',
+    "INSERT INTO assignment_notification_outbox VALUES(1,9,7,'changed',1234,5678,2);",
+  ].join(' '))
+  installAssignmentNotificationOutbox(db)
+  installAssignmentNotificationOutbox(db)
+  assert.deepEqual(db.prepare([
+    'SELECT event_id AS eventId,person_id AS personId,kind,change_mask AS changeMask,',
+    'delivered_at AS deliveredAt,delivery_attempts AS attempts',
+    'FROM assignment_notification_outbox WHERE id=1',
+  ].join(' ')).get(),{
+    eventId:9,personId:7,kind:'changed',changeMask:0,deliveredAt:5678,attempts:2,
+  })
+  assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok')
+})
+
+test('change fields are transactional, accurate, and cleared after each reconciliation',t=>{
+  const db=setup(t,{preExisting:true})
+  db.exec('BEGIN IMMEDIATE')
+  db.prepare("UPDATE events SET date='2027-05-09',notes='Uncommitted' WHERE id=1").run()
+  db.exec('ROLLBACK')
+  assert.equal(reconcile(db).queued,0)
+  assert.deepEqual(db.prepare('SELECT * FROM notification_dirty_event_fields').all(),[])
+
+  db.prepare("UPDATE events SET date='2027-05-10',time='12:00',location='New address' WHERE id=1").run()
+  assert.equal(reconcile(db).queued,2)
+  const noticesWithMasks=db.prepare(
+    "SELECT change_mask AS mask FROM assignment_notification_outbox WHERE kind='changed' ORDER BY id"
+  ).all()
+  assert.deepEqual(noticesWithMasks.map(x=>x.mask),[2+8+32,2+8+32])
+  assert.deepEqual(db.prepare('SELECT * FROM notification_dirty_event_fields').all(),[])
+  db.prepare('UPDATE events SET date=date WHERE id=1').run()
+  assert.equal(reconcile(db).queued,0)
+  assert.deepEqual(db.prepare('SELECT * FROM notification_dirty_event_fields').all(),[])
+})
