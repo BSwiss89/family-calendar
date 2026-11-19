@@ -10,7 +10,7 @@ const updater = readFileSync(new URL('./secure-test-auto-deploy.ps1', import.met
 
 test('schedule change is explicit, one minute and only for existing TEST updater', () => {
   assert.match(polling, /param\(\[switch\]\$Apply,\[switch\]\$ApplyNative,\[switch\]\$SelfTestPrincipal\)/);
-  assert.match(polling, /if \(!\$Apply -or \$before\.Interval -eq 'PT1M'\)/);
+  assert.match(polling, /if \(!\$changeRequested -or \$before\.Interval -eq 'PT1M'\)/);
   assert.match(polling, /'Family Calendar Secure TEST Auto Deploy'/);
   assert.match(polling, /& schtasks\.exe \/Change \/TN \$taskName \/RI 1/);
   assert.match(polling, /\$originalErrorAction = \$ErrorActionPreference/);
