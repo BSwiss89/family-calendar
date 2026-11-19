@@ -19,7 +19,7 @@ test('desktop invites have their own page without replacing LIVE navigation', ()
 })
 
 test('mobile invitation reminder is optional and remains isolated from editing events', () => {
-  assert.match(app, /<MobileInvitationReminder \{\.\.\.invitationInbox\} \{\.\.\.notificationDisplayProps\} suppress=\{page === 'invitations'\} \/>/)
+  assert.match(app, /<MobileInvitationReminder \{\.\.\.invitationInbox\} \{\.\.\.notificationDisplayProps\} suppress=\{page === 'invitations' \|\| showEventModal\} \/>/)
   assert.match(ui, /mobile && \(\(available && invitations\.length > 0\)/)
   assert.match(ui, /Ask Again Later/)
   assert.match(ui, /Accept/)
@@ -37,7 +37,7 @@ test('mobile Settings reopens pending invites after Ask Again Later without dupl
   assert.match(app, /void invitationInbox\.refresh\(\)/)
   assert.match(app, /mobile-invitation-back/)
   assert.match(ui, /!remindLater && !suppress/)
-  assert.match(app, /suppress=\{page === 'invitations'\}/)
+  assert.match(app, /suppress=\{page === 'invitations' \|\| showEventModal\}/)
 })
 
 test('pending invitations do not copy external events into the editable local calendar', () => {
@@ -52,4 +52,19 @@ test('pending invitations do not copy external events into the editable local ca
   assert.match(ui, /Acknowledge/)
   assert.match(app, /storeSortingEnabled/)
   assert.match(app, /makeEventDuplicateDraft/)
+})
+
+test('compact mobile update reminder preserves a real response requirement', () => {
+  assert.match(ui, /const popupTitle = onlyAssignment/)
+  assert.match(ui, /compact=\\{onlyAssignment\\}/)
+  assert.match(ui, /Ask Again Later/)
+  assert.doesNotMatch(ui, /mobile-invitations-footnote/)
+  assert.doesNotMatch(ui, /Please respond to invitations or acknowledge/)
+  const view = ui.match(/const viewAssignmentEvent = openEvent \\? \\(eventId: number\\) => \\{([\\s\\S]*?)\\} : undefined/)
+  assert.ok(view, 'View Event must use a reminder-closing handler')
+  assert.match(view[1], /setRemindLater\\(true\\)/)
+  assert.match(view[1], /openEvent\\(eventId\\)/)
+  assert.doesNotMatch(view[1], /acknowledge\\(/)
+  assert.match(app, /suppress=\\{page === 'invitations' \\|\\| showEventModal\\}/)
+  assert.match(assignment, /setNotifications\\(current=>current\\.filter\\(n=>n\\.id!==id\\)\\)/)
 })
