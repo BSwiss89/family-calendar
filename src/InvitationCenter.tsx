@@ -1,10 +1,65 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { IncomingEventInvitation } from './eventSharingUiModel'
-import type { AssignmentNotice } from './useAssignmentInbox'
+import type { AssignmentNotice, AssignmentChangeField } from './useAssignmentInbox'
 import type { FamilyEventInvitation } from './useFamilyEventInvitations'
 import { formatSharedDate, formatSharedTime } from './sharedEventOverlay'
 import './InvitationCenter.css'
+
+type AssignmentEventDetails = {
+  title: string
+  date: string
+  endDate: string | null
+  time: string | null
+  endTime: string | null
+  location: string | null
+  notes: string | null
+  repeatUnit: string | null
+  repeatInterval: number | null
+  repeatEndType: string | null
+  repeatEndDate: string | null
+  repeatCount: number | null
+}
+const repeatChangeFields = new Set<AssignmentChangeField>([
+  'repeatUnit','repeatInterval','repeatEndType','repeatEndDate','repeatCount',
+])
+function repeatDescription(event: AssignmentEventDetails) {
+  const unit = event.repeatUnit?.toLowerCase()
+  if (!unit || unit === 'none') return 'No longer repeating'
+  const labels: Record<string,string> = {
+    daily: 'day', weekly: 'week', monthly: 'month', yearly: 'year',
+  }
+  const period = labels[unit]
+  if (!period) return 'Repeat settings updated — open event to review'
+  const interval = event.repeatInterval && event.repeatInterval > 0
+    ? event.repeatInterval : 1
+  let value = interval === 1 ? 'Every ' + period
+    : 'Every ' + interval + ' ' + period + 's'
+  if (event.repeatEndType === 'date' && event.repeatEndDate) {
+    value += ' until ' + formatSharedDate(event.repeatEndDate)
+  } else if (event.repeatEndType === 'count' && event.repeatCount) {
+    value += ' for ' + event.repeatCount + ' occurrences'
+  }
+  return value
+}
+function assignmentChangeDetail(field: AssignmentChangeField,
+  event: AssignmentEventDetails): {label: string; value: string} {
+  switch (field) {
+    case 'title': return {label:'Event name',value:event.title}
+    case 'date': return {label:'Start date',value:formatSharedDate(event.date)}
+    case 'endDate': return {label:'End date',value:event.endDate
+      ? formatSharedDate(event.endDate) : 'End date removed'}
+    case 'time': return {label:'Start time',value:formatSharedTime(event.time)}
+    case 'endTime': return {label:'End time',value:event.endTime
+      ? formatSharedTime(event.endTime) : 'End time removed'}
+    case 'location': return {label:'Location',value:event.location?.trim() || 'Location removed'}
+    case 'notes': return {label:'Notes',value:event.notes?.trim()
+      ? 'Notes updated — open the event to read them' : 'Notes removed'}
+    case 'occurrences': return {label:'Recurring dates',
+      value:'One or more occurrences changed — open the event to review'}
+    default: return {label:'Repeats',value:repeatDescription(event)}
+  }
+}
 
 type Props = {
   available: boolean
@@ -23,7 +78,7 @@ type Props = {
   acknowledgingId?: number | null
   assignmentError?: string
   acknowledge?: (notificationId: number) => Promise<boolean>
-  detailsForEvent?: (eventId: number) => { title: string; date: string; time: string | null } | null
+  detailsForEvent?: (eventId: number) => AssignmentEventDetails | null
   openEvent?: (eventId: number) => void
 }
 
@@ -93,7 +148,7 @@ function AssignmentCards({
   items: readonly AssignmentNotice[]
   acknowledgingId?: number | null
   acknowledge?: (id: number) => Promise<boolean>
-  detailsForEvent?: (eventId: number) => { title: string; date: string; time: string | null } | null
+  detailsForEvent?: (eventId: number) => AssignmentEventDetails | null
   openEvent?: (eventId: number) => void
 }) {
   const kindLabel: Record<AssignmentNotice['kind'],string> = {
@@ -103,12 +158,36 @@ function AssignmentCards({
     cancelled: 'An assigned event was cancelled',
   }
   return <div className="invitation-center-items">
-    {items.map(item => { const event = detailsForEvent?.(item.eventId); return <article className="invitation-center-item" key={'assignment-' + item.id}>
+    {items.map(item => {
+      const event = detailsForEvent?.(item.eventId)
+      const firstRepeatIndex = item.changedFields.findIndex(field => repeatChangeFields.has(field))
+      const changedFields = item.changedFields.filter((field,index) =>
+        !repeatChangeFields.has(field) || index === firstRepeatIndex)
+      return <article className="invitation-center-item" key={'assignment-' + item.id}>
       <span className="invitation-center-source">Calendar notification</span>
       <strong>{kindLabel[item.kind]}</strong>
-      <span className="invitation-center-date">
-        {event ? <><span>{event.title}</span><span>{formatSharedDate(event.date)} · {formatSharedTime(event.time)}</span></> : 'Event details unavailable'}
-      </span>
+      <div className="assignment-event-summary">
+        {event ? <>
+          <b>{event.title}</b>
+          <span>{formatSharedDate(event.date)} · {formatSharedTime(event.time)}</span>
+          {event.location?.trim() && <span>{event.location}</span>}
+        </> : <span>Event details are no longer available.</span>}
+      </div>
+      {item.kind === 'changed' && <section className="assignment-event-changes"
+        aria-label="Updated event information">
+        <div className="assignment-changes-title">What changed</div>
+        {event && changedFields.length > 0
+          ? <>
+            <p>Showing the latest event details:</p>
+            <ul>{changedFields.map(field => {
+              const detail = assignmentChangeDetail(field,event)
+              return <li key={field}><span>{detail.label}</span>
+                <strong>{detail.value}</strong></li>
+            })}</ul>
+          </>
+          : <p>Specific changes weren’t recorded for this update.
+              {event ? ' Select View Event to review the latest details.' : ''}</p>}
+      </section>}
       <div className="invitation-center-actions">
         {event && openEvent && <button type="button"
           className="invitation-decline"
@@ -119,7 +198,8 @@ function AssignmentCards({
           {acknowledgingId === item.id ? 'Saving…' : 'Acknowledge'}
         </button>
       </div>
-    </article> })}
+    </article>
+    })}
   </div>
 }
 
