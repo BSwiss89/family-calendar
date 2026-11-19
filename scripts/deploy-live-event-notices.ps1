@@ -141,8 +141,28 @@ try {
     Assert ($LASTEXITCODE -eq 0 -and $liveStatus.Count -eq 0) 'Secure LIVE checkout is clean'
     $stageStatus = @(& git -C $stage status --porcelain)
     Assert ($LASTEXITCODE -eq 0 -and $stageStatus.Count -eq 0) 'Candidate worktree is committed and clean'
-    $changed = @(& git -C $stage diff --name-only $baseline $candidateSha | Sort-Object)
-    Assert ($LASTEXITCODE -eq 0 -and ($changed -join '|') -ceq 'Server/event-assignment-notifications.mjs|Server/live-notification-inbox.mjs|Server/notification-event-mutation-capture.mjs|scripts/test-arney-planning.mjs|scripts/test-family-daily-notes.mjs|scripts/test-live-notification-inbox-pilot.mjs|scripts/test-notification-mutation-attribution.mjs|src/App.tsx|src/LiveInvitations.css|src/LiveInvitations.tsx|src/useAssignmentInbox.ts') 'Only reviewed LIVE notification and test files changed'
+    $changed = @(& git -C $stage diff --name-only $baseline $candidateSha)
+    Assert ($LASTEXITCODE -eq 0) 'Candidate file changes are available'
+    # Compare exact case-sensitive sets, not presentation ordering: PowerShell
+    # Sort-Object uses different case/culture ordering than an ordinal list.
+    $approved = @(
+        'Server/event-assignment-notifications.mjs',
+        'Server/live-notification-inbox.mjs',
+        'Server/notification-event-mutation-capture.mjs',
+        'scripts/test-arney-planning.mjs',
+        'scripts/test-family-daily-notes.mjs',
+        'scripts/test-live-notification-inbox-pilot.mjs',
+        'scripts/test-notification-mutation-attribution.mjs',
+        'src/App.tsx',
+        'src/LiveInvitations.css',
+        'src/LiveInvitations.tsx',
+        'src/useAssignmentInbox.ts'
+    )
+    $missing = @($approved | Where-Object { $changed -cnotcontains $_ })
+    $unexpected = @($changed | Where-Object { $approved -cnotcontains $_ })
+    Assert ($changed.Count -eq $approved.Count -and $missing.Count -eq 0 -and
+        $unexpected.Count -eq 0) ("Only reviewed LIVE notification and test files changed; " +
+        "missing=$($missing -join ','); unexpected=$($unexpected -join ',')")
 
     $app = [IO.File]::ReadAllText((Join-Path $stage 'src\App.tsx'))
     $notices = [IO.File]::ReadAllText((Join-Path $stage 'src\LiveInvitations.tsx'))
