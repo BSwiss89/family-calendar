@@ -20368,7 +20368,7 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
     border-radius: 50%;
   }
 
-  /* Add Event only: show names beneath mobile avatars without clipping. */
+  /* Add Event only: keep mobile avatar names visible without clipping. */
   .event-form-family-slider {
     height: auto;
     min-height: 84px;
