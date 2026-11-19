@@ -1,3 +1,4 @@
+import { resolveDeploymentOptionalFeatures } from './optionalFeatureFlags.mjs'
 import { normalizePersonPhoto } from './normalizePersonPhoto'
 import { getHomeWeatherScene, type HomeWeatherPeriod } from './homeWeatherScene'
 import {
@@ -81,6 +82,12 @@ import {
 } from '@dnd-kit/sortable'
 
 import { CSS } from '@dnd-kit/utilities'
+
+// Explicit build-time opt-in only; unknown and LIVE deployments remain off.
+const optionalFeatureFlags = resolveDeploymentOptionalFeatures(
+  import.meta.env.VITE_CALENDAR_DEPLOYMENT,
+  { addEventPersonLabels: import.meta.env.VITE_FEATURE_ADD_EVENT_PERSON_LABELS === 'true' },
+)
 
 type Person = {
   id: number
@@ -19639,9 +19646,11 @@ const occurrenceEndDate =
             'family-slider-avatar'
           )}
 
-          <span className="family-slider-name">
+          {optionalFeatureFlags.addEventPersonLabels && (
+            <span className="family-slider-name">
             {person.name}
           </span>
+          )}
         </button>
       )
     })}
@@ -20257,9 +20266,11 @@ const occurrenceEndDate =
               'family-slider-avatar'
             )}
 
+            {optionalFeatureFlags.addEventPersonLabels && (
             <span className="family-slider-name">
               {person.name}
             </span>
+          )}
           </button>
         )
       })}
