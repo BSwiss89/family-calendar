@@ -21,6 +21,16 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Verify current LIVE parity audit against exact installed commit (advisory)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/audit-household-live-parity.mjs --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'LIVE parity audit self-test failed.' }
+          git fetch --no-tags --depth=1 origin 6377963372c30e8c4c4e33af6bf617d87961e989
+          if ($LASTEXITCODE -ne 0) { throw 'Exact LIVE commit fetch failed.' }
+          node scripts/audit-household-live-parity.mjs --audit
+          if ($LASTEXITCODE -ne 0) { throw 'LIVE parity audit could not inspect the pinned commit.' }
       - name: Refuse missing LIVE features or household foundations in isolated candidate
         if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.number == 70 || github.event.pull_request.base.ref == 'feature/live-preserving-household-integration-candidate') }}
         shell: pwsh
