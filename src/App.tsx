@@ -15614,6 +15614,29 @@ return (
           </button>
 
           <button
+            className="quick-add-option"
+            type="button"
+            onClick={() => {
+              setQuickAddOpen(false)
+              setNewListName('')
+              setNewListIcon(null)
+              setListIconPickerTarget(null)
+              setPage('lists')
+              setListCreateOpen(true)
+            }}
+          >
+            <span className="quick-add-option-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 5h12M8 10h12M8 15h7M4 5h.01M4 10h.01M4 15h.01M15 19h6M18 16v6" />
+              </svg>
+            </span>
+            <span className="quick-add-option-text">
+              <strong>Create List</strong>
+              <small>Start a new shared list</small>
+            </span>
+          </button>
+
+          <button
   className="quick-add-option"
   type="button"
   onClick={() => {
@@ -24529,6 +24552,21 @@ capture.captureType !== 'other' && (
           packing, and more.
         </p>
       </div>
+    </div>
+
+    <div className="lists-create-action">
+      <button
+        className="add-event-button"
+        type="button"
+        onClick={() => {
+          setNewListName('')
+          setNewListIcon(null)
+          setListIconPickerTarget(null)
+          setListCreateOpen(true)
+        }}
+      >
+        + New List
+      </button>
     </div>
 
     <div className="people-grid list-page-grid">
