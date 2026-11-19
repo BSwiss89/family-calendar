@@ -186,7 +186,7 @@ try {
     $testRoot = Join-Path $homeDir 'Projects\family-calendar-test-security-stage'
     Assert ((GitHead $testRoot) -ceq $pinnedTest) 'Accepted TEST revision remains installed'
     $testListeners = @(Get-NetTCPConnection -State Listen -LocalPort 13002 -ErrorAction Stop)
-    Assert ($testListeners.Count -eq 1 -and $testListeners[0].LocalAddress -match '^100\\.') 'One private TEST listener remains'
+    Assert ($testListeners.Count -eq 1 -and $testListeners[0].LocalAddress -match '^100\.') 'One private TEST listener remains'
     $testIp = $testListeners[0].LocalAddress
     Assert ((Invoke-RestMethod "http://${testIp}:13002/api/health" -TimeoutSec 5).status -eq 'ok') 'TEST remains healthy'
     $oldLauncherHash = Digest $launcher
