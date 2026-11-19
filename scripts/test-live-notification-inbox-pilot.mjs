@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import express from 'express'
 import { DatabaseSync } from 'node:sqlite'
 import {
@@ -260,4 +261,18 @@ test('recurring exception update records the affected schedule field, not privat
   const data=await (await get(base,'/api/test-notification-pilot')).json()
   assert.deepEqual(data.notifications[0].changedFields,['occurrences'])
   assert.equal(data.notifications[0].kind,'changed')
+})
+
+test('LIVE reminder: compact event details, working View Event, Ask Again Later, no implied response',()=>{
+  const ui=readFileSync(new URL('../src/LiveInvitations.tsx',import.meta.url),'utf8')
+  const app=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8')
+  assert.match(ui,/Changed:/)
+  assert.match(ui,/eventDetails\(note\.eventId\)/)
+  assert.match(ui,/const openFromReminder=\(id:number\)=>\{/)
+  assert.match(ui,/setRemindLater\(true\)\s+props\.onView\(id\)/)
+  assert.match(ui,/Ask Again Later/)
+  assert.match(ui,/onClick=\{\(\)=>\{void onAcknowledge\(note\.id\)\}\}/)
+  assert.match(app,/suppressed=\{page === 'invitations' \|\| showEventModal\}/)
+  assert.match(app,/eventDetails:\(id:number\)=>/)
+  assert.doesNotMatch(ui,/Event #['"]?\s*\+\s*note\.eventId/)
 })
