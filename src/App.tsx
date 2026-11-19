@@ -25187,7 +25187,7 @@ capture.captureType !== 'other' && (
     </section>
   </div>, document.body
 )}
-      <MobileInvitationReminder {...invitationInbox} {...notificationDisplayProps} suppress={page === 'invitations'} />
+      <MobileInvitationReminder {...invitationInbox} {...notificationDisplayProps} suppress={page === 'invitations' || showEventModal} />
       <ReleaseHighlights
         accountKey={activeHouseholdAccountKey}
         personId={activeHouseholdPersonId}
