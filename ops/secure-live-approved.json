@@ -1,9 +1,13 @@
 {
   "schema": 1,
-  "kind": "deployed-baseline",
+  "kind": "frontend-only",
   "repository": "BSwiss89/family-calendar",
-  "to_sha": "6683fd722a4fbbecbf5a1207f49bb0409832caf2",
-  "build_run_id": 42395345955,
-  "files": [],
-  "approval_note": "Owner explicitly authorized Issue #144 to LIVE. Controlled backend deployment completed November 7, 2026 16:14:06 America/Chicago, with LIVE SHA 6683fd722a4fbbecbf5a1207f49bb0409832caf2, successful SQLite backup/isolated restore and data integrity checks, authenticated LIVE health, preserved uploads and TEST SHA 181d80befa02ef24dace9212ab140ea3f33e528a, and watchdog restored. Exact Windows Build Family Calendar run 42395345955 passed. This receipt acknowledges only the ALREADY DEPLOYED baseline. It authorizes ZERO changes, restarts, or automatic backend/database deployments. Future frontend-only releases require a new explicitly approved exact-commit receipt and existing safety gates. The older frontend-only controller remains limited to that scope."
+  "from_sha": "3e694c4a8c626e89345bbc95cb085c540aebeb4b",
+  "to_sha": "6377963372c30e8c4c4e33af6bf617d87961e989",
+  "files": [
+    "src/App.css"
+  ],
+  "build_run_id": 44569980524,
+  "safety_run_id": 44570903609,
+  "approval_note": "Owner explicitly approved the TEST-verified Add Event mobile people-selector name labels for LIVE. Only src/App.css changes, based on exact running LIVE baseline. Build Family Calendar, profile picker regressions and Deployment safety passed. No TEST deployment or backend/database changes authorized."
 }
