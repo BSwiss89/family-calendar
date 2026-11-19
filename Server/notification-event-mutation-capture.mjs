@@ -131,7 +131,7 @@ const changeFieldTriggers = [
   ['notify_changed_exception_insert','AFTER INSERT ON event_exceptions',
     markChangedFields('NEW.event_id',String(exceptionBit))],
   ['notify_changed_exception_update','AFTER UPDATE ON event_exceptions',
-    markChangedFields('OLD.event_id',String(exceptionBit)) + '\\n' +
+    markChangedFields('OLD.event_id',String(exceptionBit)) + '\n' +
     markChangedFields('NEW.event_id',String(exceptionBit))],
   ['notify_changed_exception_delete','AFTER DELETE ON event_exceptions',
     markChangedFields('OLD.event_id',String(exceptionBit))],
