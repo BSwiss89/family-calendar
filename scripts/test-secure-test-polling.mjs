@@ -26,7 +26,7 @@ test('schedule change is explicit, one minute and only for existing TEST updater
   assert.match(polling, /CimClassName -ne 'MSFT_TaskTimeTrigger'/);
   assert.match(polling, /Repetition\.Duration -ne 'P3650D'/);
   assert.match(polling, /Repetition\.Interval = 'PT1M'/);
-  assert.match(polling, /Set-ScheduledTask -TaskPath '\\\\' -TaskName \$taskName -Trigger \$triggers -ErrorAction Stop/);
+  assert.match(polling, /Set-ScheduledTask -TaskPath '\\' -TaskName \$taskName -Trigger \$triggers -ErrorAction Stop/);
   assert.match(polling, /\$changeError = "Set-ScheduledTask rejected trigger-only update:/);
   assert.match(polling, /if \(\$changeError -and \$after\.Interval -eq 'PT1M'\)/);
   assert.match(polling, /\$safe = Same-ExceptInterval \$before \$after/);
