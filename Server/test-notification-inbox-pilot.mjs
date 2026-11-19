@@ -6,6 +6,7 @@ import path from 'node:path'
 import { installAssignmentNotificationOutbox } from './event-assignment-notifications.mjs'
 import {
   installNotificationMutationCapture, reconcileNotificationMutations,
+  fieldsForAssignmentChangeMask,
 } from './notification-event-mutation-capture.mjs'
 
 function selectedPerson(db, account, now) {
@@ -26,10 +27,16 @@ function selectedPerson(db, account, now) {
 
 function latest(db, personId) {
   return db.prepare([
-    'SELECT id,event_id AS eventId,kind,created_at AS createdAt',
+    'SELECT id,event_id AS eventId,kind,created_at AS createdAt,',
+    'change_mask AS changeMask',
     'FROM assignment_notification_outbox WHERE person_id=?',
     'ORDER BY id DESC LIMIT 50',
-  ].join(' ')).all(personId)
+  ].join(' ')).all(personId).map(({changeMask,...note}) => ({
+    ...note,
+    // Only safe field identifiers leave this authenticated TEST-only API.
+    changedFields: note.kind === 'changed'
+      ? fieldsForAssignmentChangeMask(changeMask) : [],
+  }))
 }
 
 function page(selected, rows) {
