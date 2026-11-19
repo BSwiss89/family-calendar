@@ -6,6 +6,7 @@ const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url
 const inbox = readFileSync(fileURLToPath(new URL('../src/useInvitationInbox.ts', import.meta.url)), 'utf8')
 const ui = readFileSync(fileURLToPath(new URL('../src/InvitationCenter.tsx', import.meta.url)), 'utf8')
 const assignment = readFileSync(fileURLToPath(new URL('../src/useAssignmentInbox.ts', import.meta.url)), 'utf8')
+const siteRoutes = readFileSync(fileURLToPath(new URL('../src/familySiteRoutes.ts', import.meta.url)), 'utf8')
 
 test('desktop invites have their own page without replacing LIVE navigation', () => {
   assert.match(app, /import \{ DesktopInvitations, MobileInvitationReminder \} from '\.\/InvitationCenter'/)
@@ -47,7 +48,8 @@ test('pending invitations do not copy external events into the editable local ca
   assert.match(app, /<FamilyEventSharing event=\{viewingCalendarEvent\} \/>/)
   assert.match(app, /<HouseholdEventJoin/)
   assert.match(app, /useAssignmentInbox\(activeHouseholdPersonId\)/)
-  assert.match(assignment, /test-notification-pilot/)
+  assert.match(assignment, /familySiteRoutes\.assignmentInbox/)
+  assert.match(siteRoutes, /assignmentInbox:\s*'\/api\/test-notification-pilot'/)
   assert.match(ui, /Calendar notifications/)
   assert.match(ui, /Acknowledge/)
   assert.match(app, /storeSortingEnabled/)
