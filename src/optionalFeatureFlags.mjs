@@ -38,3 +38,15 @@ export function resolveOptionalFeatures(overrides = undefined) {
   }
   return Object.freeze(result)
 }
+
+/**
+ * Resolve an explicitly supplied, trusted deployment configuration.
+ * Merely running on TEST does not turn features on. LIVE refuses all
+ * experimental features even if a configuration mistakenly requests them.
+ *
+ * Callers must not pass untrusted browser input as deployment configuration.
+ */
+export function resolveDeploymentOptionalFeatures(deployment, overrides = undefined) {
+  if (deployment !== 'test') return resolveOptionalFeatures()
+  return resolveOptionalFeatures(overrides)
+}
