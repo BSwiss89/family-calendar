@@ -23,7 +23,7 @@ type Props = {
   acknowledgingId?: number | null
   assignmentError?: string
   acknowledge?: (notificationId: number) => Promise<boolean>
-  titleForEvent?: (eventId: number) => string | null
+  detailsForEvent?: (eventId: number) => { title: string; date: string; time: string | null } | null
   openEvent?: (eventId: number) => void
 }
 
@@ -88,12 +88,12 @@ function HouseholdInvitationCards({
 }
 
 function AssignmentCards({
-  items,acknowledgingId,acknowledge,titleForEvent,openEvent,
+  items,acknowledgingId,acknowledge,detailsForEvent,openEvent,
 }: {
   items: readonly AssignmentNotice[]
   acknowledgingId?: number | null
   acknowledge?: (id: number) => Promise<boolean>
-  titleForEvent?: (eventId: number) => string | null
+  detailsForEvent?: (eventId: number) => string | null
   openEvent?: (eventId: number) => void
 }) {
   const kindLabel: Record<AssignmentNotice['kind'],string> = {
@@ -103,14 +103,14 @@ function AssignmentCards({
     cancelled: 'An assigned event was cancelled',
   }
   return <div className="invitation-center-items">
-    {items.map(item => <article className="invitation-center-item" key={'assignment-' + item.id}>
+    {items.map(item => { const event = detailsForEvent?.(item.eventId); return <article className="invitation-center-item" key={'assignment-' + item.id}>
       <span className="invitation-center-source">Calendar notification</span>
       <strong>{kindLabel[item.kind]}</strong>
       <span className="invitation-center-date">
-        {titleForEvent?.(item.eventId) || 'Event #' + item.eventId}
+        {event ? <><span>{event.title}</span><span>{formatSharedDate(event.date)} · {formatSharedTime(event.time)}</span></> : 'Event details unavailable'}
       </span>
       <div className="invitation-center-actions">
-        {titleForEvent?.(item.eventId) && openEvent && <button type="button"
+        {event && openEvent && <button type="button"
           className="invitation-decline"
           onClick={() => openEvent(item.eventId)}>View Event</button>}
         <button type="button" className="invitation-accept"
@@ -119,7 +119,7 @@ function AssignmentCards({
           {acknowledgingId === item.id ? 'Saving…' : 'Acknowledge'}
         </button>
       </div>
-    </article>)}
+    </article> })}
   </div>
 }
 
@@ -129,7 +129,7 @@ export function DesktopInvitations({
   familyInvitesAvailable = false, familyInvitations = [],
   respondingFamilyId = null, familyInvitationError = '', respondFamily,
   assignmentAvailable = false, assignmentNotifications = [],
-  acknowledgingId = null, assignmentError = '', acknowledge, titleForEvent, openEvent,
+  acknowledgingId = null, assignmentError = '', acknowledge, detailsForEvent, openEvent,
 }: Props) {
   return (
     <section className="invitation-center-page" aria-label="Invitations">
@@ -154,7 +154,7 @@ export function DesktopInvitations({
       {!assignmentAvailable || assignmentNotifications.length === 0 ? (
         <p className="invitation-center-empty">No new calendar notifications.</p>
       ) : <AssignmentCards items={assignmentNotifications} acknowledgingId={acknowledgingId}
-          acknowledge={acknowledge} titleForEvent={titleForEvent} openEvent={openEvent} />}
+          acknowledge={acknowledge} detailsForEvent={detailsForEvent} openEvent={openEvent} />}
       {assignmentError && <p role="alert" className="invitation-center-error">{assignmentError}</p>}
     </section>
   )
@@ -170,7 +170,7 @@ export function MobileInvitationReminder({
   familyInvitesAvailable = false, familyInvitations = [],
   respondingFamilyId = null, familyInvitationError = '', respondFamily,
   assignmentAvailable = false, assignmentNotifications = [],
-  acknowledgingId = null, assignmentError = '', acknowledge, titleForEvent, openEvent,
+  acknowledgingId = null, assignmentError = '', acknowledge, detailsForEvent, openEvent,
 }: Props) {
   const [mobile, setMobile] = useState(() =>
     window.matchMedia('(max-width: 760px)').matches)
@@ -292,7 +292,7 @@ export function MobileInvitationReminder({
         {assignmentNotifications.length > 0 && <>
           <h3>Calendar notifications</h3>
           <AssignmentCards items={assignmentNotifications} acknowledgingId={acknowledgingId}
-            acknowledge={acknowledge} titleForEvent={titleForEvent} openEvent={openEvent} />
+            acknowledge={acknowledge} detailsForEvent={detailsForEvent} openEvent={openEvent} />
         </>}
         {error && <p role="alert" className="invitation-center-error">{error}</p>}
         {assignmentError && <p role="alert" className="invitation-center-error">{assignmentError}</p>}
