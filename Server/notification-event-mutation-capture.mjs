@@ -1,5 +1,5 @@
-// PRODUCTION-RELEASE SUPPORT. Install only with reviewed, backed-up LIVE
-// backend/database migration and explicit approval.
+// LIVE feature release: additive change-field migration, reviewed and backed up.
+// Existing notifications and profile authorization must remain intact.
 //
 // This captures SQL changes made by normal event APIs, AI reschedules,
 // batch deletes, event_people changes, and recurring exceptions in the SAME
@@ -11,6 +11,24 @@
 // an HTTP endpoint. Device authorization remains at trusted dispatch time.
 import { createHash } from 'node:crypto'
 import { queueEventAssignmentNotifications } from './event-assignment-notifications.mjs'
+
+// Stable, non-sensitive identifiers: bit positions are stored in the LIVE
+// outbox so a later edit does not rewrite what the earlier notice reported.
+const changeColumns = Object.freeze([
+  ['title','title'], ['date','date'], ['endDate','end_date'],
+  ['time','time'], ['endTime','end_time'], ['location','location'],
+  ['notes','notes'], ['repeatUnit','repeat_unit'],
+  ['repeatInterval','repeat_interval'], ['repeatEndType','repeat_end_type'],
+  ['repeatEndDate','repeat_end_date'], ['repeatCount','repeat_count'],
+])
+const exceptionBit = 4096
+export function fieldsForAssignmentChangeMask(mask) {
+  if (!Number.isSafeInteger(mask) || mask < 0 || mask > 8191) return []
+  return [
+    ...changeColumns.filter((_,index) => mask & (2 ** index)).map(([field]) => field),
+    ...(mask & exceptionBit ? ['occurrences'] : []),
+  ]
+}
 
 const isId = value => Number.isSafeInteger(value) && value > 0
 
@@ -93,6 +111,32 @@ function markDirty(sqlId) {
   ].join(' ')
 }
 
+// Separate additive triggers preserve already-installed SQL mutation triggers.
+// No event titles/notes or earlier private values are copied into the outbox.
+function markChangedFields(sqlId, sqlMask) {
+  return [
+    'INSERT INTO notification_dirty_event_fields(event_id,change_mask)',
+    'VALUES (' + sqlId + ',(' + sqlMask + '))',
+    'ON CONFLICT(event_id) DO UPDATE SET',
+    'change_mask=change_mask | excluded.change_mask;',
+  ].join(' ')
+}
+const changedEventMaskSql = changeColumns.map(([,column],index) =>
+  '(CASE WHEN OLD.' + column + ' IS NOT NEW.' + column +
+  ' THEN ' + (2 ** index) + ' ELSE 0 END)'
+).join(' + ')
+const changeFieldTriggers = [
+  ['notify_changed_event_fields','AFTER UPDATE ON events',
+    markChangedFields('NEW.id',changedEventMaskSql)],
+  ['notify_changed_exception_insert','AFTER INSERT ON event_exceptions',
+    markChangedFields('NEW.event_id',String(exceptionBit))],
+  ['notify_changed_exception_update','AFTER UPDATE ON event_exceptions',
+    markChangedFields('OLD.event_id',String(exceptionBit)) + '\n' +
+    markChangedFields('NEW.event_id',String(exceptionBit))],
+  ['notify_changed_exception_delete','AFTER DELETE ON event_exceptions',
+    markChangedFields('OLD.event_id',String(exceptionBit))],
+]
+
 const triggerDefinitions = [
   ['notify_event_insert','AFTER INSERT ON events', markDirty('NEW.id')],
   ['notify_event_update','AFTER UPDATE ON events',
@@ -145,13 +189,17 @@ export function installNotificationMutationCapture(db) {
       'event_id INTEGER PRIMARY KEY CHECK(event_id > 0),',
       'person_id INTEGER,revision INTEGER NOT NULL CHECK(revision > 0)',
       ') STRICT;',
+      'CREATE TABLE IF NOT EXISTS notification_dirty_event_fields(',
+      'event_id INTEGER PRIMARY KEY CHECK(event_id > 0),',
+      'change_mask INTEGER NOT NULL CHECK(change_mask BETWEEN 0 AND 8191)',
+      ') STRICT;',
     ].join('\n'))
     if (!previous.size) {
       for (const {id} of db.prepare('SELECT id FROM events ORDER BY id').all()) {
         storeBaseline(db,currentSnapshot(db,id))
       }
     }
-    db.exec(triggerDefinitions.map(([name,when,body]) =>
+    db.exec([...triggerDefinitions,...changeFieldTriggers].map(([name,when,body]) =>
       'CREATE TRIGGER IF NOT EXISTS ' + name + ' ' + when + ' BEGIN\n' +
       body + '\nEND;'
     ).join('\n'))
@@ -188,6 +236,10 @@ export function reconcileNotificationMutations(db, { limit = 100, at = Date.now(
       }
       const before = baselineSnapshot(db,eventId)
       const after = currentSnapshot(db,eventId)
+      const changeMask = db.prepare([
+        'SELECT change_mask AS changeMask FROM notification_dirty_event_fields',
+        'WHERE event_id=?',
+      ].join(' ')).get(eventId)?.changeMask ?? 0
       const origin = db.prepare([
         'SELECT person_id AS personId,revision',
         'FROM notification_dirty_event_attribution WHERE event_id=?',
@@ -198,13 +250,15 @@ export function reconcileNotificationMutations(db, { limit = 100, at = Date.now(
         isId(origin.personId) ? origin.personId : null
       if (before || after) {
         queued += queueEventAssignmentNotifications(
-          db,plannerInput(before),plannerInput(after),at,{excludePersonId}
+          db,plannerInput(before),plannerInput(after),at,{excludePersonId,changeMask}
         )
       }
       if (after) storeBaseline(db,after)
       else db.prepare('DELETE FROM notification_event_baselines WHERE event_id = ?')
         .run(eventId)
       db.prepare('DELETE FROM notification_dirty_event_attribution WHERE event_id=?')
+        .run(eventId)
+      db.prepare('DELETE FROM notification_dirty_event_fields WHERE event_id=?')
         .run(eventId)
       // Compare revision even though BEGIN IMMEDIATE serializes SQLite writers:
       // a future caller may reuse these semantics with cross-process workers.
