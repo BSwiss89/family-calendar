@@ -20364,8 +20364,10 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
     border-radius: 50%;
   }
 
-  /* Add Event only: show small names below each mobile avatar. */
+  /* Add Event only: allow the taller avatar-and-name cards to remain visible. */
   .event-form-family-slider {
+    height: auto;
+    min-height: 84px;
     align-items: flex-start;
   }
 
