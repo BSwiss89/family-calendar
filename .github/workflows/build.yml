@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  frontend-build:
+  frontend-checks:
     runs-on: windows-latest
     steps:
       - name: Check out source
@@ -75,6 +75,20 @@ jobs:
         run: node --test scripts/test-release-highlights.mjs
       - name: Verify auth, remembered devices, and separate site cookies
         run: node --test scripts/test-family-auth.mjs
+  household-tests:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build frontend for isolated integration and rollback tests
+        run: npm run build
       - name: Test isolated household storage, memberships and secure invitations
         run: |
           node --test scripts/test-household-storage.mjs scripts/test-household-memberships.mjs scripts/test-household-member-invitations.mjs scripts/test-household-member-directory.mjs scripts/test-household-member-access-revocation.mjs
@@ -156,6 +170,20 @@ jobs:
         run: node --test scripts/test-test-event-invitations.mjs
       - name: Verify profile photo replacement and removal against disposable real backend
         run: node --test scripts/test-person-photo-edit.mjs
+  release-safety:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build frontend for isolated integration and rollback tests
+        run: npm run build
       - name: Check backend JavaScript syntax
         run: |
           node --check Server/index.mjs
@@ -322,6 +350,35 @@ jobs:
               throw "PowerShell syntax error in $($_.Name)"
             }
           }
+
+  # Preserve the EXACT protected GitHub check name "frontend-build".
+  # The TEST updater requires a successful exact-SHA push workflow; this gate
+  # can pass only when every Windows suite (including rollback tests) passes.
+  frontend-build:
+    name: frontend-build
+    needs:
+      - frontend-checks
+      - household-tests
+      - release-safety
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all Windows build, household, and rollback suites to pass
+        env:
+          FRONTEND_RESULT: ${{ needs.frontend-checks.result }}
+          HOUSEHOLD_RESULT: ${{ needs.household-tests.result }}
+          RELEASE_RESULT: ${{ needs.release-safety.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "frontend-checks: $FRONTEND_RESULT"
+          echo "household-tests: $HOUSEHOLD_RESULT"
+          echo "release-safety: $RELEASE_RESULT"
+          if [[ "$FRONTEND_RESULT" != success || "$HOUSEHOLD_RESULT" != success || "$RELEASE_RESULT" != success ]]; then
+            echo "One or more required Windows suites failed, were cancelled, or were skipped." >&2
+            exit 1
+          fi
+          echo "ALL_REQUIRED_WINDOWS_SUITES=PASS"
 
   ci-history:
     name: ci-history
