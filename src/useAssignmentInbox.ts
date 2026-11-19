@@ -3,12 +3,21 @@ import { useEffect, useRef, useState } from 'react'
 // Only consumed from the authenticated, single-household TEST pilot. These
 // numbers describe assignments for the server-selected device profile; they
 // are not verified personal identities or Web Push subscriptions.
+export const ASSIGNMENT_CHANGE_FIELDS = [
+  'title','date','endDate','time','endTime','location','notes',
+  'repeatUnit','repeatInterval','repeatEndType','repeatEndDate',
+  'repeatCount','occurrences',
+] as const
+export type AssignmentChangeField = typeof ASSIGNMENT_CHANGE_FIELDS[number]
+const allowedChanges = new Set<string>(ASSIGNMENT_CHANGE_FIELDS)
+
 export type AssignmentNotice = {
   id: number
   eventId: number
   kind: 'assigned' | 'changed' | 'unassigned' | 'cancelled'
   createdAt: number
   acknowledged: boolean
+  changedFields: AssignmentChangeField[]
 }
 
 const kinds = new Set(['assigned','changed','unassigned','cancelled'])
@@ -26,6 +35,10 @@ function parseNotice(input: unknown): AssignmentNotice | null {
     kind: row.kind as AssignmentNotice['kind'],
     createdAt: row.createdAt as number,
     acknowledged: row.acknowledged as boolean,
+    changedFields: Array.isArray(row.changedFields)
+      ? [...new Set(row.changedFields.filter((field): field is AssignmentChangeField =>
+        typeof field === 'string' && allowedChanges.has(field)))].slice(0,13)
+      : [],
   }
 }
 
