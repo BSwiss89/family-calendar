@@ -19138,3 +19138,9 @@ max-height:
   color: #4f5359;
   pointer-events: none;
 }
+
+.lists-heading-title-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.lists-heading-title-row h2 { margin:0; }
+.lists-header-create-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:44px; padding:9px 14px; border:1px solid #243a65; border-radius:12px; background:#243a65; color:#fff; font:inherit; font-size:14px; font-weight:750; cursor:pointer; }
+.lists-header-create-button span { font-size:21px; font-weight:500; }
+.lists-header-create-button:focus-visible { outline:3px solid #6495ff; outline-offset:3px; }

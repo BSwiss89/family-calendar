@@ -14432,6 +14432,7 @@ return (
             </span>
           </button>
 
+          <button className="quick-add-option" type="button" onClick={() => { setQuickAddOpen(false); setNewListName(''); setPage('lists'); setListCreateOpen(true) }}><span className="quick-add-option-icon" aria-hidden="true">+</span><span className="quick-add-option-text"><strong>Create List</strong><small>Start a new shared list</small></span></button>
           <button
   className="quick-add-option"
   type="button"
@@ -14456,7 +14457,7 @@ return (
   </span>
 
   <span className="quick-add-option-text">
-    <strong>List</strong>
+    <strong>Add to List</strong>
     <small>Add an item to a list</small>
   </span>
 </button>
@@ -23133,7 +23134,7 @@ capture.captureType !== 'other' && (
   <section className="people-page">
     <div className="people-page-heading">
       <div>
-        <h2>Lists</h2>
+        <div className="lists-heading-title-row"><h2>Lists</h2><button className="lists-header-create-button" type="button" onClick={() => { setNewListName(''); setListCreateOpen(true) }}><span aria-hidden="true">+</span> New List</button></div>
         <p>
           Shared lists for groceries, chores, shopping,
           packing, and more.
@@ -23180,20 +23181,6 @@ capture.captureType !== 'other' && (
         ))
       )}
     </div>
-
-    <button
-      className="calendar-floating-add"
-      type="button"
-      aria-label="Create list"
-      onClick={() => {
-        setNewListName('')
-        setListCreateOpen(true)
-      }}
-    >
-      <span className="calendar-floating-add-plus">
-        +
-      </span>
-    </button>
 
     {listCreateOpen &&
       createPortal(
