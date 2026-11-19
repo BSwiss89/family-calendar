@@ -13,3 +13,14 @@
 .live-invitation-dialog h2{margin:0 0 8px}
 .live-remind-later{display:block;width:100%;margin-top:16px}
 @media(max-width:760px){.live-invitations-page{padding:12px}.live-invitation-dialog{padding:16px}}
+
+/* Compact LIVE reminder matching the verified TEST layout. */
+.live-invitation-dialog .live-invitations-list{margin-top:12px}
+.live-invitation-dialog .live-invitation-card.live-invitation-compact{padding:4px 0 0;border:0;background:transparent;gap:4px}
+.live-invitation-dialog .live-invitation-compact .live-notice-event-title{font-size:1.15rem;line-height:1.35}
+.live-notice-date{color:var(--secondary-text-color,#52657c);font-size:.88rem}
+.live-notice-changes{color:var(--secondary-text-color,#52657c);font-size:.8rem;line-height:1.5;overflow-wrap:anywhere}
+.live-notice-changes b{color:#36516e}
+.live-notice-kind{font-size:.95rem}
+.live-invitation-dialog h2{font-size:1.35rem;margin:0}
+.live-invitation-buttons button{min-height:42px}
