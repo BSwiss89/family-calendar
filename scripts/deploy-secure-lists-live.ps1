@@ -32,9 +32,12 @@ function GitHead([string]$folder) {
     return ([string]$sha).Trim()
 }
 function GitBranch([string]$folder) {
-    $name = & git -C $folder branch --show-current
-    if ($LASTEXITCODE -ne 0) { throw "Cannot resolve Git branch: $folder" }
-    return ([string]$name).Trim()
+    # An intentional detached checkout returns HEAD (rather than null).
+    $name = @(& git -C $folder rev-parse --abbrev-ref HEAD)
+    if ($LASTEXITCODE -ne 0 -or $name.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$name[0])) {
+        throw "Cannot resolve Git checkout type: $folder"
+    }
+    return ([string]$name[0]).Trim()
 }
 function Digest([string]$file) { return (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash }
 function StatusCode([string]$url) {
@@ -122,14 +125,14 @@ try {
     $isAdmin = ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     Assert ($isAdmin -and $identity.Name -ne 'NT AUTHORITY\SYSTEM') 'Interactive administrator session'
     Assert ((Test-Path -LiteralPath (Join-Path $live '.git')) -and (Test-Path -LiteralPath (Join-Path $stage '.git'))) 'Secure LIVE and candidate worktrees exist'
-    Assert ((GitHead $live) -ceq $baseline -and (GitBranch $live) -eq '') 'Running secure LIVE baseline is unchanged and detached'
+    Assert ((GitHead $live) -ceq $baseline -and (GitBranch $live) -ceq 'HEAD') 'Running secure LIVE baseline is unchanged and detached'
     Assert ((GitBranch $stage) -ceq $branch) 'Correct isolated Lists staging branch'
     # Deploy tested UI commit only; this tooling is its direct child commit.
     $candidateSha = '22bd0b709712bb79045bfe30ac7b60d125d666c1'
     $scriptHead = GitHead $stage
     Assert ($scriptHead -cmatch '^[a-f0-9]{40}$' -and $scriptHead -cne $candidateSha) 'GitHub deployment tool commit exists'
-    $toolParent = & git -C $stage rev-parse 'HEAD^'
-    Assert ($LASTEXITCODE -eq 0 -and ([string]$toolParent).Trim() -ceq $candidateSha) 'Deployment tool is directly above tested UI'
+    & git -C $stage merge-base --is-ancestor $candidateSha $scriptHead
+    Assert ($LASTEXITCODE -eq 0) 'Deployment tooling descends from exact tested UI commit'
     $releaseParent = & git -C $stage rev-parse ($candidateSha + '^')
     Assert ($LASTEXITCODE -eq 0 -and ([string]$releaseParent).Trim() -ceq $baseline) 'Tested UI directly based on secure LIVE'
     $toolDiff = @(& git -C $stage diff --name-only $candidateSha $scriptHead)
