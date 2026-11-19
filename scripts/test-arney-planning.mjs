@@ -203,7 +203,7 @@ test('entire app uses self-hosted Nunito with fallback and an included open lice
 })
 
 
-test('blue plus uses seven ordered compact rows matching the approved mockup', () => {
+test('blue plus retains eight approved rows including Create List and Add to List', () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const app = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8')
   const css = fs.readFileSync(path.join(root, 'src/App.css'), 'utf8')
@@ -212,9 +212,9 @@ test('blue plus uses seven ordered compact rows matching the approved mockup', (
   assert.ok(first > 0 && last > first)
   const block = app.slice(first, last)
   assert.match(block, /className="quick-add-sheet quick-add-actions-sheet"/)
-  assert.deepEqual([...block.matchAll(/<strong>(Add Event|Add List Item|Add Recipe|Analyze Photo|Take Photo|Settings|Ask Arney)<\/strong>/g)]
+  assert.deepEqual([...block.matchAll(/<strong>(Add Event|Create List|Add to List|Add Recipe|Analyze Photo|Take Photo|Settings|Ask Arney)<\/strong>/g)]
     .map(match => match[1]), [
-      'Add Event', 'Add List Item', 'Add Recipe', 'Analyze Photo', 'Take Photo', 'Settings', 'Ask Arney',
+      'Add Event', 'Create List', 'Add to List', 'Add Recipe', 'Analyze Photo', 'Take Photo', 'Settings', 'Ask Arney',
     ])
   assert.match(css, /\.quick-add-actions-sheet \.quick-add-options \{/)
   assert.match(css, /flex-direction: column;/)
