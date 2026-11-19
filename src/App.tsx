@@ -14338,7 +14338,17 @@ const notificationDisplayProps = {
   acknowledgingId: assignmentInbox.acknowledgingId,
   assignmentError: assignmentInbox.error,
   acknowledge: assignmentInbox.acknowledge,
-  detailsForEvent: (eventId: number) => { const event = events.find(e => e.id === eventId); return event ? { title: event.title, date: event.date, time: event.time } : null },
+  detailsForEvent: (eventId: number) => {
+    const event = events.find(e => e.id === eventId)
+    return event ? {
+      title: event.title, date: event.date, endDate: event.endDate,
+      time: event.time, endTime: event.endTime,
+      location: event.location, notes: event.notes,
+      repeatUnit: event.repeatUnit, repeatInterval: event.repeatInterval,
+      repeatEndType: event.repeatEndType, repeatEndDate: event.repeatEndDate,
+      repeatCount: event.repeatCount,
+    } : null
+  },
   openEvent: (eventId: number) => {
     const target = events.find(e => e.id === eventId)
     if (!target) return
