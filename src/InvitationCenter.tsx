@@ -143,19 +143,20 @@ function HouseholdInvitationCards({
 }
 
 function AssignmentCards({
-  items,acknowledgingId,acknowledge,detailsForEvent,openEvent,
+  items,acknowledgingId,acknowledge,detailsForEvent,openEvent,compact = false,
 }: {
   items: readonly AssignmentNotice[]
   acknowledgingId?: number | null
   acknowledge?: (id: number) => Promise<boolean>
   detailsForEvent?: (eventId: number) => AssignmentEventDetails | null
   openEvent?: (eventId: number) => void
+  compact?: boolean
 }) {
   const kindLabel: Record<AssignmentNotice['kind'],string> = {
-    assigned: "You\'ve been assigned an event",
-    changed: 'An assigned event was updated',
-    unassigned: 'You were removed from an event',
-    cancelled: 'An assigned event was cancelled',
+    assigned: 'Added to an event',
+    changed: 'Event updated',
+    unassigned: 'Removed from an event',
+    cancelled: 'Event cancelled',
   }
   return <div className="invitation-center-items">
     {items.map(item => {
@@ -163,42 +164,33 @@ function AssignmentCards({
       const firstRepeatIndex = item.changedFields.findIndex(field => repeatChangeFields.has(field))
       const changedFields = item.changedFields.filter((field,index) =>
         !repeatChangeFields.has(field) || index === firstRepeatIndex)
-      return <article className="invitation-center-item" key={'assignment-' + item.id}>
-      <span className="invitation-center-source">Calendar notification</span>
-      <strong>{kindLabel[item.kind]}</strong>
-      <div className="assignment-event-summary">
-        {event ? <>
-          <b>{event.title}</b>
-          <span>{formatSharedDate(event.date)} · {formatSharedTime(event.time)}</span>
-          {event.location?.trim() && <span>{event.location}</span>}
-        </> : <span>Event details are no longer available.</span>}
-      </div>
-      {item.kind === 'changed' && <section className="assignment-event-changes"
-        aria-label="Updated event information">
-        <div className="assignment-changes-title">What changed</div>
-        {event && changedFields.length > 0
-          ? <>
-            <p>Showing the latest event details:</p>
-            <ul>{changedFields.map(field => {
-              const detail = assignmentChangeDetail(field,event)
-              return <li key={field}><span>{detail.label}</span>
-                <strong>{detail.value}</strong></li>
-            })}</ul>
-          </>
-          : <p>Specific changes weren’t recorded for this update.
-              {event ? ' Select View Event to review the latest details.' : ''}</p>}
-      </section>}
-      <div className="invitation-center-actions">
-        {event && openEvent && <button type="button"
-          className="invitation-decline"
-          onClick={() => openEvent(item.eventId)}>View Event</button>}
-        <button type="button" className="invitation-accept"
-          disabled={acknowledgingId !== null && acknowledgingId !== undefined}
-          onClick={() => { void acknowledge?.(item.id) }}>
-          {acknowledgingId === item.id ? 'Saving…' : 'Acknowledge'}
-        </button>
-      </div>
-    </article>
+      const changeLabels = event ? changedFields.map(field => {
+        const detail = assignmentChangeDetail(field,event)
+        return field === 'title' || field === 'date' || field === 'time'
+          ? detail.label : detail.label + ': ' + detail.value
+      }) : []
+      return <article className={`invitation-center-item${compact ? ' assignment-notice-compact' : ''}`}
+        key={'assignment-' + item.id}>
+        {!compact && <strong className="assignment-notice-kind">{kindLabel[item.kind]}</strong>}
+        <div className="assignment-event-summary">
+          {event ? <>
+            <b>{event.title}</b>
+            <span>{formatSharedDate(event.date)} · {formatSharedTime(event.time)}</span>
+          </> : <span>Event details unavailable</span>}
+        </div>
+        {item.kind === 'changed' && changeLabels.length > 0 && <p className="assignment-event-changes">
+          <b>Changed:</b> {changeLabels.join(' · ')}
+        </p>}
+        <div className="invitation-center-actions">
+          {event && openEvent && <button type="button" className="invitation-view-event"
+            onClick={() => openEvent(item.eventId)}>View Event</button>}
+          <button type="button" className="invitation-accept"
+            disabled={acknowledgingId !== null && acknowledgingId !== undefined}
+            onClick={() => { void acknowledge?.(item.id) }}>
+            {acknowledgingId === item.id ? 'Saving…' : 'Acknowledge'}
+          </button>
+        </div>
+      </article>
     })}
   </div>
 }
@@ -293,6 +285,25 @@ export function MobileInvitationReminder({
     if (hasNew) setRemindLater(false)
   }, [invitations, familyInvitations, assignmentNotifications])
 
+  const noticeCount = invitations.length + familyInvitations.length + assignmentNotifications.length
+  const onlyAssignment = assignmentNotifications.length === 1 &&
+    invitations.length === 0 && familyInvitations.length === 0
+  const kindHeading: Record<AssignmentNotice['kind'],string> = {
+    assigned: 'Added to an event', changed: 'Event updated',
+    unassigned: 'Removed from an event', cancelled: 'Event cancelled',
+  }
+  const popupTitle = onlyAssignment ? kindHeading[assignmentNotifications[0].kind]
+    : noticeCount === 1 ? 'Notification' : noticeCount + ' notifications'
+  const multipleTypes = [
+    invitations.length > 0, familyInvitations.length > 0,
+    assignmentNotifications.length > 0,
+  ].filter(Boolean).length > 1
+  // View Event must dismiss this higher-z-index reminder without acknowledging.
+  const viewAssignmentEvent = openEvent ? (eventId: number) => {
+    setRemindLater(true)
+    openEvent(eventId)
+  } : undefined
+
   // The full inbox must be accessible after Remind Later without a duplicate
   // modal covering it. Pending invitations remain on the server until answered.
   const visible = mobile && ((available && invitations.length > 0) ||
@@ -344,35 +355,26 @@ export function MobileInvitationReminder({
       <div role="dialog" aria-modal="true" aria-labelledby="mobile-invite-title"
         className="mobile-invitations-dialog" tabIndex={-1} ref={dialog}>
         <div className="mobile-invitations-header">
-          <div>
-            <span>Family Calendar</span>
-            <h2 id="mobile-invite-title">
-              {(invitations.length + familyInvitations.length + assignmentNotifications.length) === 1
-                ? 'You have a new notification'
-                : 'You have ' + ((invitations.length + familyInvitations.length + assignmentNotifications.length)) + ' new items'}
-            </h2>
-          </div>
+          <h2 id="mobile-invite-title">{popupTitle}</h2>
           <button type="button" onClick={() => setRemindLater(true)}
-            aria-label="Remind me later about these events">×</button>
+            aria-label="Ask again later">×</button>
         </div>
-        <p className="mobile-invitations-description">
-          Please respond to invitations or acknowledge calendar updates. You can ask again later without accepting or declining.
-        </p>
         {invitations.length > 0 && <>
-          <h3>Invitations</h3>
+          {multipleTypes && <h3>Invitations</h3>}
           <InvitationCards invitations={invitations}
             respondingId={respondingId} respond={respond} />
         </>}
         {familyInvitations.length > 0 && <>
-          <h3>Household invitations</h3>
+          {multipleTypes && <h3>Household invitations</h3>}
           <HouseholdInvitationCards invitations={familyInvitations}
             respondingId={respondingFamilyId} respond={respondFamily} />
         </>}
         {familyInvitationError && <p role="alert" className="invitation-center-error">{familyInvitationError}</p>}
         {assignmentNotifications.length > 0 && <>
-          <h3>Calendar notifications</h3>
+          {multipleTypes && <h3>Event updates</h3>}
           <AssignmentCards items={assignmentNotifications} acknowledgingId={acknowledgingId}
-            acknowledge={acknowledge} detailsForEvent={detailsForEvent} openEvent={openEvent} />
+            acknowledge={acknowledge} detailsForEvent={detailsForEvent}
+            openEvent={viewAssignmentEvent} compact={onlyAssignment} />
         </>}
         {error && <p role="alert" className="invitation-center-error">{error}</p>}
         {assignmentError && <p role="alert" className="invitation-center-error">{assignmentError}</p>}
@@ -380,9 +382,6 @@ export function MobileInvitationReminder({
           onClick={() => setRemindLater(true)}>
           Ask Again Later
         </button>
-        <p className="mobile-invitations-footnote">
-          Pending invitations and unacknowledged updates stay in Invitations and will be shown again when you reopen the app.
-        </p>
       </div>
     </div>,
     document.body
