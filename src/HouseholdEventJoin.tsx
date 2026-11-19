@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { familySiteRoutes } from './familySiteRoutes'
 import './HouseholdEventJoin.css'
 
 type Props = {
@@ -12,7 +13,7 @@ type Props = {
 }
 
 /**
- * TEST-only self-service participation. Profile selection is a shared-device
+ * Site-specific self-service participation. Profile selection is a shared-device
  * preference, not authenticated personal identity; this must stay disabled
  * until trusted person/account links exist for multi-family production.
  */
@@ -28,7 +29,7 @@ export default function HouseholdEventJoin({
     setSupported(false)
     setError('')
     if (!selectedPersonId) return
-    fetch('/api/test-household-events/join-capability',{
+    fetch(familySiteRoutes.householdJoin+'/join-capability',{
       credentials:'same-origin',cache:'no-store',
     }).then(async response=>{
       if(!response.ok) return null
@@ -47,7 +48,7 @@ export default function HouseholdEventJoin({
     setError('')
     try {
       const action=joined?'leave':'join'
-      const response=await fetch('/api/test-household-events/'+eventId+'/'+action,{
+      const response=await fetch(familySiteRoutes.householdJoin+'/'+eventId+'/'+action,{
         method:'POST',credentials:'same-origin',cache:'no-store',
       })
       if(!response.ok) throw new Error('Could not update your participation.')
