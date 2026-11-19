@@ -303,6 +303,9 @@ jobs:
       - name: Regression-test short and qualified Windows task principal SIDs
         shell: powershell
         run: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\configure-secure-test-polling.ps1 -SelfTestPrincipal
+      - name: Exercise native trigger-only polling on a disposable Windows scheduled task
+        shell: powershell
+        run: .\scripts\test-native-test-polling.ps1
       - name: Verify TEST polling and status helpers preserve deployment safety
         run: node --test scripts/test-secure-test-polling.mjs
       - name: Validate PowerShell script syntax
