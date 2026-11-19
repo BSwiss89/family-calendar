@@ -1,9 +1,9 @@
 // Read-only audit. Does NOT fetch, merge, edit a database, copy assets, or deploy.
-// CI must fetch the approved LIVE commit into FETCH_HEAD before running it.
+// CI must fetch the exact approved LIVE commit into FETCH_HEAD before running it.\n// Refresh this pin only after verifying the installed LIVE SHA; do not infer it from a branch.
 // Audit output is advisory: a clean file presence report is NOT deployment approval.
 import { spawnSync } from 'node:child_process'
 
-const EXPECTED_LIVE = '742addbde25255ce3e79f1cce9fc9276c1efb567'
+const EXPECTED_LIVE = '6377963372c30e8c4c4e33af6bf617d87961e989'
 const liveOnlyFilesToPreserve = [
   'Server/list-features.mjs',
   'Server/list-icons.mjs',
