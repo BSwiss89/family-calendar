@@ -31,9 +31,9 @@ jobs:
           }
           node scripts/audit-household-live-parity.mjs --self-test
           if ($LASTEXITCODE -ne 0) { throw 'LIVE-preservation audit fixture failed.' }
-          # Fetch pinned working LIVE baseline for read-only Git object comparisons.
+          # Fetch the exact owner-verified installed LIVE SHA for read-only Git object comparisons.
           # No checkout, reset, merging, DB access, deployment or Tailscale change.
-          git fetch --no-tags --depth=1 origin feature/auth-current-calendar-two-sites
+          git fetch --no-tags --depth=1 origin 6377963372c30e8c4c4e33af6bf617d87961e989
           if ($LASTEXITCODE -ne 0) { throw 'Pinned LIVE baseline fetch failed.' }
           node scripts/audit-household-live-parity.mjs --require-preserved-features
           if ($LASTEXITCODE -ne 0) { throw 'Baseline LIVE feature or household foundation file missing.' }
