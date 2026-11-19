@@ -1,7 +1,7 @@
 # Change ONLY the existing secure TEST updater's polling interval.
 # Read-only by default. Does not install a new task, change accounts or touch LIVE.
 [CmdletBinding()]
-param([switch]$Apply,[switch]$SelfTestPrincipal)
+param([switch]$Apply,[switch]$ApplyNative,[switch]$SelfTestPrincipal)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -51,8 +51,9 @@ function Test-TaskPrincipalIsCurrentUser([string]$taskUser) {
 }
 
 # Isolated CI regression; no access to installed Calendar services.
+if ($Apply -and $ApplyNative) { throw 'Choose one polling change method only.' }
 if ($SelfTestPrincipal) {
-    if ($Apply) { throw 'Principal self-test cannot be combined with -Apply.' }
+    if ($Apply -or $ApplyNative) { throw 'Principal self-test cannot be combined with an apply mode.' }
     $current = [Security.Principal.WindowsIdentity]::GetCurrent()
     $shortName = ($current.Name -split '\\')[-1]
     if (!(Test-TaskPrincipalIsCurrentUser $current.Name) -or
@@ -118,11 +119,12 @@ foreach ($oldName in @('Family Calendar Auto Preview','Family Calendar Auto Depl
 }
 $before = Get-TaskSnapshot
 Assert-Task $before -RequireIdle
+$changeRequested = [bool]($Apply -or $ApplyNative)
 $checkedAt = Get-Date -Format o
 Write-Host "TEST_POLL_PREFLIGHT=PASS | checked_at=$checkedAt | current=$($before.Interval) | target=PT1M | task_identity=UNCHANGED | changes_made=NONE"
 # Faster polling must not accelerate an unreviewed direct push to an unprotected branch.
 # GitHub's public branch snapshot must expose an enforced Windows build check.
-if ($Apply -and $before.Interval -ne 'PT1M') {
+if ($changeRequested -and $before.Interval -ne 'PT1M') {
     $uri = 'https://api.github.com/repos/BSwiss89/family-calendar/branches/test-release'
     try {
         $branchState = Invoke-RestMethod -Uri $uri -Headers @{ 'User-Agent'='FamilyCalendar-SafePolling-Preflight'; 'Accept'='application/vnd.github+json' } -TimeoutSec 15
@@ -136,8 +138,8 @@ if ($Apply -and $before.Interval -ne 'PT1M') {
         throw 'GitHub test-release lacks verified branch protection and the required Windows build check. No faster polling.'
     }
 }
-if (!$Apply -or $before.Interval -eq 'PT1M') {
-    if ($Apply -and $before.Interval -eq 'PT1M') {
+if (!$changeRequested -or $before.Interval -eq 'PT1M') {
+    if ($changeRequested -and $before.Interval -eq 'PT1M') {
         Write-Host "TEST_POLL_APPLY=ALREADY_CONFIGURED | checked_at=$checkedAt | interval=PT1M"
     }
     return
@@ -166,9 +168,26 @@ try {
     $backup = Join-Path $folder ("before-one-minute-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + ".xml")
     if (Test-Path -LiteralPath $backup) { throw 'Task backup name collision.' }
     [System.IO.File]::WriteAllText($backup,$before.XmlText,[System.Text.UTF8Encoding]::new($false))
-    # schtasks /change /ri changes an existing repetition interval without replacing its principal.
-    # Never supply credentials, a different principal, a new action, or task registration.
+    # Only modify the already verified single TEST task. The Windows native
+    # method changes its existing TimeTrigger in place and never supplies
+    # principal, action, settings, credentials, or a task registration.
     $changeError = $null
+    if ($ApplyNative) {
+        try {
+            $triggers = @($before.Task.Triggers)
+            if ($triggers.Count -ne 1 -or $triggers[0].CimClass.CimClassName -ne 'MSFT_TaskTimeTrigger' -or
+                $triggers[0].Repetition.Interval -ne 'PT15M' -or
+                $triggers[0].Repetition.Duration -ne 'P3650D') {
+                throw 'Existing TEST TimeTrigger layout does not match verified XML.'
+            }
+            $triggers[0].Repetition.Interval = 'PT1M'
+            $null = Set-ScheduledTask -TaskPath '\' -TaskName $taskName -Trigger $triggers -ErrorAction Stop
+        } catch {
+            $changeError = "Set-ScheduledTask rejected trigger-only update: $($_.Exception.Message)"
+        }
+    } else {
+    # Original schtasks method remains available; it may request a password
+    # for an existing LogonType=Password task, even if no identity was changed.
     # Windows PowerShell 5.1 can convert a native program's stderr into a
     # terminating ErrorRecord when the caller sets ErrorActionPreference=Stop.
     # Capture schtasks output and exit code without suppressing the diagnostic.
@@ -187,6 +206,7 @@ try {
         $changeError = "schtasks invocation failed: $($_.Exception.Message)"
     } finally {
         $ErrorActionPreference = $originalErrorAction
+    }
     }
     $after = Get-TaskSnapshot
     $safe = Same-ExceptInterval $before $after
@@ -215,7 +235,7 @@ try {
         throw "POLLING_CHANGE_NOT_APPLIED: Windows retained $($after.Interval); original task XML: $backup"
     }
     Assert-Task $after
-    Write-Host ("TEST_POLL_APPLY=PASS | checked_at=" + (Get-Date -Format o) + " | interval=PT1M | task_identity=UNCHANGED | live_sha=$liveSha | test_sha=$testSha | backup=$backup")
+    Write-Host ("TEST_POLL_APPLY=PASS | method=" + $(if($ApplyNative){'Set-ScheduledTask'}else{'schtasks'}) + " | checked_at=" + (Get-Date -Format o) + " | interval=PT1M | task_identity=UNCHANGED | live_sha=$liveSha | test_sha=$testSha | backup=$backup")
 } finally {
     if ($locked) { $mutex.ReleaseMutex() }
     $mutex.Dispose()
