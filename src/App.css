@@ -21693,3 +21693,12 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
 .recipe-social-video-check.recipe-social-video-check-partial small {
   color:#75613b;
 }
+
+/* Keep the list creation action aligned with the Lists title and legible on warm themes. */
+.lists-overview-heading > div { width: 100%; min-width: 0; }
+.lists-heading-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.lists-heading-title-row h2 { margin: 0; }
+.lists-header-create-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; min-height: 44px; padding: 9px 14px; border: 1px solid #243a65; border-radius: 12px; background: #243a65; color: #fff; font: inherit; font-size: 14px; font-weight: 750; line-height: 1.2; cursor: pointer; box-shadow: 0 2px 8px rgba(25, 37, 60, .16); }
+.lists-header-create-button span { font-size: 21px; font-weight: 500; line-height: 1; }
+.lists-header-create-button:focus-visible { outline: 3px solid #6495ff; outline-offset: 3px; }
+@media (max-width: 380px) { .lists-header-create-button { padding: 9px 10px; font-size: 13px; } }
