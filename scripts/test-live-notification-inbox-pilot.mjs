@@ -218,3 +218,46 @@ test('assignment acknowledgements belong to selected profile and survive refresh
   assert.equal((await post(base,'/live-notification-pilot/refresh')).status,303)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM assignment_notification_outbox').get().n,1)
 })
+
+test('updated-event acknowledgements name changed fields without exposing private values',async t=>{
+  const db=makeDb(t)
+  createEvent(db,88,[7,9])
+  const app=setupApp(db)
+  pilot(app,db)
+  const base=await withServer(t,app)
+  db.prepare([
+    'UPDATE events SET title=?,date=?,time=?,end_time=?,',
+    'location=?,notes=?,repeat_unit=?,repeat_interval=? WHERE id=?',
+  ].join(' ')).run('Private dinner','2027-05-06','18:30','20:00',
+    'Private house','Bring medication', 'weekly', 2, 88)
+  assert.equal((await post(base,'/test-notification-pilot/refresh',11)).status,303)
+  const seven=await (await get(base,'/api/test-notification-pilot',11)).json()
+  const nine=await (await get(base,'/api/test-notification-pilot',12)).json()
+  assert.deepEqual(seven.notifications[0].changedFields,
+    ['title','date','time','endTime','location','notes','repeatUnit','repeatInterval'])
+  assert.deepEqual(nine.notifications[0].changedFields,seven.notifications[0].changedFields)
+  assert.equal(seven.notifications[0].kind,'changed')
+  assert.doesNotMatch(JSON.stringify(seven),/Private dinner|Private house|Bring medication/)
+  assert.equal((await get(base,'/api/test-notification-pilot',13)).status,403)
+  const firstId=seven.notifications[0].id
+  // Newer changes must not rewrite what an unacknowledged earlier notice recorded.
+  db.prepare("UPDATE events SET date='2027-05-08' WHERE id=88").run()
+  assert.equal((await post(base,'/test-notification-pilot/refresh')).status,303)
+  const pending=(await (await get(base,'/api/test-notification-pilot')).json()).notifications
+  assert.deepEqual(pending[0].changedFields,['date'])
+  assert.equal(pending[1].id,firstId)
+  assert.deepEqual(pending[1].changedFields,seven.notifications[0].changedFields)
+})
+
+test('recurring exception update records the affected schedule field, not private event text',async t=>{
+  const db=makeDb(t)
+  createEvent(db,89,[7])
+  const app=setupApp(db)
+  pilot(app,db)
+  const base=await withServer(t,app)
+  db.prepare("INSERT INTO event_exceptions VALUES(89,'2027-05-08')").run()
+  assert.equal((await post(base,'/test-notification-pilot/refresh')).status,303)
+  const data=await (await get(base,'/api/test-notification-pilot')).json()
+  assert.deepEqual(data.notifications[0].changedFields,['occurrences'])
+  assert.equal(data.notifications[0].kind,'changed')
+})
