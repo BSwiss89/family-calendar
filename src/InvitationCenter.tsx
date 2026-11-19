@@ -93,7 +93,7 @@ function AssignmentCards({
   items: readonly AssignmentNotice[]
   acknowledgingId?: number | null
   acknowledge?: (id: number) => Promise<boolean>
-  detailsForEvent?: (eventId: number) => string | null
+  detailsForEvent?: (eventId: number) => { title: string; date: string; time: string | null } | null
   openEvent?: (eventId: number) => void
 }) {
   const kindLabel: Record<AssignmentNotice['kind'],string> = {
