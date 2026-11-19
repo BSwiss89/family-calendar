@@ -14028,7 +14028,16 @@ const liveInvitationProps = {
     setPage('calendar')
     openEventDetails(event,event.date)
   },
-  eventTitle:(id:number)=>events.find(item=>item.id===id)?.title ?? null,
+  eventDetails:(id:number)=>{
+    const event=events.find(item=>item.id===id)
+    return event ? {
+      title:event.title,date:event.date,endDate:event.endDate,
+      time:event.time,endTime:event.endTime,location:event.location,notes:event.notes,
+      repeatUnit:event.repeatUnit,repeatInterval:event.repeatInterval,
+      repeatEndType:event.repeatEndType,repeatEndDate:event.repeatEndDate,
+      repeatCount:event.repeatCount,
+    } : null
+  },
 }
 
 const viewingDateKey =
@@ -24534,7 +24543,7 @@ capture.captureType !== 'other' && (
     </section>
   </div>, document.body
 )}
-      <LiveInvitationReminder {...liveInvitationProps} suppressed={page === 'invitations'}/>
+      <LiveInvitationReminder {...liveInvitationProps} suppressed={page === 'invitations' || showEventModal}/>
       <ReleaseHighlights
         accountKey={activeHouseholdAccountKey}
         personId={activeHouseholdPersonId}
