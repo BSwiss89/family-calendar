@@ -1,6 +1,6 @@
 // Single-household event-assignment notification foundation.
 // Do NOT connect to push transport until device ownership and consent are verified.
-// The outbox stores only event/person IDs and a change kind (not private event text).
+// The outbox stores IDs, change kind and an optional field-name bitmask, never private event text.
 const MATERIAL_FIELDS = Object.freeze([
   'title', 'date', 'endDate', 'time', 'endTime', 'location', 'notes',
   'repeatUnit', 'repeatInterval', 'repeatEndType', 'repeatEndDate', 'repeatCount',
@@ -66,12 +66,20 @@ export function installAssignmentNotificationOutbox(database) {
       kind TEXT NOT NULL CHECK(kind IN ('assigned','changed','unassigned','cancelled')),
       created_at INTEGER NOT NULL CHECK(created_at > 0),
       delivered_at INTEGER,
-      delivery_attempts INTEGER NOT NULL DEFAULT 0 CHECK(delivery_attempts >= 0)
+      delivery_attempts INTEGER NOT NULL DEFAULT 0 CHECK(delivery_attempts >= 0),
+      change_mask INTEGER NOT NULL DEFAULT 0 CHECK(change_mask BETWEEN 0 AND 8191)
     ) STRICT;
     CREATE INDEX IF NOT EXISTS assignment_notifications_pending_idx
       ON assignment_notification_outbox(created_at, id)
       WHERE delivered_at IS NULL;
   `)
+  // The TEST pilot already has durable outbox rows. Upgrade in place without
+  // clearing prior notices, delivery history, or acknowledgements.
+  if (!database.prepare('PRAGMA table_info(assignment_notification_outbox)')
+    .all().some(row => row.name === 'change_mask')) {
+    database.exec('ALTER TABLE assignment_notification_outbox ADD COLUMN ' +
+      'change_mask INTEGER NOT NULL DEFAULT 0 CHECK(change_mask BETWEEN 0 AND 8191)')
+  }
 }
 
 // The caller must invoke this inside the SAME SQLite transaction as the
@@ -80,12 +88,17 @@ export function installAssignmentNotificationOutbox(database) {
 export function queueEventAssignmentNotifications(database, before, after, at = Date.now(), options = {}) {
   if (!Number.isSafeInteger(at) || at <= 0) throw new Error('Invalid notification timestamp.')
   const intents = planEventAssignmentNotifications(before, after, options)
+  const changeMask = options.changeMask ?? 0
+  if (!Number.isSafeInteger(changeMask) || changeMask < 0 || changeMask > 8191) {
+    throw new Error('Invalid event change field mask.')
+  }
   const insert = database.prepare(`
-    INSERT INTO assignment_notification_outbox(event_id, person_id, kind, created_at)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO assignment_notification_outbox(event_id, person_id, kind, created_at, change_mask)
+    VALUES (?, ?, ?, ?, ?)
   `)
   for (const intent of intents) {
-    insert.run(intent.eventId, intent.personId, intent.kind, at)
+    insert.run(intent.eventId, intent.personId, intent.kind, at,
+      intent.kind === 'changed' ? changeMask : 0)
   }
   return intents.length
 }
@@ -96,7 +109,8 @@ export function pendingAssignmentNotifications(database, limit = 100) {
   }
   return database.prepare(`
     SELECT id, event_id AS eventId, person_id AS personId,
-           kind, created_at AS createdAt, delivery_attempts AS deliveryAttempts
+           kind, created_at AS createdAt, delivery_attempts AS deliveryAttempts,
+           change_mask AS changeMask
     FROM assignment_notification_outbox
     WHERE delivered_at IS NULL
     ORDER BY created_at, id
