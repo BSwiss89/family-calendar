@@ -14338,7 +14338,7 @@ const notificationDisplayProps = {
   acknowledgingId: assignmentInbox.acknowledgingId,
   assignmentError: assignmentInbox.error,
   acknowledge: assignmentInbox.acknowledge,
-  titleForEvent: (eventId: number) => events.find(e => e.id === eventId)?.title ?? null,
+  detailsForEvent: (eventId: number) => { const event = events.find(e => e.id === eventId); return event ? { title: event.title, date: event.date, time: event.time } : null },
   openEvent: (eventId: number) => {
     const target = events.find(e => e.id === eventId)
     if (!target) return
