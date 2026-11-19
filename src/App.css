@@ -20368,9 +20368,33 @@ body:has(.list-icon-picker-overlay) .lists-overview > .calendar-floating-add {
     border-radius: 50%;
   }
 
-  .event-form-family-slider
-    .family-slider-name {
-    display: none;
+  /* Add Event only: show names beneath mobile avatars without clipping. */
+  .event-form-family-slider {
+    height: auto;
+    min-height: 84px;
+    align-items: flex-start;
+  }
+
+  .event-form-family-slider .family-slider-card {
+    width: 68px;
+    min-width: 68px;
+    height: 76px;
+    min-height: 76px;
+    flex: 0 0 68px;
+    border-radius: 16px;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .event-form-family-slider .family-slider-name {
+    display: block;
+    width: 100%;
+    font-size: 10px;
+    line-height: 1.1;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
