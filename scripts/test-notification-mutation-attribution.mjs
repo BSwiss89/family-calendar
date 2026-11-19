@@ -287,11 +287,11 @@ test('prior TEST outbox rows upgrade without losing delivery history or changing
   ].join(' '))
   installAssignmentNotificationOutbox(db)
   installAssignmentNotificationOutbox(db)
-  assert.deepEqual(db.prepare([
+  assert.deepEqual({...db.prepare([
     'SELECT event_id AS eventId,person_id AS personId,kind,change_mask AS changeMask,',
     'delivered_at AS deliveredAt,delivery_attempts AS attempts',
     'FROM assignment_notification_outbox WHERE id=1',
-  ].join(' ')).get(),{
+  ].join(' ')).get()},{
     eventId:9,personId:7,kind:'changed',changeMask:0,deliveredAt:5678,attempts:2,
   })
   assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok')
