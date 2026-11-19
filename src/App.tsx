@@ -24546,27 +24546,26 @@ capture.captureType !== 'other' && (
     </svg>
     <div className="people-page-heading lists-overview-heading">
       <div>
-        <h2>Lists</h2>
+        <div className="lists-heading-title-row">
+          <h2>Lists</h2>
+          <button
+            className="lists-header-create-button"
+            type="button"
+            onClick={() => {
+              setNewListName('')
+              setNewListIcon(null)
+              setListIconPickerTarget(null)
+              setListCreateOpen(true)
+            }}
+          >
+            <span aria-hidden="true">+</span> New List
+          </button>
+        </div>
         <p>
           Shared lists for groceries, chores, shopping,
           packing, and more.
         </p>
       </div>
-    </div>
-
-    <div className="lists-create-action">
-      <button
-        className="add-event-button"
-        type="button"
-        onClick={() => {
-          setNewListName('')
-          setNewListIcon(null)
-          setListIconPickerTarget(null)
-          setListCreateOpen(true)
-        }}
-      >
-        + New List
-      </button>
     </div>
 
     <div className="people-grid list-page-grid">
