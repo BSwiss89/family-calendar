@@ -244,13 +244,17 @@
   }
 }
 
-/* TEST assignment-update acknowledgments: readable on phone and desktop. */
+/* Compact event notifications for mobile and desktop. */
 .assignment-event-summary { display: flex; flex-direction: column; gap: 3px; min-width: 0; color: #52657c; font-size: 13px; }
-.assignment-event-summary b { font-size: 15px; color: #253e5b; }
-.assignment-event-changes { margin-top: 8px; padding: 12px; border: 1px solid #d3e1f1; border-radius: 10px; background: #f3f8ff; }
-.assignment-changes-title { color: #253e5b; font-weight: 750; font-size: 14px; }
-.assignment-event-changes p { margin: 5px 0 0; color: #52657c; font-size: 12px; line-height: 1.4; }
-.assignment-event-changes ul { padding: 0; margin: 9px 0 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.assignment-event-changes li { border-top: 1px solid #d9e5f2; padding-top: 7px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
-.assignment-event-changes li span { color: #58718d; font-size: 12px; }
-.assignment-event-changes li strong { color: #253e5b; font-size: 13px; font-weight: 650; white-space: pre-wrap; overflow-wrap: anywhere; }
+.assignment-event-summary b { color: #253e5b; font-size: 17px; line-height: 1.35; }
+.assignment-event-changes { margin: 6px 0 0; padding: 0; border: 0; background: none; color: #52657c; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.assignment-event-changes b { color: #36516e; font-weight: 750; }
+.invitation-view-event { color: #365c84; border: 1px solid #bbcee3; background: #f5f9ff; }
+.invitation-view-event:hover { background: #e8f2ff; }
+.mobile-invitations-header h2 { margin: 3px 0 0; font-size: 22px; }
+.mobile-invitations-dialog .invitation-center-items { margin-top: 12px; }
+.mobile-invitations-dialog .invitation-center-item.assignment-notice-compact { border: 0; background: transparent; padding: 4px 0 0; }
+.mobile-invitations-dialog .invitation-center-item.assignment-notice-compact .assignment-event-summary b { font-size: 19px; }
+.mobile-invitations-dialog .assignment-notice-kind { font-size: 14px; }
+.mobile-invitations-dialog .invitation-center-actions { margin-top: 12px; }
+.mobile-invitations-dialog .mobile-invitations-remind { margin-top: 14px; }
