@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { emojiMarkerOccursOnDate, type EmojiMarkerData } from './emojiMarkerRules.mjs'
+import { emojiMarkerOccursOnDate, type EmojiMarkerData } from '../Server/emoji-marker-rules.mjs'
 import './EmojiCalendarMarkers.css'
 
 export function useCalendarEmojiMarkers() {
