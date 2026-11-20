@@ -3,6 +3,7 @@ import {
   parseTrustedShareRecipients, type TrustedShareRecipient,
 } from './eventSharingUiModel'
 import HouseholdAdminSettings from './HouseholdAdminSettings'
+import FamilyMemberAccessSettings from './FamilyMemberAccessSettings'
 import './HouseholdMembersSettings.css'
 
 type Household = {
@@ -327,6 +328,8 @@ export default function HouseholdMembersSettings() {
                   ))}
                 </div>
               </div>
+
+              <FamilyMemberAccessSettings />
 
               <div className="household-settings-card">
                 <h2>Invite a household member</h2>

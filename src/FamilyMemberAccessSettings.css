@@ -1,0 +1,16 @@
+.family-member-access { display: grid; gap: 1rem; }
+.family-member-access h2 { margin-bottom: 0; }
+.family-member-access-password { display: grid; gap: .35rem; font-weight: 600; }
+.family-member-access-password input { box-sizing: border-box; width: 100%; max-width: 28rem; min-height: 2.5rem; padding: .6rem .75rem; border: 1px solid var(--border-color, #b9c4d1); border-radius: .65rem; font: inherit; }
+.family-member-access-member { display: grid; gap: .8rem; padding: 1rem 0; border-top: 1px solid var(--border-color, #d0d8e0); }
+.family-member-access-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem; }
+.family-member-access-heading span { font-size: .85rem; opacity: .78; }
+.family-member-access-field { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.family-member-access-field label { min-width: 7rem; font-weight: 600; }
+.family-member-access-field select { min-height: 2.5rem; padding: .45rem .55rem; border: 1px solid var(--border-color, #b9c4d1); border-radius: .65rem; background: var(--card-bg, #fff); color: inherit; max-width: 100%; font: inherit; }
+.family-member-access-field button { min-height: 2.5rem; padding: .5rem .8rem; border: 1px solid var(--border-color, #aebcca); border-radius: .65rem; background: var(--card-bg, #fff); color: inherit; cursor: pointer; font: inherit; }
+.family-member-access-field button:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 600px) {
+  .family-member-access-field { align-items: stretch; flex-direction: column; }
+  .family-member-access-field select, .family-member-access-field button { width: 100%; }
+}

@@ -41,7 +41,10 @@ import { createIndependentHouseholdInvitationTables, issueIndependentHouseholdIn
   revokeIndependentHouseholdInvitation, listIndependentHouseholdAdministration,
 } from './independent-household-invitations.mjs'
 import { listHouseholdMembers } from './household-member-directory.mjs'
-import { createFamilyMemberAccessTables, getVerifiedFamilyMemberAuthorization } from './family-member-access.mjs'
+import { createFamilyMemberAccessTables, getFamilyMemberAuthorization, getVerifiedFamilyMemberAuthorization,
+  setFamilyMemberType, setFamilyMemberPersonLink, setFamilyMemberPermission, FAMILY_ACTIONS,
+} from './family-member-access.mjs'
+import { createOwnerPasswordStepUp } from './family-owner-step-up.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { createPrivateActivationRecords, approvePrivateHouseholdActivation,
@@ -553,6 +556,7 @@ export async function startPrivateHouseholdGateway({
   // Drain any persisted pending intents before accepting browser traffic.
   // If a source DB is unavailable, startup fails instead of serving stale data.
   reconcilePendingShares()
+  const ownerPasswordStepUp = createOwnerPasswordStepUp()
   const app = express()
   app.disable('x-powered-by')
   // Login is the only endpoint that needs parsed JSON. All calendar request
@@ -825,14 +829,130 @@ export async function startPrivateHouseholdGateway({
             username: member.username, memberType: actor?.role ?? null,
             linkedPersonId: actor?.personId ?? null,
             linkedPersonName: person?.name ?? null,
+            allowedActions: actor?.permissions ?? [],
           }
         })
+        // Owner-scoped EXISTING People only. Never let a browser create or
+        // modify a People row as a side effect of account linking.
+        const availablePeople = calendarDb.prepare(
+          'SELECT id, name FROM people ORDER BY name COLLATE NOCASE, id'
+        ).all().map(person => ({ ...person }))
         response.set('Cache-Control', 'no-store')
-        response.json({ members })
+        response.json({ members, availablePeople })
       } finally {
         calendarDb.close()
       }
     }))
+
+  // PRIVATE LOCAL GATEWAY ONLY. Sensitive account operations require the
+  // Owner's actual password on EVERY change; the personal phone's valid
+  // session alone is not administrative step-up. No 4-digit mobile PIN.
+  // The existing auth middleware enforces HTTPS same-origin CSRF first.
+  async function changeMemberAsVerifiedOwner(request, response, action) {
+    const household = trustedHousehold(request, response)
+    if (!household) return
+    const ownerUserId = request.familyAccount.user_id
+    const actor = getFamilyMemberAuthorization(identityDatabase, {
+      householdId: household.householdId,
+      serverVerifiedUserId: ownerUserId,
+    })
+    if (actor?.role !== 'owner') {
+      return response.status(403).json({ error: 'Household Owner required.' })
+    }
+    const memberUserId = decimalPathId(request.params.id)
+    if (!memberUserId) {
+      return response.status(400).json({ error: 'Invalid family member.' })
+    }
+    let reverified
+    try {
+      reverified = await ownerPasswordStepUp.verify(identityDatabase, {
+        serverVerifiedUserId: ownerUserId,
+        password: request.body?.ownerPassword,
+      })
+    } catch (error) {
+      console.error('Owner password verification unavailable:', error?.message)
+      return response.status(503).json({ error: 'Owner verification unavailable.' })
+    }
+    if (reverified.status === 'limited') {
+      response.set('Retry-After', String(reverified.retryAfter))
+      return response.status(429).json({ error: 'Too many password attempts. Try later.' })
+    }
+    if (reverified.status === 'busy') {
+      response.set('Retry-After', '1')
+      return response.status(503).json({ error: 'Owner verification is busy.' })
+    }
+    if (reverified.status !== 'verified') {
+      return response.status(403).json({ error: 'Owner password verification failed.' })
+    }
+    // Membership and Owner role are checked AGAIN in the transactional
+    // setter after awaiting scrypt; stale/revoked sessions cannot mutate.
+    try {
+      await action(household.householdId, ownerUserId, memberUserId)
+      response.set('Cache-Control', 'no-store')
+      return response.json({ ok: true })
+    } catch (error) {
+      const message = error?.message ?? ''
+      if (message === 'Person does not exist in this household calendar.' ||
+          message === 'Member type must be adult or child.' ||
+          message === 'Permission enabled must be a boolean.') {
+        return response.status(400).json({ error: 'Invalid member setting.' })
+      }
+      if (message.includes('UNIQUE constraint failed')) {
+        return response.status(409).json({ error: 'This Person is already linked to an account.' })
+      }
+      if (/Owner required|Target must be|not delegable|Adult administrative|Member must be|Target must be an active/.test(message)) {
+        return response.status(403).json({ error: 'Member change is not permitted.' })
+      }
+      console.error('Member management unavailable:', message)
+      return response.status(503).json({ error: 'Member change temporarily unavailable.' })
+    }
+  }
+
+  const parseMemberChange = express.json({ limit: '8kb' })
+
+  app.post('/api/households/members/:id/type', parseMemberChange, (request, response) => {
+    if (!['adult', 'child'].includes(request.body?.memberType)) {
+      return response.status(400).json({ error: 'Choose Adult or Child.' })
+    }
+    return changeMemberAsVerifiedOwner(request, response, (householdId, ownerUserId, memberUserId) =>
+      setFamilyMemberType(identityDatabase, {
+        householdId, serverVerifiedOwnerUserId: ownerUserId,
+        targetUserId: memberUserId, memberType: request.body.memberType,
+      }))
+  })
+
+  app.post('/api/households/members/:id/person', parseMemberChange, (request, response) => {
+    const personId = request.body?.personId
+    if (!request.body || !Object.hasOwn(request.body, 'personId') ||
+        (personId !== null && (!Number.isSafeInteger(personId) || personId < 1))) {
+      return response.status(400).json({ error: 'Choose an existing Person or Unlink.' })
+    }
+    return changeMemberAsVerifiedOwner(request, response, (householdId, ownerUserId, memberUserId) => {
+      const storage = resolveHouseholdStorage({ serverDirectory, storageRoot, householdId })
+      const calendarDb = new DatabaseSync(storage.databasePath, { readOnly: true })
+      try {
+        return setFamilyMemberPersonLink(identityDatabase, {
+          householdId, serverVerifiedOwnerUserId: ownerUserId,
+          targetUserId: memberUserId, personId, householdDatabase: calendarDb,
+        })
+      } finally {
+        calendarDb.close()
+      }
+    })
+  })
+
+  app.post('/api/households/members/:id/permission', parseMemberChange, (request, response) => {
+    const { action, enabled } = request.body ?? {}
+    if (typeof action !== 'string' || !FAMILY_ACTIONS.includes(action) ||
+        typeof enabled !== 'boolean') {
+      return response.status(400).json({ error: 'Choose a valid permission and state.' })
+    }
+    return changeMemberAsVerifiedOwner(request, response, (householdId, ownerUserId, memberUserId) =>
+      setFamilyMemberPermission(identityDatabase, {
+        householdId, serverVerifiedOwnerUserId: ownerUserId,
+        targetUserId: memberUserId, action, enabled,
+      }))
+  })
 
   app.use('/api/households', (_request, response) => {
     response.status(404).json({ error: 'Not found.' })

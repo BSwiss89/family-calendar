@@ -1,5 +1,6 @@
 import './test-family-member-access.mjs' // Include draft member-role security checks in existing household CI gate.
 import './test-family-member-profile-link.mjs' // Verify account-to-People linking and stale-profile denial.
+import './test-family-owner-step-up.mjs' // Guard sensitive Owner changes with bounded password verification.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
