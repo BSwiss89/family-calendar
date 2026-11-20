@@ -48,9 +48,9 @@ function auth(db, userId, householdId = 'home-a') {
 }
 
 test('only one active Owner can be registered for a household', t => {
-  const { db, ownerA, adult } = fixture(t)
+  const { db, ownerA, outsider } = fixture(t)
   assert.throws(() => grantHouseholdMembership(db, {
-    serverVerifiedUserId: adult, householdId: 'home-b', role: 'owner',
+    serverVerifiedUserId: outsider, householdId: 'home-b', role: 'owner',
   }), /UNIQUE/)
   // The independent one-household-per-user constraint still applies.
   assert.equal(auth(db, ownerA).role, 'owner')
