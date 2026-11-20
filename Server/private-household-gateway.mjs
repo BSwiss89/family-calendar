@@ -45,6 +45,8 @@ import { createFamilyMemberAccessTables, getFamilyMemberAuthorization, getVerifi
   setFamilyMemberType, setFamilyMemberPersonLink, setFamilyMemberPermission, FAMILY_ACTIONS,
 } from './family-member-access.mjs'
 import { createOwnerPasswordStepUp } from './family-owner-step-up.mjs'
+import { createFamilyPasswordRecoveryTables } from './family-password-recovery.mjs'
+import { installPrivateRecoveryPublic, installPrivateRecoveryOperator } from './private-family-password-recovery.mjs'
 import { installPrivateMemberRouteEnforcement } from './family-member-route-enforcement.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
@@ -409,6 +411,7 @@ export async function startPrivateHouseholdGateway({
   // Central identity only; no migrations to any family's calendar database.
   createFamilyMemberAccessTables(identityDatabase)
   createIndependentHouseholdInvitationTables(identityDatabase)
+  createFamilyPasswordRecoveryTables(identityDatabase)
   createPrivateActivationRecords(identityDatabase)
   // The trusted host may only rebind a generated independent household that
   // was explicitly approved after its previous identity-checked activation.
@@ -569,6 +572,8 @@ export async function startPrivateHouseholdGateway({
   // Calendar requests (including multipart uploads) still stream unchanged.
   app.use('/api/auth/login', express.json({ limit: '32kb' }))
   app.use('/api/auth/device-profile', express.json({ limit: '8kb', strict: true }))
+  // Secure public request and one-time reset claim before required login.
+  installPrivateRecoveryPublic(app, { identityDatabase, serverDirectory })
   // Only this exact anonymous join flow precedes required session protection.
   installPrivateHouseholdSignup(app, identityDatabase, serverDirectory)
   installPrivateIndependentHouseholdSignup(app, {
@@ -577,6 +582,12 @@ export async function startPrivateHouseholdGateway({
   })
   installFamilyAuth(app, identityDatabase, serverDirectory, 'required', {
     cookieName: '__Host-fc_gateway_session',
+  })
+  // Operator review and opt-in contact editing require a verified existing
+  // session, and one more real password check before sensitive writes.
+  installPrivateRecoveryOperator(app, {
+    identityDatabase, trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+    passwordStepUp: ownerPasswordStepUp,
   })
   // This policy must register BEFORE gateway-owned Arney/share endpoints
   // AND the backend proxy. If enabled, unknown API routes fail closed.
