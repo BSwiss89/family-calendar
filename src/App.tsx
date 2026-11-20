@@ -35,6 +35,7 @@ import ArneyRecipeCarousel from './ArneyRecipeCarousel'
 import FamilyDailyNotes from './FamilyDailyNotes'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
 import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
+import { useCalendarEmojiMarkers, EmojiMarkerDayButton, EmojiMarkerEventForm } from './EmojiCalendarMarkers'
 import {
   eventMatchesCalendarPersonFilter,
   toggleCalendarPersonFilterIds,
@@ -1995,6 +1996,7 @@ async function prepareCaptureImage(
 
 function App() {
   const today = new Date()
+  const emojiCalendar = useCalendarEmojiMarkers()
 
 const [page, setPage] =
   useState<
@@ -3257,6 +3259,8 @@ const [viewingOccurrenceDate, setViewingOccurrenceDate] =
   setDetailsDeleteConfirmOpen,
 ] = useState(false)
   const [isAddingEvent, setIsAddingEvent] = useState(false)
+const [iconOnlyMode, setIconOnlyMode] = useState(false)
+const [iconMarkerManageExisting, setIconMarkerManageExisting] = useState(false)
 const [quickAddOpen, setQuickAddOpen] = useState(false)
 
 const calendarPlusHoldRef = useRef<ArneyPlusHoldController | null>(null)
@@ -10483,6 +10487,21 @@ location: eventLocation,
   await loadEvents()
   clearEventForm()
 }
+function openIconOnlyFromMonth(dateKey: string) {
+  const [dateYear, dateMonth, dateDay] = dateKey.split('-').map(Number)
+  if (!dateYear || !dateMonth || !dateDay) return
+  clearEventForm()
+  setMonthEventsOpen(false)
+  setViewDate(new Date(dateYear, dateMonth - 1, 1))
+  setWeekDate(new Date(dateYear, dateMonth - 1, dateDay))
+  setSelectedDay(dateDay)
+  setEventStartDate(dateKey)
+  setEventStartDateText(formatDateKeyForText(dateKey))
+  setIconOnlyMode(true)
+  setIconMarkerManageExisting(true)
+  setIsAddingEvent(true)
+}
+
 function closeEventModal() {
   if (eventModalClosing) {
     return
@@ -10503,6 +10522,8 @@ function getDefaultEventPersonIds(): number[] {
     : []
 }
  function clearEventForm() {
+setIconOnlyMode(false)
+setIconMarkerManageExisting(false)
 setEditingEventId(null)
 setDuplicateSourceEventId(null)
 setViewingEventId(null)
@@ -17045,6 +17066,7 @@ const visibleDayEventCount =
               >
                 <div className="month-day-open-zone">
   <strong>{day}</strong>
+  <EmojiMarkerDayButton dateKey={daySharedEventKey} markers={emojiCalendar.markers} onOpen={openIconOnlyFromMonth} />
 </div>
 
                 <div
@@ -19157,16 +19179,32 @@ const occurrenceEndDate =
   </>
 ) : (
   <>
-          <div className="event-modal-heading-row">
+          <div className={`event-modal-heading-row ${
+    editingEventId === null && duplicateSourceEventId === null
+      ? 'event-add-mode-heading'
+      : ''
+  }`}>
   <h2>
     {editingEventId !== null
       ? 'Edit Event'
       : duplicateSourceEventId !== null
         ? 'Duplicate Event'
-        : 'Add Event'}
+        : iconOnlyMode ? 'Add Icon' : 'Add Event'}
   </h2>
 
-  {people.length > 0 && (
+  {editingEventId === null && duplicateSourceEventId === null && (
+    <label className="event-icon-only-toggle">
+      <span>Icon Only</span>
+      <input type="checkbox" role="switch" aria-label="Icon Only"
+        checked={iconOnlyMode}
+        onChange={(event) => {
+          setIconOnlyMode(event.target.checked)
+          setIconMarkerManageExisting(false)
+        }} />
+    </label>
+  )}
+
+  {!iconOnlyMode && people.length > 0 && (
     <div className="event-header-people event-header-people-desktop">
   <div className="family-slider event-header-family-slider">
     {people.map((person) => {
@@ -19293,6 +19331,20 @@ const occurrenceEndDate =
   </p>
 )}
 
+                  {iconOnlyMode ? (
+                    <EmojiMarkerEventForm
+                      key={String(iconMarkerManageExisting) + '-' + (eventStartDate || getDateKey(selectedDay))}
+                      dateKey={eventStartDate || getDateKey(selectedDay)}
+                      markers={emojiCalendar.markers}
+                      manageExisting={iconMarkerManageExisting}
+                      onCancel={closeEventModal}
+                      onSaved={async () => {
+                        await emojiCalendar.reload()
+                        closeEventModal()
+                      }}
+                    />
+                  ) : (
+                    <>
                   {duplicateSourceEventId !== null && (
                     <p className="event-duplicate-notice">
                       Change the date or time, then create your copy.
@@ -20241,6 +20293,8 @@ const occurrenceEndDate =
    
   </>
 )}
+                    </>
+                  )}
                 </>
               )}
                       </>
