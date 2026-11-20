@@ -27,7 +27,7 @@ import {
   grantHouseholdMembership,
 } from '../Server/household-memberships.mjs'
 import { setFamilyAccount } from '../Server/family-auth.mjs'
-import { setFamilyMemberType } from '../Server/family-member-access.mjs'
+import { setFamilyMemberType, setFamilyMemberPermission } from '../Server/family-member-access.mjs'
 import {
   createEventShareTables, registerTrustedShareConnection,
   inviteSelectedEvents, respondToEventInvitation,
@@ -1724,6 +1724,118 @@ test('client disconnect cannot clear a share update while backend is still commi
       await new Promise(resolve => fakeBackendB.close(resolve))
     }
     central.close()
+    fs.rmSync(work, { recursive: true, force: true })
+  }
+})
+
+test('opt-in private gateway enforces real authenticated Child/Owner actions before backend routing', {
+  timeout: 60000,
+}, async () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'calendar-family-permissions-gateway-'))
+  const storageRoot = path.join(work, 'storage')
+  fs.mkdirSync(storageRoot)
+  const identity = new DatabaseSync(path.join(work, 'identity.db'))
+  let gateway = null
+  let backend = null
+  try {
+    provisionEmptyHousehold({ serverDirectory, storageRoot, householdId: 'family-a' })
+    createHouseholdMembershipTables(identity)
+    setFamilyAccount(identity, 'pilot-owner', 'Pilot Owner', testPassword)
+    setFamilyAccount(identity, 'pilot-child', 'Pilot Child', testPassword)
+    const ownerId = identity.prepare('SELECT id FROM family_users WHERE username = ?')
+      .get('pilot-owner').id
+    const childId = identity.prepare('SELECT id FROM family_users WHERE username = ?')
+      .get('pilot-child').id
+    registerHousehold(identity, { householdId: 'family-a', displayName: 'Family A' })
+    grantHouseholdMembership(identity, {
+      serverVerifiedUserId: ownerId, householdId: 'family-a', role: 'owner',
+    })
+    grantHouseholdMembership(identity, {
+      serverVerifiedUserId: childId, householdId: 'family-a', role: 'member',
+    })
+    setFamilyMemberType(identity, {
+      householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+      targetUserId: childId, memberType: 'child',
+    })
+    const used = new Set()
+    const port = await randomPort(used)
+    const token = randomBytes(32).toString('hex')
+    backend = startBackend(storageRoot, 'family-a', port, token)
+    await waitForBackend(backend)
+    gateway = await startPrivateHouseholdGateway({
+      identityDatabase: identity, serverDirectory, storageRoot,
+      backendPorts: { 'family-a': port },
+      backendTokens: { 'family-a': token },
+      enforceFamilyMemberPermissions: true,
+    })
+    const ownerCookie = await login(gateway.base, 'pilot-owner')
+    const childCookie = await login(gateway.base, 'pilot-child')
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: childCookie,
+    })).response.status, 200)
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: ownerCookie,
+    })).response.status, 200)
+    const event = { date: '2026-12-21', title: 'Verified Owner event', time: '10:00' }
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: childCookie, body: { ...event, role: 'owner', selectedProfile: 'Home' },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, '/api/lists', {
+      cookie: childCookie, body: { name: 'Children cannot bypass lists' },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, '/api/ai/event-action-confirm', {
+      cookie: childCookie, body: { confirm: true },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, '/api/ai/cancel-confirmed', {
+      cookie: childCookie, body: { confirm: true },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, '/api/events/01', {
+      cookie: ownerCookie, method: 'DELETE',
+    })).response.status, 403, 'unknown alias cannot bypass policy')
+    assert.equal((await json(gateway.base, '/api/tasks/1/complete', {
+      cookie: childCookie, body: {},
+    })).response.status, 403, 'no unverified assigned-task writes')
+    assert.equal((await json(gateway.base, '/api/auth/device-profile', {
+      cookie: childCookie, body: { kind: 'home' },
+    })).response.status, 200)
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: childCookie, body: event,
+    })).response.status, 403, 'Home device selection does not elevate the child')
+    const created = await json(gateway.base, '/api/events', {
+      cookie: ownerCookie, body: event,
+    })
+    assert.equal(created.response.status, 201)
+    assert.equal((await json(gateway.base, '/api/events/' + created.value.id, {
+      cookie: childCookie, method: 'DELETE',
+    })).response.status, 403)
+    setFamilyMemberPermission(identity, {
+      householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+      targetUserId: childId, action: 'events.create', enabled: true,
+    })
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: childCookie, body: {
+        date: '2026-12-22', title: 'Explicitly allowed child event', time: '12:00',
+      },
+    })).response.status, 201)
+    setFamilyMemberPermission(identity, {
+      householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+      targetUserId: childId, action: 'events.create', enabled: false,
+    })
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: childCookie, body: event,
+    })).response.status, 403)
+    identity.prepare('UPDATE household_memberships SET disabled = 1 WHERE user_id = ?')
+      .run(childId)
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: childCookie,
+    })).response.status, 403, 'revoked member immediately loses even read access')
+    assert.equal((await json(gateway.base, '/api/events', {
+      cookie: ownerCookie,
+    })).response.status, 200)
+  } finally {
+    if (gateway) await gateway.close()
+    if (backend) await stopBackend(backend)
+    identity.close()
     fs.rmSync(work, { recursive: true, force: true })
   }
 })
