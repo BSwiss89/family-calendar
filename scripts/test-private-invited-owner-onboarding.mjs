@@ -185,7 +185,7 @@ test('operator invitation creates two independent Owner logins; neither can view
   assert.equal((await req('/api/households', { cookie: a.cookie })).data.count, 1)
   assert.equal((await req('/api/households', { cookie: b.cookie })).data.count, 1)
   assert.equal(db.prepare([
-    'SELECT COUNT(*) AS n FROM household_memberships WHERE role="owner"',
+    "SELECT COUNT(*) AS n FROM household_memberships WHERE role = 'owner'",
   ].join(' ')).get().n, 2, 'one Owner per independent family, not two Owners for one family')
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n, 4)
   assert.equal((await req('/api/households/my-onboarding', { cookie: unrelated }))
