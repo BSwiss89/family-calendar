@@ -221,15 +221,12 @@ try {
     $oldPid = ValidateLive $false 0
     Write-Host "PASS: Secure LIVE authenticated and healthy (Node PID $oldPid)"
     Write-Host "Candidate SHA: $candidateSha"
-    if (-not $Apply) {
-        Write-Host 'LIVE_SHARED_FOUNDATION_PREVIEW=PASS; LIVE_AND_TEST_UNCHANGED'
-        return
-    }
-
-    # Reproduce output from committed source, and re-run regression tests before stopping LIVE.
+    # One preflight handles the CI check, isolated build, regression tests,
+    # SQLite backup/restore verification and uploads backup before any cutover.
+    # Apply mode repeats the exact same checks with a new snapshot.
     Push-Location $stage
     try {
-        & node --test scripts/test-live-notification-inbox-pilot.mjs scripts/test-notification-mutation-attribution.mjs scripts/test-arney-planning.mjs scripts/test-family-daily-notes.mjs scripts/test-live-event-invitations.mjs scripts/test-family-auth.mjs scripts/test-household-profile-selection.mjs
+        & node --test scripts/test-calendar-input-validation.mjs scripts/test-calendar-recurrence.mjs scripts/test-live-site-routes.mjs scripts/test-live-notification-inbox-pilot.mjs scripts/test-notification-mutation-attribution.mjs scripts/test-live-event-invitations.mjs scripts/test-live-informational-push.mjs scripts/test-live-household-event-join.mjs scripts/test-family-auth.mjs scripts/test-household-profile-selection.mjs
         if ($LASTEXITCODE -ne 0) { throw 'Candidate LIVE notification, privacy and regression tests failed' }
         & npm.cmd run build
         if ($LASTEXITCODE -ne 0) { throw 'Candidate frontend build failed' }
@@ -266,26 +263,7 @@ try {
     New-Item -ItemType Directory -Path $online -ErrorAction Stop | Out-Null
     & $node (Join-Path $stage 'scripts\live-profile-db-check.mjs') backup (Join-Path $live 'Server\data\calendar.db') $online (Join-Path $testRoot 'Server\data\calendar.db') (Join-Path $live 'Server\uploads') (Join-Path $testRoot 'Server\uploads')
     Assert ($LASTEXITCODE -eq 0) 'Pre-cutover LIVE SQLite backup, integrity and isolated restore passed'
-    # Fetch exact candidate code before stopping the running LIVE task.
-    & git -C $live fetch --no-tags $stage $candidateSha
-    Assert ($LASTEXITCODE -eq 0 -and (GitHead $live) -ceq $baseline) 'Exact source fetched; running LIVE unchanged'
-    Assert (([string](& git -C $live rev-parse FETCH_HEAD)).Trim() -ceq $candidateSha) 'Fetched exact CI-tested SHA'
-
-    Disable-ScheduledTask -TaskName $autoTaskName -ErrorAction Stop | Out-Null
-    $autoPaused = $true
-    Disable-ScheduledTask -TaskName $watchdogName -ErrorAction Stop | Out-Null
-    $watchdogPaused = $true
-    Assert ((Get-ScheduledTask -TaskName $watchdogName).State -ne 'Running') 'Watchdog paused before cutover'
-    Disable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
-    $serverTouched = $true
-    Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
-    WaitStopped
-    Write-Host 'PASS: Previous LIVE listener safely stopped'
-    # Cold backup includes all committed LIVE database activity up to shutdown.
-    $cold = Join-Path $runBackup 'cold-sqlite'
-    New-Item -ItemType Directory -Path $cold -ErrorAction Stop | Out-Null
-    & $node (Join-Path $stage 'scripts\live-profile-db-check.mjs') backup (Join-Path $live 'Server\data\calendar.db') $cold (Join-Path $testRoot 'Server\data\calendar.db') (Join-Path $live 'Server\uploads') (Join-Path $testRoot 'Server\uploads')
-    Assert ($LASTEXITCODE -eq 0) 'Cold LIVE SQLite backup and independent restore passed'
+    # Verify and back up every LIVE upload while services remain running.
     $uploads = Join-Path $live 'Server\uploads'
     $savedUploads = Join-Path $runBackup 'uploads'
     New-Item -ItemType Directory -Path $savedUploads -ErrorAction Stop | Out-Null
@@ -304,25 +282,70 @@ try {
         $copy = Join-Path $savedUploads $relative
         Assert ((Test-Path -LiteralPath $copy) -and (Digest $file.FullName) -ceq (Digest $copy)) 'LIVE upload backup hash verified'
     }
+    Assert ((ValidateLive $false 0) -eq $oldPid -and (GitHead $live) -ceq $baseline) 'Running LIVE unchanged after snapshot'
+    Assert ((Get-ScheduledTask -TaskName $testAutoName).Settings.Enabled -and (GitHead $testRoot) -ceq $pinnedTest) 'TEST auto-deploy enabled and TEST source unchanged'
+    if (-not $Apply) {
+        Write-Host "LIVE_SHARED_FOUNDATION_PREFLIGHT=PASS | CANDIDATE=$candidateSha | RECOVERY_FOLDER=$runBackup"
+        Write-Host 'NO_LIVE_DEPLOYMENT=TRUE | TEST_AUTO_DEPLOY=ENABLED | SQLITE_RESTORE_AND_UPLOADS=VERIFIED'
+        return
+    }
+    # Separately authorized -Apply is the only path that can stop LIVE.
+
+    # Fetch exact candidate code before stopping the running LIVE task.
+    & git -C $live fetch --no-tags $stage $candidateSha
+    Assert ($LASTEXITCODE -eq 0 -and (GitHead $live) -ceq $baseline) 'Exact source fetched; running LIVE unchanged'
+    Assert (([string](& git -C $live rev-parse FETCH_HEAD)).Trim() -ceq $candidateSha) 'Fetched exact CI-tested SHA'
+
+    if ($originalAutoEnabled) {
+        Disable-ScheduledTask -TaskName $autoTaskName -ErrorAction Stop | Out-Null
+        $autoPaused = $true
+    }
+    Disable-ScheduledTask -TaskName $watchdogName -ErrorAction Stop | Out-Null
+    $watchdogPaused = $true
+    Assert ((Get-ScheduledTask -TaskName $watchdogName).State -ne 'Running') 'Watchdog paused before cutover'
+    Disable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
+    $serverTouched = $true
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    WaitStopped
+    Write-Host 'PASS: Previous LIVE listener safely stopped'
+    # Cold backup includes all committed LIVE database activity up to shutdown.
+    $cold = Join-Path $runBackup 'cold-sqlite'
+    New-Item -ItemType Directory -Path $cold -ErrorAction Stop | Out-Null
+    & $node (Join-Path $stage 'scripts\live-profile-db-check.mjs') backup (Join-Path $live 'Server\data\calendar.db') $cold (Join-Path $testRoot 'Server\data\calendar.db') (Join-Path $live 'Server\uploads') (Join-Path $testRoot 'Server\uploads')
+    Assert ($LASTEXITCODE -eq 0) 'Cold LIVE SQLite backup and independent restore passed'
+    # Cold snapshot captures any uploads written between preflight and shutdown.
+    $coldUploads = Join-Path $runBackup 'cold-uploads'
+    New-Item -ItemType Directory -Path $coldUploads -ErrorAction Stop | Out-Null
+    foreach ($item in @(Get-ChildItem -LiteralPath $uploads -Force -ErrorAction Stop)) {
+        Copy-Item -LiteralPath $item.FullName -Destination $coldUploads -Recurse -ErrorAction Stop
+    }
+    $sourceFiles = @(Get-ChildItem -LiteralPath $uploads -Recurse -File -Force)
+    $coldFiles = @(Get-ChildItem -LiteralPath $coldUploads -Recurse -File -Force)
+    Assert ($sourceFiles.Count -eq $coldFiles.Count) 'Cold LIVE uploads file count preserved'
+    foreach ($file in $sourceFiles) {
+        $relative = $file.FullName.Substring($uploads.Length).TrimStart([char]'\')
+        $copy = Join-Path $coldUploads $relative
+        Assert ((Test-Path -LiteralPath $copy) -and (Digest $file.FullName) -ceq (Digest $copy)) 'Cold LIVE uploads hash verified'
+    }
 
     # Switch reviewed frontend and backend helpers; preserve all existing LIVE data.
-    & git -C $live -c advice.detachedHead=false checkout --quiet --detach $candidateSha
-    if ($LASTEXITCODE -ne 0) { throw 'Could not switch secure LIVE notification source' }
     $gitChanged = $true
+    & git -C $live -c advice.detachedHead=false checkout --quiet --detach $candidateSha
+    if ($LASTEXITCODE -ne 0) { throw 'Could not switch secure LIVE shared-foundation source' }
     Assert ((GitHead $live) -ceq $candidateSha) 'Secure LIVE source switched to CI-tested notification candidate'
     Move-Item -LiteralPath $oldDistPath -Destination $oldDistBackup -ErrorAction Stop
     $distMoved = $true
     Move-Item -LiteralPath $preparedDist -Destination $oldDistPath -ErrorAction Stop
     Assert ((DistManifest $oldDistPath) -ceq $candidateManifest) 'Approved frontend installed with exact asset hashes'
-    Set-SecureLiveLauncher $plan.Candidate $launcher
     $launcherChanged = $true
+    Set-SecureLiveLauncher $plan.Candidate $launcher
     Assert-SecureLiveLauncherPins $launcher $live
     Enable-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
     Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
     $newPid = WaitHealthy $oldPid
     & $node (Join-Path $stage 'scripts\live-profile-db-check.mjs') verify (Join-Path $live 'Server\data\calendar.db') $cold (Join-Path $testRoot 'Server\data\calendar.db') (Join-Path $live 'Server\uploads') (Join-Path $testRoot 'Server\uploads')
     Assert ($LASTEXITCODE -eq 0) 'LIVE SQLite integrity and prior row counts preserved'
-    Assert ((GitHead $testRoot) -ceq $pinnedTest) 'TEST checkout remains unchanged'
+    Assert ((GitHead $testRoot) -ceq $pinnedTest -and (Get-ScheduledTask -TaskName $testAutoName).Settings.Enabled) 'TEST checkout and auto-deploy remain unchanged'
     Assert ((GitHead $live) -ceq $candidateSha -and (DistManifest $oldDistPath) -ceq $candidateManifest) 'Secure LIVE source and frontend match approved release'
     Assert ((Get-ScheduledTask -TaskName $taskName).State -eq 'Running') 'Secure LIVE SYSTEM task running'
     if ($originalWatchdogEnabled) { Enable-ScheduledTask -TaskName $watchdogName -ErrorAction Stop | Out-Null }
@@ -333,7 +356,7 @@ try {
     Write-Host "LIVE_SHARED_FOUNDATION_LIVE_DEPLOYMENT=PASS | SHA=$candidateSha | PID=$newPid"
     Write-Host 'AUTHENTICATION=PASS | SQLITE_BACKUP_AND_VERIFY=PASS | UPLOADS_BACKED_UP=PASS | TEST_UNCHANGED=PASS'
     Write-Host "RECOVERY_FOLDER=$runBackup"
-    Write-Host 'LIVE_AUTO_DEPLOY=DISABLED; approval baseline must be updated before re-enabling.'
+    Write-Host 'LIVE_AUTO_DEPLOY=DISABLED | TEST_AUTO_DEPLOY=ENABLED | WATCHDOG=ENABLED'
 } catch {
     $failure = $_.Exception.Message
     Write-Warning "LIVE_SHARED_FOUNDATION_RELEASE_FAILED: $failure"
