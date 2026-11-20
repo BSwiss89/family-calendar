@@ -7,6 +7,7 @@ import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
+import { installExistingTestLoginFamilyPermissions } from './test-existing-login-family-bridge.mjs'
 import { installDailyFamilyNotes } from './daily-family-notes.mjs'
 import { installCalendarEmojiMarkers } from './calendar-emoji-markers.mjs'
 import { isValidDate, isValidTitle, isValidPersonName, isValidColor, cleanOptionalText } from './calendar-input-validation.mjs'
@@ -669,6 +670,53 @@ app.use(express.json())
 // Required mode protects all subsequent calendar APIs, uploads and pages.
 // Disabled by default; never enable public Funnel before a tested rollout.
 installFamilyAuth(app, database, __dirname)
+// Source-only, OFF unless an operator explicitly configures an existing,
+// reviewed central family identity SQLite for secure TEST port 13002.
+// Never create a third calendar, copy credentials, auto-assign the Owner,
+// or share LIVE and TEST sessions. Installed TEST keeps its current behavior.
+const testFamilyAccessMode = process.env.FAMILY_CALENDAR_TEST_FAMILY_ACCESS_MODE ?? 'off'
+if (!['off', 'enforce'].includes(testFamilyAccessMode)) {
+  throw new Error('Invalid TEST family access mode.')
+}
+if (testFamilyAccessMode === 'enforce') {
+  if (PORT !== 13002 || householdStorage.mode !== 'legacy' ||
+      process.env.FAMILY_CALENDAR_AUTH_MODE !== 'required') {
+    throw new Error('Family account enforcement requires the authenticated existing TEST site.')
+  }
+  const candidate = process.env.FAMILY_CALENDAR_TEST_FAMILY_IDENTITY_DB
+  const familyId = process.env.FAMILY_CALENDAR_TEST_FAMILY_HOUSEHOLD_ID
+  if (typeof candidate !== 'string' || !path.isAbsolute(candidate) ||
+      typeof familyId !== 'string' ||
+      !/^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/.test(familyId)) {
+    throw new Error('Trusted TEST identity database path and household ID required.')
+  }
+  // Central identity file must already be provisioned, physically distinct
+  // from all calendar data and outside the application source checkout.
+  // A failed preflight prevents the process from opening the public listener.
+  const centralPath = fs.realpathSync(candidate)
+  const checkout = fs.realpathSync(path.resolve(__dirname, '..'))
+  const relative = path.relative(checkout, centralPath)
+  if (centralPath === fs.realpathSync(databasePath) ||
+      relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep)
+        && !path.isAbsolute(relative))) {
+    throw new Error('TEST family identity must be a separate, external SQLite file.')
+  }
+  const identityDatabase = new DatabaseSync(centralPath, { readOnly: true })
+  const owners = identityDatabase.prepare([
+    'SELECT COUNT(*) AS n FROM household_memberships m',
+    'JOIN household_registry h ON h.id = m.household_id',
+    "JOIN family_users u ON u.id = m.user_id AND u.account_kind = 'person'",
+    "WHERE h.storage_id = ? AND m.role = 'owner'",
+    'AND m.disabled = 0 AND h.disabled = 0 AND u.disabled = 0',
+  ].join(' ')).get(familyId)
+  if (owners?.n !== 1) {
+    identityDatabase.close()
+    throw new Error('Explicitly provision exactly one active household Owner before TEST rollout.')
+  }
+  installExistingTestLoginFamilyPermissions(app, {
+    loginDatabase: database, identityDatabase, householdId: familyId,
+  })
+}
 // Family notes live only in process memory and never enter SQLite or backups.
 installDailyFamilyNotes(app)
 // Household-wide marker CRUD runs behind the existing calendar auth middleware.
