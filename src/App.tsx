@@ -16856,6 +16856,11 @@ createPortal(
               )
             }
 
+            const daySharedEventKey = getDateKeyForMonth(
+              targetYear,
+              targetMonth,
+              day
+            )
             const isToday =
   day === today.getDate() &&
   targetMonth ===
