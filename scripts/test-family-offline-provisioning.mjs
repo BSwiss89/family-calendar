@@ -113,11 +113,13 @@ test('new central identity maps original TEST user IDs with no password hashes, 
 
 test('offline CLI preflight fingerprints account inventory, creates new external SQLite only after exact approval', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'family-test-offline-plan-'))
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const sourceFile = path.join(root, 'test-source.sqlite')
   const planFile = path.join(root, 'private-plan.json')
   const outputFile = path.join(root, 'new-central-identity.sqlite')
   const { source, sourceSummary } = sourceFixture(t, sourceFile)
+  // Windows cannot delete an open SQLite directory. Register cleanup AFTER
+  // sourceFixture's t.after(close) so it executes after connection closure.
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   fs.writeFileSync(planFile, JSON.stringify(plan()), { mode: 0o600 })
   const before = sourceSummary()
   const args = ['--test-db', sourceFile, '--plan', planFile,
@@ -151,11 +153,11 @@ test('offline CLI preflight fingerprints account inventory, creates new external
 
 test('changed existing TEST identity inventory invalidates a previously approved plan', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'family-test-plan-snapshot-'))
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const sourceFile = path.join(root, 'source.sqlite')
   const planFile = path.join(root, 'plan.json')
   const outputFile = path.join(root, 'identity.sqlite')
   const { source } = sourceFixture(t, sourceFile)
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   fs.writeFileSync(planFile, JSON.stringify(plan()))
   const args = ['--test-db', sourceFile, '--plan', planFile,
     '--identity-out', outputFile]
