@@ -1,0 +1,48 @@
+:root { color-scheme: light; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #142438; background: #f1f5fa; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; }
+.shell { max-width: 1150px; margin: 0 auto; padding: 28px clamp(14px, 3vw, 40px) 70px; }
+.masthead { padding: 26px clamp(18px, 3vw, 36px); border-radius: 20px; background: #182a46; color: #f7fafe; }
+.eyebrow { font-size: 12px; font-weight: 800; letter-spacing: .12em; color: #a8c7fa; }
+h1 { margin: 10px 0 6px; font-size: clamp(23px, 4vw, 35px); line-height: 1.2; }
+.masthead p { max-width: 780px; line-height: 1.55; color: #d1def0; }
+.masthead nav { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 25px; }
+.masthead a { color: #f7fafe; font-size: 14px; font-weight: 650; text-decoration: none; border-radius: 9px; padding: 8px 11px; background: #284260; }
+.status-line { min-height: 24px; margin: 14px 0; color: #405c7e; }
+.status-line.is-error { color: #9f2340; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; margin: 22px 0; }
+.stat, .panel { border: 1px solid #dfe5ed; border-radius: 15px; background: white; box-shadow: 0 3px 13px #24365408; }
+.stat { padding: 18px; display: grid; gap: 6px; }
+.stat strong { font-size: 27px; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat span { color: #52637a; font-size: 12px; font-weight: 650; }
+.sections { display: grid; gap: 18px; }
+.panel { padding: clamp(17px, 2.5vw, 28px); scroll-margin-top: 15px; }
+.panel h2 { margin: 0 0 9px; font-size: 21px; }
+.panel h3 { font-size: 16px; margin: 28px 0 14px; }
+.panel p { font-size: 14px; line-height: 1.55; color: #506278; }
+.section-head { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+.stack { display: grid; gap: 11px; margin-top: 17px; }
+.entry { padding: 14px; border: 1px solid #dfe5ed; border-radius: 11px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; align-items: center; }
+.entry-info { display: grid; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
+.entry-info strong { font-size: 15px; }
+.entry-info span { font-size: 13px; color: #52637a; }
+.entry-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 10px; background: #e9effa; color: #1e4668; font-size: 12px; font-weight: 700; }
+.chip.pending { background: #fff4d8; color: #78550c; }
+.chip.configured { background: #e7f3ec; color: #2b634a; }
+button { font: inherit; font-weight: 700; padding: 11px 15px; border: 0; border-radius: 9px; cursor: pointer; background: #295bd7; color: white; min-height: 42px; }
+button:disabled { opacity: .55; cursor: not-allowed; }
+button.quiet-button { background: #edf2ff; color: #234694; }
+button.danger { background: #fbe9ed; color: #ab2d44; }
+button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid #7e9df9; outline-offset: 2px; }
+input[type="text"], input[type="password"] { width: 100%; max-width: 680px; border: 1px solid #aab9d0; border-radius: 8px; padding: 12px; font: inherit; background: white; color: #142438; }
+label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 700; }
+.verification { margin: 16px 0 20px; display: grid; gap: 6px; }
+.checkbox-row { display: flex; align-items: center; gap: 10px; font-weight: 550; line-height: 1.4; }
+.checkbox-row input { width: 20px; height: 20px; flex-shrink: 0; }
+.secret-panel { border-radius: 12px; padding: 16px; margin-top: 16px; background: #f0f5ff; border: 1px solid #cbdaf4; }
+.secret-panel input { display: block; margin-bottom: 10px; font-size: 13px; }
+.secret-panel p { margin-bottom: 0; font-size: 12px; }
+[hidden] { display: none !important; }
+footer { font-size: 12px; line-height: 1.5; color: #52637a; margin-top: 28px; }
+@media (max-width: 650px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .entry { align-items: stretch; flex-direction: column; } .entry-actions button { flex: 1; } .masthead nav { gap: 8px; } }
