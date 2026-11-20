@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { familySiteRoutes } from './familySiteRoutes'
 
-// Only consumed from the authenticated, single-household LIVE pilot. These
+// Only consumed from the authenticated, single-household assignment pilot. These
 // numbers describe assignments for the server-selected device profile; they
 // are not verified personal identities or Web Push subscriptions.
 export const ASSIGNMENT_CHANGE_FIELDS = [
@@ -60,7 +61,7 @@ export function useAssignmentInbox(personId: number | null) {
     try {
       // Do not trigger reconciliation unless this pilot is enabled and the
       // current server session is actually scoped to the selected person.
-      const first = await fetch('/api/live-notification-pilot',{
+      const first = await fetch(familySiteRoutes.assignmentInbox,{
         credentials:'same-origin',cache:'no-store',
       })
       if (!first.ok) throw new Error('Assignment inbox unavailable.')
@@ -69,11 +70,11 @@ export function useAssignmentInbox(personId: number | null) {
         (identity as {personId?:unknown}).personId !== personId) {
         throw new Error('Selected profile differs from the server session.')
       }
-      const reconciled = await fetch('/live-notification-pilot/refresh',{
+      const reconciled = await fetch(familySiteRoutes.assignmentRefresh,{
         method:'POST',credentials:'same-origin',cache:'no-store',
       })
       if (!reconciled.ok) throw new Error('Could not refresh assigned events.')
-      const latest = await fetch('/api/live-notification-pilot',{
+      const latest = await fetch(familySiteRoutes.assignmentInbox,{
         credentials:'same-origin',cache:'no-store',
       })
       if (!latest.ok) throw new Error('Assignment inbox unavailable.')
@@ -119,7 +120,7 @@ export function useAssignmentInbox(personId: number | null) {
     setAcknowledgingId(id)
     setError('')
     try {
-      const response=await fetch('/api/live-notification-pilot/'+id+'/acknowledge',{
+      const response=await fetch(familySiteRoutes.assignmentInbox+'/'+id+'/acknowledge',{
         method:'POST',credentials:'same-origin',cache:'no-store',
       })
       if(!response.ok) throw new Error('Could not acknowledge this notification.')
