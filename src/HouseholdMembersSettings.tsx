@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   parseTrustedShareRecipients, type TrustedShareRecipient,
 } from './eventSharingUiModel'
-import HouseholdAdminSettings from './HouseholdAdminSettings'
 import FamilyMemberAccessSettings from './FamilyMemberAccessSettings'
 import './HouseholdMembersSettings.css'
 
@@ -293,7 +292,6 @@ export default function HouseholdMembersSettings() {
               access to this family's calendar, not a separate one.</p>
           </div>
 
-          <HouseholdAdminSettings />
 
           {household.role === 'owner' ? (
             <>
