@@ -163,7 +163,7 @@ try {
     $missing = @($approved | Where-Object { $changed -cnotcontains $_ })
     $unexpected = @($changed | Where-Object { $approved -cnotcontains $_ })
     Assert ($changed.Count -eq $approved.Count -and $missing.Count -eq 0 -and
-        $unexpected.Count -eq 0) ("Only reviewed LIVE notification and test files changed; " +
+        $unexpected.Count -eq 0) ("Only reviewed LIVE shared-foundation and regression files changed; " +
         "missing=$($missing -join ','); unexpected=$($unexpected -join ',')")
 
     # Abort if unrelated auth, package, schema or primary app source has changed.
@@ -204,7 +204,7 @@ try {
     Assert-SecureLiveLauncherPins $launcher $live
     # GitHub PR build must have succeeded for the exact release candidate SHA.
     $ciUrl = "https://api.github.com/repos/BSwiss89/family-calendar/actions/runs?head_sha=$candidateSha&per_page=100"
-    $runs = Invoke-RestMethod -Uri $ciUrl -Headers @{ 'User-Agent'='FamilyCalendar-LiveNoticeRelease'; 'Accept'='application/vnd.github+json' } -TimeoutSec 20
+    $runs = Invoke-RestMethod -Uri $ciUrl -Headers @{ 'User-Agent'='FamilyCalendar-SharedFoundationRelease'; 'Accept'='application/vnd.github+json' } -TimeoutSec 20
     $matching = @($runs.workflow_runs | Where-Object {
         $_.name -eq 'Build Family Calendar' -and $_.head_sha -ceq $candidateSha -and
         $_.event -eq 'pull_request'
@@ -228,8 +228,10 @@ try {
     # Apply mode repeats the exact same checks with a new snapshot.
     Push-Location $stage
     try {
+        & npm.cmd ci --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw 'Isolated candidate dependency installation failed' }
         & node --experimental-strip-types --test scripts/test-calendar-input-validation.mjs scripts/test-calendar-recurrence.mjs scripts/test-live-site-routes.mjs scripts/test-live-notification-inbox-pilot.mjs scripts/test-notification-mutation-attribution.mjs scripts/test-live-event-invitations.mjs scripts/test-live-informational-push.mjs scripts/test-live-household-event-join.mjs scripts/test-family-auth.mjs scripts/test-household-profile-selection.mjs
-        if ($LASTEXITCODE -ne 0) { throw 'Candidate LIVE notification, privacy and regression tests failed' }
+        if ($LASTEXITCODE -ne 0) { throw 'Candidate LIVE shared calendar, auth and regression tests failed' }
         & npm.cmd run build
         if ($LASTEXITCODE -ne 0) { throw 'Candidate frontend build failed' }
     } finally { Pop-Location }
@@ -238,9 +240,8 @@ try {
     Assert ($candidateManifest.Length -gt 0) 'Candidate frontend manifest ready'
     Assert ((Digest (Join-Path $stageDistPath 'index.html')) -cne $oldHtmlHash) 'Candidate frontend hash differs from prior LIVE'
 
-    # A verified consistent SQLite snapshot and recoverability test (no writes to LIVE DB).
-    & node (Join-Path $homeDir 'Projects\family-calendar\scripts\verify-sqlite-recovery.mjs')
-    if ($LASTEXITCODE -ne 0) { throw 'SQLite snapshot and recovery verification failed' }
+    # The trusted new backup-and-restore verifier runs below; no legacy
+    # project checkout or implicit production data path is used.
     Assert ((ValidateLive $false 0) -eq $oldPid) 'LIVE stayed healthy during preflight'
     Assert ((GitHead $live) -ceq $baseline -and (Digest $launcher) -ceq $oldLauncherHash) 'LIVE baseline unchanged before cutover'
 
@@ -334,7 +335,7 @@ try {
     $gitChanged = $true
     & git -C $live -c advice.detachedHead=false checkout --quiet --detach $candidateSha
     if ($LASTEXITCODE -ne 0) { throw 'Could not switch secure LIVE shared-foundation source' }
-    Assert ((GitHead $live) -ceq $candidateSha) 'Secure LIVE source switched to CI-tested notification candidate'
+    Assert ((GitHead $live) -ceq $candidateSha) 'Secure LIVE source switched to exact CI-tested candidate'
     Move-Item -LiteralPath $oldDistPath -Destination $oldDistBackup -ErrorAction Stop
     $distMoved = $true
     Move-Item -LiteralPath $preparedDist -Destination $oldDistPath -ErrorAction Stop
@@ -411,7 +412,7 @@ try {
     } else {
         Write-Warning "RECOVERY_HOLD=$guardFile"
     }
-    throw "Secure LIVE notification release failed. $failure"
+    throw "Secure LIVE shared-foundation release failed. $failure"
 } finally {
     if ($gotTestLock) { $testMutex.ReleaseMutex() }
     if ($gotLiveLock) { $liveMutex.ReleaseMutex() }
