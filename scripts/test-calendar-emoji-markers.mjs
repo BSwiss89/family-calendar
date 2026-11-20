@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import express from 'express'
 import {
   emojiMarkerOccursOnDate, normalizeEmojiMarkerPayload, validEmojiDate,
-} from '../src/emojiMarkerRules.mjs'
+} from '../Server/emoji-marker-rules.mjs'
 import { installCalendarEmojiMarkers } from '../Server/calendar-emoji-markers.mjs'
 
 function marker(date, extra = {}) {
