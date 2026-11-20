@@ -106,7 +106,7 @@ test('new central identity maps original TEST user IDs with no password hashes, 
   assert.equal(canFamilyMemberAct(actorChild, 'tasks.completeAssigned',
     { assignedPersonId: 1 }), false)
   assert.equal(destination.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n, 0)
-  assert.equal(destination.prepare('SELECT COUNT(*) AS n FROM people').get().n, 0)
+  assert.equal(destination.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='people'").get().n, 0)
   assert.throws(() => provisionFreshTestFamilyIdentity(source, destination, plan()),
     /completely empty/)
 })
