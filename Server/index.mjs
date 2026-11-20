@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import { installDailyFamilyNotes } from './daily-family-notes.mjs'
+import { installCalendarEmojiMarkers } from './calendar-emoji-markers.mjs'
 import { isValidDate, isValidTitle, isValidPersonName, isValidColor, cleanOptionalText } from './calendar-input-validation.mjs'
 import { getRepeatRule, doesEventStartOnDate } from './calendar-recurrence.mjs'
 import { installTestNotificationInboxPilot } from './test-notification-inbox-pilot.mjs'
@@ -670,6 +671,8 @@ app.use(express.json())
 installFamilyAuth(app, database, __dirname)
 // Family notes live only in process memory and never enter SQLite or backups.
 installDailyFamilyNotes(app)
+// Household-wide marker CRUD runs behind the existing calendar auth middleware.
+installCalendarEmojiMarkers(app, database)
 // No routes/schema unless separately approved, TEST-only opt-in startup flag.
 installTestNotificationInboxPilot(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 // Single-household Join/Leave preview; same guarded TEST-only opt-in.
