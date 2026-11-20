@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { familySiteRoutes } from './familySiteRoutes'
 
-// LIVE-only browser binding: the phone's existing push subscription follows the
+// Browser binding: the phone's existing push subscription follows the
 // selected family profile. No per-person password/PIN. Home receives no pushes.
 // Push alerts never accept/decline an invitation; that stays in Invitations.
 type Config = {enabled: true; publicKey: string}
@@ -34,16 +35,16 @@ async function bindExisting(personId: number | null) {
   if (personId === null) {
     // Disable remote delivery for Home before unsubscribing this browser.
     try {
-      await json('/api/live-push/subscriptions',{
+      await json(familySiteRoutes.push + '/subscriptions',{
         method:'DELETE',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({endpoint:subscription.endpoint}),
       })
     } catch { /* Server session's Home selection independently blocks delivery */ }
     return false
   }
-  const status=await json<Status>('/api/live-push/status')
+  const status=await json<Status>(familySiteRoutes.push + '/status')
   if (status.profile !== 'person' || status.personId !== personId) return false
-  await json('/api/live-push/subscriptions',{
+  await json(familySiteRoutes.push + '/subscriptions',{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(subscription.toJSON()),
   })
@@ -74,9 +75,9 @@ export function useFamilyPush(personId: number | null) {
     }
     void (async()=>{
       try {
-        const config=await json<Config>('/api/live-push/config')
+        const config=await json<Config>(familySiteRoutes.push + '/config')
         if (!config.enabled) return
-        const status=await json<Status>('/api/live-push/status')
+        const status=await json<Status>(familySiteRoutes.push + '/status')
         if (status.personId !== personId || status.profile !== 'person') return
         if (number!==sequence.current) return
         publicKey.current=config.publicKey
@@ -112,11 +113,11 @@ export function useFamilyPush(personId: number | null) {
       const subscription=existing || await ready.pushManager.subscribe({
         userVisibleOnly:true,applicationServerKey:bytes,
       })
-      const status=await json<Status>('/api/live-push/status')
+      const status=await json<Status>(familySiteRoutes.push + '/status')
       if (status.profile!=='person' || status.personId!==personId) {
         throw new Error('Select your profile again before enabling notifications.')
       }
-      await json('/api/live-push/subscriptions',{
+      await json(familySiteRoutes.push + '/subscriptions',{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(subscription.toJSON()),
       })
@@ -133,7 +134,7 @@ export function useFamilyPush(personId: number | null) {
     try {
       const subscription=await currentBrowserSubscription()
       if(subscription) {
-        await json('/api/live-push/subscriptions',{
+        await json(familySiteRoutes.push + '/subscriptions',{
           method:'DELETE',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({endpoint:subscription.endpoint}),
         })
