@@ -187,3 +187,122 @@
   }
   .month-calendar-grid .emoji-marker-day-button { right: -2px; width: 24px; font-size: 12px; }
 }
+
+
+/* An Icon Only option lives in the original Add Event header. */
+.event-modal-heading-row.event-add-mode-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+}
+.event-modal-heading-row.event-add-mode-heading h2 {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  white-space: normal;
+  margin: 0;
+}
+.event-modal-heading-row .event-icon-only-toggle {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 7px 9px;
+  box-sizing: border-box;
+  border: 1px solid #d6d0c6;
+  border-radius: 999px;
+  background: #f7f4ee;
+  color: #37322c;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.event-modal-heading-row .event-icon-only-toggle input {
+  width: 19px;
+  height: 19px;
+  margin: 0;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+.event-modal-heading-row.event-add-mode-heading .event-header-people {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-self: start;
+  width: min(430px, 100%);
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+}
+.event-modal-heading-row.event-add-mode-heading .event-header-family-slider {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+}
+.event-modal-card .emoji-marker-inline {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.event-modal-card .emoji-marker-inline .emoji-marker-mode-note {
+  margin: 2px 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #edf3ff;
+  color: #414956;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.event-modal-card .emoji-marker-inline .emoji-marker-emoji-input {
+  width: 85px;
+  max-width: 85px;
+  min-height: 44px;
+  padding: 5px 8px;
+  box-sizing: border-box;
+  font-size: 26px;
+  text-align: center;
+}
+.event-modal-card .emoji-marker-inline .emoji-marker-quick-picker {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin: 4px 0 6px;
+}
+.event-modal-card .emoji-marker-inline .emoji-marker-weekdays {
+  margin: 6px 0;
+}
+.event-modal-card .emoji-marker-inline .emoji-marker-existing {
+  margin: 8px 0 14px;
+}
+.event-modal-card .emoji-marker-inline .emoji-marker-delete-actions {
+  margin-top: 16px;
+}
+.event-modal-card .emoji-marker-inline .emoji-marker-error {
+  margin: 2px 0 0;
+}
+@media (max-width: 760px) {
+  .event-modal-heading-row.event-add-mode-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+  }
+  .event-modal-heading-row .event-icon-only-toggle {
+    font-size: 12px;
+    min-height: 38px;
+    gap: 5px;
+  }
+  .event-modal-heading-row.event-add-mode-heading .event-header-people {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .event-modal-heading-row.event-add-mode-heading .event-header-family-slider {
+    justify-content: flex-start;
+    max-width: 100%;
+  }
+}
