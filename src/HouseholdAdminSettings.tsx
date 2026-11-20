@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import SystemRecoveryAdminSettings from './SystemRecoveryAdminSettings'
 
 type Invitation = { id: number; createdAt: number; expiresAt: number }
 type ManagedHousehold = {
@@ -194,6 +195,7 @@ export default function HouseholdAdminSettings() {
         Refresh status
       </button>
       {(error || notice) && <p role="status" aria-live="polite">{error || notice}</p>}
+      <SystemRecoveryAdminSettings />
     </div>
   )
 }
