@@ -154,7 +154,8 @@ test('dedicated system UI and JS/CSS deny ordinary household Owners and unauthen
     '/api/admin/household-overview',
   ]) {
     const anonymous = await get(asset)
-    assert.equal(anonymous.status, 303, asset + ' needs a real session')
+    assert.equal(anonymous.status, asset.startsWith('/api/') ? 401 : 303,
+      asset + ' needs a real session')
     const unrelated = await get(asset, owner)
     assert.equal(unrelated.status, 403, asset + ' never grants Owner operator power')
     const admin = await get(asset, operator)
