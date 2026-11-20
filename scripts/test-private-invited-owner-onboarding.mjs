@@ -24,6 +24,7 @@ import {
 import {
   installPrivateSystemAdministrator,
 } from '../Server/private-system-administration.mjs'
+import { resolveHouseholdStorage } from '../Server/household-storage.mjs'
 
 const directory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../Server')
 const password = 'Only-Disposable-Invited-Owner-Secure-Password-2026!'
@@ -275,4 +276,65 @@ test('Owner sees pending, approved-unrouted and configured states without browse
     cookie: a.cookie,
   })).data.households, [])
   assert.equal((await req('/my-household', { cookie: a.cookie })).response.status, 403)
+})
+
+
+test('pending activation inspection holds damaged or populated tenant storage without copying data or granting access', async t => {
+  const { db, storageRoot, req, login, inviteAndJoin } = await fixture(t)
+  const owner = await inviteAndJoin('integrityowner', 'Fresh private family')
+  const admin = await login('operatorinvites', operatorPassword)
+  const inspect = async () => {
+    const result = await req('/api/admin/activation-readiness?householdId=' +
+      encodeURIComponent('family-' + 'f'.repeat(24)), { cookie: admin })
+    assert.equal(result.response.status, 200)
+    assert.equal(result.data.checks.length, 1,
+      'caller-supplied household IDs must never change the operator scope')
+    assert.equal(result.data.checks[0].householdId, owner.id)
+    return result.data.checks[0]
+  }
+  assert.equal((await inspect()).stage, 'storage-reviewed-awaiting-backend-proof')
+  const storage = resolveHouseholdStorage({
+    serverDirectory: directory, storageRoot, householdId: owner.id,
+  })
+  // This is a disposable filesystem created in a unique OS temp folder.
+  const household = new DatabaseSync(storage.databasePath)
+  try {
+    household.exec('CREATE TABLE events(id INTEGER PRIMARY KEY, title TEXT NOT NULL)')
+    household.prepare('INSERT INTO events(title) VALUES (?)')
+      .run('Private preactivation data must not be silently adopted')
+    assert.deepEqual(await inspect(), {
+      householdId: owner.id, stage: 'blocked-review',
+      storagePreflight: 'failed',
+    })
+    assert.equal(household.prepare('SELECT COUNT(*) AS n FROM events').get().n, 1,
+      'the inspector does not overwrite or delete a tenant event')
+    household.prepare('DELETE FROM events').run()
+  } finally {
+    household.close()
+  }
+  assert.equal((await inspect()).stage, 'storage-reviewed-awaiting-backend-proof')
+  fs.writeFileSync(path.join(storage.uploadFolder, 'unreviewed-people-photo.txt'),
+    'disposable private file')
+  assert.equal((await inspect()).stage, 'blocked-review')
+  assert.equal(fs.existsSync(path.join(storage.uploadFolder,
+    'unreviewed-people-photo.txt')), true)
+  fs.unlinkSync(path.join(storage.uploadFolder, 'unreviewed-people-photo.txt'))
+  assert.equal((await inspect()).stage, 'storage-reviewed-awaiting-backend-proof')
+  const actualOwner = db.prepare(
+    "SELECT id FROM family_users WHERE username = 'integrityowner'"
+  ).get().id
+  db.prepare('UPDATE household_memberships SET disabled = 1 WHERE user_id = ?')
+    .run(actualOwner)
+  assert.deepEqual(await inspect(), {
+    householdId: owner.id, stage: 'blocked-review',
+    storagePreflight: 'not-evaluated',
+  })
+  assert.equal((await req('/api/households/my-onboarding', {
+    cookie: owner.cookie,
+  })).data.households.length, 0)
+  db.prepare('UPDATE household_memberships SET disabled = 0 WHERE user_id = ?')
+    .run(actualOwner)
+  assert.equal((await inspect()).stage, 'storage-reviewed-awaiting-backend-proof')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM private_activated_households')
+    .get().n, 0, 'readiness can never register approval')
 })
