@@ -565,9 +565,10 @@ export async function startPrivateHouseholdGateway({
   const ownerPasswordStepUp = createOwnerPasswordStepUp()
   const app = express()
   app.disable('x-powered-by')
-  // Login is the only endpoint that needs parsed JSON. All calendar request
-  // bodies, including multipart uploads, must stream through unchanged.
+  // Only login and signed-in device-profile selection need parsed JSON.
+  // Calendar requests (including multipart uploads) still stream unchanged.
   app.use('/api/auth/login', express.json({ limit: '32kb' }))
+  app.use('/api/auth/device-profile', express.json({ limit: '8kb', strict: true }))
   // Only this exact anonymous join flow precedes required session protection.
   installPrivateHouseholdSignup(app, identityDatabase, serverDirectory)
   installPrivateIndependentHouseholdSignup(app, {
