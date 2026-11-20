@@ -829,9 +829,6 @@ export async function startPrivateHouseholdGateway({
         })
         response.set('Cache-Control', 'no-store')
         response.json({ members })
-      } catch (error) {
-        console.error('Private member roster access unavailable:', error?.message)
-        response.status(503).json({ error: 'Member access temporarily unavailable.' })
       } finally {
         calendarDb.close()
       }
