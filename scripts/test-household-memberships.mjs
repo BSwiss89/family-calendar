@@ -1,3 +1,4 @@
+import './test-family-member-access.mjs' // Include draft member-role security checks in existing household CI gate.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
