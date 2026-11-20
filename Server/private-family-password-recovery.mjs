@@ -160,13 +160,15 @@ export function installPrivateRecoveryOperator(app, {
     if (requests !== null) res.json({ requests })
   })
 
-  async function verifiedAdminAction(req, res, handler) {
+  async function verifiedAdminAction(req, res, handler, needsIdentityCheck = true) {
     const requests = pending(req, res)
     if (requests === null) return
-    if (!exactObject(req.body, ['ownerPassword', 'verifiedOutOfBand']) ||
+    const expected = needsIdentityCheck
+      ? ['ownerPassword', 'verifiedOutOfBand'] : ['ownerPassword']
+    if (!exactObject(req.body, expected) ||
         typeof req.body.ownerPassword !== 'string' ||
-        req.body.verifiedOutOfBand !== true) {
-      return res.status(400).json({ error: 'Verify identity independently and confirm your password.' })
+        (needsIdentityCheck && req.body.verifiedOutOfBand !== true)) {
+      return res.status(400).json({ error: 'Confirm your administrator password and required identity checks.' })
     }
     let status
     try {
@@ -229,7 +231,7 @@ export function installPrivateRecoveryOperator(app, {
         } catch {
           return res.status(503).json({ error: 'Recovery denial unavailable.' })
         }
-      })
+      }, false)
     })
   app.use('/api/admin/recovery/requests', safeParserError)
 
