@@ -403,6 +403,107 @@ test('central authenticated gateway denies one family access to another family b
       cookie: cookieMember,
     })).value.username, 'familymembera')
 
+    // Owner changes must require the Owner's PASSWORD, not the family
+    // profile picker, a child's login, the shared Home profile, or a phone PIN.
+    const typeUrl = '/api/households/members/' + memberId + '/type'
+    const personUrl = '/api/households/members/' + memberId + '/person'
+    const permissionUrl = '/api/households/members/' + memberId + '/permission'
+    assert.equal((await json(gateway.base, typeUrl, {
+      body: { memberType: 'adult', ownerPassword: testPassword },
+    })).response.status, 401)
+    assert.equal((await json(gateway.base, typeUrl, {
+      cookie: cookieMember, body: { memberType: 'adult', ownerPassword: testPassword },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, typeUrl, {
+      cookie: cookieB, body: { memberType: 'adult', ownerPassword: testPassword },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, typeUrl, {
+      cookie: cookieA, body: { memberType: 'adult', ownerPassword: 'wrong' },
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, typeUrl, {
+      cookie: cookieA, body: { memberType: 'adult', ownerPassword: testPassword },
+      headers: { Origin: 'https://evil.example' },
+    })).response.status, 403)
+    const adultUpdate = await json(gateway.base, typeUrl, {
+      cookie: cookieA, body: { memberType: 'adult', ownerPassword: testPassword },
+    })
+    assert.equal(adultUpdate.response.status, 200)
+    assert.deepEqual(adultUpdate.value, { ok: true })
+    assert.equal((await json(gateway.base, accessMe, {
+      cookie: cookieMember,
+    })).value.memberType, 'adult')
+
+    const personDatabase = new DatabaseSync(a.databasePath)
+    let existingPersonId
+    try {
+      existingPersonId = Number(personDatabase.prepare([
+        'INSERT INTO people(name, color, image, sort_order)',
+        "VALUES ('Existing Person in A', '#64748b', NULL, 0)",
+      ].join(' ')).run().lastInsertRowid)
+    } finally {
+      personDatabase.close()
+    }
+    const badLink = await json(gateway.base, personUrl, {
+      cookie: cookieA, body: { personId: existingPersonId + 5000, ownerPassword: testPassword },
+    })
+    assert.equal(badLink.response.status, 400)
+    const goodLink = await json(gateway.base, personUrl, {
+      cookie: cookieA, body: { personId: existingPersonId, ownerPassword: testPassword },
+    })
+    assert.equal(goodLink.response.status, 200)
+    const linked = await json(gateway.base, accessMe, { cookie: cookieMember })
+    assert.equal(linked.value.linkedPersonId, existingPersonId)
+    const afterLinkRoster = await json(gateway.base, accessRoster, { cookie: cookieA })
+    assert.equal(afterLinkRoster.response.status, 200)
+    assert.equal(afterLinkRoster.value.availablePeople.some(
+      person => person.id === existingPersonId && person.name === 'Existing Person in A'), true)
+    assert.equal(afterLinkRoster.value.members.find(m =>
+      m.userId === memberId).linkedPersonName, 'Existing Person in A')
+    assert.equal((await json(gateway.base, '/api/households/members/' +
+      idA + '/person', {
+        cookie: cookieA, body: { personId: existingPersonId, ownerPassword: testPassword },
+      })).response.status, 409, 'A Person cannot be linked to two accounts')
+
+    const grant = await json(gateway.base, permissionUrl, {
+      cookie: cookieA, body: {
+        action: 'events.create', enabled: true, ownerPassword: testPassword,
+      },
+    })
+    assert.equal(grant.response.status, 200)
+    assert.equal((await json(gateway.base, accessMe, {
+      cookie: cookieMember,
+    })).value.allowedActions.includes('events.create'), true)
+    assert.equal((await json(gateway.base, permissionUrl, {
+      cookie: cookieA, body: {
+        action: 'permissions.manage', enabled: true, ownerPassword: testPassword,
+      },
+    })).response.status, 403, 'Owner permissions cannot be delegated')
+    const revoke = await json(gateway.base, permissionUrl, {
+      cookie: cookieA, body: {
+        action: 'events.create', enabled: false, ownerPassword: testPassword,
+      },
+    })
+    assert.equal(revoke.response.status, 200)
+    assert.equal((await json(gateway.base, accessMe, {
+      cookie: cookieMember,
+    })).value.allowedActions.includes('events.create'), false)
+    assert.equal((await json(gateway.base, typeUrl, {
+      cookie: cookieA, body: { memberType: 'child', ownerPassword: testPassword },
+    })).response.status, 200)
+    const childAfterUpdate = await json(gateway.base, accessMe, {
+      cookie: cookieMember,
+    })
+    assert.equal(childAfterUpdate.value.memberType, 'child')
+    assert.equal(childAfterUpdate.value.linkedPersonId, existingPersonId)
+    assert.equal(childAfterUpdate.value.allowedActions.includes('events.create'), false)
+    assert.equal((await json(gateway.base, personUrl, {
+      cookie: cookieA, body: { personId: null, ownerPassword: testPassword },
+    })).response.status, 200)
+    assert.equal((await json(gateway.base, accessMe, {
+      cookie: cookieMember,
+    })).value.linkedPersonId, null)
+    assert.equal(/password|hash|session|token/i.test(JSON.stringify(afterLinkRoster.value)), false)
+
     // A roster is scoped to the verified owner and omits secret fields.
     const rosterPath = '/api/households/members'
     assert.equal((await json(gateway.base, rosterPath)).response.status, 401)
