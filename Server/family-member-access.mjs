@@ -86,6 +86,10 @@ export function createFamilyMemberAccessTables(database) {
     'FOREIGN KEY(user_id, household_id)',
     'REFERENCES family_member_access(user_id, household_id) ON DELETE CASCADE',
     ') STRICT;',
+    // The same calendar Person cannot silently become two different logins.
+    // Existing duplicates fail this migration rather than being overwritten.
+    'CREATE UNIQUE INDEX IF NOT EXISTS family_member_one_person_per_household',
+    'ON family_member_access(household_id, person_id) WHERE person_id IS NOT NULL;',
   ].join(' '))
 }
 
@@ -155,6 +159,87 @@ export function setFamilyMemberPermission(database, {
     database.exec('ROLLBACK')
     throw error
   }
+}
+
+// Trusted owner operation only: associate an authenticated account with an
+// EXISTING Person in that household's separate calendar database. The caller
+// must obtain householdDatabase from server-owned, authenticated routing; the
+// browser may never choose the database or storage path. No calendar People,
+// events, assignments or photos are created, renamed or modified.
+export function setFamilyMemberPersonLink(identityDatabase, {
+  householdId, serverVerifiedOwnerUserId, targetUserId, personId, householdDatabase,
+}) {
+  const home = requireHouseholdId(householdId)
+  const target = requireId(targetUserId, 'target user')
+  if (personId !== null && (!Number.isSafeInteger(personId) || personId < 1)) {
+    throw new Error('A current Person ID or explicit null is required.')
+  }
+  if (!householdDatabase || typeof householdDatabase.prepare !== 'function') {
+    throw new Error('Trusted household calendar database is required.')
+  }
+  createFamilyMemberAccessTables(identityDatabase)
+  identityDatabase.exec('BEGIN IMMEDIATE')
+  try {
+    assertOwner(identityDatabase, home, serverVerifiedOwnerUserId)
+    const member = identityDatabase.prepare([
+      'SELECT m.role AS membershipRole, a.member_type AS memberType,',
+      'h.id AS householdKey FROM household_memberships m',
+      'JOIN household_registry h ON h.id = m.household_id',
+      'JOIN family_users u ON u.id = m.user_id',
+      'LEFT JOIN family_member_access a ON a.user_id = m.user_id',
+      'AND a.household_id = m.household_id',
+      'WHERE h.storage_id = ? AND m.user_id = ? AND m.disabled = 0',
+      "AND h.disabled = 0 AND u.disabled = 0 AND u.account_kind = 'person'",
+    ].join(' ')).get(home, target)
+    if (!member || !['owner', 'member'].includes(member.membershipRole)) {
+      throw new Error('Target must be an active household person account.')
+    }
+    if (member.membershipRole === 'member' &&
+        !['adult', 'child'].includes(member.memberType)) {
+      throw new Error('Member must have an Adult or Child type first.')
+    }
+    if (personId !== null) {
+      const existingPerson = householdDatabase.prepare(
+        'SELECT id FROM people WHERE id = ?'
+      ).get(personId)
+      if (!existingPerson) {
+        throw new Error('Person does not exist in this household calendar.')
+      }
+    }
+    // Owner is still Owner regardless of the storage-only member_type value.
+    // A type change by setFamilyMemberType preserves the verified link.
+    const storedType = member.membershipRole === 'owner'
+      ? 'adult' : member.memberType
+    identityDatabase.prepare([
+      'INSERT INTO family_member_access(user_id, household_id, member_type, person_id)',
+      'VALUES (?, ?, ?, ?) ON CONFLICT(user_id, household_id)',
+      'DO UPDATE SET person_id = excluded.person_id',
+    ].join(' ')).run(target, member.householdKey, storedType, personId)
+    identityDatabase.exec('COMMIT')
+    return { userId: target, personId, membershipRole: member.membershipRole }
+  } catch (error) {
+    identityDatabase.exec('ROLLBACK')
+    throw error
+  }
+}
+
+// Resolve the account from a SERVER-authenticated session, then revalidate
+// its Person link against the verified household's calendar DB. A removed
+// profile immediately loses task attribution; avatar selection is ignored.
+export function getVerifiedFamilyMemberAuthorization(identityDatabase, {
+  householdId, serverVerifiedUserId, householdDatabase,
+}) {
+  if (!householdDatabase || typeof householdDatabase.prepare !== 'function') {
+    return null
+  }
+  const actor = getFamilyMemberAuthorization(identityDatabase, {
+    householdId, serverVerifiedUserId,
+  })
+  if (!actor || actor.personId === null) return actor
+  const linkedPerson = householdDatabase.prepare(
+    'SELECT id FROM people WHERE id = ?'
+  ).get(actor.personId)
+  return linkedPerson ? actor : { ...actor, personId: null }
 }
 
 // Read membership from the CENTRAL identity DB for EACH protected request.
