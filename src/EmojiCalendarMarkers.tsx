@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { emojiMarkerOccursOnDate, type EmojiMarkerData } from './emojiMarkerRules.mjs'
 import './EmojiCalendarMarkers.css'
@@ -106,19 +106,21 @@ export function EmojiMarkerEditor({
   const [scope, setScope] = useState<EditScope>('series')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
 
   useEffect(() => {
     const oldOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') closeRef.current()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => {
       document.body.style.overflow = oldOverflow
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [onClose])
+  }, [])
 
   function openForm(marker: EmojiMarkerData | null) {
     const sourceDate = marker?.date ?? dateKey
