@@ -48,6 +48,7 @@ import { createOwnerPasswordStepUp } from './family-owner-step-up.mjs'
 import { createFamilyPasswordRecoveryTables } from './family-password-recovery.mjs'
 import { installPrivateRecoveryPublic, installPrivateRecoveryOperator } from './private-family-password-recovery.mjs'
 import { installPrivateSystemAdministrator } from './private-system-administration.mjs'
+import { installPrivateInvitedOwnerOnboarding } from './private-invited-owner-onboarding.mjs'
 import { installPrivateMemberRouteEnforcement } from './family-member-route-enforcement.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
@@ -596,6 +597,12 @@ export async function startPrivateHouseholdGateway({
     identityDatabase, serverDirectory,
     trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
     routedHouseholdIds: [...portByHousehold.keys()],
+  })
+  // Newly invited Owner status is derived ONLY from their verified session
+  // and current activated, trusted gateway routing. Never activate via UI.
+  installPrivateInvitedOwnerOnboarding(app, {
+    identityDatabase, serverDirectory,
+    getRoutedHouseholdIds: () => [...portByHousehold.keys()],
   })
   // Never forward an unknown administrator API to a family backend.
   app.use('/api/admin', (_request, response) =>

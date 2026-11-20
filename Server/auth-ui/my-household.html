@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>Your household — Family Calendar</title>
+  <link rel="stylesheet" href="/auth/styles.css">
+  <script src="/auth/my-household.js" defer></script>
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card" aria-labelledby="household-status-title">
+      <div class="auth-mark" aria-hidden="true">▦</div>
+      <h1 id="household-status-title">Your family calendar</h1>
+      <p class="auth-intro">Your household Owner account is registered. The system administrator activates a new family's private calendar after verifying its secure setup.</p>
+      <div id="my-household-status-list" aria-live="polite">
+        <p id="my-household-status-message" role="status" class="muted small">Checking your household registration…</p>
+      </div>
+      <p class="muted small">Registration does not automatically activate a calendar. “Configured” means its private route has been approved, not that the service has been checked as online.</p>
+      <button type="button" id="refresh-household-status">Check status again</button>
+      <p class="auth-footnote"><a href="/account">My account and trusted devices</a></p>
+    </section>
+  </main>
+</body>
+</html>

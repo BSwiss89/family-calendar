@@ -4,6 +4,29 @@ const button = document.getElementById('login-button')
 const checking = document.getElementById('session-check')
 const content = document.getElementById('login-content')
 
+// Only the PRIVATE invitation gateway exposes this read-only Owner status.
+// Legacy TEST/LIVE return 404 and preserve the existing sign-in behavior.
+async function successfulSignInDestination() {
+  try {
+    const response = await fetch('/api/households/my-onboarding', {
+      credentials: 'same-origin', cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!response.ok) return '/'
+    const result = await response.json()
+    if (!result || !Array.isArray(result.households)) return '/'
+    const homes = result.households.filter(h => h &&
+      ['pending-activation', 'approved-awaiting-route', 'configured-route']
+        .includes(h.state))
+    // Do not send a newly registered Owner to an unactivated tenant or
+    // ask them to create a second account.
+    if (homes.length && homes.every(h => h.state !== 'configured-route')) {
+      return '/my-household'
+    }
+  } catch { /* Legacy sites or transient gateway failures use normal login. */ }
+  return '/'
+}
+
 function showLoginForm() {
   checking.hidden = true
   content.hidden = false
@@ -31,7 +54,7 @@ async function checkRememberedLogin() {
     if (response.ok) {
       const status = await response.json()
       if (status.authenticated === true) {
-        location.replace('/')
+        location.replace(await successfulSignInDestination())
         return
       }
     }
@@ -88,7 +111,7 @@ form.addEventListener('submit', async (event) => {
       message.textContent = result.error || 'Sign in unsuccessful. Please try again.'
       return
     }
-    location.replace('/')
+    location.replace(await successfulSignInDestination())
   } catch {
     message.textContent = 'The calendar could not be reached. Please try again.'
   } finally {
