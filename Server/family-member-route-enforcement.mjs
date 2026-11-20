@@ -123,7 +123,9 @@ export function installPrivateMemberRouteEnforcement(app, {
     throw new Error('Trusted central identity and household resolver required.')
   }
   app.use((request, response, next) => {
-    if (!request.path.startsWith('/api/')) return next()
+    // Express routes are case-insensitive by default. Guard every casing
+    // before the legacy backend can normalize an alias such as /API/events.
+    if (!request.path.toLowerCase().startsWith('/api/')) return next()
     // The auth module and household administration own their own guarded
     // routes and remain accessible to Owner and a minimally enrolled member.
     if (request.path === '/api/health' ||
