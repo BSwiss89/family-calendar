@@ -41,6 +41,7 @@ import { createIndependentHouseholdInvitationTables, issueIndependentHouseholdIn
   revokeIndependentHouseholdInvitation, listIndependentHouseholdAdministration,
 } from './independent-household-invitations.mjs'
 import { listHouseholdMembers } from './household-member-directory.mjs'
+import { createFamilyMemberAccessTables, getVerifiedFamilyMemberAuthorization } from './family-member-access.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { createPrivateActivationRecords, approvePrivateHouseholdActivation,
@@ -396,6 +397,8 @@ export async function startPrivateHouseholdGateway({
   try {
   // Invitation state is central-only, never stored in household calendars.
   createHouseholdInvitationTables(identityDatabase)
+  // Central identity only; no migrations to any family's calendar database.
+  createFamilyMemberAccessTables(identityDatabase)
   createIndependentHouseholdInvitationTables(identityDatabase)
   createPrivateActivationRecords(identityDatabase)
   // The trusted host may only rebind a generated independent household that
@@ -763,6 +766,73 @@ export async function startPrivateHouseholdGateway({
         ? { ok: true } : { error: 'Active member not found.' })
     })
   })
+
+  // PRIVATE HARNESS ONLY: read the member's effective role from their actual
+  // authenticated central session and an independently verified household.
+  // A chosen People avatar, mobile User-Agent or request body grants nothing.
+  // No PIN is needed for a valid personal-account session.
+  app.get('/api/households/my-member-access', (request, response) => {
+    const home = trustedHousehold(request, response)
+    if (!home) return
+    const storage = resolveHouseholdStorage({
+      serverDirectory, storageRoot, householdId: home.householdId,
+    })
+    const calendarDb = new DatabaseSync(storage.databasePath, { readOnly: true })
+    try {
+      const actor = getVerifiedFamilyMemberAuthorization(identityDatabase, {
+        householdId: home.householdId,
+        serverVerifiedUserId: request.familyAccount.user_id,
+        householdDatabase: calendarDb,
+      })
+      response.set('Cache-Control', 'no-store')
+      if (!actor) return response.status(403).json({
+        error: 'Family account permissions are not configured yet.',
+      })
+      response.json({
+        memberType: actor.role, linkedPersonId: actor.personId,
+        allowedActions: actor.permissions,
+      })
+    } catch (error) {
+      console.error('Private member access lookup unavailable:', error?.message)
+      response.status(503).json({ error: 'Member access temporarily unavailable.' })
+    } finally {
+      calendarDb.close()
+    }
+  })
+
+  // An Owner can review the active household's existing account-to-People
+  // links. This is READ-ONLY; changing membership permissions/links requires a
+  // separate password-step-up flow, not a selected avatar or Home PIN.
+  app.get('/api/households/member-access', (request, response) =>
+    ownerOnlyMembershipAction(request, response, householdId => {
+      const storage = resolveHouseholdStorage({
+        serverDirectory, storageRoot, householdId,
+      })
+      const calendarDb = new DatabaseSync(storage.databasePath, { readOnly: true })
+      try {
+        const members = listHouseholdMembers(identityDatabase, {
+          householdId,
+          serverVerifiedOwnerUserId: request.familyAccount.user_id,
+        }).map(member => {
+          const actor = getVerifiedFamilyMemberAuthorization(identityDatabase, {
+            householdId, serverVerifiedUserId: member.userId,
+            householdDatabase: calendarDb,
+          })
+          const person = actor?.personId == null ? null :
+            calendarDb.prepare('SELECT name FROM people WHERE id = ?').get(actor.personId)
+          return {
+            userId: member.userId, displayName: member.displayName,
+            username: member.username, memberType: actor?.role ?? null,
+            linkedPersonId: actor?.personId ?? null,
+            linkedPersonName: person?.name ?? null,
+          }
+        })
+        response.set('Cache-Control', 'no-store')
+        response.json({ members })
+      } finally {
+        calendarDb.close()
+      }
+    }))
 
   app.use('/api/households', (_request, response) => {
     response.status(404).json({ error: 'Not found.' })
