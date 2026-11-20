@@ -113,7 +113,9 @@ test('new central identity maps original TEST user IDs with no password hashes, 
 
 test('offline CLI preflight fingerprints account inventory, creates new external SQLite only after exact approval', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'family-test-offline-plan-'))
-  const sourceFile = path.join(root, 'test-source.sqlite')
+  const sourceFolder = path.join(root, 'existing-test-data')
+  fs.mkdirSync(sourceFolder)
+  const sourceFile = path.join(sourceFolder, 'test-source.sqlite')
   const planFile = path.join(root, 'private-plan.json')
   const outputDirectory = path.join(root, 'separate-private-permissions')
   fs.mkdirSync(outputDirectory)
@@ -155,7 +157,9 @@ test('offline CLI preflight fingerprints account inventory, creates new external
 
 test('changed existing TEST identity inventory invalidates a previously approved plan', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'family-test-plan-snapshot-'))
-  const sourceFile = path.join(root, 'source.sqlite')
+  const sourceFolder = path.join(root, 'existing-test-data')
+  fs.mkdirSync(sourceFolder)
+  const sourceFile = path.join(sourceFolder, 'source.sqlite')
   const planFile = path.join(root, 'plan.json')
   const outputDirectory = path.join(root, 'separate-private-permissions')
   fs.mkdirSync(outputDirectory)
