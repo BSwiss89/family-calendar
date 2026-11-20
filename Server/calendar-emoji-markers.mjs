@@ -1,4 +1,4 @@
-import { emojiMarkerOccursOnDate, normalizeEmojiMarkerPayload, previousEmojiDate, validEmojiDate } from '../src/emojiMarkerRules.mjs'
+import { emojiMarkerOccursOnDate, normalizeEmojiMarkerPayload, previousEmojiDate, validEmojiDate } from './emoji-marker-rules.mjs'
 
 // A marker is not an event: no invitations, attendee rows, notifications or event slots.
 // This uses the already-selected environment's SQLite connection. Authentication is
