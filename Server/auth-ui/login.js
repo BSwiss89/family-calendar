@@ -43,6 +43,20 @@ async function checkRememberedLogin() {
   }
 }
 
+// Current installed TEST/LIVE have no approved password recovery service.
+// Never show a dead link unless the authenticated-origin gateway explicitly
+// advertises administrator-assisted recovery.
+void fetch('/api/auth/recovery/availability', {
+  credentials: 'same-origin', cache: 'no-store',
+}).then(async response => {
+  if (!response.ok) return
+  const data = await response.json()
+  if (data && data.supported === true &&
+      data.mode === 'administrator-assisted') {
+    document.getElementById('forgot-password-link').hidden = false
+  }
+}).catch(() => {})
+
 void checkRememberedLogin()
 
 // Browser back/forward cache can restore the old login DOM even when a device
