@@ -18,6 +18,20 @@
       <p class="small muted">You stay signed in on devices you use. Revoke access to a device that was lost or is no longer trusted.</p>
       <p id="account-message" role="status" aria-live="polite"></p>
       <div id="devices" class="device-list" aria-live="polite"></div>
+      <section id="recovery-contact-section" hidden>
+        <h2>Optional recovery email</h2>
+        <p class="small muted">A recovery email is optional. We will store it as unverified until email confirmation is available. Password resets still require administrator assistance; no automatic emails are sent.</p>
+        <form id="recovery-contact-form">
+          <label for="recovery-contact-email">Email address (optional)</label>
+          <input type="email" id="recovery-contact-email" name="email"
+            autocomplete="email" maxlength="254" placeholder="your@email.com">
+          <label for="recovery-contact-password">Current account password</label>
+          <input type="password" id="recovery-contact-password" name="currentPassword"
+            autocomplete="current-password" maxlength="200" required>
+          <p id="recovery-contact-message" class="small muted" role="status" aria-live="polite"></p>
+          <button type="submit" id="recovery-contact-save">Save recovery contact</button>
+        </form>
+      </section>
       <button id="logout" type="button" class="secondary-button">Sign out of this device</button>
     </section>
   </main>
