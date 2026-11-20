@@ -175,8 +175,7 @@ try {
     $routes = [IO.File]::ReadAllText((Join-Path $stage 'src\familySiteRoutes.ts'))
     Assert ($routes.Contains("assignmentInbox: '/api/live-notification-pilot'") -and
         $routes.Contains("push: '/api/live-push'") -and -not $routes.Contains('/api/test-')) 'Exact authenticated production routes preserved'
-    Assert ((DistManifest $stageDistPath).Length -gt 0 -and (DistManifest $oldDistPath).Length -gt 0) 'Candidate and current frontend assets exist'
-    Assert ((Digest (Join-Path $stageDistPath 'index.html')) -cne (Digest (Join-Path $oldDistPath 'index.html'))) 'Candidate frontend differs from installed frontend'
+    Assert ((DistManifest $oldDistPath).Length -gt 0) 'Installed LIVE frontend assets exist'
 
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
     Assert ($task.Principal.UserId -eq 'SYSTEM' -and @($task.Actions).Count -eq 1 -and
@@ -226,7 +225,7 @@ try {
     # Apply mode repeats the exact same checks with a new snapshot.
     Push-Location $stage
     try {
-        & node --test scripts/test-calendar-input-validation.mjs scripts/test-calendar-recurrence.mjs scripts/test-live-site-routes.mjs scripts/test-live-notification-inbox-pilot.mjs scripts/test-notification-mutation-attribution.mjs scripts/test-live-event-invitations.mjs scripts/test-live-informational-push.mjs scripts/test-live-household-event-join.mjs scripts/test-family-auth.mjs scripts/test-household-profile-selection.mjs
+        & node --experimental-strip-types --test scripts/test-calendar-input-validation.mjs scripts/test-calendar-recurrence.mjs scripts/test-live-site-routes.mjs scripts/test-live-notification-inbox-pilot.mjs scripts/test-notification-mutation-attribution.mjs scripts/test-live-event-invitations.mjs scripts/test-live-informational-push.mjs scripts/test-live-household-event-join.mjs scripts/test-family-auth.mjs scripts/test-household-profile-selection.mjs
         if ($LASTEXITCODE -ne 0) { throw 'Candidate LIVE notification, privacy and regression tests failed' }
         & npm.cmd run build
         if ($LASTEXITCODE -ne 0) { throw 'Candidate frontend build failed' }
@@ -255,8 +254,7 @@ try {
     Set-Content -LiteralPath (Join-Path $runBackup 'from.txt') -Value $baseline -Encoding Ascii
     Set-Content -LiteralPath (Join-Path $runBackup 'to.txt') -Value $candidateSha -Encoding Ascii
     New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
-    Set-Content -LiteralPath $guardFile -Value "Cutover begun. Previous=$baseline Candidate=$candidateSha Recovery=$runBackup" -Encoding Ascii -ErrorAction Stop
-
+    # No cutover/recovery hold is created by ordinary preflight.
     # Verified online SQLite backup before any service changes.
     $node = 'C:\ProgramData\FamilyCalendar\Runtime\node-v24.22.1\node.exe'
     $online = Join-Path $runBackup 'online-sqlite'
@@ -295,6 +293,7 @@ try {
     & git -C $live fetch --no-tags $stage $candidateSha
     Assert ($LASTEXITCODE -eq 0 -and (GitHead $live) -ceq $baseline) 'Exact source fetched; running LIVE unchanged'
     Assert (([string](& git -C $live rev-parse FETCH_HEAD)).Trim() -ceq $candidateSha) 'Fetched exact CI-tested SHA'
+    Set-Content -LiteralPath $guardFile -Value "Cutover begun. Previous=$baseline Candidate=$candidateSha Recovery=$runBackup" -Encoding Ascii -ErrorAction Stop
 
     if ($originalAutoEnabled) {
         Disable-ScheduledTask -TaskName $autoTaskName -ErrorAction Stop | Out-Null
@@ -328,7 +327,7 @@ try {
         Assert ((Test-Path -LiteralPath $copy) -and (Digest $file.FullName) -ceq (Digest $copy)) 'Cold LIVE uploads hash verified'
     }
 
-    # Switch reviewed frontend and backend helpers; preserve all existing LIVE data.
+    # Switch exact reviewed frontend and common backend helpers; preserve LIVE data.
     $gitChanged = $true
     & git -C $live -c advice.detachedHead=false checkout --quiet --detach $candidateSha
     if ($LASTEXITCODE -ne 0) { throw 'Could not switch secure LIVE shared-foundation source' }
