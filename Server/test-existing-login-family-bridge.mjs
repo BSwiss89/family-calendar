@@ -88,7 +88,13 @@ export function installExistingTestLoginFamilyPermissions(app, {
   app.use((request, response, next) => {
     const lower = request.path.toLowerCase()
     if (lower === '/api/health' && ['GET', 'HEAD'].includes(request.method)) return next()
-    if (lower.startsWith('/api/auth/')) return next()
+    // The existing auth installer has already handled every supported
+    // login, status, device and logout route above this middleware.
+    // A NEW auth route introduced after this guard must not bypass review.
+    if (lower.startsWith('/api/auth/')) {
+      response.set('Cache-Control', 'no-store')
+      return response.status(403).json({ error: 'Unreviewed account action.' })
+    }
     // Uploads can contain private People photos; never expose them to an
     // account without current calendar-view authority. The legacy session
     // middleware already protects non-API browser navigation and assets.
