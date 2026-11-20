@@ -215,6 +215,11 @@ export function completeFamilyPasswordReset(db, {
 
 export function readOptionalRecoveryContact(db, { serverVerifiedUserId }) {
   if (!Number.isSafeInteger(serverVerifiedUserId) || serverVerifiedUserId < 1) return null
+  const member = db.prepare([
+    'SELECT id FROM family_users',
+    "WHERE id = ? AND disabled = 0 AND account_kind = 'person'",
+  ].join(' ')).get(serverVerifiedUserId)
+  if (!member) return null
   const data = db.prepare([
     'SELECT c.email, c.verified_at AS verifiedAt',
     'FROM family_recovery_contacts c JOIN family_users u ON u.id = c.user_id',
