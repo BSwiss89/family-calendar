@@ -19,6 +19,11 @@ const VIEWS = new Map([
   ['/api/shared-events/accepted', 'calendar.view'],
   ['/api/ai/calendar-lookup', 'calendar.view'],
   ['/api/ai-budget', 'settings.manage'],
+  // Existing family UI essentials. These reads are already protected by
+  // the real authenticated TEST session; roles still come from central DB.
+  ['/api/emoji-markers', 'calendar.view'],
+  ['/api/family-daily-note', 'calendar.view'],
+  ['/api/arney/local-transcription/status', 'calendar.view'],
 ])
 
 const READ_ONLY_POSTS = new Map([
@@ -54,6 +59,11 @@ export function requiredFamilyMemberActions(method, originalUrl) {
   if (method === 'POST') {
     if (READ_ONLY_POSTS.has(route)) return [READ_ONLY_POSTS.get(route)]
     if (route === '/api/events') return ['events.create']
+    if (route === '/api/emoji-markers') return ['events.create']
+    if (/^\/api\/emoji-markers\/[1-9][0-9]*\/(exceptions|change-occurrence|truncate)$/.test(route)) return ['events.edit']
+    // Local voice transcription is a no-write speech-to-text input, never
+    // permission to confirm an Arney edit or delete action.
+    if (route === '/api/arney/local-transcription') return ['calendar.view']
     if (route === '/api/ai/event-action-confirm') {
       // Confirmed Arney edit-or-delete is opaque until after the signed
       // preview is verified; require BOTH, never edit as a delete bypass.
@@ -70,6 +80,8 @@ export function requiredFamilyMemberActions(method, originalUrl) {
   }
   if (method === 'PUT' || method === 'PATCH') {
     if (method === 'PUT' && /^\/api\/events\/[1-9][0-9]*$/.test(route)) return ['events.edit']
+    if (method === 'PUT' && /^\/api\/emoji-markers\/[1-9][0-9]*$/.test(route)) return ['events.edit']
+    if (method === 'PUT' && route === '/api/family-daily-note') return ['events.edit']
     if (method === 'PUT' && (/^\/api\/lists\/[1-9][0-9]*\/(reorder|icon|store-sorting)$/.test(route) ||
       /^\/api\/list-items\/[1-9][0-9]*$/.test(route) ||
       /^\/api\/shopping-stores\/[1-9][0-9]*$/.test(route))) return ['lists.edit']
@@ -78,10 +90,12 @@ export function requiredFamilyMemberActions(method, originalUrl) {
       /^\/api\/meal-plan-items\/[0-9-]+\/[a-z]+$/.test(route))) return ['recipes.edit']
     if (method === 'PUT' && (route === '/api/people/reorder' ||
       /^\/api\/people\/[1-9][0-9]*$/.test(route) ||
-      /^\/api\/daily-notes\/[0-9-]+$/.test(route))) return ['settings.manage']
+      false)) return ['settings.manage']
+    if (method === 'PUT' && /^\/api\/daily-notes\/[0-9-]+$/.test(route)) return ['events.edit']
     return null
   }
   if (method === 'DELETE') {
+    if (/^\/api\/emoji-markers\/[1-9][0-9]*$/.test(route)) return ['events.delete']
     if (/^\/api\/events\/[1-9][0-9]*$/.test(route) ||
       /^\/api\/shared-events\/[1-9][0-9]*\/received$/.test(route)) return ['events.delete']
     if (/^\/api\/lists\/[1-9][0-9]*(\/completed)?$/.test(route) ||
