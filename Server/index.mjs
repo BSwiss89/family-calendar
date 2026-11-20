@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import { installDailyFamilyNotes } from './daily-family-notes.mjs'
+import { installCalendarEmojiMarkers } from './calendar-emoji-markers.mjs'
 import { isValidDate, isValidTitle, isValidPersonName, isValidColor, cleanOptionalText } from './calendar-input-validation.mjs'
 import { getRepeatRule, doesEventStartOnDate } from './calendar-recurrence.mjs'
 import { installLiveNotificationInboxPilot } from './live-notification-inbox.mjs'
@@ -629,6 +630,8 @@ app.use(express.json())
 installFamilyAuth(app, database, __dirname)
 // Authenticated household scratchpad: RAM-only; never write to SQLite or backups.
 installDailyFamilyNotes(app)
+// Authenticated household-wide emoji markers use LIVE's own SQLite database.
+installCalendarEmojiMarkers(app, database)
 // User-approved one-household notification pilot. Disabled by default;
 // source and database migration are never enabled without LIVE operator opt-in.
 installLiveNotificationInboxPilot(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
