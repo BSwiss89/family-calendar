@@ -45,6 +45,7 @@ import { createFamilyMemberAccessTables, getFamilyMemberAuthorization, getVerifi
   setFamilyMemberType, setFamilyMemberPersonLink, setFamilyMemberPermission, FAMILY_ACTIONS,
 } from './family-member-access.mjs'
 import { createOwnerPasswordStepUp } from './family-owner-step-up.mjs'
+import { installPrivateMemberRouteEnforcement } from './family-member-route-enforcement.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { createPrivateActivationRecords, approvePrivateHouseholdActivation,
@@ -370,7 +371,12 @@ export async function startPrivateHouseholdGateway({
   backendTokens,
   // Empty by default; only trusted server configuration can permit issuance.
   independentHouseholdAdministratorUserIds = [],
+  // Private disposable preview only. Never enable via request header or URL.
+  enforceFamilyMemberPermissions = false,
 }) {
+  if (typeof enforceFamilyMemberPermissions !== 'boolean') {
+    throw new Error('Private family permission enforcement must be a trusted boolean setting.')
+  }
   if (!Array.isArray(independentHouseholdAdministratorUserIds) ||
       independentHouseholdAdministratorUserIds.some(id => !Number.isSafeInteger(id) || id < 1)) {
     throw new Error('Invalid private administrator allowlist.')
@@ -571,6 +577,13 @@ export async function startPrivateHouseholdGateway({
   installFamilyAuth(app, identityDatabase, serverDirectory, 'required', {
     cookieName: '__Host-fc_gateway_session',
   })
+  // This policy must register BEFORE gateway-owned Arney/share endpoints
+  // AND the backend proxy. If enabled, unknown API routes fail closed.
+  if (enforceFamilyMemberPermissions) {
+    installPrivateMemberRouteEnforcement(app, {
+      identityDatabase, trustedHousehold,
+    })
+  }
   createEventCreatorAuditTables(identityDatabase)
 
   app.get('/api/health', (_request, response) => {
