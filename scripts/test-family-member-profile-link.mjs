@@ -133,7 +133,7 @@ test('removing a Person invalidates authorization attribution without relinking 
   assert.equal(getFamilyMemberAuthorization(identity, {
     householdId: 'family-a', serverVerifiedUserId: childA,
   }).personId, 2)
-  assert.equal(identity.prepare('SELECT COUNT(*) AS n FROM family_member_access').get().n, 1)
+  assert.equal(identity.prepare('SELECT COUNT(*) AS n FROM family_member_access').get().n, 2) // Both enrolled members remain; a deleted People record is not erased centrally.
   assert.equal(identity.prepare('SELECT COUNT(*) AS n FROM family_member_grants').get().n, 0)
   assert.equal(ownerA > 0, true)
 })
