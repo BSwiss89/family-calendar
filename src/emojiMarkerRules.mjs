@@ -118,12 +118,12 @@ export function emojiMarkerOccursOnDate(marker, dateKey) {
     const monthDiff = (target.getUTCFullYear() - start.getUTCFullYear()) * 12 +
       target.getUTCMonth() - start.getUTCMonth()
     if (monthDiff % interval !== 0) return false
-    if (monthlyOccurrenceDay(marker, target.getUTCFullYear(), target.getUTCMonth()) !== target.getUTCDate()) return false
+    if (monthDiff !== 0 && monthlyOccurrenceDay(marker, target.getUTCFullYear(), target.getUTCMonth()) !== target.getUTCDate()) return false
     if (marker.repeatEndType === 'count') {
       for (let delta = 0; delta <= monthDiff; delta += interval) {
         const total = start.getUTCFullYear() * 12 + start.getUTCMonth() + delta
         const y = Math.floor(total / 12), m = total % 12
-        if (monthlyOccurrenceDay(marker, y, m) != null) occurrenceNumber += 1
+        if (delta === 0 || monthlyOccurrenceDay(marker, y, m) != null) occurrenceNumber += 1
       }
     } else occurrenceNumber = monthDiff / interval + 1
   } else if (marker.repeatUnit === 'year') {
