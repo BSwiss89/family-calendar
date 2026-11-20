@@ -56,6 +56,12 @@ jobs:
         run: node --test scripts/test-duplicate-event.mjs
       - name: Test list categories and additive migration
         run: node --test scripts/test-list-features.mjs && node --test scripts/test-shopping-stores.mjs && node --test scripts/test-list-icons.mjs
+      - name: Verify exact shared LIVE validation and calendar recurrence semantics
+        run: |
+          node --test scripts/test-calendar-input-validation.mjs
+          node --test scripts/test-calendar-recurrence.mjs
+      - name: Verify shared LIVE components use only protected production API routes
+        run: node --experimental-strip-types --test scripts/test-live-site-routes.mjs
       - name: Verify auth, remembered devices, and separate site cookies
         run: node --test scripts/test-family-auth.mjs
       - name: Verify household profile selection and remembered devices
