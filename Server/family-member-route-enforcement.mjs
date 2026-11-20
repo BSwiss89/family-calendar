@@ -89,8 +89,7 @@ export function requiredFamilyMemberActions(method, originalUrl) {
       /^\/api\/meal-plans\/[0-9-]+$/.test(route) ||
       /^\/api\/meal-plan-items\/[0-9-]+\/[a-z]+$/.test(route))) return ['recipes.edit']
     if (method === 'PUT' && (route === '/api/people/reorder' ||
-      /^\/api\/people\/[1-9][0-9]*$/.test(route) ||
-      false)) return ['settings.manage']
+      /^\/api\/people\/[1-9][0-9]*$/.test(route))) return ['settings.manage']
     if (method === 'PUT' && /^\/api\/daily-notes\/[0-9-]+$/.test(route)) return ['events.edit']
     return null
   }
