@@ -22,6 +22,10 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
+      - name: Verify recurring emoji markers API, validation, and event isolation
+        run: node --test scripts/test-calendar-emoji-markers.mjs
+      - name: Verify LIVE Add Event Icon Only routing and regression guards
+        run: node --test scripts/test-add-event-icon-only.mjs
       - name: Check TypeScript and build frontend
         run: npm run build
       - name: Verify Arney read-only planning and compact Quick Add
