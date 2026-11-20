@@ -1,21 +1,20 @@
-# Secure LIVE notification release from tested, isolated source.
-# Preview by default. -Apply is required for the guarded LIVE cutover.
-# Only reviewed notification UI, backend helpers and regression tests may change.
-# Additive SQLite field migration requires independent backups and verification.
+# Secure LIVE shared-foundation release. Preview is default and leaves LIVE intact.
+# -Apply requires explicit production authorization and repeats all checks first.
+# TEST automatic deployment remains enabled; LIVE automatic deployment stays disabled.
 param([switch]$Apply)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $homeDir = $env:USERPROFILE
 $live = Join-Path $homeDir 'Projects\family-calendar-live-auth-candidate'
-$stage = Join-Path $homeDir 'Projects\family-calendar-live-notice-stage-v2'
-$baseline = '22bd0b709712bb79045bfe30ac7b60d125d666c1'
-$branch = 'ops/live-event-notice-deploy-20261119-v2'
+$stage = Join-Path $homeDir 'Projects\family-calendar-live-shared-foundation-stage'
+$baseline = '6377963372c30e8c4c4e33af6bf617d87961e989'
+$branch = 'ops/live-shared-foundation-release-tooling-20261119'
 $launcher = 'C:\ProgramData\FamilyCalendar\SecureLive\start-secure-live-node24.ps1'
 $taskName = 'Family Calendar Server'
 $autoTaskName = 'Family Calendar Secure LIVE Auto Deploy'
 $watchdogName = 'Family Calendar Watchdog'
-$backupRoot = Join-Path $homeDir 'CalendarBackups\LiveEventNotices'
+$backupRoot = Join-Path $homeDir 'CalendarBackups\SharedCalendarFoundation'
 $guardFile = Join-Path $backupRoot 'RELEASE-IN-PROGRESS.txt'
 $oldDistPath = Join-Path $live 'dist'
 $stageDistPath = Join-Path $stage 'dist'
@@ -126,17 +125,17 @@ try {
     Assert ($isAdmin -and $identity.Name -ne 'NT AUTHORITY\SYSTEM') 'Interactive administrator session'
     Assert ((Test-Path -LiteralPath (Join-Path $live '.git')) -and (Test-Path -LiteralPath (Join-Path $stage '.git'))) 'Secure LIVE and candidate worktrees exist'
     Assert ((GitHead $live) -ceq $baseline -and (GitBranch $live) -ceq 'HEAD') 'Running secure LIVE baseline is unchanged and detached'
-    Assert ((GitBranch $stage) -ceq $branch) 'Correct isolated Lists staging branch'
-    # Deploy only the exact CI-tested LIVE notification code; tooling is a separate commit.
-    $candidateSha = '3e694c4a8c626e89345bbc95cb085c540aebeb4b'
+    Assert ((GitBranch $stage) -ceq $branch) 'Correct isolated shared-foundation staging branch'
+    # Deploy only the exact CI-tested shared-foundation code; tooling is separate.
+    $candidateSha = '584c5c3911fc75bcae281a8bdb3763aa3a4970f1'
     $scriptHead = GitHead $stage
     Assert ($scriptHead -cmatch '^[a-f0-9]{40}$' -and $scriptHead -cne $candidateSha) 'GitHub deployment tool commit exists'
     & git -C $stage merge-base --is-ancestor $candidateSha $scriptHead
     Assert ($LASTEXITCODE -eq 0) 'Deployment tooling descends from exact tested UI commit'
     & git -C $stage merge-base --is-ancestor $baseline $candidateSha
-    Assert ($LASTEXITCODE -eq 0) 'Notification candidate descends from installed secure LIVE'
+    Assert ($LASTEXITCODE -eq 0) 'Candidate descends from installed secure LIVE'
     $toolDiff = @(& git -C $stage diff --name-only $candidateSha $scriptHead)
-    Assert ($LASTEXITCODE -eq 0 -and ($toolDiff -join '|') -ceq 'scripts/deploy-live-event-notices.ps1') 'Only deployment tooling was added after candidate'
+    Assert ($LASTEXITCODE -eq 0 -and ($toolDiff -join '|') -ceq 'scripts/deploy-live-shared-foundation.ps1') 'Only deployment tooling was added after candidate'
     $liveStatus = @(& git -C $live status --porcelain)
     Assert ($LASTEXITCODE -eq 0 -and $liveStatus.Count -eq 0) 'Secure LIVE checkout is clean'
     $stageStatus = @(& git -C $stage status --porcelain)
@@ -146,17 +145,19 @@ try {
     # Compare exact case-sensitive sets, not presentation ordering: PowerShell
     # Sort-Object uses different case/culture ordering than an ordinal list.
     $approved = @(
-        'Server/event-assignment-notifications.mjs',
-        'Server/live-notification-inbox.mjs',
-        'Server/notification-event-mutation-capture.mjs',
-        'scripts/test-arney-planning.mjs',
-        'scripts/test-family-daily-notes.mjs',
-        'scripts/test-live-notification-inbox-pilot.mjs',
-        'scripts/test-notification-mutation-attribution.mjs',
-        'src/App.tsx',
-        'src/LiveInvitations.css',
-        'src/LiveInvitations.tsx',
-        'src/useAssignmentInbox.ts'
+        '.github/workflows/build.yml',
+        'Server/calendar-input-validation.mjs',
+        'Server/calendar-recurrence.mjs',
+        'Server/index.mjs',
+        'docs/LIVE_SHARED_CALENDAR_FOUNDATION_REVIEW.md',
+        'scripts/test-calendar-input-validation.mjs',
+        'scripts/test-calendar-recurrence.mjs',
+        'scripts/test-live-site-routes.mjs',
+        'src/FamilyPushNotifications.tsx',
+        'src/HouseholdEventJoin.tsx',
+        'src/familySiteRoutes.ts',
+        'src/useAssignmentInbox.ts',
+        'src/useFamilyEventInvitations.ts'
     )
     $missing = @($approved | Where-Object { $changed -cnotcontains $_ })
     $unexpected = @($changed | Where-Object { $approved -cnotcontains $_ })
@@ -164,14 +165,16 @@ try {
         $unexpected.Count -eq 0) ("Only reviewed LIVE notification and test files changed; " +
         "missing=$($missing -join ','); unexpected=$($unexpected -join ',')")
 
-    $app = [IO.File]::ReadAllText((Join-Path $stage 'src\App.tsx'))
-    $notices = [IO.File]::ReadAllText((Join-Path $stage 'src\LiveInvitations.tsx'))
-    Assert ($app.Contains("suppressed={page === 'invitations' || showEventModal}") -and
-        $notices.Contains('Changed:') -and $notices.Contains('Ask Again Later') -and
-        $notices.Contains('setRemindLater(true)') -and $notices.Contains('props.onView(id)')) 'Approved compact reminder and View Event handoff exist'
-    foreach ($path in @('Server\index.mjs','Server\family-auth.mjs','package.json','package-lock.json')) {
+    # Abort if unrelated auth, package, schema or primary app source has changed.
+    foreach ($path in @('Server\family-auth.mjs','package.json','package-lock.json',
+            'public\family-push-sw.js','Server\live-event-invitations.mjs',
+            'Server\live-notification-inbox.mjs','Server\live-household-event-join.mjs',
+            'src\App.tsx','src\App.css')) {
         Assert ((Digest (Join-Path $stage $path)) -ceq (Digest (Join-Path $live $path))) "Protected unchanged: $path"
     }
+    $routes = [IO.File]::ReadAllText((Join-Path $stage 'src\familySiteRoutes.ts'))
+    Assert ($routes.Contains("assignmentInbox: '/api/live-notification-pilot'") -and
+        $routes.Contains("push: '/api/live-push'") -and -not $routes.Contains('/api/test-')) 'Exact authenticated production routes preserved'
     Assert ((DistManifest $stageDistPath).Length -gt 0 -and (DistManifest $oldDistPath).Length -gt 0) 'Candidate and current frontend assets exist'
     Assert ((Digest (Join-Path $stageDistPath 'index.html')) -cne (Digest (Join-Path $oldDistPath 'index.html'))) 'Candidate frontend differs from installed frontend'
 
@@ -180,9 +183,13 @@ try {
         $task.Actions[0].Arguments -like '*start-secure-live-node24.ps1*') 'Secure LIVE SYSTEM task and launcher still configured'
     $auto = Get-ScheduledTask -TaskName $autoTaskName -ErrorAction Stop
     $watchdog = Get-ScheduledTask -TaskName $watchdogName -ErrorAction Stop
-    Assert ($auto.State -notin @('Running','Queued') -and $watchdog.State -notin @('Running','Queued')) 'LIVE updater and watchdog idle'
+    Assert (-not $auto.Settings.Enabled -and $auto.State -notin @('Running','Queued') -and
+        $watchdog.Settings.Enabled -and $watchdog.State -notin @('Running','Queued')) 'LIVE updater disabled and watchdog idle'
     $originalAutoEnabled = [bool]$auto.Settings.Enabled
     $originalWatchdogEnabled = [bool]$watchdog.Settings.Enabled
+    $testAutoName = 'Family Calendar Secure TEST Auto Deploy'
+    $testAuto = Get-ScheduledTask -TaskName $testAutoName -ErrorAction Stop
+    Assert ($testAuto.Settings.Enabled) 'TEST automatic deployment remains enabled'
     foreach ($file in @($guardFile,
         'C:\ProgramData\FamilyCalendar\SecureLiveAutoDeploy\DEPLOYMENT-IN-PROGRESS.json',
         'C:\ProgramData\FamilyCalendar\SecureLiveAutoDeploy\REQUIRES-REVIEW.txt',
@@ -191,7 +198,7 @@ try {
     }
     $pendingBackups = @(Get-ScheduledTask | Where-Object { $_.TaskName -like 'Family Calendar Backup*' -and $_.State -eq 'Running' })
     Assert ($pendingBackups.Count -eq 0) 'No backup job currently running'
-    . (Join-Path $stage 'scripts\secure-live-launcher-pins.ps1')
+    . (Join-Path $stage 'scripts\live-profile-launcher-plan.ps1')
     Assert-SecureLiveLauncherPins $launcher $live
     # GitHub PR build must have succeeded for the exact release candidate SHA.
     $ciUrl = "https://api.github.com/repos/BSwiss89/family-calendar/actions/runs?head_sha=$candidateSha&per_page=100"
@@ -202,7 +209,7 @@ try {
     } | Sort-Object id -Descending)
     Assert ($matching.Count -ge 1 -and $matching[0].status -eq 'completed' -and
         $matching[0].conclusion -eq 'success') 'Exact candidate Windows CI passed'
-    $pinnedTest = '3fe30d0d418006b0cc521c676439b14ce93e860c'
+    $pinnedTest = '8a558d4aa8d129976f058d567bac3754ce4cd519'
     $testRoot = Join-Path $homeDir 'Projects\family-calendar-test-security-stage'
     Assert ((GitHead $testRoot) -ceq $pinnedTest) 'Accepted TEST revision remains installed'
     $testListeners = @(Get-NetTCPConnection -State Listen -LocalPort 13002 -ErrorAction Stop)
@@ -215,7 +222,7 @@ try {
     Write-Host "PASS: Secure LIVE authenticated and healthy (Node PID $oldPid)"
     Write-Host "Candidate SHA: $candidateSha"
     if (-not $Apply) {
-        Write-Host 'LIVE_NOTICES_PREVIEW=PASS; LIVE_AND_TEST_UNCHANGED'
+        Write-Host 'LIVE_SHARED_FOUNDATION_PREVIEW=PASS; LIVE_AND_TEST_UNCHANGED'
         return
     }
 
@@ -247,7 +254,7 @@ try {
     $oldDistBackup = Join-Path $runBackup 'previous-dist'
     Copy-Item -LiteralPath $stageDistPath -Destination $preparedDist -Recurse -ErrorAction Stop
     Assert ((DistManifest $preparedDist) -ceq $candidateManifest) 'Staged frontend copied and verified'
-    $plan = New-SecureLiveLauncherPlan $launcher $live $stage $preparedDist $runBackup
+    $plan = New-LiveProfileLauncherPlan $launcher $live $stage $runBackup
     Set-Content -LiteralPath (Join-Path $runBackup 'from.txt') -Value $baseline -Encoding Ascii
     Set-Content -LiteralPath (Join-Path $runBackup 'to.txt') -Value $candidateSha -Encoding Ascii
     New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
@@ -323,13 +330,13 @@ try {
     # Do not automatically re-enable LIVE auto-deploy against an outdated approval baseline.
     Remove-Item -LiteralPath $guardFile -ErrorAction Stop
     $success = $true
-    Write-Host "LIVE_NOTICES_LIVE_DEPLOYMENT=PASS | SHA=$candidateSha | PID=$newPid"
+    Write-Host "LIVE_SHARED_FOUNDATION_LIVE_DEPLOYMENT=PASS | SHA=$candidateSha | PID=$newPid"
     Write-Host 'AUTHENTICATION=PASS | SQLITE_BACKUP_AND_VERIFY=PASS | UPLOADS_BACKED_UP=PASS | TEST_UNCHANGED=PASS'
     Write-Host "RECOVERY_FOLDER=$runBackup"
     Write-Host 'LIVE_AUTO_DEPLOY=DISABLED; approval baseline must be updated before re-enabling.'
 } catch {
     $failure = $_.Exception.Message
-    Write-Warning "LIVE_NOTICES_RELEASE_FAILED: $failure"
+    Write-Warning "LIVE_SHARED_FOUNDATION_RELEASE_FAILED: $failure"
     if ($serverTouched) {
         try {
             $portOwners = @(Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue |
