@@ -47,6 +47,7 @@ import { createFamilyMemberAccessTables, getFamilyMemberAuthorization, getVerifi
 import { createOwnerPasswordStepUp } from './family-owner-step-up.mjs'
 import { createFamilyPasswordRecoveryTables } from './family-password-recovery.mjs'
 import { installPrivateRecoveryPublic, installPrivateRecoveryOperator } from './private-family-password-recovery.mjs'
+import { installPrivateSystemAdministrator } from './private-system-administration.mjs'
 import { installPrivateMemberRouteEnforcement } from './family-member-route-enforcement.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
@@ -589,6 +590,16 @@ export async function startPrivateHouseholdGateway({
     identityDatabase, trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
     passwordStepUp: ownerPasswordStepUp,
   })
+  // A dedicated SYSTEM operator route, never inside any household settings
+  // pane or backend. Read-only metadata, invitations and recovery review.
+  installPrivateSystemAdministrator(app, {
+    identityDatabase, serverDirectory,
+    trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+    routedHouseholdIds: [...portByHousehold.keys()],
+  })
+  // Never forward an unknown administrator API to a family backend.
+  app.use('/api/admin', (_request, response) =>
+    response.status(404).json({ error: 'Not found.' }))
   // This policy must register BEFORE gateway-owned Arney/share endpoints
   // AND the backend proxy. If enabled, unknown API routes fail closed.
   if (enforceFamilyMemberPermissions) {
