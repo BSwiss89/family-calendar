@@ -82,6 +82,7 @@ async function makeSite(loginDatabase, identityDatabase) {
   app.post('/api/lists/1/items', (_req, res) => res.status(201).json({ wrote: true }))
   app.get('/api/recipes', (_req, res) => res.json({ recipes: [] }))
   app.get('/api/emoji-markers', (_req, res) => res.json({ privateData: 'not reviewed' }))
+  app.post('/api/auth/unreviewed-owner-change', (_req, res) => res.json({ unsafe: true }))
   app.get('/uploads/person-photo', (_req, res) => res.send('private photo'))
   const server = createServer(app)
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -146,6 +147,7 @@ test('existing username/password and remembered cookie establish family actor wi
   assert.equal((await call(site, child, '/uploads/person-photo')).status, 200)
   assert.equal((await call(site, owner, '/api/emoji-markers')).status, 403,
     'even the Owner cannot use unreviewed API routes during pilot')
+  assert.equal((await call(site, owner, '/api/auth/unreviewed-owner-change', 'POST', {})).status, 403)
   assert.equal((await call(site, child, '/API/events')).status, 403)
   const chosenHome = await call(site, child, '/api/auth/device-profile', 'POST', { kind: 'home' })
   assert.equal(chosenHome.status, 200)
