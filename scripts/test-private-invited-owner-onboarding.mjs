@@ -24,6 +24,7 @@ import {
 import {
   installPrivateSystemAdministrator,
 } from '../Server/private-system-administration.mjs'
+import { resolveHouseholdStorage } from '../Server/household-storage.mjs'
 
 const directory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../Server')
 const password = 'Only-Disposable-Invited-Owner-Secure-Password-2026!'
@@ -53,9 +54,11 @@ async function fixture(t) {
     cookieName: '__Host-fc_gateway_session',
   })
   installPrivateSystemAdministrator(app, {
-    identityDatabase: db, serverDirectory: directory,
+    identityDatabase: db, serverDirectory: directory, storageRoot,
     trustedAdministratorUserIds: [operatorId],
-    routedHouseholdIds: [], // Static metadata fixture, not a real backend.
+    // This changes only when our disposable fixture simulates a TRUSTED
+    // already-reviewed operator route; ordinary HTTP cannot change it.
+    getRoutedHouseholdIds: () => [...routed],
   })
   installPrivateInvitedOwnerOnboarding(app, {
     identityDatabase: db, serverDirectory: directory,
@@ -137,7 +140,7 @@ async function fixture(t) {
     ].join(' ')).get(username).householdId
     return { id, cookie: await login(username) }
   }
-  return { db, base, operatorId, routed, req, login, inviteAndJoin }
+  return { db, base, storageRoot, operatorId, routed, req, login, inviteAndJoin }
 }
 
 test('operator invitation creates two independent Owner logins; neither can view the other status', async t => {
@@ -182,6 +185,28 @@ test('operator invitation creates two independent Owner logins; neither can view
   assert.equal(operatorOverview.data.households.every(x =>
     x.state === 'pending-activation' && x.memberCount === 1 &&
     x.ownerCount === 1), true)
+  const readiness = await req('/api/admin/activation-readiness', {
+    cookie: operator,
+  })
+  assert.equal(readiness.response.status, 200)
+  assert.equal(readiness.data.kind, 'read-only-private-activation-preflight-v1')
+  assert.equal(readiness.data.canActivateFromBrowser, false)
+  assert.deepEqual(new Set(readiness.data.checks.map(x => x.householdId)),
+    new Set([a.id, b.id]))
+  assert.equal(readiness.data.checks.every(x =>
+    x.stage === 'storage-reviewed-awaiting-backend-proof' &&
+    x.storagePreflight === 'passed'), true)
+  assert.equal((await req('/api/admin/activation-readiness', {
+    cookie: a.cookie,
+  })).response.status, 403, 'household Owner cannot inspect system preflight')
+  assert.equal((await req('/api/admin/activation-readiness')).response.status, 401)
+  assert.equal((await req('/api/admin/activate', {
+    cookie: operator, body: { householdId: a.id },
+  })).response.status, 404, 'the HTTP dashboard cannot activate a household')
+  assert.equal((await req('/api/households/my-onboarding', {
+    cookie: a.cookie,
+  })).data.households[0].state, 'pending-activation',
+  'read-only activation inspection does not change the household')
   assert.equal((await req('/api/households', { cookie: a.cookie })).data.count, 1)
   assert.equal((await req('/api/households', { cookie: b.cookie })).data.count, 1)
   assert.equal(db.prepare([
@@ -196,8 +221,21 @@ test('operator invitation creates two independent Owner logins; neither can view
 })
 
 test('Owner sees pending, approved-unrouted and configured states without browser activation', async t => {
-  const { db, req, routed, inviteAndJoin } = await fixture(t)
+  const { db, req, login, routed, inviteAndJoin } = await fixture(t)
   const a = await inviteAndJoin('activatingowner', 'Awaiting review')
+  const operator = await login('operatorinvites', operatorPassword)
+  const adminOverview = async () => (await req('/api/admin/household-overview', {
+    cookie: operator,
+  })).data.households[0]
+  const adminReadiness = async () => (await req('/api/admin/activation-readiness', {
+    cookie: operator,
+  })).data.checks[0]
+  assert.equal((await adminOverview()).state, 'pending-activation')
+  assert.deepEqual(await adminReadiness(), {
+    householdId: a.id,
+    stage: 'storage-reviewed-awaiting-backend-proof',
+    storagePreflight: 'passed',
+  })
   assert.equal((await req('/api/households/my-onboarding', {
     cookie: a.cookie,
   })).data.households[0].state, 'pending-activation')
@@ -214,7 +252,18 @@ test('Owner sees pending, approved-unrouted and configured states without browse
   assert.equal((await req('/api/households/my-onboarding', {
     cookie: a.cookie,
   })).data.households[0].state, 'approved-awaiting-route')
+  assert.equal((await adminOverview()).state, 'approved-unrouted')
+  assert.deepEqual(await adminReadiness(), {
+    householdId: a.id, stage: 'approved-awaiting-route',
+    storagePreflight: 'not-evaluated',
+  })
   routed.add(a.id)
+  assert.equal((await adminOverview()).state, 'configured-route',
+    'newly enrolled private backend must appear without gateway restart')
+  assert.deepEqual(await adminReadiness(), {
+    householdId: a.id, stage: 'approved-route-configured',
+    storagePreflight: 'not-evaluated',
+  })
   assert.equal((await req('/api/households/my-onboarding', {
     cookie: a.cookie,
   })).data.households[0].state, 'configured-route')
@@ -227,4 +276,65 @@ test('Owner sees pending, approved-unrouted and configured states without browse
     cookie: a.cookie,
   })).data.households, [])
   assert.equal((await req('/my-household', { cookie: a.cookie })).response.status, 403)
+})
+
+
+test('pending activation inspection holds damaged or populated tenant storage without copying data or granting access', async t => {
+  const { db, storageRoot, req, login, inviteAndJoin } = await fixture(t)
+  const owner = await inviteAndJoin('integrityowner', 'Fresh private family')
+  const admin = await login('operatorinvites', operatorPassword)
+  const inspect = async () => {
+    const result = await req('/api/admin/activation-readiness?householdId=' +
+      encodeURIComponent('family-' + 'f'.repeat(24)), { cookie: admin })
+    assert.equal(result.response.status, 200)
+    assert.equal(result.data.checks.length, 1,
+      'caller-supplied household IDs must never change the operator scope')
+    assert.equal(result.data.checks[0].householdId, owner.id)
+    return result.data.checks[0]
+  }
+  assert.equal((await inspect()).stage, 'storage-reviewed-awaiting-backend-proof')
+  const storage = resolveHouseholdStorage({
+    serverDirectory: directory, storageRoot, householdId: owner.id,
+  })
+  // This is a disposable filesystem created in a unique OS temp folder.
+  const household = new DatabaseSync(storage.databasePath)
+  try {
+    household.exec('CREATE TABLE events(id INTEGER PRIMARY KEY, title TEXT NOT NULL)')
+    household.prepare('INSERT INTO events(title) VALUES (?)')
+      .run('Private preactivation data must not be silently adopted')
+    assert.deepEqual(await inspect(), {
+      householdId: owner.id, stage: 'blocked-review',
+      storagePreflight: 'failed',
+    })
+    assert.equal(household.prepare('SELECT COUNT(*) AS n FROM events').get().n, 1,
+      'the inspector does not overwrite or delete a tenant event')
+    household.prepare('DELETE FROM events').run()
+  } finally {
+    household.close()
+  }
+  assert.equal((await inspect()).stage, 'storage-reviewed-awaiting-backend-proof')
+  fs.writeFileSync(path.join(storage.uploadFolder, 'unreviewed-people-photo.txt'),
+    'disposable private file')
+  assert.equal((await inspect()).stage, 'blocked-review')
+  assert.equal(fs.existsSync(path.join(storage.uploadFolder,
+    'unreviewed-people-photo.txt')), true)
+  fs.unlinkSync(path.join(storage.uploadFolder, 'unreviewed-people-photo.txt'))
+  assert.equal((await inspect()).stage, 'storage-reviewed-awaiting-backend-proof')
+  const actualOwner = db.prepare(
+    "SELECT id FROM family_users WHERE username = 'integrityowner'"
+  ).get().id
+  db.prepare('UPDATE household_memberships SET disabled = 1 WHERE user_id = ?')
+    .run(actualOwner)
+  assert.deepEqual(await inspect(), {
+    householdId: owner.id, stage: 'blocked-review',
+    storagePreflight: 'not-evaluated',
+  })
+  assert.equal((await req('/api/households/my-onboarding', {
+    cookie: owner.cookie,
+  })).data.households.length, 0)
+  db.prepare('UPDATE household_memberships SET disabled = 0 WHERE user_id = ?')
+    .run(actualOwner)
+  assert.equal((await inspect()).stage, 'storage-reviewed-awaiting-backend-proof')
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM private_activated_households')
+    .get().n, 0, 'readiness can never register approval')
 })

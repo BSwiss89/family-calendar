@@ -594,9 +594,11 @@ export async function startPrivateHouseholdGateway({
   // A dedicated SYSTEM operator route, never inside any household settings
   // pane or backend. Read-only metadata, invitations and recovery review.
   installPrivateSystemAdministrator(app, {
-    identityDatabase, serverDirectory,
+    identityDatabase, serverDirectory, storageRoot,
     trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
-    routedHouseholdIds: [...portByHousehold.keys()],
+    // Enrollment can add a verified private backend after initial boot.
+    // Always derive operator status from the current trusted route map.
+    getRoutedHouseholdIds: () => [...portByHousehold.keys()],
   })
   // Newly invited Owner status is derived ONLY from their verified session
   // and current activated, trusted gateway routing. Never activate via UI.

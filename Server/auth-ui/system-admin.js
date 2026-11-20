@@ -3,6 +3,7 @@
 // All account/household fields are rendered as TEXT, never HTML.
 const $ = id => document.getElementById(id)
 let busy = false
+let activationChecks = new Map()
 const linkPrefix = location.origin + '/start-family#token='
 const resetPrefix = location.origin + '/reset-password#token='
 
@@ -84,6 +85,16 @@ function householdEntry(household) {
   appendText(info, 'span', 'Owner: ' + (household.ownerDisplayName || 'Unassigned'))
   appendText(info, 'span', household.memberCount + ' enrolled account' +
     (household.memberCount === 1 ? '' : 's'))
+  const check = activationChecks.get(household.householdId)
+  if (check && check.stage === 'storage-reviewed-awaiting-backend-proof') {
+    appendText(info, 'span', 'Storage preflight passed; independent backend, backup and authorization review still required.')
+  } else if (check && check.stage === 'blocked-review') {
+    appendText(info, 'span', 'Activation on hold: review household storage and Owner records.')
+  } else if (check && check.stage === 'approved-awaiting-route') {
+    appendText(info, 'span', 'Approved; trusted backend route not configured.')
+  } else if (check && check.stage === 'approved-route-configured') {
+    appendText(info, 'span', 'Approved and route configured. Online health not confirmed here.')
+  }
   const state = element('span', {
     className: 'chip ' + (household.state === 'configured-route'
       ? 'configured' : 'pending'),
@@ -160,13 +171,24 @@ function validateRecovery(value) {
 }
 
 async function refresh() {
-  const [overview, pending] = await Promise.all([
+  const [overview, pending, readiness] = await Promise.all([
     requestJson('/api/admin/household-overview'),
     requestJson('/api/admin/recovery/requests'),
+    // The optional preflight does not control registration/activation. If it
+    // is unavailable, the existing household overview remains usable.
+    requestJson('/api/admin/activation-readiness').catch(() => null),
   ])
   if (!validateOverview(overview) || !validateRecovery(pending)) {
     throw new Error('Unexpected response from administrator service.')
   }
+  activationChecks = readiness?.kind === 'read-only-private-activation-preflight-v1' &&
+    readiness.canActivateFromBrowser === false && Array.isArray(readiness.checks)
+      ? new Map(readiness.checks.filter(check => check &&
+          typeof check.householdId === 'string' &&
+          ['blocked-review', 'storage-reviewed-awaiting-backend-proof',
+            'approved-awaiting-route', 'approved-route-configured'].includes(check.stage))
+        .map(check => [check.householdId, check]))
+      : new Map()
   $('household-count').textContent = overview.households.length
   $('configured-count').textContent = overview.households
     .filter(x => x.state === 'configured-route').length

@@ -3,6 +3,7 @@
 // household Owner role, selected People avatar or request-supplied ID.
 // No household event, recipe, shopping, People photo or device secrets leak.
 import path from 'node:path'
+import { inspectPrivateHouseholdActivationReadiness } from './private-household-activation-readiness.mjs'
 import {
   listIndependentHouseholdAdministration,
 } from './independent-household-invitations.mjs'
@@ -69,10 +70,15 @@ function isTrustedAdmin(db, serverVerifiedId, allowlist) {
 export function installPrivateSystemAdministrator(app, {
   identityDatabase, serverDirectory, trustedAdministratorUserIds,
   routedHouseholdIds = [],
+  getRoutedHouseholdIds = () => routedHouseholdIds,
+  storageRoot = null,
 }) {
   if (!app || !identityDatabase ||
       typeof serverDirectory !== 'string' || !path.isAbsolute(serverDirectory) ||
-      !Array.isArray(trustedAdministratorUserIds)) {
+      !Array.isArray(trustedAdministratorUserIds) ||
+      typeof getRoutedHouseholdIds !== 'function' ||
+      (storageRoot !== null &&
+        (typeof storageRoot !== 'string' || !path.isAbsolute(storageRoot)))) {
     throw new Error('System dashboard needs private authenticated gateway configuration.')
   }
 
@@ -109,7 +115,9 @@ export function installPrivateSystemAdministrator(app, {
       const overview = listPrivateOperatorHouseholdOverview(identityDatabase, {
         serverVerifiedAdministratorUserId: request.familyAccount.user_id,
         trustedAdministratorUserIds,
-        routedHouseholdIds,
+        // A newly enrolled family can be routed AFTER gateway startup.
+        // Never cache the original boot-time route list for operator views.
+        routedHouseholdIds: getRoutedHouseholdIds(),
       })
       response.json(overview)
     } catch (error) {
@@ -117,4 +125,37 @@ export function installPrivateSystemAdministrator(app, {
       response.status(503).json({ error: 'System household overview unavailable.' })
     }
   })
+
+  // Optional read-only preflight: no browser endpoint may approve a backend,
+  // start a Node process, modify another tenant or clear a crash hold.
+  if (storageRoot !== null) {
+    app.get('/api/admin/activation-readiness', operatorOnly, (request, response) => {
+      try {
+        const routes = getRoutedHouseholdIds()
+        const overview = listPrivateOperatorHouseholdOverview(identityDatabase, {
+          serverVerifiedAdministratorUserId: request.familyAccount.user_id,
+          trustedAdministratorUserIds,
+          routedHouseholdIds: routes,
+        })
+        const active = new Set(routes)
+        const checks = overview.households.map(household => ({
+          householdId: household.householdId,
+          ...inspectPrivateHouseholdActivationReadiness({
+            identityDatabase, serverDirectory, storageRoot,
+            householdId: household.householdId,
+            configuredRoute: active.has(household.householdId),
+          }),
+        }))
+        response.json({
+          kind: 'read-only-private-activation-preflight-v1',
+          canActivateFromBrowser: false,
+          checks,
+          note: 'Storage review is not backend attestation, a completed backup, activation permission or online status.',
+        })
+      } catch (error) {
+        console.error('Private activation readiness unavailable:', error?.message)
+        response.status(503).json({ error: 'Private activation inspection unavailable.' })
+      }
+    })
+  }
 }

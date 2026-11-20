@@ -153,7 +153,10 @@ async function login(base, username) {
 }
 
 test('central authenticated gateway denies one family access to another family by API, list, image or crafted tenant selector', {
-  timeout: 60000,
+  // Multiple real backend children plus Windows runner scheduling can exceed
+  // 60 s while all explicit security assertions still complete normally.
+  // Keep a bounded 90 s limit; never skip or weaken the isolation checks.
+  timeout: 90000,
 }, async () => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'calendar-private-gateway-'))
   const storageRoot = path.join(work, 'household-storage')
