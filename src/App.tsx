@@ -36,6 +36,7 @@ import HouseholdMembersSettings from './HouseholdMembersSettings'
 import FamilyDailyNotes from './FamilyDailyNotes'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
 import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
+import { useCalendarEmojiMarkers, EmojiMarkerDayButton, EmojiMarkerEditor } from './EmojiCalendarMarkers'
 import {
   eventMatchesCalendarPersonFilter,
   toggleCalendarPersonFilterIds,
@@ -2055,6 +2056,7 @@ async function prepareCaptureImage(
 
 function App() {
   const today = new Date()
+  const emojiCalendar = useCalendarEmojiMarkers()
 
 const [page, setPage] =
   useState<
@@ -17121,6 +17123,14 @@ createPortal(
 </div>
 
 <SharedEventDetails event={selectedReceivedEvent} onClose={closeReceivedDetails} />
+{emojiCalendar.selectedDate && (
+  <EmojiMarkerEditor
+    dateKey={emojiCalendar.selectedDate}
+    markers={emojiCalendar.markers}
+    onClose={() => emojiCalendar.setSelectedDate(null)}
+    onChanged={emojiCalendar.reload}
+  />
+)}
 
 {calendarView === 'month' && (
   <div
@@ -17440,6 +17450,7 @@ const visibleDayEventCount =
               >
                 <div className="month-day-open-zone">
   <strong>{day}</strong>
+  <EmojiMarkerDayButton dateKey={daySharedEventKey} markers={emojiCalendar.markers} onOpen={emojiCalendar.setSelectedDate} />
 </div>
 
                 <div
