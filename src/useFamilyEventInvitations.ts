@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from 'react'
+import { familySiteRoutes } from './familySiteRoutes'
 
 // Personal invitations share the existing Invitations view. No standalone inbox,
 // separate login, or system-notification RSVP actions.
@@ -33,7 +34,7 @@ export function useFamilyEventInvitations(personId:number|null) {
     const request=++serial.current
     if(!personId) {setAvailable(false);setInvitations([]);return}
     try {
-      const response=await fetch('/api/live-event-invitations',{
+      const response=await fetch(familySiteRoutes.eventInvitations,{
         credentials:'same-origin',cache:'no-store',
       })
       if(!response.ok) throw Error('Family invitations unavailable.')
@@ -76,7 +77,7 @@ export function useFamilyEventInvitations(personId:number|null) {
     setRespondingFamilyId(id)
     setFamilyInvitationError('')
     try {
-      const response=await fetch('/api/live-event-invitations/'+id+'/respond',{
+      const response=await fetch(familySiteRoutes.eventInvitations+'/'+id+'/respond',{
         method:'POST',credentials:'same-origin',cache:'no-store',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({decision}),
