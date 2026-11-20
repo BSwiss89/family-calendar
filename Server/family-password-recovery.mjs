@@ -38,7 +38,7 @@ export function createFamilyPasswordRecoveryTables(db) {
     'decided_by INTEGER REFERENCES family_users(id), decided_at INTEGER,',
     'token_hash TEXT UNIQUE, token_expires_at INTEGER, redeemed_at INTEGER,',
     'CHECK(expires_at > created_at),',
-    "CHECK((state != 'issued') OR (token_hash IS NOT NULL AND token_expires_at IS NOT NULL)),",
+    "CHECK((state != 'issued') OR (token_hash IS NOT NULL AND token_expires_at IS NOT NULL))",
     ') STRICT;',
     'CREATE INDEX IF NOT EXISTS family_recovery_user_idx',
     'ON family_recovery_requests(user_id, created_at);',
