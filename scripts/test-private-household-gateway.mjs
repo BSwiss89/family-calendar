@@ -27,6 +27,7 @@ import {
   grantHouseholdMembership,
 } from '../Server/household-memberships.mjs'
 import { setFamilyAccount } from '../Server/family-auth.mjs'
+import { setFamilyMemberType } from '../Server/family-member-access.mjs'
 import {
   createEventShareTables, registerTrustedShareConnection,
   inviteSelectedEvents, respondToEventInvitation,
@@ -354,6 +355,53 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal((await json(gateway.base, invitePath + '/' + issued.value.invitationId + '/revoke', {
       cookie: cookieA, method: 'POST',
     })).response.status, 404)
+
+    // Account rights are resolved from the central authenticated session.
+    // Profile-selection and forged household headers cannot change that role.
+    const accessMe = '/api/households/my-member-access'
+    const accessRoster = '/api/households/member-access'
+    assert.equal((await json(gateway.base, accessMe)).response.status, 401)
+    assert.equal((await json(gateway.base, accessRoster)).response.status, 401)
+    assert.equal((await json(gateway.base, accessRoster, { cookie: cookieMember })).response.status, 403)
+    const ownerAccessA = await json(gateway.base, accessMe, {
+      cookie: cookieA, headers: { 'x-household-id': 'family-b' },
+    })
+    assert.equal(ownerAccessA.response.status, 200)
+    assert.equal(ownerAccessA.response.headers.get('cache-control'), 'no-store')
+    assert.equal(ownerAccessA.value.memberType, 'owner')
+    assert.equal(ownerAccessA.value.linkedPersonId, null)
+    assert.equal(ownerAccessA.value.allowedActions.includes('permissions.manage'), true)
+    assert.equal((await json(gateway.base, accessMe, {
+      cookie: cookieMember,
+    })).response.status, 403, 'unconfigured Member cannot assume Adult rights')
+    const accessA = await json(gateway.base, accessRoster, {
+      cookie: cookieA, headers: { 'x-household-id': 'family-b' },
+    })
+    const accessB = await json(gateway.base, accessRoster, { cookie: cookieB })
+    assert.equal(accessA.response.status, 200)
+    assert.equal(accessB.response.status, 200)
+    assert.deepEqual(accessA.value.members.map(m => m.username),
+      ['familyadmina', 'familymembera'])
+    assert.deepEqual(accessA.value.members.map(m => m.memberType), ['owner', null])
+    assert.deepEqual(accessB.value.members.map(m => m.username), ['familyadminb'])
+    assert.equal(/password_hash|token_hash|session_id/.test(JSON.stringify(accessA.value)), false)
+    // The test harness uses offline Owner provisioning, not a browser grant.
+    setFamilyMemberType(central, {
+      householdId: 'family-a', serverVerifiedOwnerUserId: idA,
+      targetUserId: memberId, memberType: 'child',
+    })
+    const childAccess = await json(gateway.base, accessMe, { cookie: cookieMember })
+    assert.equal(childAccess.response.status, 200)
+    assert.equal(childAccess.value.memberType, 'child')
+    assert.equal(childAccess.value.linkedPersonId, null)
+    assert.equal(childAccess.value.allowedActions.includes('calendar.view'), true)
+    assert.equal(childAccess.value.allowedActions.includes('events.create'), false)
+    assert.equal((await json(gateway.base, accessRoster, {
+      cookie: cookieMember,
+    })).response.status, 403)
+    assert.equal((await json(gateway.base, '/api/auth/status', {
+      cookie: cookieMember,
+    })).value.username, 'familymembera')
 
     // A roster is scoped to the verified owner and omits secret fields.
     const rosterPath = '/api/households/members'
