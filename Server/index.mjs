@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import { installDailyFamilyNotes } from './daily-family-notes.mjs'
+import { isValidDate, isValidTitle, isValidPersonName, isValidColor, cleanOptionalText } from './calendar-input-validation.mjs'
 import { installTestNotificationInboxPilot } from './test-notification-inbox-pilot.mjs'
 import {
   applyAttributedEventMutation, captureEventMutationAttribution, attributeNewEvent,
@@ -677,43 +678,6 @@ const testEventInvitations = installTestEventInvitations(app, database, { port: 
 installTestInformationalPush(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 // Private loopback Whisper bridge; disabled unless authenticated TEST opts in.
 installTestLocalStt(app, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
-
-function isValidDate(date) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(date)
-}
-
-function isValidTitle(title) {
-  return (
-    typeof title === 'string' &&
-    title.trim().length > 0 &&
-    title.trim().length <= 200
-  )
-}
-
-function isValidPersonName(name) {
-  return (
-    typeof name === 'string' &&
-    name.trim().length > 0 &&
-    name.trim().length <= 50
-  )
-}
-
-function isValidColor(color) {
-  return /^#[0-9A-Fa-f]{6}$/.test(color)
-}
-function cleanOptionalText(value, maxLength) {
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const cleaned = value.trim()
-
-  if (cleaned.length === 0) {
-    return null
-  }
-
-  return cleaned.slice(0, maxLength)
-}
 
 function getRepeatRule(body, eventDate) {
   const repeatUnit = body.repeatUnit
