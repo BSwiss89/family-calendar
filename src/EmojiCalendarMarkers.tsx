@@ -4,7 +4,6 @@ import './EmojiCalendarMarkers.css'
 
 export function useCalendarEmojiMarkers() {
   const [markers, setMarkers] = useState<EmojiMarkerData[]>([])
-  const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const reload = useCallback(async () => {
     const response = await fetch('/api/emoji-markers', { credentials: 'same-origin', cache: 'no-store' })
     if (!response.ok) throw new Error('Could not load emoji markers.')
@@ -19,10 +18,7 @@ export function useCalendarEmojiMarkers() {
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [reload])
-  useEffect(() => {
-    if (selectedDate) void reload().catch(() => {})
-  }, [selectedDate, reload])
-  return { markers, selectedDate, setSelectedDate, reload }
+  return { markers, reload }
 }
 
 export function EmojiMarkerDayButton({
