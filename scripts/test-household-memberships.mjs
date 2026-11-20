@@ -3,6 +3,8 @@ import './test-family-member-profile-link.mjs' // Verify account-to-People linki
 import './test-family-owner-step-up.mjs' // Guard sensitive Owner changes with bounded password verification.
 import './test-family-member-route-enforcement.mjs' // Enforce account grants on private HTTP routes, including Arney.
 import './test-existing-test-login-family-bridge.mjs' // Prove current TEST cookies/sessions authorize independent family account rights.
+import './test-family-offline-provisioning.mjs' // Inventory existing TEST accounts and create new identity files only on explicit approval.
+import './test-test-family-route-audit.mjs' // Audit remaining TEST legacy routes and fail-closed permission classifications.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
