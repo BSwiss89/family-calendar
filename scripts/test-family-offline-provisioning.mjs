@@ -115,7 +115,9 @@ test('offline CLI preflight fingerprints account inventory, creates new external
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'family-test-offline-plan-'))
   const sourceFile = path.join(root, 'test-source.sqlite')
   const planFile = path.join(root, 'private-plan.json')
-  const outputFile = path.join(root, 'new-central-identity.sqlite')
+  const outputDirectory = path.join(root, 'separate-private-permissions')
+  fs.mkdirSync(outputDirectory)
+  const outputFile = path.join(outputDirectory, 'new-central-identity.sqlite')
   const { source, sourceSummary } = sourceFixture(t, sourceFile)
   // Windows cannot delete an open SQLite directory. Register cleanup AFTER
   // sourceFixture's t.after(close) so it executes after connection closure.
@@ -155,7 +157,9 @@ test('changed existing TEST identity inventory invalidates a previously approved
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'family-test-plan-snapshot-'))
   const sourceFile = path.join(root, 'source.sqlite')
   const planFile = path.join(root, 'plan.json')
-  const outputFile = path.join(root, 'identity.sqlite')
+  const outputDirectory = path.join(root, 'separate-private-permissions')
+  fs.mkdirSync(outputDirectory)
+  const outputFile = path.join(outputDirectory, 'identity.sqlite')
   const { source } = sourceFixture(t, sourceFile)
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   fs.writeFileSync(planFile, JSON.stringify(plan()))
