@@ -117,6 +117,8 @@ export function EmojiMarkerEventForm({
     undefined, { weekday: 'long' }
   )
   const ordinal = ['first', 'second', 'third', 'fourth', 'fifth'][Math.floor((startDay - 1) / 7)]
+  const monthDaySuffix = startDay % 100 >= 11 && startDay % 100 <= 13 ? 'th' :
+    startDay % 10 === 1 ? 'st' : startDay % 10 === 2 ? 'nd' : startDay % 10 === 3 ? 'rd' : 'th'
 
   function resetNew() {
     setEditingId(null)
@@ -343,7 +345,7 @@ export function EmojiMarkerEventForm({
                   <select id="add-event-emoji-month-pattern" className="event-input"
                     value={monthPattern} onChange={(event) =>
                       setMonthPattern(event.target.value as typeof monthPattern)}>
-                    <option value="date">The {startDay}th (skip months without this date)</option>
+                    <option value="date">The {startDay}{monthDaySuffix} (skip months without this date)</option>
                     <option value="nth-weekday">The {ordinal} {weekday}</option>
                     <option value="last-weekday">The last {weekday}</option>
                   </select>
