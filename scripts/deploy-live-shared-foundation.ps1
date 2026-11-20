@@ -1,7 +1,7 @@
 # Secure LIVE shared-foundation release. Preview is default and leaves LIVE intact.
 # -Apply requires explicit production authorization and repeats all checks first.
 # TEST automatic deployment remains enabled; LIVE automatic deployment stays disabled.
-param([switch]$Apply)
+param([switch]$Apply,[string]$ApprovedSha='')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -128,6 +128,7 @@ try {
     Assert ((GitBranch $stage) -ceq $branch) 'Correct isolated shared-foundation staging branch'
     # Deploy only the exact CI-tested shared-foundation code; tooling is separate.
     $candidateSha = '584c5c3911fc75bcae281a8bdb3763aa3a4970f1'
+    if ($Apply -and $ApprovedSha -cne $candidateSha) { throw 'LIVE apply blocked: explicit exact approved SHA required' }
     $scriptHead = GitHead $stage
     Assert ($scriptHead -cmatch '^[a-f0-9]{40}$' -and $scriptHead -cne $candidateSha) 'GitHub deployment tool commit exists'
     & git -C $stage merge-base --is-ancestor $candidateSha $scriptHead
@@ -192,7 +193,9 @@ try {
     foreach ($file in @($guardFile,
         'C:\ProgramData\FamilyCalendar\SecureLiveAutoDeploy\DEPLOYMENT-IN-PROGRESS.json',
         'C:\ProgramData\FamilyCalendar\SecureLiveAutoDeploy\REQUIRES-REVIEW.txt',
-        'C:\ProgramData\FamilyCalendar\LiveProfilesRelease\IN-PROGRESS.json')) {
+        'C:\ProgramData\FamilyCalendar\LiveProfilesRelease\IN-PROGRESS.json',
+        'C:\ProgramData\FamilyCalendar\SecureTestAutoDeploy\IN-PROGRESS.txt',
+        'C:\ProgramData\FamilyCalendar\SecureTestAutoDeploy\REQUIRES-REVIEW.txt')) {
         Assert (-not (Test-Path -LiteralPath $file)) "No unresolved release marker: $file"
     }
     $pendingBackups = @(Get-ScheduledTask | Where-Object { $_.TaskName -like 'Family Calendar Backup*' -and $_.State -eq 'Running' })
