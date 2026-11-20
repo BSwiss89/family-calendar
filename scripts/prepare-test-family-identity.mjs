@@ -74,6 +74,7 @@ export function runOfflineTestFamilyPlan(argv) {
   if (within(resolvedOutput.toLowerCase(), repoRoot.toLowerCase()) ||
       within(planPath.toLowerCase(), repoRoot.toLowerCase()) ||
       inputPath.toLowerCase() === resolvedOutput.toLowerCase() ||
+      within(resolvedOutput.toLowerCase(), path.dirname(inputPath).toLowerCase()) ||
       planPath.toLowerCase() === resolvedOutput.toLowerCase() ||
       !/\.(sqlite|sqlite3|db)$/i.test(resolvedOutput)) {
     fail('Use separate external identity and private plan paths; never the app checkout or source file.')
@@ -126,6 +127,11 @@ export function runOfflineTestFamilyPlan(argv) {
       }
     } finally {
       candidate.close()
+    }
+    // Recheck before publication; a change in any original account/profile
+    // during the preflight invalidates this exact human-approved mapping.
+    if (localPlanFingerprint(source, planText) !== approval) {
+      fail('Source TEST inventory changed while preparing permissions. Refusing publication.')
     }
     // COPYFILE_EXCL is creation-only, never replacement. In a crash, any
     // incomplete output is held for manual operator investigation, not reused.
