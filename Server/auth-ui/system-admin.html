@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1f2937">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>System administration — Family Calendar</title>
+  <link rel="stylesheet" href="/system-admin/styles.css">
+  <script defer src="/system-admin/app.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div class="eyebrow">PRIVATE OPERATOR VIEW</div>
+      <h1>Family Calendar System Administration</h1>
+      <p>Manage independent household invitations and account recovery. Household events, shopping lists, recipes, and People photos are not accessible from this dashboard.</p>
+      <nav aria-label="System dashboard">
+        <a href="#households">Households</a>
+        <a href="#invitations">Invitations</a>
+        <a href="#recovery">Password recovery</a>
+        <a href="/account">My account</a>
+      </nav>
+    </header>
+    <p id="global-status" role="status" aria-live="polite" class="status-line">Loading your system-administrator permissions…</p>
+    <section class="stats" aria-label="Administrative overview">
+      <div class="stat"><strong id="household-count">—</strong><span>Registered households</span></div>
+      <div class="stat"><strong id="configured-count">—</strong><span>Configured routes</span></div>
+      <div class="stat"><strong id="pending-invites-count">—</strong><span>Pending invitations</span></div>
+      <div class="stat"><strong id="pending-recovery-count">—</strong><span>Recovery requests</span></div>
+    </section>
+    <div class="sections">
+      <section id="households" class="panel">
+        <div class="section-head">
+          <div><h2>Independent households</h2><p>Only households registered through your authorized invitations. Configured does not mean online or healthy.</p></div>
+          <button type="button" id="refresh-button" class="quiet-button">Refresh</button>
+        </div>
+        <div id="household-list" class="stack" aria-live="polite"><p>Loading households…</p></div>
+      </section>
+      <section id="invitations" class="panel">
+        <h2>New household invitation</h2>
+        <p>Send a one-time invitation link. The recipient creates the sole Owner login and names their independent household. Activation remains a separate, reviewed step.</p>
+        <button type="button" id="create-invite">Create invitation link</button>
+        <div class="secret-panel" id="new-household-link" hidden>
+          <label for="household-invite-link">One-time invitation link</label>
+          <input type="text" readonly id="household-invite-link">
+          <button type="button" class="quiet-button" id="copy-household-link">Copy link</button>
+          <p>Copy and share privately. The link is not displayed again after leaving this page.</p>
+        </div>
+        <h3>Pending invitations</h3>
+        <div id="invitation-list" class="stack" aria-live="polite"><p>Loading invitations…</p></div>
+      </section>
+      <section id="recovery" class="panel">
+        <h2>Administrator-assisted password recovery</h2>
+        <p>People can request a password reset from the sign-in page. Confirm their identity through an existing trusted contact method before issuing a one-use link. You never see their password.</p>
+        <div class="verification">
+          <label for="operator-password">Your current system-administrator password</label>
+          <input type="password" id="operator-password" autocomplete="current-password" maxlength="200" placeholder="Required for every decision">
+          <label class="checkbox-row" for="verified-identity">
+            <input type="checkbox" id="verified-identity">
+            <span>I independently verified the intended account holder.</span>
+          </label>
+        </div>
+        <div id="recovery-list" class="stack" aria-live="polite"><p>Loading recovery requests…</p></div>
+        <div id="recovery-link-box" class="secret-panel" hidden>
+          <label for="recovery-link">One-time password reset link (30 minutes)</label>
+          <input type="text" readonly id="recovery-link">
+          <button type="button" class="quiet-button" id="copy-recovery-link">Copy reset link</button>
+          <p>Send the link using the verified contact channel. No automatic recovery emails are sent.</p>
+        </div>
+      </section>
+    </div>
+    <footer>Only verified system-operator accounts can open this page. Household Owners manage their own members inside their own calendar.</footer>
+  </main>
+</body>
+</html>
