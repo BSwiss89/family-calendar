@@ -12,8 +12,8 @@
 import { createHash } from 'node:crypto'
 import { queueEventAssignmentNotifications } from './event-assignment-notifications.mjs'
 
-// Stable, non-sensitive identifiers: bit positions are stored in the LIVE
-// outbox so a later edit does not rewrite what the earlier notice reported.
+// Stable change-field identifiers are stored in the LIVE outbox. For deleted
+// events only, a limited pre-delete snapshot also survives for the recipient.
 const changeColumns = Object.freeze([
   ['title','title'], ['date','date'], ['endDate','end_date'],
   ['time','time'], ['endTime','end_time'], ['location','location'],
@@ -45,8 +45,9 @@ const eventQuery = [
   'repeat_count AS repeatCount FROM events WHERE id = ?',
 ].join(' ')
 
-// A stable material-change fingerprint avoids storing private titles/notes
-// in the shadow/outbox. Assigned people live as sorted integer IDs.
+// A stable material-change fingerprint avoids retaining private titles/notes
+// in the baseline. A short-lived deletion record captures only the event
+// identity fields needed for a recipient's cancelled-event notification.
 // Occurrence exceptions are part of the SERIES fingerprint, not separate
 // per-occurrence cancellation intents.
 function currentSnapshot(db, eventId) {
@@ -138,7 +139,17 @@ const changeFieldTriggers = [
 ]
 
 const triggerDefinitions = [
-  ['notify_event_insert','AFTER INSERT ON events', markDirty('NEW.id')],
+  ['notify_deleted_event_details','BEFORE DELETE ON events', [
+    'INSERT INTO notification_deleted_event_details(',
+    'event_id,title,date,end_date,time,end_time,location)',
+    'VALUES (OLD.id,OLD.title,OLD.date,OLD.end_date,OLD.time,OLD.end_time,OLD.location)',
+    'ON CONFLICT(event_id) DO UPDATE SET title=excluded.title,',
+    'date=excluded.date,end_date=excluded.end_date,time=excluded.time,',
+    'end_time=excluded.end_time,location=excluded.location;',
+  ].join(' ')],
+  ['notify_event_insert','AFTER INSERT ON events',
+    'DELETE FROM notification_deleted_event_details WHERE event_id=NEW.id;\n' +
+    markDirty('NEW.id')],
   ['notify_event_update','AFTER UPDATE ON events',
     markDirty('OLD.id') + '\n' + markDirty('NEW.id')],
   ['notify_event_delete','AFTER DELETE ON events', markDirty('OLD.id')],
@@ -193,6 +204,12 @@ export function installNotificationMutationCapture(db) {
       'event_id INTEGER PRIMARY KEY CHECK(event_id > 0),',
       'change_mask INTEGER NOT NULL CHECK(change_mask BETWEEN 0 AND 8191)',
       ') STRICT;',
+      // Transient pre-delete fields. Reconciliation copies a limited immutable
+      // snapshot to each recipient cancellation notice, then erases this row.
+      'CREATE TABLE IF NOT EXISTS notification_deleted_event_details(',
+      'event_id INTEGER PRIMARY KEY CHECK(event_id > 0),',
+      'title TEXT,date TEXT,end_date TEXT,time TEXT,end_time TEXT,location TEXT',
+      ') STRICT;',
     ].join('\n'))
     if (!previous.size) {
       for (const {id} of db.prepare('SELECT id FROM events ORDER BY id').all()) {
@@ -236,6 +253,10 @@ export function reconcileNotificationMutations(db, { limit = 100, at = Date.now(
       }
       const before = baselineSnapshot(db,eventId)
       const after = currentSnapshot(db,eventId)
+      const cancelledEvent = before && !after ? db.prepare([
+        'SELECT title,date,end_date AS endDate,time,end_time AS endTime,location',
+        'FROM notification_deleted_event_details WHERE event_id=?',
+      ].join(' ')).get(eventId) ?? null : null
       const changeMask = db.prepare([
         'SELECT change_mask AS changeMask FROM notification_dirty_event_fields',
         'WHERE event_id=?',
@@ -250,11 +271,14 @@ export function reconcileNotificationMutations(db, { limit = 100, at = Date.now(
         isId(origin.personId) ? origin.personId : null
       if (before || after) {
         queued += queueEventAssignmentNotifications(
-          db,plannerInput(before),plannerInput(after),at,{excludePersonId,changeMask}
+          db,plannerInput(before),plannerInput(after),at,
+          {excludePersonId,changeMask,cancelledEvent}
         )
       }
       if (after) storeBaseline(db,after)
       else db.prepare('DELETE FROM notification_event_baselines WHERE event_id = ?')
+        .run(eventId)
+      db.prepare('DELETE FROM notification_deleted_event_details WHERE event_id=?')
         .run(eventId)
       db.prepare('DELETE FROM notification_dirty_event_attribution WHERE event_id=?')
         .run(eventId)
