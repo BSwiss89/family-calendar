@@ -261,3 +261,58 @@ test('recurring exception update records the affected schedule field, not privat
   assert.deepEqual(data.notifications[0].changedFields,['occurrences'])
   assert.equal(data.notifications[0].kind,'changed')
 })
+
+test('deleted event keeps its original details for each recipient until acknowledgement',async t=>{
+  const db=makeDb(t)
+  createEvent(db,90,[7,9])
+  const app=setupApp(db)
+  pilot(app,db)
+  const base=await withServer(t,app)
+  db.prepare([
+    'UPDATE events SET title=?,date=?,end_date=?,time=?,end_time=?,',
+    'location=?,notes=? WHERE id=?',
+  ].join(' ')).run('Team practice','2027-05-04','2027-05-05',
+    '18:30','20:00','Community center','Private note not in notice',90)
+  db.prepare('DELETE FROM events WHERE id=90').run()
+  assert.equal((await post(base,'/test-notification-pilot/refresh',11)).status,303)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM notification_deleted_event_details')
+    .get().n,0,'temporary pre-delete snapshot must be erased after reconciliation')
+  const seven=(await (await get(base,'/api/test-notification-pilot',11)).json()).notifications
+  const nine=(await (await get(base,'/api/test-notification-pilot',12)).json()).notifications
+  const expected={
+    title:'Team practice',date:'2027-05-04',endDate:'2027-05-05',
+    time:'18:30',endTime:'20:00',location:'Community center',
+  }
+  for(const notices of [seven,nine]) {
+    assert.equal(notices.length,1)
+    assert.equal(notices[0].kind,'cancelled')
+    assert.deepEqual(notices[0].cancelledEvent,expected)
+    assert.equal(notices[0].acknowledged,false)
+    assert.doesNotMatch(JSON.stringify(notices),/Private note not in notice/)
+  }
+  assert.notEqual(seven[0].id,nine[0].id)
+  assert.equal((await get(base,'/api/test-notification-pilot',13)).status,403)
+  assert.equal((await get(base,'/api/test-notification-pilot',99)).status,401)
+  assert.equal((await post(base,
+    '/api/test-notification-pilot/'+nine[0].id+'/acknowledge',11)).status,404)
+  assert.equal((await post(base,
+    '/api/test-notification-pilot/'+seven[0].id+'/acknowledge',11)).status,200)
+  const after=(await (await get(base,'/api/test-notification-pilot',12)).json()).notifications
+  assert.deepEqual(after[0].cancelledEvent,expected)
+  assert.equal(after[0].acknowledged,false)
+})
+
+test('legacy cancellation notices remain readable without falsely guessing event data',async t=>{
+  const db=makeDb(t),app=setupApp(db)
+  pilot(app,db)
+  db.prepare([
+    'INSERT INTO assignment_notification_outbox(',
+    'event_id,person_id,kind,created_at)',
+    "VALUES (999,7,'cancelled',1000)",
+  ].join(' ')).run()
+  const base=await withServer(t,app)
+  const notes=(await (await get(base,'/api/test-notification-pilot',11)).json()).notifications
+  assert.equal(notes.length,1)
+  assert.equal(notes[0].kind,'cancelled')
+  assert.equal(notes[0].cancelledEvent,null)
+})
