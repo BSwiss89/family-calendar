@@ -12,6 +12,15 @@ export const ASSIGNMENT_CHANGE_FIELDS = [
 export type AssignmentChangeField = typeof ASSIGNMENT_CHANGE_FIELDS[number]
 const allowedChanges = new Set<string>(ASSIGNMENT_CHANGE_FIELDS)
 
+export type CancelledEventDetails = {
+  title: string
+  date: string
+  endDate: string | null
+  time: string | null
+  endTime: string | null
+  location: string | null
+}
+
 export type AssignmentNotice = {
   id: number
   eventId: number
@@ -19,9 +28,24 @@ export type AssignmentNotice = {
   createdAt: number
   acknowledged: boolean
   changedFields: AssignmentChangeField[]
+  cancelledEvent: CancelledEventDetails | null
 }
 
 const kinds = new Set(['assigned','changed','unassigned','cancelled'])
+function parseCancelledEvent(input: unknown): CancelledEventDetails | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const event = input as Record<string,unknown>
+  if (typeof event.title !== 'string' || typeof event.date !== 'string' ||
+    ['endDate','time','endTime','location'].some(key =>
+      event[key] != null && typeof event[key] !== 'string')) return null
+  return {
+    title: event.title, date: event.date,
+    endDate: typeof event.endDate === 'string' ? event.endDate : null,
+    time: typeof event.time === 'string' ? event.time : null,
+    endTime: typeof event.endTime === 'string' ? event.endTime : null,
+    location: typeof event.location === 'string' ? event.location : null,
+  }
+}
 function parseNotice(input: unknown): AssignmentNotice | null {
   if (!input || typeof input !== 'object') return null
   const row = input as Record<string,unknown>
@@ -36,6 +60,8 @@ function parseNotice(input: unknown): AssignmentNotice | null {
     kind: row.kind as AssignmentNotice['kind'],
     createdAt: row.createdAt as number,
     acknowledged: row.acknowledged as boolean,
+    cancelledEvent: row.kind === 'cancelled'
+      ? parseCancelledEvent(row.cancelledEvent) : null,
     changedFields: Array.isArray(row.changedFields)
       ? [...new Set(row.changedFields.filter((field): field is AssignmentChangeField =>
         typeof field === 'string' && allowedChanges.has(field)))].slice(0,13)

@@ -98,17 +98,30 @@ function Cards({invitations,notifications,responseBusy,notificationBusy,error,on
       </div>
     </article>)}
     {notifications.map(note=>{
-      const event=eventDetails(note.eventId)
+      // Deleted event IDs cannot be read from the active calendar (and may
+      // eventually be reused). Use the immutable recipient notice instead.
+      const event=note.kind==='cancelled'?null:eventDetails(note.eventId)
+      const summary=note.kind==='cancelled'?note.cancelledEvent:event
       const firstRepeatIndex=note.changedFields.findIndex(field=>recurringFields.has(field))
       const fields=note.changedFields.filter((field,index)=>
         !recurringFields.has(field)||index===firstRepeatIndex)
       return <article key={'update-'+note.id}
         className={`live-invitation-card${compact?' live-invitation-compact':''}`}>
         {!compact&&<strong className="live-notice-kind">{kindLabels[note.kind]}</strong>}
-        {event ? <>
-          <strong className="live-notice-event-title">{event.title}</strong>
-          <p className="live-notice-date">{formatDate(event.date,event.time)}</p>
-        </> : <p>Event details unavailable</p>}
+        {summary ? <>
+          <strong className="live-notice-event-title">{summary.title}</strong>
+          <p className="live-notice-date">
+            {formatDate(summary.date,summary.time)}
+            {note.kind==='cancelled'&&summary.endDate&&summary.endDate!==summary.date
+              ? ' – '+formatDate(summary.endDate,summary.endTime) :
+              note.kind==='cancelled'&&summary.time&&summary.endTime
+                ? ' – '+formatTime(summary.endTime) : ''}
+          </p>
+          {note.kind==='cancelled'&&summary.location?.trim()&&
+            <p className="live-notice-date">Location: {summary.location}</p>}
+        </> : <p>{note.kind==='cancelled'
+          ? 'Details were not saved for this earlier cancellation'
+          : 'Event details unavailable'}</p>}
         {event&&note.kind==='changed'&&fields.length>0&&
           <p className="live-notice-changes"><b>Changed:</b> {fields.map(field=>
             changeDescription(field,event)).join(' · ')}</p>}

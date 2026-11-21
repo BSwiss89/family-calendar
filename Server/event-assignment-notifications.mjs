@@ -1,6 +1,8 @@
 // Single-household event-assignment notification foundation.
 // Do NOT connect to push transport until device ownership and consent are verified.
-// The outbox stores IDs, change kind and an optional field-name bitmask, never private event text.
+// The outbox stores IDs and change flags; cancelled notices also retain a limited
+// event identity snapshot for the assigned recipient after an event is deleted.
+// Never forward that private snapshot to unauthenticated/push transports.
 const MATERIAL_FIELDS = Object.freeze([
   'title', 'date', 'endDate', 'time', 'endTime', 'location', 'notes',
   'repeatUnit', 'repeatInterval', 'repeatEndType', 'repeatEndDate', 'repeatCount',
@@ -67,7 +69,8 @@ export function installAssignmentNotificationOutbox(database) {
       created_at INTEGER NOT NULL CHECK(created_at > 0),
       delivered_at INTEGER,
       delivery_attempts INTEGER NOT NULL DEFAULT 0 CHECK(delivery_attempts >= 0),
-      change_mask INTEGER NOT NULL DEFAULT 0 CHECK(change_mask BETWEEN 0 AND 8191)
+      change_mask INTEGER NOT NULL DEFAULT 0 CHECK(change_mask BETWEEN 0 AND 8191),
+      cancelled_details_json TEXT
     ) STRICT;
     CREATE INDEX IF NOT EXISTS assignment_notifications_pending_idx
       ON assignment_notification_outbox(created_at, id)
@@ -79,6 +82,11 @@ export function installAssignmentNotificationOutbox(database) {
     .all().some(row => row.name === 'change_mask')) {
     database.exec('ALTER TABLE assignment_notification_outbox ADD COLUMN ' +
       'change_mask INTEGER NOT NULL DEFAULT 0 CHECK(change_mask BETWEEN 0 AND 8191)')
+  }
+  if (!database.prepare('PRAGMA table_info(assignment_notification_outbox)')
+    .all().some(row => row.name === 'cancelled_details_json')) {
+    database.exec('ALTER TABLE assignment_notification_outbox ADD COLUMN ' +
+      'cancelled_details_json TEXT')
   }
 }
 
@@ -92,13 +100,27 @@ export function queueEventAssignmentNotifications(database, before, after, at = 
   if (!Number.isSafeInteger(changeMask) || changeMask < 0 || changeMask > 8191) {
     throw new Error('Invalid event change field mask.')
   }
+  // This data is server-side and is only returned to the original assigned
+  // recipient through the authenticated person-scoped inbox, never Web Push.
+  const deleted = options.cancelledEvent
+  const cancelledDetailsJson = deleted && typeof deleted.title === 'string' &&
+    typeof deleted.date === 'string' ? JSON.stringify({
+      title: deleted.title,
+      date: deleted.date,
+      endDate: typeof deleted.endDate === 'string' ? deleted.endDate : null,
+      time: typeof deleted.time === 'string' ? deleted.time : null,
+      endTime: typeof deleted.endTime === 'string' ? deleted.endTime : null,
+      location: typeof deleted.location === 'string' ? deleted.location : null,
+    }) : null
   const insert = database.prepare(`
-    INSERT INTO assignment_notification_outbox(event_id, person_id, kind, created_at, change_mask)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO assignment_notification_outbox(
+      event_id, person_id, kind, created_at, change_mask, cancelled_details_json)
+    VALUES (?, ?, ?, ?, ?, ?)
   `)
   for (const intent of intents) {
     insert.run(intent.eventId, intent.personId, intent.kind, at,
-      intent.kind === 'changed' ? changeMask : 0)
+      intent.kind === 'changed' ? changeMask : 0,
+      intent.kind === 'cancelled' ? cancelledDetailsJson : null)
   }
   return intents.length
 }
