@@ -7,6 +7,7 @@ import { createHouseholdMembershipTables } from './household-memberships.mjs'
 export const FAMILY_ACTIONS = Object.freeze([
   'calendar.view', 'events.create', 'events.edit', 'events.delete',
   'lists.view', 'lists.edit', 'tasks.view', 'tasks.completeAssigned',
+  'invitations.respondOwn', 'notifications.acknowledgeOwn',
   'tasks.manage', 'recipes.view', 'recipes.edit', 'settings.manage',
   'members.invite', 'permissions.manage', 'devices.manage', 'ownership.transfer',
 ])
@@ -14,13 +15,18 @@ export const FAMILY_ACTIONS = Object.freeze([
 const ACTIONS = new Set(FAMILY_ACTIONS)
 const OWNER_ONLY = new Set(['permissions.manage', 'devices.manage', 'ownership.transfer'])
 const ADULT_ONLY = new Set(['settings.manage', 'members.invite'])
+const PERSON_SCOPED = new Set([
+  'tasks.completeAssigned', 'invitations.respondOwn', 'notifications.acknowledgeOwn',
+])
 const ADULT_DEFAULTS = new Set([
   'calendar.view', 'events.create', 'events.edit', 'events.delete',
   'lists.view', 'lists.edit', 'tasks.view', 'tasks.completeAssigned',
   'tasks.manage', 'recipes.view', 'recipes.edit',
+  'invitations.respondOwn', 'notifications.acknowledgeOwn',
 ])
 const CHILD_DEFAULTS = new Set([
   'calendar.view', 'tasks.view', 'tasks.completeAssigned',
+  'invitations.respondOwn', 'notifications.acknowledgeOwn',
 ])
 // Home is a verified device mode, NEVER another family member or a role.
 // The frontend can show these controls, but a write still needs a verified actor.
@@ -282,7 +288,7 @@ export function canFamilyMemberAct(actor, action, { assignedPersonId = null } = 
   if (!actor || !['owner', 'adult', 'child'].includes(actor.role) ||
       !ACTIONS.has(action) || !Array.isArray(actor.permissions) ||
       !actor.permissions.includes(action)) return false
-  if (action === 'tasks.completeAssigned') {
+  if (PERSON_SCOPED.has(action)) {
     return Number.isSafeInteger(actor.personId) && actor.personId > 0 &&
       actor.personId === assignedPersonId
   }

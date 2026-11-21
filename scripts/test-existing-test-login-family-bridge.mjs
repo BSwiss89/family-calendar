@@ -13,7 +13,7 @@ import {
 import { registerHousehold, grantHouseholdMembership } from '../Server/household-memberships.mjs'
 import {
   installExistingTestLoginFamilyPermissions,
-  verifyExistingTestLoginFamilyActor,
+  verifyExistingTestLoginFamilyActor, requiredExistingTestPersonalAction,
 } from '../Server/test-existing-login-family-bridge.mjs'
 
 const directory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../Server')
@@ -90,7 +90,12 @@ async function makeSite(loginDatabase, identityDatabase) {
   app.put('/api/family-daily-note', (_req, res) => res.json({ wrote: true }))
   app.get('/api/arney/local-transcription/status', (_req, res) => res.json({ ready: true }))
   app.post('/api/arney/local-transcription', (_req, res) => res.json({ text: 'test' }))
-  app.get('/api/test-event-invitations', (_req, res) => res.json({ privateData: 'not reviewed' }))
+  app.get('/api/test-event-invitations', (_req, res) => res.json({ linkedInbox: true }))
+  app.post('/api/test-event-invitations/7/respond', (_req, res) => res.json({ ownResponse: true }))
+  app.get('/api/test-notification-pilot', (_req, res) => res.json({ linkedInbox: true }))
+  app.post('/api/test-notification-pilot/9/acknowledge', (_req, res) => res.json({ ownAck: true }))
+  app.post('/api/test-household-events/1/join', (_req, res) => res.json({ joined: true }))
+  app.post('/api/test-push/subscriptions', (_req, res) => res.json({ subscribed: true }))
   app.post('/api/auth/unreviewed-owner-change', (_req, res) => res.json({ unsafe: true }))
   app.get('/uploads/person-photo', (_req, res) => res.send('private photo'))
   const server = createServer(app)
@@ -172,7 +177,32 @@ test('existing username/password and remembered cookie establish family actor wi
   assert.equal((await call(site, adult, '/api/emoji-markers', 'POST', {})).status, 201)
   assert.equal((await call(site, adult, '/api/family-daily-note', 'PUT', {})).status, 200)
   assert.equal((await call(site, owner, '/api/test-event-invitations')).status, 403,
-    'unreviewed selected-avatar invitation routes remain denied even to Owner')
+    'unlinked Owner cannot access a selected-avatar personal inbox')
+  assert.equal((await call(site, child, '/api/test-event-invitations')).status, 403,
+    'child must explicitly select their OWN linked Person')
+  assert.equal((await call(site, child, '/api/auth/device-profile', 'POST',
+    { kind: 'person', personId: 1 })).status, 200)
+  assert.equal((await call(site, child, '/api/test-event-invitations')).status, 403,
+    'switching to another Person does not impersonate that Person')
+  assert.equal((await call(site, child, '/api/test-event-invitations/7/respond', 'POST',
+    { personId: 1, actor: 'owner', decision: 'accepted' })).status, 403)
+  assert.equal((await call(site, child, '/api/auth/device-profile', 'POST',
+    { kind: 'person', personId: 2 })).status, 200)
+  assert.equal((await call(site, child, '/api/test-event-invitations')).status, 200)
+  assert.equal((await call(site, child, '/api/test-event-invitations/7/respond', 'POST',
+    { personId: 1, actor: 'owner', decision: 'declined' })).status, 200)
+  assert.equal((await call(site, child, '/api/test-notification-pilot')).status, 200)
+  assert.equal((await call(site, child, '/api/test-notification-pilot/9/acknowledge', 'POST',
+    { personId: 1, actor: 'owner' })).status, 200)
+  assert.equal((await call(site, child, '/api/test-household-events/1/join', 'POST', {})).status, 403,
+    'event joining still awaits separately scoped account authorization')
+  assert.equal((await call(site, child, '/api/test-push/subscriptions', 'POST', {})).status, 403,
+    'Web Push awaits centrally revoked-session-aware delivery')
+  assert.equal((await call(site, child, '/api/test-event-invitations/07/respond', 'POST', {})).status, 403)
+  assert.equal((await call(site, child, '/api/test-event-invitations/7/respond?owner=1', 'POST', {})).status, 403)
+  assert.equal((await call(site, child, '/API/test-event-invitations')).status, 403)
+  assert.equal((await call(site, adult, '/api/test-notification-pilot')).status, 403,
+    'unlinked Adult has no claim on a selected Person inbox')
   assert.equal((await call(site, owner, '/api/auth/unreviewed-owner-change', 'POST', {})).status, 403)
   assert.equal((await call(site, child, '/API/events')).status, 403)
   const chosenHome = await call(site, child, '/api/auth/device-profile', 'POST', { kind: 'home' })
@@ -181,6 +211,8 @@ test('existing username/password and remembered cookie establish family actor wi
     selectedProfile: 'Home', userId: users['real-owner'],
   })).status, 403)
   assert.equal((await call(site, child, '/api/auth/my-family-access')).status, 200)
+  assert.equal((await call(site, child, '/api/test-event-invitations')).status, 403)
+  assert.equal((await call(site, child, '/api/test-notification-pilot')).status, 403)
 
   setFamilyMemberPermission(identityDatabase, {
     householdId: home, serverVerifiedOwnerUserId: users['real-owner'],
@@ -235,6 +267,26 @@ test('stale session, missing shadow, disabled account and changed identity mappi
   // invalidates the old trusted session, so no write survives the reset.
   setFamilyAccount(loginDatabase, 'real-child', 'Child', 'Brand-New-Strong-Secure-Passphrase')
   assert.equal((await call(site, child, '/api/events')).status, 401)
+})
+
+test('personal API allowlist is narrow: no alias, other Person or Web Push bypass', () => {
+  for (const [method, url, action] of [
+    ['GET', '/api/test-event-invitations', 'calendar.view'],
+    ['POST', '/api/test-event-invitations/7/respond', 'invitations.respondOwn'],
+    ['GET', '/api/test-notification-pilot', 'calendar.view'],
+    ['POST', '/api/test-notification-pilot/9/acknowledge', 'notifications.acknowledgeOwn'],
+  ]) assert.equal(requiredExistingTestPersonalAction(method, url), action)
+  for (const [method, url] of [
+    ['POST', '/api/test-push/subscriptions'],
+    ['POST', '/api/test-household-events/7/join'],
+    ['GET', '/api/test-event-invitations/'],
+    ['GET', '/api/test-event-invitations?personId=2'],
+    ['POST', '/api/test-event-invitations/0/respond'],
+    ['POST', '/api/test-event-invitations/07/respond'],
+    ['POST', '/api/test-event-invitations/7/respond?role=owner'],
+    ['POST', '/api/test-notification-pilot/9/acknowledge/'],
+    ['GET', '/API/test-notification-pilot'],
+  ]) assert.equal(requiredExistingTestPersonalAction(method, url), null, method + ' ' + url)
 })
 
 test('missing separate identity backend is never interpreted as an Owner login', t => {

@@ -13,6 +13,40 @@ import { requiredFamilyMemberActions } from './family-member-route-enforcement.m
 
 const HOUSEHOLD_ID = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/
 
+// Legacy TEST invitations and notification inboxes select the recipient by
+// a device's People avatar. Only this signed-login bridge may allow these
+// endpoints, and only if the selected Person equals the Owner-verified Person
+// linked to the current account. Private multi-family routing stays denied.
+export function requiredExistingTestPersonalAction(method, originalUrl) {
+  if (typeof originalUrl !== 'string' || !originalUrl.startsWith('/api/') ||
+      originalUrl.includes('?') || originalUrl.includes('%') ||
+      originalUrl.includes('//') || originalUrl.endsWith('/')) return null
+  if (method === 'GET' && (originalUrl === '/api/test-event-invitations' ||
+      originalUrl === '/api/test-notification-pilot')) return 'calendar.view'
+  if (method === 'POST') {
+    if (/^\/api\/test-event-invitations\/[1-9][0-9]*\/respond$/.test(originalUrl)) {
+      return 'invitations.respondOwn'
+    }
+    if (/^\/api\/test-notification-pilot\/[1-9][0-9]*\/acknowledge$/.test(originalUrl)) {
+      return 'notifications.acknowledgeOwn'
+    }
+  }
+  return null
+}
+
+function accountOwnsSelectedSessionPerson(loginDatabase, authenticatedSession, actor) {
+  if (!Number.isSafeInteger(actor?.personId) || actor.personId < 1 ||
+      !Number.isSafeInteger(authenticatedSession?.id) ||
+      !Number.isSafeInteger(authenticatedSession?.user_id)) return false
+  const row = loginDatabase.prepare([
+    'SELECT 1 FROM family_sessions WHERE id = ? AND user_id = ?',
+    "AND selected_profile_kind = 'person' AND selected_person_id = ?",
+    'AND revoked_at IS NULL AND expires_at > ?',
+  ].join(' ')).get(authenticatedSession.id, authenticatedSession.user_id,
+    actor.personId, Date.now())
+  return Boolean(row)
+}
+
 export function verifyExistingTestLoginFamilyActor({
   loginDatabase, identityDatabase, householdId, authenticatedSession,
 }) {
@@ -116,11 +150,20 @@ export function installExistingTestLoginFamilyPermissions(app, {
         allowed = ['GET', 'HEAD'].includes(request.method) &&
           canFamilyMemberAct(actor, 'calendar.view')
       } else {
-        const required = requiredFamilyMemberActions(request.method, request.originalUrl)
-        // Unknown API routes, alternate casing and unreviewed Arney writes
-        // are DENIED, including for Owner, until individually audited.
-        allowed = Array.isArray(required) && required.every(action =>
-          canFamilyMemberAct(actor, action))
+        const personal = requiredExistingTestPersonalAction(request.method, request.originalUrl)
+        if (personal) {
+          // This account's verified Person and its active signed session must
+          // agree. The client-selected avatar and request body authorize nothing.
+          allowed = accountOwnsSelectedSessionPerson(loginDatabase,
+            request.familyAccount, actor) &&
+            canFamilyMemberAct(actor, personal, { assignedPersonId: actor.personId })
+        } else {
+          const required = requiredFamilyMemberActions(request.method, request.originalUrl)
+          // Unknown/alias routes and all other legacy personal actions stay
+          // denied to every account, including an Owner.
+          allowed = Array.isArray(required) && required.every(action =>
+            canFamilyMemberAct(actor, action))
+        }
       }
     }
     if (!allowed) {
