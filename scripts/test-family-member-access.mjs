@@ -1,3 +1,14 @@
+test('personal RSVP and acknowledgement require a linked, matching Person', () => {
+  for (const action of ['invitations.respondOwn', 'notifications.acknowledgeOwn']) {
+    const actor = { role: 'child', personId: 2, permissions: [action] }
+    assert.equal(canFamilyMemberAct(actor, action), false)
+    assert.equal(canFamilyMemberAct(actor, action, { assignedPersonId: 1 }), false)
+    assert.equal(canFamilyMemberAct(actor, action, { assignedPersonId: 2 }), true)
+    assert.equal(canFamilyMemberAct({ ...actor, personId: null }, action,
+      { assignedPersonId: 2 }), false)
+  }
+})
+
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
