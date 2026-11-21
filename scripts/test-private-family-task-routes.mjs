@@ -191,8 +191,8 @@ test('authenticated route assigns to real Person and only matching Child can com
   assert.equal(own.body.tasks[0].title, 'Feed the pets')
   assert.equal(own.headers.get('cache-control'), 'no-store')
   const route = '/api/family-assigned-tasks/1/complete'
-  assert.equal((await call(site, owner, route, 'POST', {})).status, 403)
-  assert.equal((await call(site, adult, route, 'POST', {})).status, 403)
+  assert.equal((await call(site, owner, route, 'POST', {})).status, 404)
+  assert.equal((await call(site, adult, route, 'POST', {})).status, 404)
   assert.equal((await call(site, child, route, 'POST', {
     actor: 'owner', personId: 11, selectedProfile: 'Home',
   })).status, 400)
@@ -209,7 +209,7 @@ test('authenticated route assigns to real Person and only matching Child can com
   assert.ok(completed.at > 0)
   assert.equal(completed.byUser, f.users['task-child-a'])
   assert.equal(completed.byPerson, 12)
-  assert.equal((await call(site, child, '/api/family-assigned-tasks/1/reopen', 'POST', {})).status, 403)
+  assert.equal((await call(site, child, '/api/family-assigned-tasks/1/reopen', 'POST', {})).status, 404)
   assert.equal((await call(site, owner, '/api/family-assigned-tasks/1/reopen', 'POST', {})).status, 200)
   assert.equal(f.dbs['family-a'].prepare(
     'SELECT completed_at FROM family_assigned_tasks WHERE id=1'
@@ -277,7 +277,7 @@ test('revocation, expired session, hub account and alias paths fail closed', asy
     enabled: false,
   })
   assert.equal((await call(site, child, '/api/family-assigned-tasks/1/complete',
-    'POST', {})).status, 403)
+    'POST', {})).status, 404)
   setFamilyMemberPermission(f.identity, {
     householdId: 'family-a', serverVerifiedOwnerUserId: f.users['task-owner-a'],
     targetUserId: f.users['task-child-a'], action: 'tasks.completeAssigned',
