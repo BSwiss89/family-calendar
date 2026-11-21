@@ -1,0 +1,96 @@
+/* Future private gateway only: enabled by server-verified capability.
+   Ordinary LIVE and TEST keep the disabled Chores navigation. */
+.verified-chores-page {
+  width: min(920px, calc(100% - 32px));
+  margin: 28px auto 96px;
+  color: var(--text-primary, #263648);
+}
+.verified-chores-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 26px;
+}
+.verified-chores-heading h2 { font-size: clamp(28px, 4vw, 40px); margin: 4px 0; }
+.verified-chores-heading p { margin: 8px 0 0; opacity: .75; line-height: 1.45; }
+.verified-chores-eyebrow {
+  font-size: 12px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  opacity: .75;
+  font-weight: 700;
+}
+.verified-chores-page button,
+.verified-chores-page input,
+.verified-chores-page select { font: inherit; }
+.verified-chores-page button {
+  border: 1px solid #b7c2cb;
+  background: #f4f7f9;
+  color: #294056;
+  border-radius: 12px;
+  min-height: 43px;
+  padding: 9px 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.verified-chores-page button:disabled { cursor: default; opacity: .55; }
+.verified-chores-page button:focus-visible,
+.verified-chores-page select:focus-visible,
+.verified-chores-page input:focus-visible { outline: 3px solid #517cba; outline-offset: 2px; }
+.verified-chores-add {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+  padding: 18px;
+  background: #fff;
+  border: 1px solid #d8e0e6;
+  border-radius: 18px;
+  margin-bottom: 28px;
+}
+.verified-chores-add label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; }
+.verified-chores-add input,
+.verified-chores-add select {
+  width: 100%;
+  min-height: 43px;
+  border: 1px solid #c3ced6;
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: #263648;
+  background: #fff;
+}
+.verified-chores-add button { background: #2d5981; color: #fff; border-color: #2d5981; }
+.verified-chores-page h3 { font-size: 20px; margin: 22px 0 12px; }
+.verified-chores-page h3 span { opacity: .6; font-weight: 400; }
+.verified-chores-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.verified-chores-list li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 18px;
+  background: #fff;
+  border: 1px solid #d8e0e6;
+  border-radius: 14px;
+}
+.verified-chores-detail { display: grid; gap: 7px; min-width: 0; }
+.verified-chores-detail strong { overflow-wrap: anywhere; }
+.verified-chores-detail small,
+.verified-chores-assigned { color: #64778a; font-size: 13px; }
+.verified-chores-completed .verified-chores-detail strong { opacity: .65; text-decoration: line-through; }
+.verified-chores-error {
+  border: 1px solid #d4a1a1;
+  color: #8b3030;
+  background: #fff8f7;
+  padding: 12px 16px;
+  border-radius: 10px;
+}
+.verified-chores-empty { padding: 18px 0; opacity: .72; }
+@media (max-width: 700px) {
+  .verified-chores-page { width: min(100% - 24px, 600px); margin-top: 20px; }
+  .verified-chores-heading { align-items: center; gap: 8px; }
+  .verified-chores-heading h2 { font-size: 29px; }
+  .verified-chores-add { grid-template-columns: 1fr; }
+  .verified-chores-list li { padding: 12px; }
+}
