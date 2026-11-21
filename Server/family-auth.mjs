@@ -246,6 +246,13 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   if (cookieName !== COOKIE_NAME && cookieName !== '__Host-fc_gateway_session') {
     throw new Error('Unapproved session cookie name.')
   }
+  // Cross-household Person display resolution may be configured only by the
+  // private gateway. Installed TEST and LIVE keep their local People lookup.
+  if (resolveDevicePersonName !== null &&
+      (cookieName !== '__Host-fc_gateway_session' ||
+       typeof resolveDevicePersonName !== 'function')) {
+    throw new Error('Device Person resolver is restricted to the private gateway.')
+  }
   if (!['required', 'disabled'].includes(mode)) {
     throw new Error('FAMILY_CALENDAR_AUTH_MODE must be required or disabled.')
   }
