@@ -160,7 +160,10 @@ function AssignmentCards({
   }
   return <div className="invitation-center-items">
     {items.map(item => {
-      const event = detailsForEvent?.(item.eventId)
+      // A cancelled event is no longer in the calendar. Never look up a
+      // potentially reused event ID; show its immutable pre-delete notice.
+      const event = item.kind === 'cancelled' ? null : detailsForEvent?.(item.eventId)
+      const summary = item.kind === 'cancelled' ? item.cancelledEvent : event
       const firstRepeatIndex = item.changedFields.findIndex(field => repeatChangeFields.has(field))
       const changedFields = item.changedFields.filter((field,index) =>
         !repeatChangeFields.has(field) || index === firstRepeatIndex)
@@ -173,10 +176,21 @@ function AssignmentCards({
         key={'assignment-' + item.id}>
         {!compact && <strong className="assignment-notice-kind">{kindLabel[item.kind]}</strong>}
         <div className="assignment-event-summary">
-          {event ? <>
-            <b>{event.title}</b>
-            <span>{formatSharedDate(event.date)} · {formatSharedTime(event.time)}</span>
-          </> : <span>Event details unavailable</span>}
+          {summary ? <>
+            <b>{summary.title}</b>
+            <span>
+              {formatSharedDate(summary.date)}
+              {item.kind === 'cancelled' && summary.endDate && summary.endDate !== summary.date
+                ? ' – ' + formatSharedDate(summary.endDate) : ''}
+              {' · ' + formatSharedTime(summary.time)}
+              {item.kind === 'cancelled' && summary.time && summary.endTime
+                ? ' – ' + formatSharedTime(summary.endTime) : ''}
+            </span>
+            {item.kind === 'cancelled' && summary.location?.trim() &&
+              <span>Location: {summary.location}</span>}
+          </> : <span>{item.kind === 'cancelled'
+            ? 'Details were not saved for this earlier cancellation'
+            : 'Event details unavailable'}</span>}
         </div>
         {item.kind === 'changed' && changeLabels.length > 0 && <p className="assignment-event-changes">
           <b>Changed:</b> {changeLabels.join(' · ')}
