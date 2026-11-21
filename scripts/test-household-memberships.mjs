@@ -9,6 +9,7 @@ import './test-family-password-recovery.mjs' // One-use reset links and immutabl
 import './test-private-password-recovery-http.mjs' // Real authenticated operator-assisted reset HTTP flow.
 import './test-private-system-admin-http.mjs' // Separate allowlisted system UI and privacy-scoped household overview.
 import './test-private-invited-owner-onboarding.mjs' // Invited Owner registration, own pending status and independent login.
+import './test-private-single-owner-activation.mjs' // Enforce exactly one invited Person Owner before activation and restart.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'

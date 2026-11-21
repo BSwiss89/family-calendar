@@ -105,7 +105,7 @@ test('a new household registry entry without activation blocks startup', t => {
   provisionEmptyHousehold({ serverDirectory: f.args.serverDirectory,
     storageRoot: f.args.storageRoot, householdId: friend })
   assert.throws(() => planReviewedPrivateTestStartup(f.args),
-    /missing an active owner|explicit trusted activation/)
+    /exactly one active Person Owner|explicit trusted activation/)
 })
 
 test('disabled invited owners and revoked approvals refuse restart for all', t => {
@@ -114,7 +114,7 @@ test('disabled invited owners and revoked approvals refuse restart for all', t =
     "UPDATE family_users SET disabled=1 WHERE username='friend-owner'"
   ).run()
   assert.throws(() => planReviewedPrivateTestStartup(f.args),
-    /missing an active owner|stale/)
+    /exactly one active Person Owner|stale/)
 })
 
 test('stale activation on inactive registry and multi-membership refuse startup', t => {
@@ -135,6 +135,46 @@ test('stale activation on inactive registry and multi-membership refuse startup'
   ).run(user,id)
   assert.throws(() => planReviewedPrivateTestStartup(f.args),
     /one login is linked to more than one household/)
+})
+
+test('reviewed TEST startup refuses a duplicate Owner even if a legacy database bypasses the unique index', t => {
+  const f = fixture(t, { addFriend: true })
+  const db = f.args.identityDatabase
+  const beforePrimary = sha(f.home.databasePath)
+  const beforeFriend = sha(f.friendStorage.databasePath)
+  const baseline = planReviewedPrivateTestStartup(f.args)
+  assert.deepEqual(baseline.householdIds, [primary, friend])
+  const storage = db.prepare('SELECT id FROM household_registry WHERE storage_id = ?')
+    .get(friend).id
+  setFamilyAccount(db, 'unexpected-second-owner', 'Unapproved second Owner', passwd)
+  const unauthorizedId = db.prepare(
+    "SELECT id FROM family_users WHERE username = 'unexpected-second-owner'"
+  ).get().id
+  assert.throws(() => db.prepare([
+    'INSERT INTO household_memberships(user_id, household_id, role)',
+    "VALUES (?, ?, 'owner')",
+  ].join(' ')).run(unauthorizedId, storage), /UNIQUE/,
+  'SQLite must refuse even direct duplicate Owner grants')
+  db.exec('DROP INDEX household_memberships_one_active_owner')
+  db.prepare([
+    'INSERT INTO household_memberships(user_id, household_id, role)',
+    "VALUES (?, ?, 'owner')",
+  ].join(' ')).run(unauthorizedId, storage)
+  assert.throws(() => planReviewedPrivateTestStartup(f.args),
+    /exactly one active Person Owner/)
+  assert.throws(() => createHouseholdMembershipTables(db), /UNIQUE/,
+    'migration must refuse conflicting owner records without deleting them')
+  assert.equal(db.prepare([
+    "SELECT COUNT(*) AS n FROM household_memberships WHERE household_id=? AND role='owner'",
+  ].join(' ')).get(storage).n, 2)
+  assert.equal(sha(f.home.databasePath), beforePrimary)
+  assert.equal(sha(f.friendStorage.databasePath), beforeFriend)
+  // A disabled impostor no longer has active Owner authority, but its audit
+  // record is preserved; an operator must review before any production use.
+  db.prepare('UPDATE household_memberships SET disabled = 1 WHERE user_id = ?')
+    .run(unauthorizedId)
+  assert.deepEqual(planReviewedPrivateTestStartup(f.args).householdIds,
+    [primary, friend])
 })
 
 test('existing backend and gateway locks and durable supervisor hold are never cleared', t => {

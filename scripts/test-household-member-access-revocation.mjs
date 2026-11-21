@@ -26,7 +26,7 @@ test('revoke one member grant, preserve identity and isolate other households', 
     [ownerA, 'household-a', 'owner'],
     [ownerB, 'household-b', 'owner'],
     [member, 'household-a', 'member'],
-    [hub, 'household-a', 'owner'],
+    [hub, 'household-a', 'member'],
   ]) grantHouseholdMembership(db, {
     serverVerifiedUserId: user, householdId: family, role,
   })

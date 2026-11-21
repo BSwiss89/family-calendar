@@ -112,17 +112,20 @@ export function planReviewedPrivateTestStartup({
 
   // Require a currently authorized owner before allowing any family to boot.
   const owners = identityDatabase.prepare([
-    'SELECT h.storage_id AS householdId, COUNT(*) AS owners',
+    'SELECT h.storage_id AS householdId, COUNT(*) AS owners,',
+    "SUM(CASE WHEN u.account_kind = 'person' THEN 1 ELSE 0 END) AS personOwners",
     'FROM household_registry h',
     'JOIN household_memberships m ON m.household_id = h.id',
     'JOIN family_users u ON u.id = m.user_id',
     "WHERE m.role = 'owner' AND m.disabled = 0 AND u.disabled = 0",
     'GROUP BY h.storage_id',
   ].join(' ')).all()
-  const ownerMap = new Map(owners.map(row => [row.householdId, row.owners]))
-  if (registered.some(row => !Number.isSafeInteger(ownerMap.get(row.householdId)) ||
-      ownerMap.get(row.householdId) < 1)) {
-    refuse('an active household is missing an active owner.')
+  const ownerMap = new Map(owners.map(row => [row.householdId, row]))
+  if (registered.some(row => {
+    const entry = ownerMap.get(row.householdId)
+    return !entry || entry.owners !== 1 || entry.personOwners !== 1
+  })) {
+    refuse('each active household must have exactly one active Person Owner.')
   }
   // One-household-per-login: refuse duplicate memberships (including disabled).
   const multiple = identityDatabase.prepare([

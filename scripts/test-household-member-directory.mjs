@@ -26,7 +26,7 @@ function fixture(t) {
     [ownerA, 'household-a', 'owner'],
     [memberA, 'household-a', 'member'],
     [ownerB, 'household-b', 'owner'],
-    [hubA, 'household-a', 'owner'],
+    [hubA, 'household-a', 'member'],
     [disabledA, 'household-a', 'member'],
   ]) {
     grantHouseholdMembership(db, {
