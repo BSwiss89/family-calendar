@@ -3,6 +3,7 @@
 // a server-selected household storage path are mandatory on every request.
 // No automatic task-table creation, third site, or browser-supplied actor.
 import express from 'express'
+import { getVerifiedFamilyMemberAuthorization, canFamilyMemberAct } from './family-member-access.mjs'
 import {
   createVerifiedFamilyAssignedTask, listVerifiedFamilyAssignedTasks,
   completeVerifiedFamilyAssignedTask, reopenVerifiedFamilyAssignedTask,
@@ -29,6 +30,9 @@ function canonicalTaskOperation(method, originalUrl) {
   if (typeof originalUrl !== 'string' ||
       originalUrl.includes('%') || originalUrl.includes('?') ||
       originalUrl.includes('//') || originalUrl.endsWith('/')) return null
+  if (originalUrl === ROOT + '/capability' && method === 'GET') {
+    return { action: 'capability' }
+  }
   if (originalUrl === ROOT) {
     if (method === 'GET') return { action: 'list' }
     if (method === 'POST') return { action: 'create' }
@@ -142,6 +146,23 @@ export function installPrivateFamilyTaskRoutes(app, {
         identityDatabase, householdDatabase: db,
         householdId: selected.householdId,
         serverVerifiedUserId: request.familyAccount.user_id,
+      }
+      if (operation.action === 'capability') {
+        const actor = getVerifiedFamilyMemberAuthorization(identityDatabase, {
+          householdId: selected.householdId,
+          serverVerifiedUserId: request.familyAccount.user_id,
+          householdDatabase: db,
+        })
+        if (!actor || !canFamilyMemberAct(actor, 'tasks.view')) {
+          return response.status(403).json({ error: 'Family task access unavailable.' })
+        }
+        return response.json({
+          enabled: true,
+          linkedPersonId: actor.personId,
+          canManage: canFamilyMemberAct(actor, 'tasks.manage'),
+          canCompleteOwn: canFamilyMemberAct(actor, 'tasks.completeAssigned',
+            { assignedPersonId: actor.personId }),
+        })
       }
       if (operation.action === 'list') {
         return response.json({ tasks: listVerifiedFamilyAssignedTasks(context) })
