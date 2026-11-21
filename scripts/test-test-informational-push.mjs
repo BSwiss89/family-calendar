@@ -11,7 +11,11 @@ const b64=bytes=>bytes.toString('base64url')
 const fixed=Date.now()
 function keypair() {const e=createECDH('prime256v1');e.generateKeys();return e}
 const vapid=keypair()
-const config={privateKey:b64(vapid.getPrivateKey()),subject:'mailto:family@example.com'}
+// Node/OpenSSL can return an EC private scalar without its leading zero byte.
+// VAPID requires the canonical fixed-width 32-byte scalar in base64url.
+const scalar=vapid.getPrivateKey()
+const paddedScalar=Buffer.concat([Buffer.alloc(32-scalar.length),scalar])
+const config={privateKey:b64(paddedScalar),subject:'mailto:family@example.com'}
 const browser=keypair()
 const authSecret=randomBytes(16)
 const subscription={
