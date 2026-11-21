@@ -46,6 +46,9 @@ test('known API reads and event/list writes are categorized; unknown or alias ro
     ['GET', '/api/people', ['calendar.view']],
     ['GET', '/api/lists', ['lists.view']],
     ['POST', '/api/events', ['events.create']],
+    ['POST', '/api/events/17/exceptions', ['events.edit', 'events.delete']],
+    ['DELETE', '/api/events/17/exceptions/2026-11-20', ['events.edit']],
+    ['DELETE', '/api/event-batches/abc-123', ['events.delete']],
     ['PUT', '/api/events/17', ['events.edit']],
     ['DELETE', '/api/events/17', ['events.delete']],
     ['POST', '/api/lists/1/items', ['lists.edit']],
@@ -63,6 +66,12 @@ test('known API reads and event/list writes are categorized; unknown or alias ro
   for (const [method, route] of [
     ['POST', '/api/tasks/7/complete'], // Assignment needs server-side task ownership.
     ['POST', '/api/ai/cancel-confirmed'],
+    ['POST', '/api/events/17/exceptions?bypass=1'],
+    ['POST', '/api/events/0/exceptions'],
+    ['DELETE', '/api/events/17/exceptions/2026-11-20/'],
+    ['DELETE', '/api/events/17/exceptions/not-a-date'],
+    ['DELETE', '/api/event-batches/BATCH-123'],
+    ['DELETE', '/api/event-batches/abc%2f123'],
     ['DELETE', '/api/events/017'],
     ['DELETE', '/api/events/17/'],
     ['DELETE', '/API/EVENTS/17'],
@@ -184,4 +193,41 @@ test('real express middleware rejects Home avatar bypass, cross-family request h
   assert.equal((await request('owner', '/api/events', 'POST', {})).status, 200)
   assert.equal((await request('owner', '/api/unreviewed-data')).status, 403)
   assert.equal((await request('child', '/api/households')).status, 200)
+})
+
+test('recurring occurrence skips require edit and delete while restores only require edit', t => {
+  const { db, ownerId, childId, adultId, outsiderId } = fixture(t)
+  const authorized = (userId, method, originalUrl) =>
+    authorizeFamilyMemberApiRequest(db, {
+      serverVerifiedUserId: userId, householdId: 'family-a', method, originalUrl,
+    }).allowed
+  const skip = '/api/events/17/exceptions'
+  const restore = '/api/events/17/exceptions/2026-11-20'
+  const batch = '/api/event-batches/abc-123'
+  for (const route of [["POST", skip], ["DELETE", restore], ["DELETE", batch]]) {
+    assert.equal(authorized(childId, ...route), false)
+    assert.equal(authorized(ownerId, ...route), true)
+    assert.equal(authorized(outsiderId, ...route), false)
+  }
+  setFamilyMemberPermission(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'events.edit', enabled: true,
+  })
+  assert.equal(authorized(childId, 'DELETE', restore), true)
+  assert.equal(authorized(childId, 'POST', skip), false,
+    'an edit grant alone cannot hide a recurring occurrence')
+  assert.equal(authorized(childId, 'DELETE', batch), false)
+  setFamilyMemberPermission(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'events.delete', enabled: true,
+  })
+  assert.equal(authorized(childId, 'POST', skip), true)
+  assert.equal(authorized(childId, 'DELETE', batch), true)
+  setFamilyMemberPermission(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'events.delete', enabled: false,
+  })
+  assert.equal(authorized(childId, 'POST', skip), false)
+  assert.equal(authorized(childId, 'DELETE', batch), false)
+  assert.equal(authorized(adultId, 'POST', skip), true)
 })
