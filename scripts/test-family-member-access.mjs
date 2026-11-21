@@ -140,6 +140,24 @@ test('self Join and Leave require the linked actor Person and independent grants
     action: 'events.joinOwn', assignedPersonId: 11 }), false)
 })
 
+test('notification delivery grant is bound to the account Person and revocable by Owner', t => {
+  const { db, ownerA, child, adult } = fixture(t)
+  enroll(db, ownerA, child, 'child')
+  enroll(db, ownerA, adult, 'adult')
+  db.prepare('UPDATE family_member_access SET person_id = ? WHERE user_id = ?').run(11, child)
+  db.prepare('UPDATE family_member_access SET person_id = ? WHERE user_id = ?').run(12, adult)
+  const action = 'notifications.receiveOwn'
+  assert.equal(canFamilyMemberAct(auth(db, child), action), false)
+  assert.equal(canFamilyMemberAct(auth(db, child), action, { assignedPersonId: 11 }), true)
+  assert.equal(canFamilyMemberAct(auth(db, child), action, { assignedPersonId: 12 }), false)
+  assert.equal(canFamilyMemberAct(auth(db, adult), action, { assignedPersonId: 12 }), true)
+  assert.equal(canFamilyMemberAct(auth(db, ownerA), action, { assignedPersonId: 11 }), false)
+  grant(db, ownerA, child, action, false)
+  assert.equal(canFamilyMemberAct(auth(db, child), action, { assignedPersonId: 11 }), false)
+  grant(db, ownerA, child, action, true)
+  assert.equal(canFamilyMemberAct(auth(db, child), action, { assignedPersonId: 11 }), true)
+})
+
 test('Home selection never elevates a Child or an unverified kiosk into a writer', t => {
   const { db, ownerA, adult, child } = fixture(t)
   enroll(db, ownerA, adult, 'adult')

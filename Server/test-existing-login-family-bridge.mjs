@@ -25,7 +25,15 @@ export function requiredExistingTestPersonalAction(method, originalUrl) {
       originalUrl === '/api/test-notification-pilot')) return 'calendar.view'
   if (method === 'GET' &&
       originalUrl === '/api/test-household-events/join-capability') return 'events.joinOwn'
+  if (method === 'GET' && (originalUrl === '/api/test-push/config' ||
+      originalUrl === '/api/test-push/status')) return 'notifications.receiveOwn'
+  if (method === 'DELETE' && originalUrl === '/api/test-push/subscriptions') {
+    return 'notifications.receiveOwn'
+  }
   if (method === 'POST') {
+    if (originalUrl === '/api/test-push/subscriptions') {
+      return 'notifications.receiveOwn'
+    }
     if (/^\/api\/test-household-events\/[1-9][0-9]*\/join$/.test(originalUrl)) {
       return 'events.joinOwn'
     }
@@ -93,6 +101,35 @@ export function verifyExistingTestLoginFamilyActor({
     householdId, serverVerifiedUserId: current.userId,
     householdDatabase: loginDatabase,
   })
+}
+
+/** Verify a previously saved push subscription at DELIVERY time, not only
+ * when the device first subscribed. There is no HTTP request or browser avatar
+ * to trust in a background worker, so reconstruct authority solely from the
+ * current server-owned legacy session and the current central member record.
+ * Never copy session secrets or credential hashes into the central database.
+ */
+export function canExistingTestSessionReceivePush({
+  loginDatabase, identityDatabase, householdId, sessionId, userId, personId,
+}) {
+  if (!Number.isSafeInteger(sessionId) || sessionId < 1 ||
+      !Number.isSafeInteger(userId) || userId < 1 ||
+      !Number.isSafeInteger(personId) || personId < 1) return false
+  const session = loginDatabase.prepare([
+    'SELECT u.username FROM family_sessions s',
+    'JOIN family_users u ON u.id = s.user_id',
+    'WHERE s.id = ? AND s.user_id = ? AND s.revoked_at IS NULL',
+    "AND s.expires_at > ? AND s.selected_profile_kind = 'person'",
+    'AND s.selected_person_id = ? AND u.disabled = 0',
+    "AND u.account_kind = 'person'",
+  ].join(' ')).get(sessionId, userId, Date.now(), personId)
+  if (!session) return false
+  const actor = verifyExistingTestLoginFamilyActor({
+    loginDatabase, identityDatabase, householdId,
+    authenticatedSession: { id: sessionId, user_id: userId, username: session.username },
+  })
+  return canFamilyMemberAct(actor, 'notifications.receiveOwn',
+    { assignedPersonId: personId })
 }
 
 export function installExistingTestLoginFamilyPermissions(app, {

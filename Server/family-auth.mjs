@@ -240,11 +240,18 @@ function safeDeviceLabel(value) {
 }
 
 export function installFamilyAuth(app, database, directory, mode = process.env.FAMILY_CALENDAR_AUTH_MODE ?? 'disabled',
-  { cookieName = COOKIE_NAME } = {}) {
+  { cookieName = COOKIE_NAME, resolveDevicePersonName = null } = {}) {
   // Deliberately restrict the override to the private authenticated gateway.
   // Other sites always use their own port-specific secure cookie name.
   if (cookieName !== COOKIE_NAME && cookieName !== '__Host-fc_gateway_session') {
     throw new Error('Unapproved session cookie name.')
+  }
+  // Cross-household Person display resolution may be configured only by the
+  // private gateway. Installed TEST and LIVE keep their local People lookup.
+  if (resolveDevicePersonName !== null &&
+      (cookieName !== '__Host-fc_gateway_session' ||
+       typeof resolveDevicePersonName !== 'function')) {
+    throw new Error('Device Person resolver is restricted to the private gateway.')
   }
   if (!['required', 'disabled'].includes(mode)) {
     throw new Error('FAMILY_CALENDAR_AUTH_MODE must be required or disabled.')
@@ -395,8 +402,22 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
       if (!Number.isSafeInteger(personId) || personId <= 0) {
         return response.status(400).json({ error: 'Invalid person profile.' })
       }
-      const person = database.prepare('SELECT id FROM people WHERE id = ?').get(personId)
-      if (!person) return response.status(400).json({ error: 'Person profile no longer exists.' })
+      // This is only a device display choice, never permission to act as a
+      // Person. The private gateway validates against the CURRENT household.
+      let name
+      try {
+        name = resolveDevicePersonName === null
+          ? database.prepare('SELECT name FROM people WHERE id = ?').get(personId)?.name
+          : resolveDevicePersonName({
+            serverVerifiedUserId: request.familyAccount.user_id, personId,
+          })
+      } catch (error) {
+        console.error('Device profile resolution unavailable:', error?.message)
+        return response.status(503).json({ error: 'Person profile temporarily unavailable.' })
+      }
+      if (typeof name !== 'string') {
+        return response.status(400).json({ error: 'Person profile no longer exists.' })
+      }
     }
     const saved = database.prepare([
       'UPDATE family_sessions SET selected_profile_kind = ?, selected_person_id = ?',
@@ -407,12 +428,14 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   })
 
   app.get('/api/auth/devices', (request, response) => {
+    try {
     const sessions = database.prepare([
       'SELECT id, device_label, created_at, last_seen_at, expires_at, selected_profile_kind, selected_person_id FROM family_sessions',
       'WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?',
       'ORDER BY last_seen_at DESC',
     ].join(' ')).all(request.familyAccount.user_id, Date.now())
-    const personName = sessions.some(session => session.selected_profile_kind === 'person')
+    const personName = resolveDevicePersonName === null &&
+      sessions.some(session => session.selected_profile_kind === 'person')
       ? database.prepare('SELECT name FROM people WHERE id = ?') : null
     response.json({
       devices: sessions.map((session) => ({
@@ -424,10 +447,20 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
         selectedProfile: session.selected_profile_kind === 'home'
           ? 'Home'
           : session.selected_profile_kind === 'person'
-            ? personName.get(session.selected_person_id)?.name ?? null
+            ? resolveDevicePersonName === null
+              ? personName.get(session.selected_person_id)?.name ?? null
+              : resolveDevicePersonName({
+                serverVerifiedUserId: request.familyAccount.user_id,
+                personId: session.selected_person_id,
+              })
+              ?? null
             : null,
       })),
     })
+    } catch (error) {
+      console.error('Trusted device profile list unavailable:', error?.message)
+      response.status(503).json({ error: 'Trusted devices temporarily unavailable.' })
+    }
   })
 
   app.post('/api/auth/devices/:id/revoke', (request, response) => {

@@ -67,6 +67,12 @@ test('legacy selected-avatar TEST notifications, push subscriptions and event jo
   assert.equal(requiredFamilyMemberActions('POST', '/api/test-event-invitations/7/respond'), null)
   assert.equal(requiredFamilyMemberActions('GET', '/api/test-notification-pilot'), null)
   assert.equal(requiredFamilyMemberActions('POST', '/api/test-notification-pilot/9/acknowledge'), null)
+  // Only the separately signed existing-TEST bridge may opt in a linked
+  // device; the private multi-household proxy has no reviewed push worker.
+  assert.equal(requiredFamilyMemberActions('GET', '/api/test-push/config'), null)
+  assert.equal(requiredFamilyMemberActions('GET', '/api/test-push/status'), null)
+  assert.equal(requiredFamilyMemberActions('POST', '/api/test-push/subscriptions'), null)
+  assert.equal(requiredFamilyMemberActions('DELETE', '/api/test-push/subscriptions'), null)
   assert.equal(requiredFamilyMemberActions('GET', '/api/test-household-events/join-capability'), null)
   assert.equal(requiredFamilyMemberActions('POST', '/api/test-household-events/9/join'), null)
   assert.equal(requiredFamilyMemberActions('POST', '/api/test-household-events/9/leave'), null)

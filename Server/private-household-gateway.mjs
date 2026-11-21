@@ -22,6 +22,7 @@ import {
   revokeSelectedEventShare, removeReceivedEventShare, synchronizeTrustedSelectedEventShare,
 } from './event-only-shares.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
+import { createPrivateGatewayDevicePersonResolver } from './private-gateway-device-profiles.mjs'
 import {
   createEventCreatorAuditTables, recordAuthenticatedEventCreator,
   listAuthenticatedEventCreators, cleanupDeletedEventCreator,
@@ -586,8 +587,14 @@ export async function startPrivateHouseholdGateway({
     identityDatabase, serverDirectory, storageRoot,
     trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
   })
+  // Central sessions cannot query a global People table: each household
+  // keeps its own database. The display resolver never grants actor rights.
+  const resolveDevicePersonName = createPrivateGatewayDevicePersonResolver({
+    identityDatabase, serverDirectory, storageRoot,
+    routedHouseholdIds: [...portByHousehold.keys()],
+  })
   installFamilyAuth(app, identityDatabase, serverDirectory, 'required', {
-    cookieName: '__Host-fc_gateway_session',
+    cookieName: '__Host-fc_gateway_session', resolveDevicePersonName,
   })
   // Operator review and opt-in contact editing require a verified existing
   // session, and one more real password check before sensitive writes.
