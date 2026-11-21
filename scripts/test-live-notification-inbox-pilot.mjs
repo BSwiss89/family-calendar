@@ -263,10 +263,67 @@ test('recurring exception update records the affected schedule field, not privat
   assert.equal(data.notifications[0].kind,'changed')
 })
 
+test('LIVE cancelled event retains identifying details only for its assigned recipients',async t=>{
+  const db=makeDb(t)
+  createEvent(db,90,[7,9])
+  const app=setupApp(db)
+  pilot(app,db)
+  const base=await withServer(t,app)
+  db.prepare([
+    'UPDATE events SET title=?,date=?,end_date=?,time=?,end_time=?,',
+    'location=?,notes=? WHERE id=?',
+  ].join(' ')).run('Team practice','2027-05-04','2027-05-05',
+    '18:30','20:00','Community center','Sensitive notes excluded',90)
+  db.prepare('DELETE FROM events WHERE id=90').run()
+  assert.equal((await post(base,'/live-notification-pilot/refresh',11)).status,303)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM notification_deleted_event_details')
+    .get().n,0)
+  const seven=(await (await get(base,'/api/live-notification-pilot',11)).json()).notifications
+  const nine=(await (await get(base,'/api/live-notification-pilot',12)).json()).notifications
+  const expected={
+    title:'Team practice',date:'2027-05-04',endDate:'2027-05-05',
+    time:'18:30',endTime:'20:00',location:'Community center',
+  }
+  for(const list of [seven,nine]) {
+    assert.equal(list.length,1)
+    assert.equal(list[0].kind,'cancelled')
+    assert.deepEqual(list[0].cancelledEvent,expected)
+    assert.equal(list[0].acknowledged,false)
+    assert.doesNotMatch(JSON.stringify(list),/Sensitive notes excluded/)
+  }
+  assert.notEqual(seven[0].id,nine[0].id)
+  assert.equal((await get(base,'/api/live-notification-pilot',13)).status,403)
+  assert.equal((await get(base,'/api/live-notification-pilot',99)).status,401)
+  assert.equal((await post(base,
+    '/api/live-notification-pilot/'+nine[0].id+'/acknowledge',11)).status,404)
+  assert.equal((await post(base,
+    '/api/live-notification-pilot/'+seven[0].id+'/acknowledge',11)).status,200)
+  const remaining=(await (await get(base,'/api/live-notification-pilot',12)).json()).notifications
+  assert.deepEqual(remaining[0].cancelledEvent,expected)
+  assert.equal(remaining[0].acknowledged,false)
+})
+
+test('LIVE historical cancellations without a pre-delete snapshot do not guess',async t=>{
+  const db=makeDb(t),app=setupApp(db)
+  pilot(app,db)
+  db.prepare([
+    'INSERT INTO assignment_notification_outbox(',
+    'event_id,person_id,kind,created_at)',
+    "VALUES (999,7,'cancelled',1000)",
+  ].join(' ')).run()
+  const base=await withServer(t,app)
+  const list=(await (await get(base,'/api/live-notification-pilot',11)).json()).notifications
+  assert.equal(list.length,1)
+  assert.equal(list[0].cancelledEvent,null)
+})
+
 test('LIVE reminder: compact event details, working View Event, Ask Again Later, no implied response',()=>{
   const ui=readFileSync(new URL('../src/LiveInvitations.tsx',import.meta.url),'utf8')
   const app=readFileSync(new URL('../src/App.tsx',import.meta.url),'utf8')
   assert.match(ui,/Changed:/)
+  assert.match(ui,/note.kind==='cancelled'\?note.cancelledEvent:event/)
+  assert.match(ui,/Location: \{summary.location\}/)
+  assert.match(ui,/Details were not saved for this earlier cancellation/)
   assert.match(ui,/eventDetails\(note\.eventId\)/)
   assert.match(ui,/const openFromReminder=\(id:number\)=>\{/)
   assert.match(ui,/setRemindLater\(true\)\s+props\.onView\(id\)/)
