@@ -14,8 +14,7 @@ import { requiredFamilyMemberActions } from './family-member-route-enforcement.m
 const HOUSEHOLD_ID = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/
 
 // Legacy TEST event self-participation, invitations and notification inboxes
-// select the recipient by
-// a device's People avatar. Only this signed-login bridge may allow these
+// select the recipient by a device's People avatar. Only this signed-login bridge may allow these
 // endpoints, and only if the selected Person equals the Owner-verified Person
 // linked to the current account. Private multi-family routing stays denied.
 export function requiredExistingTestPersonalAction(method, originalUrl) {
