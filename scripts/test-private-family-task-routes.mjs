@@ -177,6 +177,18 @@ test('authenticated route assigns to real Person and only matching Child can com
   const outsider = await signIn(site, 'task-outsider')
   const unauth = await call(site, null, '/api/family-assigned-tasks')
   assert.equal(unauth.status, 401)
+  assert.equal((await call(site, null, '/api/family-assigned-tasks/capability')).status, 401)
+  assert.equal((await call(site, outsider, '/api/family-assigned-tasks/capability')).status, 403)
+  const adultCapability = await call(site, adult, '/api/family-assigned-tasks/capability')
+  assert.equal(adultCapability.status, 200)
+  assert.deepEqual(adultCapability.body, {
+    enabled: true, linkedPersonId: 13, canManage: true, canCompleteOwn: true,
+  })
+  const childCapability = await call(site, child, '/api/family-assigned-tasks/capability')
+  assert.equal(childCapability.status, 200)
+  assert.deepEqual(childCapability.body, {
+    enabled: true, linkedPersonId: 12, canManage: false, canCompleteOwn: true,
+  })
   assert.equal((await call(site, outsider, '/api/family-assigned-tasks')).status, 403)
   assert.equal((await call(site, child, '/api/family-assigned-tasks',
     'POST', { title: 'Self assigned', assignedPersonId: 12 })).status, 403)
@@ -255,6 +267,7 @@ test('revocation, expired session, hub account and alias paths fail closed', asy
   const child = await signIn(site, 'task-child-a')
   const hub = await signIn(site, 'task-hub')
   assert.equal((await call(site, hub, '/api/family-assigned-tasks')).status, 403)
+  assert.equal((await call(site, hub, '/api/family-assigned-tasks/capability')).status, 403)
   assert.equal((await call(site, owner, '/api/family-assigned-tasks', 'POST', {
     title: 'Help clean up', assignedPersonId: 12,
   })).status, 201)
@@ -263,6 +276,8 @@ test('revocation, expired session, hub account and alias paths fail closed', asy
     '/api/family-assigned-tasks?owner=1', '/api/family-assigned-tasks/%31/complete',
     '/api/family-assigned-tasks/01/complete', '/api/family-assigned-tasks/1/complete?actor=owner',
     '/api/family-assigned-tasks/1/complete/', '/api/family-assigned-tasks/1/delete',
+    '/api/family-assigned-tasks/capability/', '/API/family-assigned-tasks/capability',
+    '/api/family-assigned-tasks/capability?actor=owner',
   ]) assert.equal((await call(site, child, path, path.includes('complete') ? 'POST' : 'GET',
     path.includes('complete') ? {} : undefined)).status, 404, path)
   assert.equal((await call(site, child, '/api/family-assigned-tasks',
@@ -286,6 +301,7 @@ test('revocation, expired session, hub account and alias paths fail closed', asy
   f.identity.prepare('UPDATE household_memberships SET disabled=1 WHERE user_id=?')
     .run(f.users['task-child-a'])
   assert.equal((await call(site, child, '/api/family-assigned-tasks')).status, 403)
+  assert.equal((await call(site, child, '/api/family-assigned-tasks/capability')).status, 403)
   f.identity.prepare('UPDATE household_memberships SET disabled=0 WHERE user_id=?')
     .run(f.users['task-child-a'])
   assert.equal((await call(site, child, '/api/family-assigned-tasks')).status, 200)
