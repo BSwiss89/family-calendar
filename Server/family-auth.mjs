@@ -433,7 +433,8 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
       'WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?',
       'ORDER BY last_seen_at DESC',
     ].join(' ')).all(request.familyAccount.user_id, Date.now())
-    const personName = sessions.some(session => session.selected_profile_kind === 'person')
+    const personName = resolveDevicePersonName === null &&
+      sessions.some(session => session.selected_profile_kind === 'person')
       ? database.prepare('SELECT name FROM people WHERE id = ?') : null
     response.json({
       devices: sessions.map((session) => ({
