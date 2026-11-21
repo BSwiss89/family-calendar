@@ -17,6 +17,9 @@ const serverDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), 
 function fakeCentral({ pendingApprovals = 0, approved = [], activeOwners = true } = {}) {
   return {
     prepare(sql) {
+      if (sql.startsWith('SELECT u.id AS userId FROM household_registry h')) {
+        return { all: () => activeOwners ? [{ userId: 1 }] : [] }
+      }
       if (sql.startsWith('SELECT h.storage_id AS householdId')) {
         return { all: () => approved.map(id => ({ householdId: id })) }
       }
