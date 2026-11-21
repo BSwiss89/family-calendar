@@ -402,8 +402,22 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
       if (!Number.isSafeInteger(personId) || personId <= 0) {
         return response.status(400).json({ error: 'Invalid person profile.' })
       }
-      const person = database.prepare('SELECT id FROM people WHERE id = ?').get(personId)
-      if (!person) return response.status(400).json({ error: 'Person profile no longer exists.' })
+      // This is only a device display choice, never permission to act as a
+      // Person. The private gateway validates against the CURRENT household.
+      let name
+      try {
+        name = resolveDevicePersonName === null
+          ? database.prepare('SELECT name FROM people WHERE id = ?').get(personId)?.name
+          : resolveDevicePersonName({
+            serverVerifiedUserId: request.familyAccount.user_id, personId,
+          })
+      } catch (error) {
+        console.error('Device profile resolution unavailable:', error?.message)
+        return response.status(503).json({ error: 'Person profile temporarily unavailable.' })
+      }
+      if (typeof name !== 'string') {
+        return response.status(400).json({ error: 'Person profile no longer exists.' })
+      }
     }
     const saved = database.prepare([
       'UPDATE family_sessions SET selected_profile_kind = ?, selected_person_id = ?',
