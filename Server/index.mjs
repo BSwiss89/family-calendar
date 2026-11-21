@@ -7,7 +7,9 @@ import sharp from 'sharp'
 import { fileURLToPath } from 'node:url'
 import { assertCalendarReleaseBootSafe } from '../scripts/dependency-release-boot-guard.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
-import { installExistingTestLoginFamilyPermissions } from './test-existing-login-family-bridge.mjs'
+import {
+  installExistingTestLoginFamilyPermissions, canExistingTestSessionReceivePush,
+} from './test-existing-login-family-bridge.mjs'
 import { installDailyFamilyNotes } from './daily-family-notes.mjs'
 import { installCalendarEmojiMarkers } from './calendar-emoji-markers.mjs'
 import { isValidDate, isValidTitle, isValidPersonName, isValidColor, cleanOptionalText } from './calendar-input-validation.mjs'
@@ -678,6 +680,7 @@ const testFamilyAccessMode = process.env.FAMILY_CALENDAR_TEST_FAMILY_ACCESS_MODE
 if (!['off', 'enforce'].includes(testFamilyAccessMode)) {
   throw new Error('Invalid TEST family access mode.')
 }
+let verifyTestPushRecipient = null
 if (testFamilyAccessMode === 'enforce') {
   if (PORT !== 13002 || householdStorage.mode !== 'legacy' ||
       process.env.FAMILY_CALENDAR_AUTH_MODE !== 'required') {
@@ -716,6 +719,13 @@ if (testFamilyAccessMode === 'enforce') {
   installExistingTestLoginFamilyPermissions(app, {
     loginDatabase: database, identityDatabase, householdId: familyId,
   })
+  // Saved push subscriptions are not grandfathered into new family access.
+  // Check their original signed session and current central Person binding
+  // on every delivery, including while no phone has the calendar open.
+  verifyTestPushRecipient = subscription => canExistingTestSessionReceivePush({
+    loginDatabase: database, identityDatabase, householdId: familyId,
+    ...subscription,
+  })
 }
 // Family notes live only in process memory and never enter SQLite or backups.
 installDailyFamilyNotes(app)
@@ -727,7 +737,10 @@ installTestNotificationInboxPilot(app, database, { port: PORT, rootFolder: path.
 installTestHouseholdEventJoin(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 const testEventInvitations = installTestEventInvitations(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 // Informational Web Push: explicitly disabled unless authenticated TEST startup opts in.
-installTestInformationalPush(app, database, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
+installTestInformationalPush(app, database, {
+  port: PORT, rootFolder: path.resolve(__dirname, '..'),
+  familyMemberMode: testFamilyAccessMode, verifyRecipient: verifyTestPushRecipient,
+})
 // Private loopback Whisper bridge; disabled unless authenticated TEST opts in.
 installTestLocalStt(app, { port: PORT, rootFolder: path.resolve(__dirname, '..') })
 
