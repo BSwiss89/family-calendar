@@ -37,7 +37,7 @@ function fixture(t) {
   registerHousehold(db, { householdId: 'household-b', displayName: 'B Family' })
   for (const [user, householdId, role] of [
     [ownerA, 'household-a', 'owner'], [ownerB, 'household-b', 'owner'],
-    [memberA, 'household-a', 'member'], [hubA, 'household-a', 'owner'],
+    [memberA, 'household-a', 'member'], [hubA, 'household-a', 'member'],
   ]) grantHouseholdMembership(db, {
     serverVerifiedUserId: user, householdId, role,
   })
