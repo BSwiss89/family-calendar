@@ -13,7 +13,8 @@ import { requiredFamilyMemberActions } from './family-member-route-enforcement.m
 
 const HOUSEHOLD_ID = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/
 
-// Legacy TEST invitations and notification inboxes select the recipient by
+// Legacy TEST event self-participation, invitations and notification inboxes
+// select the recipient by
 // a device's People avatar. Only this signed-login bridge may allow these
 // endpoints, and only if the selected Person equals the Owner-verified Person
 // linked to the current account. Private multi-family routing stays denied.
@@ -23,7 +24,15 @@ export function requiredExistingTestPersonalAction(method, originalUrl) {
       originalUrl.includes('//') || originalUrl.endsWith('/')) return null
   if (method === 'GET' && (originalUrl === '/api/test-event-invitations' ||
       originalUrl === '/api/test-notification-pilot')) return 'calendar.view'
+  if (method === 'GET' &&
+      originalUrl === '/api/test-household-events/join-capability') return 'events.joinOwn'
   if (method === 'POST') {
+    if (/^\/api\/test-household-events\/[1-9][0-9]*\/join$/.test(originalUrl)) {
+      return 'events.joinOwn'
+    }
+    if (/^\/api\/test-household-events\/[1-9][0-9]*\/leave$/.test(originalUrl)) {
+      return 'events.leaveOwn'
+    }
     if (/^\/api\/test-event-invitations\/[1-9][0-9]*\/respond$/.test(originalUrl)) {
       return 'invitations.respondOwn'
     }
