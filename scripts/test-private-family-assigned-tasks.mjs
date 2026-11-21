@@ -118,7 +118,9 @@ test('Adult creates a task for an existing Person; linked Child can see and comp
   }), { taskId: 1, completed: true, alreadyCompleted: true })
   const audit = x.familyA.prepare('SELECT completed_at AS at,completed_by_user_id AS byUser,' +
     'completed_by_person_id AS byPerson FROM family_assigned_tasks WHERE id = 1').get()
-  assert.deepEqual(audit, { at: 1200, byUser: x.childA, byPerson: 12 })
+  assert.equal(audit.at, 1200)
+  assert.equal(audit.byUser, x.childA)
+  assert.equal(audit.byPerson, 12)
   assert.throws(() => reopenVerifiedFamilyAssignedTask(x.a(x.childA), { taskId: 1 }),
     /cannot perform/)
   assert.deepEqual(reopenVerifiedFamilyAssignedTask(x.a(x.ownerA), { taskId: 1 }),
