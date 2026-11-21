@@ -446,6 +446,35 @@ test('central authenticated gateway denies one family access to another family b
     } finally {
       personDatabase.close()
     }
+    // Real running gateway: central accounts have NO People table.
+    // Remembered Person preferences must resolve ONLY inside each family's DB.
+    const otherPersonDatabase = new DatabaseSync(b.databasePath)
+    try {
+      otherPersonDatabase.prepare([
+        'INSERT INTO people(id,name,color,image,sort_order)',
+        "VALUES (?,'Person in B only','#64748b',NULL,0)",
+      ].join(' ')).run(existingPersonId)
+    } finally { otherPersonDatabase.close() }
+    const displayA = await json(gateway.base, '/api/auth/device-profile', {
+      cookie: cookieA, body: { kind: 'person', personId: existingPersonId },
+    })
+    const displayB = await json(gateway.base, '/api/auth/device-profile', {
+      cookie: cookieB, body: { kind: 'person', personId: existingPersonId },
+    })
+    assert.equal(displayA.response.status, 200)
+    assert.equal(displayB.response.status, 200)
+    const aDeviceNames = await json(gateway.base, '/api/auth/devices', { cookie: cookieA })
+    const bDeviceNames = await json(gateway.base, '/api/auth/devices', { cookie: cookieB })
+    assert.equal(aDeviceNames.response.status, 200)
+    assert.equal(bDeviceNames.response.status, 200)
+    assert.equal(aDeviceNames.value.devices[0].selectedProfile, 'Existing Person in A')
+    assert.equal(bDeviceNames.value.devices[0].selectedProfile, 'Person in B only')
+    assert.equal((await json(gateway.base, '/api/auth/device-profile', {
+      cookie: cookieA, body: { kind: 'person', personId: existingPersonId + 5000 },
+    })).response.status, 400)
+    assert.equal((await json(gateway.base, '/api/auth/devices', {
+      cookie: cookieA,
+    })).value.devices[0].selectedProfile, 'Existing Person in A')
     const badLink = await json(gateway.base, personUrl, {
       cookie: cookieA, body: { personId: existingPersonId + 5000, ownerPassword: testPassword },
     })
