@@ -54,6 +54,13 @@ test('known API reads and event/list writes are categorized; unknown or alias ro
     ['POST', '/api/lists/1/items', ['lists.edit']],
     ['PUT', '/api/list-items/27', ['lists.edit']],
     ['POST', '/api/ai/intent', ['calendar.view']],
+    ['POST', '/api/ai/reschedule-criteria', ['calendar.view']],
+    ['POST', '/api/ai/reschedule-preview', ['calendar.view']],
+    ['POST', '/api/ai/cancel-criteria', ['calendar.view']],
+    ['POST', '/api/ai/cancel-preview', ['calendar.view']],
+    ['POST', '/api/ai/cancel-matches', ['calendar.view']],
+    ['POST', '/api/ai/reschedule-confirmed', ['events.edit']],
+    ['POST', '/api/ai/cancel-confirmed', ['events.edit', 'events.delete']],
     ['POST', '/api/ai/event-action-confirm', ['events.edit', 'events.delete']],
     ['POST', '/api/recipes', ['recipes.edit']],
     ['GET', '/api/shared-events/accepted', ['calendar.view']],
@@ -65,7 +72,11 @@ test('known API reads and event/list writes are categorized; unknown or alias ro
   }
   for (const [method, route] of [
     ['POST', '/api/tasks/7/complete'], // Assignment needs server-side task ownership.
-    ['POST', '/api/ai/cancel-confirmed'],
+    ['POST', '/api/ai/cancel-confirmed?claim=owner'],
+    ['POST', '/api/ai/reschedule-confirmed/'],
+    ['POST', '/API/ai/cancel-confirmed'],
+    ['GET', '/api/ai/reschedule-confirmed'],
+    ['DELETE', '/api/ai/cancel-confirmed'],
     ['POST', '/api/events/17/exceptions?bypass=1'],
     ['POST', '/api/events/0/exceptions'],
     ['DELETE', '/api/events/17/exceptions/2026-11-20/'],
@@ -93,9 +104,14 @@ test('a Child cannot create events, alter lists or obtain delete via Arney; Owne
   assert.equal(check(childId, 'POST', '/api/events'), false)
   assert.equal(check(childId, 'POST', '/api/lists/1/items'), false)
   assert.equal(check(childId, 'POST', '/api/ai/event-action-confirm'), false)
+  assert.equal(check(childId, 'POST', '/api/ai/reschedule-confirmed'), false)
+  assert.equal(check(childId, 'POST', '/api/ai/cancel-confirmed'), false)
+  assert.equal(check(childId, 'POST', '/api/ai/cancel-preview'), true)
   assert.equal(check(childId, 'POST', '/api/tasks/5/complete'), false)
   assert.equal(check(adultId, 'POST', '/api/events'), true)
   assert.equal(check(adultId, 'POST', '/api/ai/event-action-confirm'), true)
+  assert.equal(check(adultId, 'POST', '/api/ai/cancel-confirmed'), true)
+  assert.equal(check(adultId, 'POST', '/api/ai/reschedule-confirmed'), true)
   assert.equal(check(ownerId, 'DELETE', '/api/events/5'), true)
   assert.equal(check(ownerId, 'GET', '/api/events'), true)
   assert.equal(check(ownerId, 'POST', '/api/unreviewed-action'), false)
@@ -156,6 +172,8 @@ test('real express middleware rejects Home avatar bypass, cross-family request h
   app.post('/api/events', (_request, response) => response.json({ wrote: true }))
   app.post('/api/ai/event-action-confirm', (_request, response) => response.json({ wrote: true }))
   app.post('/api/ai/cancel-confirmed', (_request, response) => response.json({ wrote: true }))
+  app.post('/api/ai/reschedule-confirmed', (_request, response) => response.json({ wrote: true }))
+  app.post('/api/ai/cancel-preview', (_request, response) => response.json({ preview: true }))
   app.post('/api/lists/1/items', (_request, response) => response.json({ wrote: true }))
   app.post('/api/tasks/7/complete', (_request, response) => response.json({ wrote: true }))
   app.get('/api/households', (_request, response) => response.json({ ok: true }))
@@ -181,7 +199,15 @@ test('real express middleware rejects Home avatar bypass, cross-family request h
   assert.equal((await request('child', '/api/ai/event-action-confirm', 'POST', {
     selectedProfile: 'Home',
   })).status, 403)
-  assert.equal((await request('child', '/api/ai/cancel-confirmed', 'POST', {})).status, 403)
+  assert.equal((await request('child', '/api/ai/cancel-confirmed', 'POST', {
+    actor: 'owner', matchType: 'recurring_occurrence', selectedProfile: 'Home',
+  })).status, 403)
+  assert.equal((await request('child', '/api/ai/reschedule-confirmed', 'POST', {
+    actor: 'owner', selectedProfile: 'Home',
+  })).status, 403)
+  assert.equal((await request('child', '/api/ai/cancel-preview', 'POST', {})).status, 200)
+  assert.equal((await request('adult', '/api/ai/cancel-confirmed', 'POST', {})).status, 200)
+  assert.equal((await request('adult', '/api/ai/reschedule-confirmed', 'POST', {})).status, 200)
   assert.equal((await request('child', '/api/lists/1/items', 'POST', {})).status, 403)
   assert.equal((await request('child', '/api/tasks/7/complete', 'POST', {})).status, 403)
   assert.equal((await request('child', '/api/unreviewed-data')).status, 403)
@@ -230,4 +256,36 @@ test('recurring occurrence skips require edit and delete while restores only req
   assert.equal(authorized(childId, 'POST', skip), false)
   assert.equal(authorized(childId, 'DELETE', batch), false)
   assert.equal(authorized(adultId, 'POST', skip), true)
+})
+
+test('legacy Arney confirmation always follows the verified Adult/Child grants, never preview or body claims', t => {
+  const { db, ownerId, childId, outsiderId } = fixture(t)
+  const allowed = (userId, originalUrl) => authorizeFamilyMemberApiRequest(db, {
+    serverVerifiedUserId: userId, householdId: 'family-a', method: 'POST', originalUrl,
+  }).allowed
+  const reschedule = '/api/ai/reschedule-confirmed'
+  const cancel = '/api/ai/cancel-confirmed'
+  const preview = '/api/ai/cancel-preview'
+  assert.equal(allowed(childId, preview), true)
+  assert.equal(allowed(childId, reschedule), false)
+  assert.equal(allowed(childId, cancel), false)
+  assert.equal(allowed(outsiderId, preview), false)
+  assert.equal(allowed(ownerId, reschedule), true)
+  assert.equal(allowed(ownerId, cancel), true)
+  setFamilyMemberPermission(db, { householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'events.edit', enabled: true })
+  assert.equal(allowed(childId, reschedule), true)
+  assert.equal(allowed(childId, cancel), false,
+    'edit-only Child cannot cancel or suppress a recurring occurrence')
+  setFamilyMemberPermission(db, { householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'events.delete', enabled: true })
+  assert.equal(allowed(childId, cancel), true)
+  setFamilyMemberPermission(db, { householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'events.edit', enabled: false })
+  assert.equal(allowed(childId, reschedule), false)
+  assert.equal(allowed(childId, cancel), false,
+    'delete-only Child cannot confirm unreviewed edit-versus-delete behavior')
+  db.prepare('UPDATE household_memberships SET disabled = 1 WHERE user_id = ?').run(childId)
+  assert.equal(allowed(childId, preview), false)
+  assert.equal(allowed(childId, cancel), false)
 })
