@@ -33,6 +33,7 @@ import { parseArneyRecipeDiscovery, normalizeArneyRecipeResults, type PublicReci
 import { ARNEY_RECIPE_SUGGESTIONS, ARNEY_RECIPE_SUGGESTIONS_PER_PAGE, suggestionPage } from './arneyRecipeSuggestions.mjs'
 import ArneyRecipeCarousel from './ArneyRecipeCarousel'
 import HouseholdMembersSettings from './HouseholdMembersSettings'
+import VerifiedFamilyChores, { useVerifiedChoresCapability } from './VerifiedFamilyChores'
 import FamilyDailyNotes from './FamilyDailyNotes'
 import HouseholdProfilePicker from './HouseholdProfilePicker'
 import CalendarPersonFilterAvatar from './CalendarPersonFilterAvatar'
@@ -2067,13 +2068,17 @@ const [page, setPage] =
     'lists' |
     'capture' |
     'householdMembers' |
-    'invitations'
+    'invitations' |
+    'chores'
   >('home')
 
 const [isEditingHome, setIsEditingHome] =
   useState(false)
 const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
 const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
+// Chores remain hidden unless the opt-in private gateway proves permission.
+// The installed LIVE/TEST sites do not expose this capability endpoint.
+const choresCapability = useVerifiedChoresCapability(familyAuthEnabled)
 const [profileSwitchRequest, setProfileSwitchRequest] = useState(0)
 const [profilePeopleRevision, setProfilePeopleRevision] = useState(0)
 const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | null>(null)
@@ -2328,6 +2333,7 @@ const mobileNavItems = [
     id: 'lists',
     label: 'Lists',
   },
+  ...(choresCapability ? [{ id: 'chores' as const, label: 'Chores' as const }] : []),
 ] as const
 
 type MobileNavId =
@@ -2368,7 +2374,9 @@ const mobileNavActiveId: MobileNavId =
           ? 'meals'
           : page === 'lists'
             ? 'lists'
-            : 'today'
+            : page === 'chores' && choresCapability
+              ? 'chores'
+              : 'today'
 
 const mobileNavActiveIndex =
   mobileNavItems.findIndex(
@@ -2487,6 +2495,11 @@ function openMobileNavItem(
 
   if (id === 'meals') {
     setPage('meals')
+    return
+  }
+
+  if (id === 'chores' && choresCapability) {
+    setPage('chores')
     return
   }
 
@@ -14785,8 +14798,9 @@ return (
 
   <button
     type="button"
-    className="sidebar-nav-button"
-    disabled
+    className={`sidebar-nav-button ${page === 'chores' ? 'active-sidebar-nav' : ''}`}
+    disabled={!choresCapability}
+    onClick={() => { if (choresCapability) setPage('chores') }}
   >
     <span className="sidebar-nav-icon">☑</span>
     <span>Chores</span>
@@ -16870,6 +16884,9 @@ createPortal(
       )}
       {page === 'invitations' && <DesktopInvitations {...invitationInbox} {...notificationDisplayProps} />}
       {page === 'invitations' && <PushNotificationsControl controls={familyPush} />}
+      {page === 'chores' && choresCapability && (
+        <VerifiedFamilyChores capability={choresCapability} people={people} />
+      )}
 
       {page === 'calendar' && (
        <section
