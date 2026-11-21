@@ -109,7 +109,7 @@ jobs:
           node --test scripts/test-household-members-settings.mjs scripts/test-private-household-invite-signup.mjs scripts/test-legacy-household-account-rehearsal.mjs
       - name: Verify central member permissions, real TEST sessions and recurring-event route grants
         run: |
-          node --test scripts/test-family-member-access.mjs scripts/test-family-member-route-enforcement.mjs scripts/test-family-member-profile-link.mjs scripts/test-family-owner-step-up.mjs scripts/test-existing-test-login-family-bridge.mjs scripts/test-test-family-route-audit.mjs scripts/test-private-family-assigned-tasks.mjs
+          node --test scripts/test-family-member-access.mjs scripts/test-family-member-route-enforcement.mjs scripts/test-family-member-profile-link.mjs scripts/test-family-owner-step-up.mjs scripts/test-existing-test-login-family-bridge.mjs scripts/test-test-family-route-audit.mjs scripts/test-private-family-assigned-tasks.mjs scripts/test-private-family-task-routes.mjs
       - name: Reconcile isolated migrated calendar rows and uploads against offline legacy backup
         run: node --test scripts/test-private-legacy-household-reconciliation.mjs
       - name: Test invite-only independent household owner onboarding
