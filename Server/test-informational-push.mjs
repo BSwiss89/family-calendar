@@ -67,10 +67,25 @@ export function installTestInformationalPush(app,db,{
   send=sendWebPush,
   intervalMs=15000,
   schedule=true,
+  familyMemberMode=process.env.FAMILY_CALENDAR_TEST_FAMILY_ACCESS_MODE ?? 'off',
+  verifyRecipient=null,
 }={}) {
   if (flag === undefined || flag === '' || flag === 'disabled') return {enabled:false}
   if (!scopeAllowed({flag,port,authMode,rootFolder})) {
     throw new Error('Web Push pilot requires isolated authenticated single-family TEST.')
+  }
+  if (!['off', 'enforce'].includes(familyMemberMode) ||
+      (familyMemberMode === 'enforce' && typeof verifyRecipient !== 'function')) {
+    // A pre-existing subscription is NOT proof of current family membership.
+    // Without an independently trusted central-identity verifier, do not
+    // start a delivery worker when new family permissions are enforced.
+    throw new Error('Family Web Push requires a trusted recipient verifier.')
+  }
+  function recipientAuthorized({ userId, sessionId, personId }) {
+    if (familyMemberMode === 'off') return true
+    if (!isId(userId) || !isId(sessionId) || !isId(personId)) return false
+    try { return verifyRecipient({ userId, sessionId, personId }) === true }
+    catch { return false } // No push, secrets or account data in logs.
   }
   if (typeof privateKey !== 'string' || typeof subject !== 'string' ||
       !/^(mailto:[^\s@]+@[^\s@]+|https:\/\/[^\s]+)$/.test(subject) ||
@@ -109,6 +124,11 @@ export function installTestInformationalPush(app,db,{
     if (!person) { response.status(401).json({error:'Sign in to TEST first.'});return null }
     if (personRequired && person.kind !== 'person') {
       response.status(403).json({error:'Select a person profile to enable notifications.'})
+      return null
+    }
+    if (familyMemberMode === 'enforce' &&
+        (person.kind !== 'person' || !recipientAuthorized(person))) {
+      response.status(403).json({error:'This device is not linked to an authorized family member.'})
       return null
     }
     return person
@@ -190,7 +210,8 @@ export function installTestInformationalPush(app,db,{
         : ""
       const entries=db.prepare([
         'SELECT n.id AS noticeId,n.kind,s.endpoint_hash AS endpointHash,',
-        's.endpoint,s.p256dh,s.auth',
+        's.endpoint,s.p256dh,s.auth,s.user_id AS userId,',
+        's.session_id AS sessionId,s.person_id AS personId',
         'FROM assignment_notification_outbox n',
         'JOIN test_push_subscriptions s ON s.person_id=n.person_id',
         'JOIN family_sessions fs ON fs.id=s.session_id AND fs.user_id=s.user_id',
@@ -216,7 +237,9 @@ export function installTestInformationalPush(app,db,{
           'AND fs.expires_at>? AND fs.selected_profile_kind=\'person\'',
           'AND fs.selected_person_id=s.person_id',
         ].join(' ')).get(entry.endpointHash,entry.endpoint,now())
-        if (!valid) continue
+        if (!valid || !recipientAuthorized(entry)) continue
+        // Re-authorize every attempt, including subscriptions created before
+        // the family-account rollout and retries queued before revocation.
         let status=0
         try {
           status=await send(entry,notificationMessage(entry.kind,entry.noticeId),{privateKey,subject})

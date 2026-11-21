@@ -117,6 +117,81 @@ test('TEST-only flag and port prevent accidental release to LIVE',()=>{
   x.db.close()
 })
 
+test('family-mode push cannot start without trusted central recipient verification',()=>{
+  const x=fixture()
+  assert.throws(()=>installTestInformationalPush(x.app,x.db,{
+    flag:'enabled',port:13002,authMode:'required',
+    rootFolder:'/tmp/family-calendar-test-pilot',...config,
+    familyMemberMode:'enforce',schedule:false,
+  }),/trusted recipient verifier/)
+  assert.throws(()=>installTestInformationalPush(x.app,x.db,{
+    flag:'enabled',port:13002,authMode:'required',
+    rootFolder:'/tmp/family-calendar-test-pilot',...config,
+    familyMemberMode:'unknown',schedule:false,
+  }),/trusted recipient verifier/)
+  x.db.close()
+})
+
+test('family-mode blocks old subscriptions until independently authorized at every delivery',async()=>{
+  const x=fixture()
+  // Before the opt-in family bridge, the existing single-household phone
+  // can have a valid subscription that does not prove new account ownership.
+  const legacy=installTestInformationalPush(x.app,x.db,{
+    flag:'enabled',port:13002,authMode:'required',
+    rootFolder:'/tmp/family-calendar-test-pilot',...config,
+    familyMemberMode:'off',now:()=>fixed,schedule:false,
+  })
+  assert.equal(x.call('post','/api/test-push/subscriptions',{
+    endpoint:subscription.endpoint,keys:subscription.keys,
+  }).status,200)
+  legacy.close()
+  let authorized=false
+  let invalidVerifier=false
+  const checks=[]
+  const sent=[]
+  const pilot=installTestInformationalPush(x.app,x.db,{
+    flag:'enabled',port:13002,authMode:'required',
+    rootFolder:'/tmp/family-calendar-test-pilot',...config,
+    familyMemberMode:'enforce',now:()=>fixed,schedule:false,
+    verifyRecipient: recipient=>{
+      checks.push(recipient)
+      if(invalidVerifier) throw new Error('No central member lookup')
+      return authorized
+    },
+    send:async (_sub,payload)=>{sent.push(payload);return 201},
+  })
+  assert.equal(x.call('get','/api/test-push/config').status,403)
+  assert.equal(x.call('post','/api/test-push/subscriptions',{
+    endpoint:subscription.endpoint,keys:subscription.keys,
+  }).status,403)
+  x.db.exec("INSERT INTO events(id,date,title) VALUES (1,'2026-11-02','Private details withheld')")
+  x.db.exec('INSERT INTO event_people(event_id,person_id) VALUES(1,2)')
+  assert.equal((await pilot.tick()).accepted,0)
+  assert.equal(sent.length,0,'old subscribers cannot bypass central permissions')
+  authorized=true
+  assert.equal(x.call('get','/api/test-push/status').status,200)
+  assert.equal((await pilot.tick()).accepted,1)
+  assert.equal(sent.length,1)
+  assert.equal(JSON.stringify(sent).includes('Private details'),false)
+  assert.ok(checks.some(entry=>entry.userId===1 && entry.sessionId===10 && entry.personId===2))
+  authorized=false
+  x.db.exec("INSERT INTO events(id,date,title) VALUES (2,'2026-11-02','After revocation')")
+  x.db.exec('INSERT INTO event_people(event_id,person_id) VALUES(2,2)')
+  assert.equal((await pilot.tick()).accepted,0)
+  invalidVerifier=true
+  assert.equal((await pilot.tick()).accepted,0)
+  assert.equal(sent.length,1,'closed identity backend never sends queued notifications')
+  invalidVerifier=false
+  authorized=true
+  assert.equal((await pilot.tick()).accepted,1)
+  x.db.exec("UPDATE family_sessions SET selected_profile_kind='home',selected_person_id=NULL WHERE id=10")
+  x.db.exec("INSERT INTO events(id,date,title) VALUES (3,'2026-11-02','Home must not get push')")
+  x.db.exec('INSERT INTO event_people(event_id,person_id) VALUES(3,2)')
+  assert.equal((await pilot.tick()).accepted,0)
+  assert.equal(x.call('get','/api/test-push/status').status,403)
+  pilot.close();x.db.close()
+})
+
 test('Trusted device profile opt-in sends once, Home and revoked sessions prevent delivery',async()=>{
   const x=fixture()
   const sent=[]

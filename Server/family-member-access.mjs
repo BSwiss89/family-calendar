@@ -8,6 +8,7 @@ export const FAMILY_ACTIONS = Object.freeze([
   'calendar.view', 'events.create', 'events.edit', 'events.delete',
   'lists.view', 'lists.edit', 'tasks.view', 'tasks.completeAssigned',
   'invitations.respondOwn', 'notifications.acknowledgeOwn',
+  'notifications.receiveOwn',
   'events.joinOwn', 'events.leaveOwn',
   'tasks.manage', 'recipes.view', 'recipes.edit', 'settings.manage',
   'members.invite', 'permissions.manage', 'devices.manage', 'ownership.transfer',
@@ -18,6 +19,7 @@ const OWNER_ONLY = new Set(['permissions.manage', 'devices.manage', 'ownership.t
 const ADULT_ONLY = new Set(['settings.manage', 'members.invite'])
 const PERSON_SCOPED = new Set([
   'tasks.completeAssigned', 'invitations.respondOwn', 'notifications.acknowledgeOwn',
+  'notifications.receiveOwn',
   'events.joinOwn', 'events.leaveOwn',
 ])
 const ADULT_DEFAULTS = new Set([
@@ -25,11 +27,13 @@ const ADULT_DEFAULTS = new Set([
   'lists.view', 'lists.edit', 'tasks.view', 'tasks.completeAssigned',
   'tasks.manage', 'recipes.view', 'recipes.edit',
   'invitations.respondOwn', 'notifications.acknowledgeOwn',
+  'notifications.receiveOwn',
   'events.joinOwn', 'events.leaveOwn',
 ])
 const CHILD_DEFAULTS = new Set([
   'calendar.view', 'tasks.view', 'tasks.completeAssigned',
   'invitations.respondOwn', 'notifications.acknowledgeOwn',
+  'notifications.receiveOwn',
 ])
 // Home is a verified device mode, NEVER another family member or a role.
 // The frontend can show these controls, but a write still needs a verified actor.
