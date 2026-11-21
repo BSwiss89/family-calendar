@@ -12,6 +12,13 @@ test('TEST route audit covers existing event, list, notes, marker and voice decl
   for (const [method, template, permission] of [
     ['GET', '/api/events', 'calendar.view'],
     ['POST', '/api/events', 'events.create'],
+    ['POST', '/api/ai/reschedule-criteria', 'calendar.view'],
+    ['POST', '/api/ai/reschedule-preview', 'calendar.view'],
+    ['POST', '/api/ai/cancel-criteria', 'calendar.view'],
+    ['POST', '/api/ai/cancel-preview', 'calendar.view'],
+    ['POST', '/api/ai/cancel-matches', 'calendar.view'],
+    ['POST', '/api/ai/reschedule-confirmed', 'events.edit'],
+    ['POST', '/api/ai/cancel-confirmed', 'events.delete'],
     ['POST', '/api/events/:id/exceptions', 'events.delete'],
     ['DELETE', '/api/events/:id/exceptions/:occurrenceDate', 'events.edit'],
     ['DELETE', '/api/event-batches/:batchId', 'events.delete'],
@@ -50,7 +57,8 @@ test('legacy selected-avatar TEST notifications, push subscriptions and event jo
     'POST /api/test-push/subscriptions',
     'POST /api/test-notification-pilot/:notificationId/acknowledge',
   ]) assert.ok(unknown.has(endpoint), endpoint + ' cannot be silently allowed')
-  assert.equal(requiredFamilyMemberActions('POST', '/api/ai/cancel-confirmed'), null)
+  assert.deepEqual(requiredFamilyMemberActions('POST', '/api/ai/cancel-confirmed'),
+    ['events.edit', 'events.delete'])
   assert.equal(requiredFamilyMemberActions('POST', '/api/tasks/1/complete'), null)
   assert.deepEqual(requiredFamilyMemberActions('POST', '/api/events/17/exceptions'),
     ['events.edit', 'events.delete'])
