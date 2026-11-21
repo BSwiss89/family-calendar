@@ -240,7 +240,7 @@ function safeDeviceLabel(value) {
 }
 
 export function installFamilyAuth(app, database, directory, mode = process.env.FAMILY_CALENDAR_AUTH_MODE ?? 'disabled',
-  { cookieName = COOKIE_NAME } = {}) {
+  { cookieName = COOKIE_NAME, resolveDevicePersonName = null } = {}) {
   // Deliberately restrict the override to the private authenticated gateway.
   // Other sites always use their own port-specific secure cookie name.
   if (cookieName !== COOKIE_NAME && cookieName !== '__Host-fc_gateway_session') {
