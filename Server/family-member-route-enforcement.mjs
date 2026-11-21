@@ -30,6 +30,13 @@ const READ_ONLY_POSTS = new Map([
   ['/api/ai/intent', 'calendar.view'],
   ['/api/ai/event-action-interpret', 'calendar.view'],
   ['/api/ai/event-action-preview', 'calendar.view'],
+  // Legacy Arney preview/criteria/match routes only parse input or read
+  // events; they never authorize their separate confirmation endpoints.
+  ['/api/ai/reschedule-criteria', 'calendar.view'],
+  ['/api/ai/reschedule-preview', 'calendar.view'],
+  ['/api/ai/cancel-criteria', 'calendar.view'],
+  ['/api/ai/cancel-preview', 'calendar.view'],
+  ['/api/ai/cancel-matches', 'calendar.view'],
   ['/api/ai/recipe-search', 'recipes.view'],
   ['/api/arney/social-recipe-preview', 'recipes.view'],
   ['/api/arney/social-recipe-video-preview', 'recipes.view'],
@@ -69,9 +76,13 @@ export function requiredFamilyMemberActions(method, originalUrl) {
     // Local voice transcription is a no-write speech-to-text input, never
     // permission to confirm an Arney edit or delete action.
     if (route === '/api/arney/local-transcription') return ['calendar.view']
-    if (route === '/api/ai/event-action-confirm') {
-      // Confirmed Arney edit-or-delete is opaque until after the signed
-      // preview is verified; require BOTH, never edit as a delete bypass.
+    if (route === '/api/ai/reschedule-confirmed') return ['events.edit']
+    if (route === '/api/ai/cancel-confirmed' ||
+        route === '/api/ai/event-action-confirm') {
+      // Cancellation can delete a single event or hide an occurrence.
+      // The older action-confirm route may also edit or delete. Require
+      // BOTH grants irrespective of client-supplied action/matchType,
+      // rather than letting an edit-only Child request a deletion.
       return ['events.edit', 'events.delete']
     }
     if (route === '/api/shared-events/invite') return ['events.create']
