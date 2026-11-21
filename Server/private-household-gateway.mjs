@@ -51,6 +51,7 @@ import { installPrivateRecoveryPublic, installPrivateRecoveryOperator } from './
 import { installPrivateSystemAdministrator } from './private-system-administration.mjs'
 import { installPrivateInvitedOwnerOnboarding } from './private-invited-owner-onboarding.mjs'
 import { installPrivateMemberRouteEnforcement } from './family-member-route-enforcement.mjs'
+import { installPrivateFamilyTaskRoutes } from './private-family-task-routes.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { createPrivateActivationRecords, approvePrivateHouseholdActivation,
@@ -381,9 +382,15 @@ export async function startPrivateHouseholdGateway({
   independentHouseholdAdministratorUserIds = [],
   // Private disposable preview only. Never enable via request header or URL.
   enforceFamilyMemberPermissions = false,
+  // Source-only private harness feature flag. Does not affect TEST/LIVE.
+  enableVerifiedTaskApi = false,
 }) {
   if (typeof enforceFamilyMemberPermissions !== 'boolean') {
     throw new Error('Private family permission enforcement must be a trusted boolean setting.')
+  }
+  if (typeof enableVerifiedTaskApi !== 'boolean' ||
+      (enableVerifiedTaskApi && !enforceFamilyMemberPermissions)) {
+    throw new Error('Assigned task API requires explicit private family enforcement.')
   }
   if (!Array.isArray(independentHouseholdAdministratorUserIds) ||
       independentHouseholdAdministratorUserIds.some(id => !Number.isSafeInteger(id) || id < 1)) {
@@ -404,6 +411,21 @@ export async function startPrivateHouseholdGateway({
     if (usedTokens.has(token)) throw new Error('Private household secrets must be distinct.')
     usedTokens.add(token)
     tokensByHousehold.set(householdId, token)
+  }
+  // A task pilot cannot auto-create/migrate household databases on startup.
+  // Require an approved offline schema in EVERY configured family first.
+  if (enableVerifiedTaskApi) {
+    for (const householdId of portByHousehold.keys()) {
+      const storage = resolveHouseholdStorage({
+        serverDirectory, storageRoot, householdId,
+      })
+      const db = new DatabaseSync(storage.databasePath, { readOnly: true })
+      try {
+        if (!db.prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='family_assigned_tasks'"
+        ).get()) throw new Error('Assigned task pilot requires explicit household DB provisioning.')
+      } finally { db.close() }
+    }
   }
   // Verify the binding to the actual loopback service BEFORE mutating
   // central identity/share tables or opening a client listener.
@@ -613,6 +635,25 @@ export async function startPrivateHouseholdGateway({
   // Never forward an unknown administrator API to a family backend.
   app.use('/api/admin', (_request, response) =>
     response.status(404).json({ error: 'Not found.' }))
+  // A narrow opt-in task API is owned entirely by this authenticated gateway.
+  // Mount BEFORE the generic deny-by-default proxy, as self-completion must
+  // prove the actual task assignee instead of relying on static route grants.
+  // Never mount it on the existing single-household TEST or LIVE applications.
+  if (enableVerifiedTaskApi) {
+    installPrivateFamilyTaskRoutes(app, {
+      enabled: true, identityDatabase,
+      resolveTrustedHousehold: trustedHousehold,
+      openHouseholdDatabase: householdId => {
+        if (!portByHousehold.has(householdId)) {
+          throw new Error('Household not configured for this gateway.')
+        }
+        const storage = resolveHouseholdStorage({
+          serverDirectory, storageRoot, householdId,
+        })
+        return new DatabaseSync(storage.databasePath)
+      },
+    })
+  }
   // This policy must register BEFORE gateway-owned Arney/share endpoints
   // AND the backend proxy. If enabled, unknown API routes fail closed.
   if (enforceFamilyMemberPermissions) {
