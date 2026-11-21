@@ -97,23 +97,29 @@ export function installPrivateFamilyTaskRoutes(app, {
   // Includes a final namespace catch-all. Express matches case-insensitively;
   // originalUrl matching below denies uppercase, trailing slash, query,
   // percent-encoded, overlapping and unreviewed task paths.
-  app.use(ROOT, express.json({ limit: '4kb', strict: true }), (request, response) => {
+  const parseJson = express.json({ limit: '4kb', strict: true })
+  app.use(ROOT, (request, response, next) => {
     response.set('Cache-Control', 'no-store')
-    const operation = canonicalTaskOperation(request.method, request.originalUrl)
-    if (!operation) return response.status(404).json({ error: 'Task route not found.' })
-    if (!trustedSignedPerson(identityDatabase, request.familyAccount)) {
-      return response.status(403).json({ error: 'An active Person account is required.' })
-    }
-
-    // Never accept householdId, role, userId, session ID or completion actor
-    // from a payload, URL query or People avatar.
-    const selected = resolveTrustedHousehold(request, response)
-    if (!selected) return
-    if (typeof selected.householdId !== 'string') {
-      return response.status(503).json({ error: 'Household routing unavailable.' })
-    }
+    if (request.method !== 'POST') return next()
+    return parseJson(request, response, error => {
+      if (error) return response.status(400).json({ error: 'Invalid task JSON.' })
+      next()
+    })
+  }, (request, response) => {
     let db
     try {
+      const operation = canonicalTaskOperation(request.method, request.originalUrl)
+      if (!operation) return response.status(404).json({ error: 'Task route not found.' })
+      if (!trustedSignedPerson(identityDatabase, request.familyAccount)) {
+        return response.status(403).json({ error: 'An active Person account is required.' })
+      }
+      // Never accept householdId, role, userId, session ID or completion actor
+      // from a payload, URL query or People avatar.
+      const selected = resolveTrustedHousehold(request, response)
+      if (!selected) return
+      if (typeof selected.householdId !== 'string') {
+        return response.status(503).json({ error: 'Household routing unavailable.' })
+      }
       db = openHouseholdDatabase(selected.householdId)
       if (!db?.prepare || !db?.exec || !db?.close || db === identityDatabase) {
         throw new Error('Trusted household database unavailable.')
