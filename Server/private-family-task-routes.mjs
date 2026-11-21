@@ -54,8 +54,14 @@ function postedBody(request, fields) {
   return request.body
 }
 
-function respondError(response, error) {
+function respondError(response, error, operation = null) {
   const reason = String(error?.message || '')
+  if (reason === 'This member cannot perform that assigned task action.' &&
+      operation?.taskId) {
+    // A Child must not be able to enumerate other household task IDs by
+    // distinguishing an existing task (403) from an absent task (404).
+    return response.status(404).json({ error: 'Assigned task unavailable.' })
+  }
   if (reason === 'Active household member required.' ||
       reason === 'This member cannot perform that assigned task action.') {
     return response.status(403).json({ error: 'This account cannot perform that task action.' })
@@ -107,8 +113,9 @@ export function installPrivateFamilyTaskRoutes(app, {
     })
   }, (request, response) => {
     let db
+    let operation
     try {
-      const operation = canonicalTaskOperation(request.method, request.originalUrl)
+      operation = canonicalTaskOperation(request.method, request.originalUrl)
       if (!operation) return response.status(404).json({ error: 'Task route not found.' })
       if (!trustedSignedPerson(identityDatabase, request.familyAccount)) {
         return response.status(403).json({ error: 'An active Person account is required.' })
@@ -159,7 +166,7 @@ export function installPrivateFamilyTaskRoutes(app, {
       }
       return response.status(404).json({ error: 'Task route not found.' })
     } catch (error) {
-      return respondError(response, error)
+      return respondError(response, error, operation)
     } finally {
       try { db?.close() } catch {}
     }
