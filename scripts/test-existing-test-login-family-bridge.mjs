@@ -94,7 +94,9 @@ async function makeSite(loginDatabase, identityDatabase) {
   app.post('/api/test-event-invitations/7/respond', (_req, res) => res.json({ ownResponse: true }))
   app.get('/api/test-notification-pilot', (_req, res) => res.json({ linkedInbox: true }))
   app.post('/api/test-notification-pilot/9/acknowledge', (_req, res) => res.json({ ownAck: true }))
+  app.get('/api/test-household-events/join-capability', (_req, res) => res.json({ canJoin: true }))
   app.post('/api/test-household-events/1/join', (_req, res) => res.json({ joined: true }))
+  app.post('/api/test-household-events/1/leave', (_req, res) => res.json({ left: true }))
   app.post('/api/test-push/subscriptions', (_req, res) => res.json({ subscribed: true }))
   app.post('/api/auth/unreviewed-owner-change', (_req, res) => res.json({ unsafe: true }))
   app.get('/uploads/person-photo', (_req, res) => res.send('private photo'))
@@ -228,6 +230,67 @@ test('existing username/password and remembered cookie establish family actor wi
   assert.equal(loginDatabase.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n, 4)
 })
 
+test('verified linked Person gates self Join and Leave, with separate Child grants', async t => {
+  const { loginDatabase, identityDatabase, users } = seededDatabases(t)
+  const site = await makeSite(loginDatabase, identityDatabase)
+  t.after(() => site.close())
+  const child = await signIn(site, 'real-child')
+  const adult = await signIn(site, 'real-adult')
+  const owner = await signIn(site, 'real-owner')
+  const join = '/api/test-household-events/1/join'
+  const leave = '/api/test-household-events/1/leave'
+  const capability = '/api/test-household-events/join-capability'
+  assert.equal((await call(site, child, '/api/auth/device-profile', 'POST',
+    { kind: 'person', personId: 2 })).status, 200)
+  assert.equal((await call(site, child, capability)).status, 403)
+  assert.equal((await call(site, child, join, 'POST', { actor: 'owner' })).status, 403)
+  assert.equal((await call(site, child, leave, 'POST', {})).status, 403)
+  setFamilyMemberPersonLink(identityDatabase, {
+    householdId: home, serverVerifiedOwnerUserId: users['real-owner'],
+    targetUserId: users['real-adult'], personId: 1, householdDatabase: loginDatabase,
+  })
+  assert.equal((await call(site, adult, '/api/auth/device-profile', 'POST',
+    { kind: 'person', personId: 1 })).status, 200)
+  assert.equal((await call(site, adult, capability)).status, 200)
+  assert.equal((await call(site, adult, join, 'POST', { personId: 2 })).status, 200)
+  assert.equal((await call(site, adult, leave, 'POST', { personId: 2 })).status, 200)
+  assert.equal((await call(site, adult, '/api/auth/device-profile', 'POST',
+    { kind: 'person', personId: 2 })).status, 200)
+  assert.equal((await call(site, adult, capability)).status, 403)
+  assert.equal((await call(site, adult, join, 'POST', { actor: 'owner' })).status, 403)
+  assert.equal((await call(site, adult, '/api/auth/device-profile', 'POST',
+    { kind: 'home' })).status, 200)
+  assert.equal((await call(site, adult, leave, 'POST', {})).status, 403)
+  // Even an Owner needs an actual linked Person to self-join via this pilot.
+  assert.equal((await call(site, owner, '/api/auth/device-profile', 'POST',
+    { kind: 'person', personId: 1 })).status, 200)
+  assert.equal((await call(site, owner, join, 'POST', {})).status, 403)
+  setFamilyMemberPermission(identityDatabase, {
+    householdId: home, serverVerifiedOwnerUserId: users['real-owner'],
+    targetUserId: users['real-child'], action: 'events.joinOwn', enabled: true,
+  })
+  assert.equal((await call(site, child, capability)).status, 200)
+  assert.equal((await call(site, child, join, 'POST', { actor: 'owner', personId: 1 })).status, 200)
+  assert.equal((await call(site, child, leave, 'POST', {})).status, 403)
+  setFamilyMemberPermission(identityDatabase, {
+    householdId: home, serverVerifiedOwnerUserId: users['real-owner'],
+    targetUserId: users['real-child'], action: 'events.leaveOwn', enabled: true,
+  })
+  assert.equal((await call(site, child, leave, 'POST', {})).status, 200)
+  setFamilyMemberPermission(identityDatabase, {
+    householdId: home, serverVerifiedOwnerUserId: users['real-owner'],
+    targetUserId: users['real-child'], action: 'events.joinOwn', enabled: false,
+  })
+  assert.equal((await call(site, child, join, 'POST', {})).status, 403)
+  assert.equal((await call(site, child, leave, 'POST', {})).status, 200)
+  assert.equal((await call(site, child, '/api/test-household-events/01/leave', 'POST', {})).status, 403)
+  assert.equal((await call(site, child, leave + '?personId=1', 'POST', {})).status, 403)
+  assert.equal((await call(site, child, '/API/test-household-events/1/leave', 'POST', {})).status, 403)
+  identityDatabase.prepare('UPDATE household_memberships SET disabled=1 WHERE user_id=?')
+    .run(users['real-child'])
+  assert.equal((await call(site, child, leave, 'POST', {})).status, 403)
+})
+
 test('stale session, missing shadow, disabled account and changed identity mappings deny access', async t => {
   const { loginDatabase, identityDatabase, users } = seededDatabases(t)
   const site = await makeSite(loginDatabase, identityDatabase)
@@ -274,11 +337,16 @@ test('personal API allowlist is narrow: no alias, other Person or Web Push bypas
     ['GET', '/api/test-event-invitations', 'calendar.view'],
     ['POST', '/api/test-event-invitations/7/respond', 'invitations.respondOwn'],
     ['GET', '/api/test-notification-pilot', 'calendar.view'],
+    ['GET', '/api/test-household-events/join-capability', 'events.joinOwn'],
+    ['POST', '/api/test-household-events/7/join', 'events.joinOwn'],
+    ['POST', '/api/test-household-events/7/leave', 'events.leaveOwn'],
     ['POST', '/api/test-notification-pilot/9/acknowledge', 'notifications.acknowledgeOwn'],
   ]) assert.equal(requiredExistingTestPersonalAction(method, url), action)
   for (const [method, url] of [
     ['POST', '/api/test-push/subscriptions'],
-    ['POST', '/api/test-household-events/7/join'],
+    ['POST', '/api/test-household-events/07/join'],
+    ['GET', '/api/test-household-events/7/join'],
+    ['POST', '/api/test-household-events/7/leave?actor=owner'],
     ['GET', '/api/test-event-invitations/'],
     ['GET', '/api/test-event-invitations?personId=2'],
     ['POST', '/api/test-event-invitations/0/respond'],
