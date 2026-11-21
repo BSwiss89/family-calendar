@@ -78,6 +78,9 @@ async function makeSite(loginDatabase, identityDatabase) {
   app.get('/api/events', (_req, res) => res.json({ eventTitles: ['Private household'] }))
   app.post('/api/events', (_req, res) => res.status(201).json({ wrote: true }))
   app.post('/api/ai/event-action-confirm', (_req, res) => res.json({ wrote: true }))
+  app.post('/api/ai/cancel-preview', (_req, res) => res.json({ matches: [] }))
+  app.post('/api/ai/cancel-confirmed', (_req, res) => res.json({ wrote: true }))
+  app.post('/api/ai/reschedule-confirmed', (_req, res) => res.json({ wrote: true }))
   app.get('/api/lists', (_req, res) => res.json({ lists: ['Store'] }))
   app.post('/api/lists/1/items', (_req, res) => res.status(201).json({ wrote: true }))
   app.get('/api/recipes', (_req, res) => res.json({ recipes: [] }))
@@ -144,6 +147,15 @@ test('existing username/password and remembered cookie establish family actor wi
   })).status, 403)
   assert.equal((await call(site, child, '/api/lists/1/items', 'POST', {})).status, 403)
   assert.equal((await call(site, child, '/api/ai/event-action-confirm', 'POST', {})).status, 403)
+  assert.equal((await call(site, child, '/api/ai/cancel-preview', 'POST', {})).status, 200)
+  assert.equal((await call(site, child, '/api/ai/cancel-confirmed', 'POST', {
+    selectedProfile: 'Home', actor: 'owner', matchType: 'event',
+  })).status, 403)
+  assert.equal((await call(site, child, '/api/ai/reschedule-confirmed', 'POST', {
+    actor: 'owner', selectedProfile: 'Home',
+  })).status, 403)
+  assert.equal((await call(site, adult, '/api/ai/reschedule-confirmed', 'POST', {})).status, 200)
+  assert.equal((await call(site, adult, '/api/ai/cancel-confirmed', 'POST', {})).status, 200)
   assert.equal((await call(site, child, '/api/lists')).status, 403)
   assert.equal((await call(site, adult, '/api/lists')).status, 200)
   assert.equal((await call(site, adult, '/api/events', 'POST', {})).status, 201)
