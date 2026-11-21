@@ -2,6 +2,7 @@
 // Registration is never activation. Persist only an approved generated
 // household ID; private backend tokens and ports are reissued each boot.
 // No browser endpoint, production scheduler, or untrusted filesystem scanning.
+import { getSoleActiveHouseholdOwner } from './household-memberships.mjs'
 const NEW_ID = /^family-[0-9a-f]{24}$/
 
 export function createPrivateActivationRecords(db) {
@@ -15,15 +16,22 @@ export function createPrivateActivationRecords(db) {
 
 function activeInvitedOwner(db, householdId) {
   if (typeof householdId !== 'string' || !NEW_ID.test(householdId)) return null
+  const originalOwner = getSoleActiveHouseholdOwner(db, householdId)
+  if (!originalOwner) return null
+  // The sole active Owner must be the exact account that redeemed the
+  // original verified invitation. A second Owner, disabled Person account,
+  // reassigned invite or forged Home-profile selection cannot activate.
   return db.prepare([
     'SELECT h.id FROM household_registry h',
     'JOIN independent_household_invitations i ON i.household_id = h.id',
     'JOIN family_users u ON u.id = i.redeemed_user_id',
     'JOIN household_memberships m ON m.user_id = u.id AND m.household_id = h.id',
     'WHERE h.storage_id = ? AND h.disabled = 0 AND u.disabled = 0',
+    "AND u.account_kind = 'person'",
     "AND m.role = 'owner' AND m.disabled = 0",
-    'AND i.redeemed_at IS NOT NULL AND i.revoked_at IS NULL LIMIT 1',
-  ].join(' ')).get(householdId)
+    'AND u.id = ? AND i.redeemed_at IS NOT NULL',
+    'AND i.revoked_at IS NULL LIMIT 1',
+  ].join(' ')).get(householdId, originalOwner)
 }
 
 /** Called only after a separate, verified loopback backend is healthy. */
