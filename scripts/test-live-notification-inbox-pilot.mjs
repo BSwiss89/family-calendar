@@ -333,3 +333,63 @@ test('LIVE reminder: compact event details, working View Event, Ask Again Later,
   assert.match(app,/eventDetails:\(id:number\)=>/)
   assert.doesNotMatch(ui,/Event #['"]?\s*\+\s*note\.eventId/)
 })
+
+test('LIVE cancellation supersedes old notices without erasing acknowledgement history',async t=>{
+  const db=makeDb(t),app=setupApp(db)
+  pilot(app,db)
+  const base=await withServer(t,app)
+  createEvent(db,101,[7,9])
+  createEvent(db,102,[7])
+  assert.equal((await post(base,'/live-notification-pilot/refresh',11)).status,303)
+  const original=(await (await get(base,'/api/live-notification-pilot',11)).json()).notifications
+  const prior=original.find(x=>x.eventId===101&&x.kind==='assigned')
+  assert.ok(prior)
+  assert.equal((await post(base,
+    '/api/live-notification-pilot/'+prior.id+'/acknowledge',11)).status,200)
+  db.prepare("UPDATE events SET title='Updated appointment' WHERE id=101").run()
+  assert.equal((await post(base,'/live-notification-pilot/refresh',11)).status,303)
+  const edited=(await (await get(base,'/api/live-notification-pilot',11)).json()).notifications
+  assert.ok(edited.some(x=>x.eventId===101&&x.kind==='changed'))
+  db.prepare('DELETE FROM events WHERE id=101').run()
+  assert.equal((await post(base,'/live-notification-pilot/refresh',11)).status,303)
+  const seven=(await (await get(base,'/api/live-notification-pilot',11)).json()).notifications
+  const nine=(await (await get(base,'/api/live-notification-pilot',12)).json()).notifications
+  assert.deepEqual(seven.filter(x=>x.eventId===101).map(x=>x.kind),['cancelled'])
+  assert.deepEqual(nine.filter(x=>x.eventId===101).map(x=>x.kind),['cancelled'])
+  assert.ok(seven.some(x=>x.eventId===102&&x.kind==='assigned'))
+  assert.equal(db.prepare(
+    'SELECT COUNT(*) AS n FROM assignment_notification_outbox WHERE event_id=101 AND person_id=7'
+  ).get().n,3,'must preserve created, updated and cancelled rows')
+  assert.equal(db.prepare(
+    'SELECT COUNT(*) AS n FROM live_assignment_acknowledgements WHERE notification_id=?'
+  ).get(prior.id).n,1,'must preserve older acknowledgement')
+  const cancelled=seven.find(x=>x.eventId===101)
+  assert.equal(cancelled.cancelledEvent.title,'Updated appointment')
+  assert.equal((await post(base,
+    '/api/live-notification-pilot/'+cancelled.id+'/acknowledge',11)).status,200)
+  const after=(await (await get(base,'/api/live-notification-pilot',11)).json()).notifications
+  assert.deepEqual(after.filter(x=>x.eventId===101).map(x=>[x.kind,x.acknowledged]),
+    [['cancelled',true]],'older reminders should never reappear')
+  createEvent(db,101,[7])
+  assert.equal((await post(base,'/live-notification-pilot/refresh',11)).status,303)
+  const reused=(await (await get(base,'/api/live-notification-pilot',11)).json()).notifications
+  assert.deepEqual(reused.filter(x=>x.eventId===101).map(x=>x.kind),
+    ['assigned','cancelled'])
+})
+
+test('LIVE cancellation supersedes notices only for the affected person',async t=>{
+  const db=makeDb(t),app=setupApp(db)
+  pilot(app,db)
+  const base=await withServer(t,app)
+  createEvent(db,110,[7,9])
+  assert.equal((await post(base,'/live-notification-pilot/refresh',11)).status,303)
+  db.prepare('DELETE FROM event_people WHERE event_id=110 AND person_id=9').run()
+  assert.equal((await post(base,'/live-notification-pilot/refresh',11)).status,303)
+  db.prepare('DELETE FROM events WHERE id=110').run()
+  assert.equal((await post(base,'/live-notification-pilot/refresh',11)).status,303)
+  const seven=(await (await get(base,'/api/live-notification-pilot',11)).json()).notifications
+  const nine=(await (await get(base,'/api/live-notification-pilot',12)).json()).notifications
+  assert.deepEqual(seven.map(x=>x.kind),['cancelled'])
+  assert.deepEqual(nine.map(x=>x.kind),['unassigned','assigned'])
+  assert.equal((await get(base,'/api/live-notification-pilot',13)).status,403)
+})
