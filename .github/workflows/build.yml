@@ -144,6 +144,8 @@ jobs:
         run: node --test scripts/test-private-disposable-supervised-backup-handshake.mjs
       - name: Capture and independently attest disposable coordinated multi-family backup
         run: node --test scripts/test-private-disposable-coordinated-snapshot.mjs
+      - name: Rehearse two-to-three-family backup transition and independently attested offline rollback
+        run: node --test scripts/test-private-disposable-invited-household-rollback-review.mjs
       - name: Verify synthetic household AI budgets and offline backup restore safety
         run: |
           node --test scripts/test-private-local-ai-budget.mjs scripts/test-private-paid-api-budget.mjs
