@@ -60,6 +60,13 @@ test('legacy selected-avatar TEST notifications, push subscriptions and event jo
   assert.deepEqual(requiredFamilyMemberActions('POST', '/api/ai/cancel-confirmed'),
     ['events.edit', 'events.delete'])
   assert.equal(requiredFamilyMemberActions('POST', '/api/tasks/1/complete'), null)
+  // Only the existing signed TEST login bridge can grant these personal
+  // routes after checking its server-owned selected Person against the
+  // central account link. Private multi-family proxy remains denied.
+  assert.equal(requiredFamilyMemberActions('GET', '/api/test-event-invitations'), null)
+  assert.equal(requiredFamilyMemberActions('POST', '/api/test-event-invitations/7/respond'), null)
+  assert.equal(requiredFamilyMemberActions('GET', '/api/test-notification-pilot'), null)
+  assert.equal(requiredFamilyMemberActions('POST', '/api/test-notification-pilot/9/acknowledge'), null)
   assert.deepEqual(requiredFamilyMemberActions('POST', '/api/events/17/exceptions'),
     ['events.edit', 'events.delete'])
   assert.deepEqual(requiredFamilyMemberActions('DELETE', '/api/event-batches/batch-1'),
