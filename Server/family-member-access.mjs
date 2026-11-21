@@ -34,7 +34,6 @@ const CHILD_DEFAULTS = new Set([
   'calendar.view', 'tasks.view', 'tasks.completeAssigned',
   'invitations.respondOwn', 'notifications.acknowledgeOwn',
   'notifications.receiveOwn',
-  'notifications.receiveOwn',
 ])
 // Home is a verified device mode, NEVER another family member or a role.
 // The frontend can show these controls, but a write still needs a verified actor.
