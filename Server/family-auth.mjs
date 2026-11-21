@@ -446,7 +446,13 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
         selectedProfile: session.selected_profile_kind === 'home'
           ? 'Home'
           : session.selected_profile_kind === 'person'
-            ? personName.get(session.selected_person_id)?.name ?? null
+            ? resolveDevicePersonName === null
+              ? personName.get(session.selected_person_id)?.name ?? null
+              : resolveDevicePersonName({
+                serverVerifiedUserId: request.familyAccount.user_id,
+                personId: session.selected_person_id,
+              })
+              ?? null
             : null,
       })),
     })
