@@ -59,6 +59,11 @@ export function requiredFamilyMemberActions(method, originalUrl) {
   if (method === 'POST') {
     if (READ_ONLY_POSTS.has(route)) return [READ_ONLY_POSTS.get(route)]
     if (route === '/api/events') return ['events.create']
+    // Hiding a recurring occurrence is effectively an event deletion. An
+    // edit-only grant must never let a Child skip a family event.
+    if (/^\/api\/events\/[1-9][0-9]*\/exceptions$/.test(route)) {
+      return ['events.edit', 'events.delete']
+    }
     if (route === '/api/emoji-markers') return ['events.create']
     if (/^\/api\/emoji-markers\/[1-9][0-9]*\/(exceptions|change-occurrence|truncate)$/.test(route)) return ['events.edit']
     // Local voice transcription is a no-write speech-to-text input, never
@@ -94,6 +99,15 @@ export function requiredFamilyMemberActions(method, originalUrl) {
     return null
   }
   if (method === 'DELETE') {
+    // Deleting an exception restores the existing recurring occurrence;
+    // it does not delete the event. The backend validates the actual date.
+    if (/^\/api\/events\/[1-9][0-9]*\/exceptions\/[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(route)) {
+      return ['events.edit']
+    }
+    // Batch deletion must never be treated as a harmless recurring edit.
+    if (/^\/api\/event-batches\/[a-z0-9][a-z0-9-]{0,99}$/.test(route)) {
+      return ['events.delete']
+    }
     if (/^\/api\/emoji-markers\/[1-9][0-9]*$/.test(route)) return ['events.delete']
     if (/^\/api\/events\/[1-9][0-9]*$/.test(route) ||
       /^\/api\/shared-events\/[1-9][0-9]*\/received$/.test(route)) return ['events.delete']
