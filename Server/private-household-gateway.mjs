@@ -30,6 +30,7 @@ import {
   listGrantedHouseholdsForSessionUser,
   getSelectedHouseholdForVerifiedSession,
   selectHouseholdForVerifiedSession,
+  getSoleActiveHouseholdOwner,
 } from './household-memberships.mjs'
 import {
   createHouseholdInvitationTables, issueHouseholdMemberInvitation,
@@ -116,6 +117,9 @@ function validateUpstreams({ identityDatabase, serverDirectory, storageRoot, bac
       'SELECT id FROM household_registry WHERE storage_id = ? AND disabled = 0',
     ].join(' ')).get(householdId)
     if (!row) throw new Error('Household backend has no active identity registry record.')
+    if (!getSoleActiveHouseholdOwner(identityDatabase, householdId)) {
+      throw new Error('Private backend requires exactly one active Person Owner.')
+    }
     ports.set(householdId, port)
   }
   return ports
