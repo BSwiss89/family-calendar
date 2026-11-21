@@ -116,6 +116,30 @@ test('adult default actions, explicit overrides and changed-role grants are chec
   assert.equal(canFamilyMemberAct(auth(db, adult), 'events.edit'), false)
 })
 
+test('self Join and Leave require the linked actor Person and independent grants', t => {
+  const { db, ownerA, adult, child } = fixture(t)
+  enroll(db, ownerA, adult, 'adult')
+  enroll(db, ownerA, child, 'child')
+  db.prepare('UPDATE family_member_access SET person_id = ? WHERE user_id = ?').run(11, adult)
+  db.prepare('UPDATE family_member_access SET person_id = ? WHERE user_id = ?').run(12, child)
+  for (const action of ['events.joinOwn', 'events.leaveOwn']) {
+    assert.equal(canFamilyMemberAct(auth(db, adult), action, { assignedPersonId: 11 }), true)
+    assert.equal(canFamilyMemberAct(auth(db, adult), action, { assignedPersonId: 12 }), false)
+    assert.equal(canFamilyMemberAct(auth(db, child), action, { assignedPersonId: 12 }), false)
+    assert.equal(canFamilyMemberAct(auth(db, ownerA), action, { assignedPersonId: 12 }), false)
+  }
+  grant(db, ownerA, child, 'events.joinOwn', true)
+  assert.equal(canFamilyMemberAct(auth(db, child), 'events.joinOwn', { assignedPersonId: 12 }), true)
+  assert.equal(canFamilyMemberAct(auth(db, child), 'events.leaveOwn', { assignedPersonId: 12 }), false)
+  grant(db, ownerA, child, 'events.leaveOwn', true)
+  assert.equal(canFamilyMemberAct(auth(db, child), 'events.leaveOwn', { assignedPersonId: 12 }), true)
+  grant(db, ownerA, child, 'events.joinOwn', false)
+  assert.equal(canFamilyMemberAct(auth(db, child), 'events.joinOwn', { assignedPersonId: 12 }), false)
+  assert.equal(canFamilyMemberAct(auth(db, child), 'events.leaveOwn', { assignedPersonId: 12 }), true)
+  assert.equal(canActFromHome({ serverVerifiedHomeDevice: true, actor: auth(db, adult),
+    action: 'events.joinOwn', assignedPersonId: 11 }), false)
+})
+
 test('Home selection never elevates a Child or an unverified kiosk into a writer', t => {
   const { db, ownerA, adult, child } = fixture(t)
   enroll(db, ownerA, adult, 'adult')
