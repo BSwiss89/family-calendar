@@ -428,6 +428,7 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   })
 
   app.get('/api/auth/devices', (request, response) => {
+    try {
     const sessions = database.prepare([
       'SELECT id, device_label, created_at, last_seen_at, expires_at, selected_profile_kind, selected_person_id FROM family_sessions',
       'WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?',
@@ -456,6 +457,10 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
             : null,
       })),
     })
+    } catch (error) {
+      console.error('Trusted device profile list unavailable:', error?.message)
+      response.status(503).json({ error: 'Trusted devices temporarily unavailable.' })
+    }
   })
 
   app.post('/api/auth/devices/:id/revoke', (request, response) => {
