@@ -17,7 +17,7 @@ const serverDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), 
 function fakeCentral({ pendingApprovals = 0, approved = [], activeOwners = true } = {}) {
   return {
     prepare(sql) {
-      if (sql.startsWith('SELECT u.id AS userId FROM household_registry h')) {
+      if (sql.startsWith('SELECT u.id AS userId, u.account_kind AS accountKind')) {
         return { all: () => activeOwners === 'duplicate'
           ? [{ userId: 1, accountKind: 'person' }, { userId: 2, accountKind: 'person' }]
           : activeOwners === 'hub' ? [{ userId: 3, accountKind: 'hub' }]
