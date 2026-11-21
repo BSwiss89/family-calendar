@@ -18,7 +18,10 @@ function fakeCentral({ pendingApprovals = 0, approved = [], activeOwners = true 
   return {
     prepare(sql) {
       if (sql.startsWith('SELECT u.id AS userId FROM household_registry h')) {
-        return { all: () => activeOwners ? [{ userId: 1, accountKind: 'person' }] : [] }
+        return { all: () => activeOwners === 'duplicate'
+          ? [{ userId: 1, accountKind: 'person' }, { userId: 2, accountKind: 'person' }]
+          : activeOwners === 'hub' ? [{ userId: 3, accountKind: 'hub' }]
+          : activeOwners ? [{ userId: 1, accountKind: 'person' }] : [] }
       }
       if (sql.startsWith('SELECT h.storage_id AS householdId')) {
         return { all: () => approved.map(id => ({ householdId: id })) }
@@ -70,6 +73,12 @@ test('only configured fixture families and centrally approved active new owners 
       ...values, identityDatabase: fakeCentral({ approved: [newId], pendingApprovals: 1,
         activeOwners: false }),
     }), /inactive or inconsistent ownership/)
+    for (const corrupt of ['duplicate', 'hub', false]) {
+      assert.throws(() => planApprovedPrivateHouseholdStartup({
+        ...values, identityDatabase: fakeCentral({ activeOwners: corrupt }),
+      }), /exactly one active Person Owner/,
+      'a fake duplicate, missing or hub Owner must prevent backend startup')
+    }
     assert.throws(() => planApprovedPrivateHouseholdStartup({
       ...values, identityDatabase: fakeCentral({ approved: [newId], pendingApprovals: 1 }),
     }), /ENOENT|household|metadata/i, 'Missing provisioned disk must stop startup')
