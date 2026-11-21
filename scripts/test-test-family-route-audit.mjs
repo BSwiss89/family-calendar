@@ -12,6 +12,9 @@ test('TEST route audit covers existing event, list, notes, marker and voice decl
   for (const [method, template, permission] of [
     ['GET', '/api/events', 'calendar.view'],
     ['POST', '/api/events', 'events.create'],
+    ['POST', '/api/events/:id/exceptions', 'events.delete'],
+    ['DELETE', '/api/events/:id/exceptions/:occurrenceDate', 'events.edit'],
+    ['DELETE', '/api/event-batches/:batchId', 'events.delete'],
     ['GET', '/api/lists', 'lists.view'],
     ['POST', '/api/lists/:id/items', 'lists.edit'],
     ['GET', '/api/emoji-markers', 'calendar.view'],
@@ -49,6 +52,10 @@ test('legacy selected-avatar TEST notifications, push subscriptions and event jo
   ]) assert.ok(unknown.has(endpoint), endpoint + ' cannot be silently allowed')
   assert.equal(requiredFamilyMemberActions('POST', '/api/ai/cancel-confirmed'), null)
   assert.equal(requiredFamilyMemberActions('POST', '/api/tasks/1/complete'), null)
+  assert.deepEqual(requiredFamilyMemberActions('POST', '/api/events/17/exceptions'),
+    ['events.edit', 'events.delete'])
+  assert.deepEqual(requiredFamilyMemberActions('DELETE', '/api/event-batches/batch-1'),
+    ['events.delete'])
 })
 
 test('route audit is conservative: a route declaration is not security permission', () => {
