@@ -7,6 +7,7 @@ import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { listApprovedPrivateHouseholds } from './private-household-activation-records.mjs'
+import { getSoleActiveHouseholdOwner } from './household-memberships.mjs'
 
 const FIXTURE_BASELINE = Object.freeze(['family-a', 'family-b'])
 const GENERATED_ID = /^family-[0-9a-f]{24}$/
@@ -45,6 +46,9 @@ export function planApprovedPrivateHouseholdStartup({
       'SELECT id FROM household_registry WHERE storage_id = ? AND disabled = 0'
     ).get(householdId)
     if (!registry) throw new Error('Missing active household identity registry.')
+    if (!getSoleActiveHouseholdOwner(identityDatabase, householdId)) {
+      throw new Error('Every private startup household requires exactly one active Person Owner.')
+    }
     // This validates the provisioned SQLite and uploads, containment, and
     // symlink boundaries without creating, replacing or deleting any data.
     resolveHouseholdStorage({ serverDirectory, storageRoot, householdId })
