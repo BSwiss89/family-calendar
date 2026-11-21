@@ -132,15 +132,16 @@ export function grantHouseholdMembership(identityDatabase, {
 export function getSoleActiveHouseholdOwner(identityDatabase, householdId) {
   if (typeof householdId !== 'string' || !householdIdPattern.test(householdId)) return null
   const owners = identityDatabase.prepare([
-    'SELECT u.id AS userId FROM household_registry h',
+    'SELECT u.id AS userId, u.account_kind AS accountKind',
+    'FROM household_registry h',
     'JOIN household_memberships m ON m.household_id = h.id',
     'JOIN family_users u ON u.id = m.user_id',
     'WHERE h.storage_id = ? AND h.disabled = 0',
-    "AND m.role = 'owner' AND m.disabled = 0",
-    "AND u.disabled = 0 AND u.account_kind = 'person'",
+    "AND m.role = 'owner' AND m.disabled = 0 AND u.disabled = 0",
     'LIMIT 2',
   ].join(' ')).all(householdId)
-  return owners.length === 1 ? owners[0].userId : null
+  return owners.length === 1 && owners[0].accountKind === 'person' ?
+    owners[0].userId : null
 }
 
 /**
