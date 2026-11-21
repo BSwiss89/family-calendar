@@ -316,3 +316,66 @@ test('legacy cancellation notices remain readable without falsely guessing event
   assert.equal(notes[0].kind,'cancelled')
   assert.equal(notes[0].cancelledEvent,null)
 })
+
+test('TEST cancellation replaces older pending notifications for the same event and person',async t=>{
+  const db=makeDb(t),app=setupApp(db)
+  pilot(app,db)
+  const base=await withServer(t,app)
+  createEvent(db,101,[7,9])
+  createEvent(db,102,[7]) // unrelated event must remain in the inbox
+  assert.equal((await post(base,'/test-notification-pilot/refresh',11)).status,303)
+  const originally=(await (await get(base,'/api/test-notification-pilot',11)).json()).notifications
+  const oldAssignment=originally.find(x=>x.eventId===101&&x.kind==='assigned')
+  assert.ok(oldAssignment)
+  // Earlier acknowledgement remains durable, even once its notice is superseded.
+  assert.equal((await post(base,
+    '/api/test-notification-pilot/'+oldAssignment.id+'/acknowledge',11)).status,200)
+  db.prepare("UPDATE events SET title='Updated appointment' WHERE id=101").run()
+  assert.equal((await post(base,'/test-notification-pilot/refresh',11)).status,303)
+  const beforeDelete=(await (await get(base,'/api/test-notification-pilot',11)).json()).notifications
+  assert.ok(beforeDelete.some(x=>x.eventId===101&&x.kind==='changed'))
+  db.prepare('DELETE FROM events WHERE id=101').run()
+  assert.equal((await post(base,'/test-notification-pilot/refresh',11)).status,303)
+  const for7=(await (await get(base,'/api/test-notification-pilot',11)).json()).notifications
+  const for9=(await (await get(base,'/api/test-notification-pilot',12)).json()).notifications
+  assert.deepEqual(for7.filter(x=>x.eventId===101).map(x=>x.kind),['cancelled'])
+  assert.deepEqual(for9.filter(x=>x.eventId===101).map(x=>x.kind),['cancelled'])
+  assert.ok(for7.some(x=>x.eventId===102&&x.kind==='assigned'))
+  assert.equal(db.prepare([
+    'SELECT COUNT(*) AS n FROM assignment_notification_outbox',
+    'WHERE event_id=101 AND person_id=7',
+  ].join(' ')).get().n,3,'assigned, changed and cancelled history must be kept')
+  assert.equal(db.prepare([
+    'SELECT COUNT(*) AS n FROM test_assignment_acknowledgements WHERE notification_id=?',
+  ].join(' ')).get(oldAssignment.id).n,1,'do not rewrite past acknowledgement')
+  const cancelled=for7.find(x=>x.eventId===101)
+  assert.ok(cancelled.cancelledEvent?.title==='Updated appointment')
+  assert.equal((await post(base,
+    '/api/test-notification-pilot/'+cancelled.id+'/acknowledge',11)).status,200)
+  const after=(await (await get(base,'/api/test-notification-pilot',11)).json()).notifications
+  assert.deepEqual(after.filter(x=>x.eventId===101).map(x=>[x.kind,x.acknowledged]),
+    [['cancelled',true]],'older pending notices must not resurface after acknowledgement')
+  // If an ID is reused for a new event, its later assignment is not suppressed.
+  createEvent(db,101,[7])
+  assert.equal((await post(base,'/test-notification-pilot/refresh',11)).status,303)
+  const reused=(await (await get(base,'/api/test-notification-pilot',11)).json()).notifications
+  assert.deepEqual(reused.filter(x=>x.eventId===101).map(x=>x.kind),
+    ['assigned','cancelled'])
+})
+
+test('TEST cancellation suppresses prior notices only for its recipient',async t=>{
+  const db=makeDb(t),app=setupApp(db)
+  pilot(app,db)
+  const base=await withServer(t,app)
+  createEvent(db,110,[7,9])
+  assert.equal((await post(base,'/test-notification-pilot/refresh',11)).status,303)
+  db.prepare('DELETE FROM event_people WHERE event_id=110 AND person_id=9').run()
+  assert.equal((await post(base,'/test-notification-pilot/refresh',11)).status,303)
+  db.prepare('DELETE FROM events WHERE id=110').run()
+  assert.equal((await post(base,'/test-notification-pilot/refresh',11)).status,303)
+  const for7=(await (await get(base,'/api/test-notification-pilot',11)).json()).notifications
+  const for9=(await (await get(base,'/api/test-notification-pilot',12)).json()).notifications
+  assert.deepEqual(for7.map(x=>x.kind),['cancelled'])
+  assert.deepEqual(for9.map(x=>x.kind),['unassigned','assigned'])
+  assert.equal((await get(base,'/api/test-notification-pilot',13)).status,403)
+})
