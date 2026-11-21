@@ -45,8 +45,16 @@ function latest(db, personId) {
   return db.prepare([
     'SELECT id,event_id AS eventId,kind,created_at AS createdAt,',
     'change_mask AS changeMask,cancelled_details_json AS cancelledDetailsJson',
-    'FROM assignment_notification_outbox WHERE person_id=?',
-    'ORDER BY id DESC LIMIT 50',
+    'FROM assignment_notification_outbox n WHERE n.person_id=?',
+    // An event cancellation supersedes its earlier assignment, update and
+    // unassignment alerts for this same recipient. Keep stored records and
+    // acknowledgements intact; do not resurface stale alerts after confirming.
+    // Notice ID ordering permits a later new event reusing an old event ID.
+    "AND NOT (n.kind IN ('assigned','changed','unassigned') AND EXISTS (",
+    'SELECT 1 FROM assignment_notification_outbox newer',
+    'WHERE newer.person_id=n.person_id AND newer.event_id=n.event_id',
+    "AND newer.kind='cancelled' AND newer.id>n.id))",
+    'ORDER BY n.id DESC LIMIT 50',
   ].join(' ')).all(personId).map(({changeMask,cancelledDetailsJson,...note}) => ({
     ...note,
     // Only the authenticated selected recipient gets cancellation details.
