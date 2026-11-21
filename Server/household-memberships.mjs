@@ -57,6 +57,13 @@ export function createHouseholdMembershipTables(identityDatabase) {
   // A login belongs to exactly one household, including disabled memberships.
   // Index creation fails closed on legacy conflicts without deleting records.
   identityDatabase.exec('CREATE UNIQUE INDEX IF NOT EXISTS household_memberships_one_household_per_user ON household_memberships(user_id)')
+  // Fail closed on legacy conflicts: one active Owner membership per family.
+  // Disabled former Owners can remain for audit/transfer without conferring
+  // authority. Revoking/disabling a membership precedes a new Owner grant.
+  identityDatabase.exec([
+    'CREATE UNIQUE INDEX IF NOT EXISTS household_memberships_one_active_owner',
+    "ON household_memberships(household_id) WHERE role = 'owner' AND disabled = 0",
+  ].join(' '))
 }
 
 /**
@@ -95,13 +102,45 @@ export function grantHouseholdMembership(identityDatabase, {
   // Reject attempts to grant a disabled account rather than creating dormant
   // memberships silently.
   const account = identityDatabase.prepare(
-    'SELECT id FROM family_users WHERE id = ? AND disabled = 0'
+    'SELECT id, account_kind AS accountKind FROM family_users WHERE id = ? AND disabled = 0'
   ).get(userId)
   if (!account) throw new Error('Account not found or disabled.')
+  if (grantedRole === 'owner') {
+    if (account.accountKind !== 'person') {
+      throw new Error('Only a verified person login can be the household Owner.')
+    }
+    if (identityDatabase.prepare([
+      'SELECT 1 FROM household_memberships',
+      "WHERE household_id = ? AND role = 'owner' AND disabled = 0 LIMIT 1",
+    ].join(' ')).get(target.id)) {
+      throw new Error('Household already has an active Owner.')
+    }
+  }
   identityDatabase.prepare([
     'INSERT INTO household_memberships(user_id, household_id, role)',
     'VALUES (?, ?, ?)',
   ].join(' ')).run(userId, target.id, grantedRole)
+}
+
+/**
+ * Trusted internal read-only invariant. Browser-selected People profiles,
+ * usernames and household IDs do NOT grant Owner authority. A family has a
+ * usable sole Owner only when exactly one active Person account and active
+ * Owner membership agree; a disabled owner or two conflicting Owners fails
+ * closed. This never modifies rows or transfers ownership.
+ */
+export function getSoleActiveHouseholdOwner(identityDatabase, householdId) {
+  if (typeof householdId !== 'string' || !householdIdPattern.test(householdId)) return null
+  const owners = identityDatabase.prepare([
+    'SELECT u.id AS userId FROM household_registry h',
+    'JOIN household_memberships m ON m.household_id = h.id',
+    'JOIN family_users u ON u.id = m.user_id',
+    'WHERE h.storage_id = ? AND h.disabled = 0',
+    "AND m.role = 'owner' AND m.disabled = 0",
+    "AND u.disabled = 0 AND u.account_kind = 'person'",
+    'LIMIT 2',
+  ].join(' ')).all(householdId)
+  return owners.length === 1 ? owners[0].userId : null
 }
 
 /**
