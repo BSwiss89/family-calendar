@@ -67,6 +67,9 @@ test('legacy selected-avatar TEST notifications, push subscriptions and event jo
   assert.equal(requiredFamilyMemberActions('POST', '/api/test-event-invitations/7/respond'), null)
   assert.equal(requiredFamilyMemberActions('GET', '/api/test-notification-pilot'), null)
   assert.equal(requiredFamilyMemberActions('POST', '/api/test-notification-pilot/9/acknowledge'), null)
+  assert.equal(requiredFamilyMemberActions('GET', '/api/test-household-events/join-capability'), null)
+  assert.equal(requiredFamilyMemberActions('POST', '/api/test-household-events/9/join'), null)
+  assert.equal(requiredFamilyMemberActions('POST', '/api/test-household-events/9/leave'), null)
   assert.deepEqual(requiredFamilyMemberActions('POST', '/api/events/17/exceptions'),
     ['events.edit', 'events.delete'])
   assert.deepEqual(requiredFamilyMemberActions('DELETE', '/api/event-batches/batch-1'),
