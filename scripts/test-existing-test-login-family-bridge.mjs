@@ -14,6 +14,7 @@ import { registerHousehold, grantHouseholdMembership } from '../Server/household
 import {
   installExistingTestLoginFamilyPermissions,
   verifyExistingTestLoginFamilyActor, requiredExistingTestPersonalAction,
+  canExistingTestSessionReceivePush,
 } from '../Server/test-existing-login-family-bridge.mjs'
 
 const directory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../Server')
@@ -97,7 +98,10 @@ async function makeSite(loginDatabase, identityDatabase) {
   app.get('/api/test-household-events/join-capability', (_req, res) => res.json({ canJoin: true }))
   app.post('/api/test-household-events/1/join', (_req, res) => res.json({ joined: true }))
   app.post('/api/test-household-events/1/leave', (_req, res) => res.json({ left: true }))
+  app.get('/api/test-push/config', (_req, res) => res.json({ configured: true }))
+  app.get('/api/test-push/status', (_req, res) => res.json({ optIn: true }))
   app.post('/api/test-push/subscriptions', (_req, res) => res.json({ subscribed: true }))
+  app.delete('/api/test-push/subscriptions', (_req, res) => res.json({ removed: true }))
   app.post('/api/auth/unreviewed-owner-change', (_req, res) => res.json({ unsafe: true }))
   app.get('/uploads/person-photo', (_req, res) => res.send('private photo'))
   const server = createServer(app)
@@ -198,8 +202,12 @@ test('existing username/password and remembered cookie establish family actor wi
     { personId: 1, actor: 'owner' })).status, 200)
   assert.equal((await call(site, child, '/api/test-household-events/1/join', 'POST', {})).status, 403,
     'event joining still awaits separately scoped account authorization')
-  assert.equal((await call(site, child, '/api/test-push/subscriptions', 'POST', {})).status, 403,
-    'Web Push awaits centrally revoked-session-aware delivery')
+  assert.equal((await call(site, child, '/api/test-push/config')).status, 200)
+  assert.equal((await call(site, child, '/api/test-push/status')).status, 200)
+  assert.equal((await call(site, child, '/api/test-push/subscriptions', 'POST',
+    { actor: 'owner', personId: 1 })).status, 200)
+  assert.equal((await call(site, child, '/api/test-push/subscriptions', 'DELETE',
+    { actor: 'owner', personId: 1 })).status, 200)
   assert.equal((await call(site, child, '/api/test-event-invitations/07/respond', 'POST', {})).status, 403)
   assert.equal((await call(site, child, '/api/test-event-invitations/7/respond?owner=1', 'POST', {})).status, 403)
   assert.equal((await call(site, child, '/API/test-event-invitations')).status, 403)
@@ -215,6 +223,7 @@ test('existing username/password and remembered cookie establish family actor wi
   assert.equal((await call(site, child, '/api/auth/my-family-access')).status, 200)
   assert.equal((await call(site, child, '/api/test-event-invitations')).status, 403)
   assert.equal((await call(site, child, '/api/test-notification-pilot')).status, 403)
+  assert.equal((await call(site, child, '/api/test-push/status')).status, 403)
 
   setFamilyMemberPermission(identityDatabase, {
     householdId: home, serverVerifiedOwnerUserId: users['real-owner'],
@@ -332,6 +341,56 @@ test('stale session, missing shadow, disabled account and changed identity mappi
   assert.equal((await call(site, child, '/api/events')).status, 401)
 })
 
+test('background push verifier rechecks current central membership, Person and session', async t => {
+  const { loginDatabase, identityDatabase, users } = seededDatabases(t)
+  const site = await makeSite(loginDatabase, identityDatabase)
+  t.after(() => site.close())
+  const childCookie = await signIn(site, 'real-child')
+  const childSession = loginDatabase.prepare([
+    'SELECT s.id AS sessionId, s.user_id AS userId FROM family_sessions s',
+    'JOIN family_users u ON u.id=s.user_id WHERE u.username=?',
+  ].join(' ')).get('real-child')
+  const target = { loginDatabase, identityDatabase, householdId: home,
+    sessionId: childSession.sessionId, userId: childSession.userId, personId: 2 }
+  assert.equal(canExistingTestSessionReceivePush(target), false)
+  assert.equal((await call(site, childCookie, '/api/auth/device-profile', 'POST',
+    { kind: 'person', personId: 2 })).status, 200)
+  assert.equal(canExistingTestSessionReceivePush(target), true)
+  assert.equal(canExistingTestSessionReceivePush({ ...target, personId: 1 }), false)
+  assert.equal(canExistingTestSessionReceivePush({ ...target, userId: users['real-owner'] }), false)
+  assert.equal(canExistingTestSessionReceivePush({ ...target, sessionId: 999 }), false)
+  assert.equal(canExistingTestSessionReceivePush({ ...target, personId: 0 }), false)
+  setFamilyMemberPermission(identityDatabase, {
+    householdId: home, serverVerifiedOwnerUserId: users['real-owner'],
+    targetUserId: users['real-child'], action: 'notifications.receiveOwn', enabled: false,
+  })
+  assert.equal(canExistingTestSessionReceivePush(target), false)
+  setFamilyMemberPermission(identityDatabase, {
+    householdId: home, serverVerifiedOwnerUserId: users['real-owner'],
+    targetUserId: users['real-child'], action: 'notifications.receiveOwn', enabled: true,
+  })
+  assert.equal(canExistingTestSessionReceivePush(target), true)
+  identityDatabase.prepare('UPDATE household_memberships SET disabled=1 WHERE user_id=?')
+    .run(users['real-child'])
+  assert.equal(canExistingTestSessionReceivePush(target), false)
+  identityDatabase.prepare('UPDATE household_memberships SET disabled=0 WHERE user_id=?')
+    .run(users['real-child'])
+  assert.equal((await call(site, childCookie, '/api/auth/device-profile', 'POST',
+    { kind: 'home' })).status, 200)
+  assert.equal(canExistingTestSessionReceivePush(target), false)
+  assert.equal((await call(site, childCookie, '/api/auth/device-profile', 'POST',
+    { kind: 'person', personId: 2 })).status, 200)
+  identityDatabase.prepare('UPDATE family_users SET username=? WHERE id=?')
+    .run('no-longer-matches', users['real-child'])
+  assert.equal(canExistingTestSessionReceivePush(target), false)
+  identityDatabase.prepare('UPDATE family_users SET username=? WHERE id=?')
+    .run('real-child', users['real-child'])
+  assert.equal(canExistingTestSessionReceivePush(target), true)
+  loginDatabase.prepare('UPDATE family_sessions SET revoked_at=? WHERE id=?')
+    .run(Date.now(), target.sessionId)
+  assert.equal(canExistingTestSessionReceivePush(target), false)
+})
+
 test('personal API allowlist is narrow: no alias, other Person or Web Push bypass', () => {
   for (const [method, url, action] of [
     ['GET', '/api/test-event-invitations', 'calendar.view'],
@@ -340,10 +399,17 @@ test('personal API allowlist is narrow: no alias, other Person or Web Push bypas
     ['GET', '/api/test-household-events/join-capability', 'events.joinOwn'],
     ['POST', '/api/test-household-events/7/join', 'events.joinOwn'],
     ['POST', '/api/test-household-events/7/leave', 'events.leaveOwn'],
+    ['GET', '/api/test-push/config', 'notifications.receiveOwn'],
+    ['GET', '/api/test-push/status', 'notifications.receiveOwn'],
+    ['POST', '/api/test-push/subscriptions', 'notifications.receiveOwn'],
+    ['DELETE', '/api/test-push/subscriptions', 'notifications.receiveOwn'],
     ['POST', '/api/test-notification-pilot/9/acknowledge', 'notifications.acknowledgeOwn'],
   ]) assert.equal(requiredExistingTestPersonalAction(method, url), action)
   for (const [method, url] of [
-    ['POST', '/api/test-push/subscriptions'],
+    ['POST', '/api/test-push/subscriptions?actor=owner'],
+    ['GET', '/api/test-push/status/'],
+    ['GET', '/API/test-push/config'],
+    ['DELETE', '/api/test-push/subscriptions?endpoint=1'],
     ['POST', '/api/test-household-events/07/join'],
     ['GET', '/api/test-household-events/7/join'],
     ['POST', '/api/test-household-events/7/leave?actor=owner'],
