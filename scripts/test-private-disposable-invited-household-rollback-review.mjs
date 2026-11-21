@@ -124,8 +124,10 @@ function tenantData(f, root, id) {
   const db = new DatabaseSync(storage.databasePath, { readOnly: true })
   try {
     return {
-      events: db.prepare('SELECT title FROM events ORDER BY id').all(),
-      lists: db.prepare('SELECT name FROM lists ORDER BY id').all(),
+      events: db.prepare('SELECT title FROM events ORDER BY id').all()
+        .map(row => ({ title: row.title })),
+      lists: db.prepare('SELECT name FROM lists ORDER BY id').all()
+        .map(row => ({ name: row.name })),
       picture: fs.readFileSync(path.join(storage.uploadFolder, 'private.bin')).toString('hex'),
     }
   } finally { db.close() }
