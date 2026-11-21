@@ -117,12 +117,13 @@ export function planReviewedPrivateTestStartup({
     'JOIN household_memberships m ON m.household_id = h.id',
     'JOIN family_users u ON u.id = m.user_id',
     "WHERE m.role = 'owner' AND m.disabled = 0 AND u.disabled = 0",
+    "AND u.account_kind = 'person'",
     'GROUP BY h.storage_id',
   ].join(' ')).all()
   const ownerMap = new Map(owners.map(row => [row.householdId, row.owners]))
   if (registered.some(row => !Number.isSafeInteger(ownerMap.get(row.householdId)) ||
-      ownerMap.get(row.householdId) < 1)) {
-    refuse('an active household is missing an active owner.')
+      ownerMap.get(row.householdId) !== 1)) {
+    refuse('each active household must have exactly one active Person Owner.')
   }
   // One-household-per-login: refuse duplicate memberships (including disabled).
   const multiple = identityDatabase.prepare([
