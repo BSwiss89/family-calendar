@@ -52,7 +52,7 @@ function validRule(entry) {
 function validatedSnapshot(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input) ||
       input.schemaVersion !== 1 || input.site !== 'existing-secure-test' ||
-      !['baseline', 'candidate-review'].includes(input.phase) ||
+      !['baseline', 'pre-route', 'candidate-review'].includes(input.phase) ||
       !SHA.test(input.installedTestSha) ||
       !ipv4(input.legacyTestAddress) ||
       !input.legacyTestAddress.startsWith('100.') ||
@@ -91,7 +91,10 @@ export function assessPrivatePhase1TestRoutingBoundary(input) {
     listenAddress: '127.0.0.1', listenPort: 13003,
     connectAddress: '127.0.0.1', connectPort: input.gatewayPort,
   })
-  const required = input.phase === 'baseline' ? expectedCurrent : expectedCandidate
+  // During pre-route inspection the old 13003 proxy target remains in place,
+  // but the 13002 service MUST already be stopped and the new private gateway
+  // verified locally. This may be a temporary TEST outage, never a third site.
+  const required = input.phase === 'candidate-review' ? expectedCandidate : expectedCurrent
   if (proxy.length === 1 && !exactRule(proxy[0], required)) {
     add(blockers, 'TEST portproxy does not point to the stage-specific reviewed target.')
   }
@@ -123,6 +126,16 @@ export function assessPrivatePhase1TestRoutingBoundary(input) {
       add(blockers, 'Pinned Phase 1 gateway must have one localhost-only listener.')
     }
     const backends = input.listeners.filter(x => x.role === 'household-backend')
+    // During pre-route the existing 13003 forwarding rule still names the
+    // quiesced legacy service, but that listener MUST be absent. After the
+    // cutover there must be no old 13002 forwarding path of any kind.
+    for (const rule of input.portproxyRules) {
+      if ((input.phase === 'candidate-review' && rule.connectPort === 13002) ||
+          backends.some(item => rule.connectPort === item.port) ||
+          (rule.connectPort === input.gatewayPort && rule.listenPort !== 13003)) {
+        add(blockers, 'Unreviewed forwarding exposes a family backend or bypasses the approved gateway.')
+      }
+    }
     if (backends.length < 1) {
       add(blockers, 'No separately verified private household backend listener.')
     }
@@ -165,6 +178,7 @@ export function assessPrivatePhase1TestRoutingBoundary(input) {
     site: input.site,
     phase: input.phase,
     observedBaselineMatches: input.phase === 'baseline' && blockers.length === 0,
+    preRouteTopologyMatches: input.phase === 'pre-route' && blockers.length === 0,
     candidateNetworkTopologyMatches: input.phase === 'candidate-review' && blockers.length === 0,
     blockers: Object.freeze(blockers),
     manualGates: MANUAL_GATES,
