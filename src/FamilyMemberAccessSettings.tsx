@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import './FamilyMemberAccessSettings.css'
+import SharedHomePinSettings from './SharedHomePinSettings'
 
 type MemberType = 'owner' | 'adult' | 'child' | null
 type AccessMember = {
@@ -184,6 +185,8 @@ export default function FamilyMemberAccessSettings() {
           onChange={event => setOwnerPassword(event.target.value)}
           placeholder="Required to save changes" maxLength={200} />
       </label>
+      <SharedHomePinSettings ownerPassword={ownerPassword}
+        clearOwnerPassword={() => setOwnerPassword('')} />
       {data.members.map(member => {
         const kind = member.memberType
         const chosen = permissionDrafts[member.userId]
