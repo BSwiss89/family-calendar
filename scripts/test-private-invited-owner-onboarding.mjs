@@ -28,6 +28,7 @@ import {
   installPrivateSystemAdministrator,
 } from '../Server/private-system-administration.mjs'
 import { resolveHouseholdStorage } from '../Server/household-storage.mjs'
+import { startPrivateHouseholdGateway } from '../Server/private-household-gateway.mjs'
 
 const directory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../Server')
 const password = 'Only-Disposable-Invited-Owner-Secure-Password-2026!'
@@ -425,4 +426,99 @@ test('private login destination never trusts unconfigured identity or arbitrary 
   assert.throws(() => installPrivateFamilyEntryRouting(express(), {
     identityDatabase: db, trustedAdministratorUserIds: [operatorId],
   }), /Authenticated private gateway/)
+})
+
+test('first invited household can register with NO existing backend, without gaining calendar access', async () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-first-family-bootstrap-'))
+  const storageRoot = path.join(work, 'households')
+  fs.mkdirSync(storageRoot)
+  const identityDatabase = new DatabaseSync(path.join(work, 'central.sqlite'))
+  let gateway
+  try {
+    setFamilyAccount(identityDatabase, 'bootstrapoperator', 'Bootstrap Operator', operatorPassword)
+    const operatorId = identityDatabase.prepare(
+      "SELECT id FROM family_users WHERE username='bootstrapoperator'"
+    ).get().id
+    const args = {
+      identityDatabase, serverDirectory: directory, storageRoot,
+      backendPorts: {}, backendTokens: {},
+      independentHouseholdAdministratorUserIds: [operatorId],
+    }
+    await assert.rejects(startPrivateHouseholdGateway(args),
+      /At least one explicit household backend/,
+      'missing opt-in must reject an accidental zero-backend configuration')
+    await assert.rejects(startPrivateHouseholdGateway({
+      ...args, allowEmptyGatewayBootstrap: true,
+      independentHouseholdAdministratorUserIds: [],
+    }), /explicit trusted administrator/,
+    'untrusted empty control plane must not start')
+    gateway = await startPrivateHouseholdGateway({
+      ...args, allowEmptyGatewayBootstrap: true,
+    })
+    const base = gateway.base
+    const request = async (route, cookie, body) => {
+      const method = body === undefined ? 'GET' : 'POST'
+      const response = await fetch(base + route, {
+        method, redirect: 'manual',
+        headers: {
+          ...(cookie ? { Cookie: cookie } : {}),
+          ...(body === undefined ? {} : {
+            Origin: 'https://' + new URL(base).host,
+            'Content-Type': 'application/json',
+          }),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      })
+      const payload = response.headers.get('content-type')?.includes('application/json')
+        ? await response.json() : await response.text()
+      return { response, payload }
+    }
+    const signIn = async (username, pass) => {
+      const login = await request('/api/auth/login', null,
+        { username, password: pass, deviceLabel: 'Temporary test device' })
+      assert.equal(login.response.status, 200)
+      return login.response.headers.get('set-cookie').split(';')[0]
+    }
+    const operator = await signIn('bootstrapoperator', operatorPassword)
+    assert.equal((await request('/api/auth/landing', operator)).payload.destination,
+      '/system-admin')
+    assert.equal((await request('/system-admin', operator)).response.status, 200)
+    const invitation = issueIndependentHouseholdInvitation(identityDatabase, {
+      serverVerifiedAdministratorUserId: operatorId,
+      trustedAdministratorUserIds: [operatorId],
+    })
+    const signup = await request('/api/households/create-from-invitation', null, {
+      token: invitation.token, username: 'brandnewhouseholdowner',
+      displayName: 'First private Owner', password,
+      householdName: 'New Family With No Backend',
+    })
+    assert.equal(signup.response.status, 201)
+    const owner = await signIn('brandnewhouseholdowner', password)
+    assert.equal((await request('/api/auth/landing', owner)).payload.destination,
+      '/my-household')
+    assert.equal((await request('/', owner)).response.headers.get('location'),
+      '/my-household')
+    const onboarding = await request('/api/households/my-onboarding', owner)
+    assert.equal(onboarding.response.status, 200)
+    assert.equal(onboarding.payload.households.length, 1)
+    assert.equal(onboarding.payload.households[0].state, 'pending-activation')
+    assert.equal((await request('/my-household', owner)).response.status, 200)
+    assert.equal((await request('/api/admin/household-overview', owner)).response.status,
+      403, 'Owner never becomes the system operator')
+    assert.equal((await request('/api/events', owner)).response.status, 503,
+      'a pending Owner cannot use a calendar backend that does not exist')
+    const oversight = await request('/api/admin/household-overview', operator)
+    assert.equal(oversight.response.status, 200)
+    assert.equal(oversight.payload.households.length, 1)
+    assert.equal(oversight.payload.households[0].state, 'pending-activation')
+    assert.equal(identityDatabase.prepare(
+      'SELECT COUNT(*) AS n FROM private_activated_households'
+    ).get().n, 0, 'bootstrap must never automatically approve a household')
+    assert.equal(gateway.port > 0 && ![3001, 13002].includes(gateway.port),
+      true, 'test harness does not take an installed calendar port')
+  } finally {
+    if (gateway) await gateway.close()
+    identityDatabase.close()
+    fs.rmSync(work, { recursive: true, force: true })
+  }
 })

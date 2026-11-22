@@ -169,3 +169,34 @@ test('a selected Person cannot authorize impersonation and unconfigured routes f
     resolveDevicePersonName: f.resolver,
   }), /restricted to the private gateway/)
 })
+
+test('newly enrolled backend routes immediately allow correct Person display, never another family', t => {
+  const f = fixture(t)
+  const routed = new Set()
+  const resolver = createPrivateGatewayDevicePersonResolver({
+    identityDatabase: f.identity, serverDirectory, storageRoot: f.root,
+    getRoutedHouseholdIds: () => [...routed],
+  })
+  const a = { serverVerifiedUserId: f.userIds['alice-account'], personId: 1 }
+  const b = { serverVerifiedUserId: f.userIds['bob-account'], personId: 1 }
+  assert.equal(resolver(a), null, 'no configured backend is safe for first-family bootstrap')
+  assert.equal(resolver(b), null)
+  routed.add('family-a')
+  assert.equal(resolver(a), 'Alice in A')
+  assert.equal(resolver(b), null, 'routing Family A never exposes Family B')
+  routed.add('family-b')
+  assert.equal(resolver(b), 'Bob in B', 'new enrollment must work without restart')
+  routed.delete('family-a')
+  assert.equal(resolver(a), null, 'removed route immediately fails closed')
+  assert.equal(resolver(b), 'Bob in B')
+  const broken = createPrivateGatewayDevicePersonResolver({
+    identityDatabase: f.identity, serverDirectory, storageRoot: f.root,
+    getRoutedHouseholdIds: () => 'family-a',
+  })
+  assert.equal(broken(a), null, 'untrusted route shapes must not be accepted')
+  const throwing = createPrivateGatewayDevicePersonResolver({
+    identityDatabase: f.identity, serverDirectory, storageRoot: f.root,
+    getRoutedHouseholdIds: () => { throw new Error('no routes') },
+  })
+  assert.equal(throwing(a), null, 'failed trusted route lookup must fail closed')
+})
