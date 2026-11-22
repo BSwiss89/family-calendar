@@ -10,7 +10,8 @@ export const FAMILY_ACTIONS = Object.freeze([
   'invitations.respondOwn', 'notifications.acknowledgeOwn',
   'notifications.receiveOwn',
   'events.joinOwn', 'events.leaveOwn',
-  'tasks.manage', 'recipes.view', 'recipes.edit', 'settings.manage',
+  'tasks.manage', 'recipes.view', 'recipes.edit',
+  'captures.view', 'captures.edit', 'settings.manage',
   'members.invite', 'permissions.manage', 'devices.manage', 'ownership.transfer',
 ])
 
@@ -26,6 +27,7 @@ const ADULT_DEFAULTS = new Set([
   'calendar.view', 'events.create', 'events.edit', 'events.delete',
   'lists.view', 'lists.edit', 'tasks.view', 'tasks.completeAssigned',
   'tasks.manage', 'recipes.view', 'recipes.edit',
+  'captures.view', 'captures.edit',
   'invitations.respondOwn', 'notifications.acknowledgeOwn',
   'notifications.receiveOwn',
   'events.joinOwn', 'events.leaveOwn',
