@@ -1,5 +1,24 @@
 // Pure synthetic scheduler snapshots. No Windows tasks or other host resources.
 import test from 'node:test'
+import fs from 'node:fs'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+const psFile = fileURLToPath(new URL('./inspect-private-phase1-windows-test-task-fingerprints.ps1', import.meta.url))
+test('PowerShell 5.1 inspector parses without touching Windows Task Scheduler',()=>{
+  if (process.platform !== 'win32') return
+  const expression = "$t=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseFile($args[0],[ref]$t,[ref]$e)|Out-Null;if(@($e).Count){exit 23}"
+  const output=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',expression,psFile],{
+    encoding:'utf8', windowsHide:true, timeout:12000,
+  })
+  assert.equal(output.status,0,'read-only Task Scheduler inspector must parse cleanly')
+  const source=fs.readFileSync(psFile,'utf8')
+  for(const forbidden of [/Stop-ScheduledTask/i,/Disable-ScheduledTask/i,
+    /Start-ScheduledTask/i,/Set-ScheduledTask/i,/Register-ScheduledTask/i,
+    /netsh.*portproxy.*add/i,/Remove-Item/i]){
+    assert.doesNotMatch(source,forbidden)
+  }
+})
 import assert from 'node:assert/strict'
 import { assessPrivatePhase1WindowsTaskFencing as assess }
   from '../Server/private-phase1-windows-test-task-fencing.mjs'
