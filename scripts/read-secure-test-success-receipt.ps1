@@ -13,10 +13,10 @@ function Read-SecureTestLastSuccessReceipt {
     # System.IO.File.ReadLines is lazy, so very large transcripts are not
     # copied into memory merely to locate a historical success record.
     foreach ($line in [System.IO.File]::ReadLines($LogFile)) {
-        if ($line -match 'TEST AUTO DEPLOY CHECK (\\d{4}-\\d\\d-\\d\\dT\\S+)') {
+        if ($line -match 'TEST AUTO DEPLOY CHECK (\d{4}-\d\d-\d\dT\S+)') {
             $lastCheckAt = $Matches[1]
         }
-        if ($line -match 'TEST AUTO DEPLOY SUCCESS ([a-fA-F0-9]{40})\\. Backup: (.+)$') {
+        if ($line -match 'TEST AUTO DEPLOY SUCCESS ([a-fA-F0-9]{40})\. Backup: (.+)$') {
             $lastSuccessSha = $Matches[1].ToLowerInvariant()
             $lastSuccessAt = $lastCheckAt
             $lastBackup = $Matches[2].Trim()
