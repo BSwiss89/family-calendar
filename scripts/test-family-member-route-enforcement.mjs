@@ -12,6 +12,7 @@ import {
   requiredFamilyMemberActions, authorizeFamilyMemberApiRequest,
   installPrivateMemberRouteEnforcement,
 } from '../Server/family-member-route-enforcement.mjs'
+import { readPrivateHomePinPolicy, setPrivateHomePinPolicy } from '../Server/private-home-pin-policy.mjs'
 
 function fixture(t) {
   const db = new DatabaseSync(':memory:')
@@ -38,6 +39,36 @@ function fixture(t) {
   }
   return { db, ownerId, adultId, childId, outsiderId }
 }
+
+test('shared Home PIN preference defaults ON, is Owner-only, and cannot grant member rights', t => {
+  const { db, ownerId, adultId, childId, outsiderId } = fixture(t)
+  const read = (householdId, userId) => readPrivateHomePinPolicy(db, {
+    householdId, serverVerifiedOwnerUserId: userId,
+  })
+  const change = (householdId, userId, pinEnabled) => setPrivateHomePinPolicy(db, {
+    householdId, serverVerifiedOwnerUserId: userId, pinEnabled,
+  })
+  assert.deepEqual(read('family-a', ownerId), { pinEnabled: true })
+  assert.deepEqual(read('family-b', outsiderId), { pinEnabled: true })
+  assert.throws(() => read('family-a', childId), /Active household Owner required/)
+  assert.throws(() => change('family-a', adultId, false), /Active household Owner required/)
+  assert.throws(() => change('family-a', outsiderId, false), /Active household Owner required/)
+  assert.throws(() => change('family-a', ownerId, 'false'), /must be a boolean/)
+  assert.deepEqual(change('family-a', ownerId, false), { pinEnabled: false })
+  assert.deepEqual(read('family-a', ownerId), { pinEnabled: false })
+  assert.deepEqual(read('family-b', outsiderId), { pinEnabled: true })
+  // A saved "PIN off" preference does not permit profile selection, Child
+  // impersonation, or unreviewed APIs to write without their existing grants.
+  assert.equal(authorizeFamilyMemberApiRequest(db, {
+    serverVerifiedUserId: childId, householdId: 'family-a',
+    method: 'POST', originalUrl: '/api/events',
+  }).allowed, false)
+  assert.deepEqual(change('family-a', ownerId, true), { pinEnabled: true })
+  db.prepare('UPDATE household_memberships SET disabled = 1 WHERE user_id = ?').run(ownerId)
+  assert.throws(() => change('family-a', ownerId, false), /Active household Owner required/)
+  assert.throws(() => read('family-a', ownerId), /Active household Owner required/)
+  assert.deepEqual(read('family-b', outsiderId), { pinEnabled: true })
+})
 
 test('known API reads and event/list writes are categorized; unknown or alias routes fail closed', () => {
   const cases = [

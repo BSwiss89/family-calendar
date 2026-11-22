@@ -54,6 +54,7 @@ import { installPrivateSystemAdministrator } from './private-system-administrati
 import { installPrivateInvitedOwnerOnboarding } from './private-invited-owner-onboarding.mjs'
 import { installPrivateMemberRouteEnforcement } from './family-member-route-enforcement.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
+import { readPrivateHomePinPolicy, setPrivateHomePinPolicy } from './private-home-pin-policy.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { createPrivateActivationRecords, approvePrivateHouseholdActivation,
   assertApprovedPrivateHousehold } from './private-household-activation-records.mjs'
@@ -1042,6 +1043,77 @@ export async function startPrivateHouseholdGateway({
         targetUserId: memberUserId, action, enabled,
       }))
   })
+
+  // PRIVATE SOURCE-ONLY policy switch for the future SHARED Home kiosk.
+  // This preference does NOT authenticate a person or remove any current
+  // actor check: the device/PIN execution layer is not installed yet.
+  app.get('/api/households/home-pin', (request, response) => {
+    response.set('Cache-Control', 'no-store')
+    if (request.originalUrl !== '/api/households/home-pin') {
+      return response.status(404).json({ error: 'Not found.' })
+    }
+    return ownerOnlyMembershipAction(request, response, householdId => {
+      response.json(readPrivateHomePinPolicy(identityDatabase, {
+        householdId, serverVerifiedOwnerUserId: request.familyAccount.user_id,
+      }))
+    })
+  })
+
+  app.post('/api/households/home-pin', express.json({ limit: '4kb', strict: true }),
+    async (request, response) => {
+      response.set('Cache-Control', 'no-store')
+      if (request.originalUrl !== '/api/households/home-pin' ||
+          !request.body || typeof request.body !== 'object' ||
+          Array.isArray(request.body) ||
+          Object.keys(request.body).length !== 2 ||
+          typeof request.body.pinEnabled !== 'boolean' ||
+          typeof request.body.ownerPassword !== 'string') {
+        return response.status(400).json({ error: 'Choose a valid shared Home PIN setting.' })
+      }
+      const home = trustedHousehold(request, response)
+      if (!home) return
+      const verifiedUserId = request.familyAccount.user_id
+      const actor = getFamilyMemberAuthorization(identityDatabase, {
+        householdId: home.householdId, serverVerifiedUserId: verifiedUserId,
+      })
+      if (actor?.role !== 'owner') {
+        return response.status(403).json({ error: 'Household Owner required.' })
+      }
+      let stepUp
+      try {
+        stepUp = await ownerPasswordStepUp.verify(identityDatabase, {
+          serverVerifiedUserId: verifiedUserId,
+          password: request.body.ownerPassword,
+        })
+      } catch (error) {
+        console.error('Shared Home PIN Owner verification unavailable:', error?.message)
+        return response.status(503).json({ error: 'Owner verification unavailable.' })
+      }
+      if (stepUp.status === 'limited') {
+        response.set('Retry-After', String(stepUp.retryAfter))
+        return response.status(429).json({ error: 'Too many password attempts. Try later.' })
+      }
+      if (stepUp.status === 'busy') {
+        response.set('Retry-After', '1')
+        return response.status(503).json({ error: 'Owner verification is busy.' })
+      }
+      if (stepUp.status !== 'verified') {
+        return response.status(403).json({ error: 'Owner password verification failed.' })
+      }
+      try {
+        // Must recheck the Owner under the SQLite write lock after scrypt.
+        return response.json(setPrivateHomePinPolicy(identityDatabase, {
+          householdId: home.householdId, serverVerifiedOwnerUserId: verifiedUserId,
+          pinEnabled: request.body.pinEnabled,
+        }))
+      } catch (error) {
+        if (error?.message === 'Active household Owner required.') {
+          return response.status(403).json({ error: 'Household Owner required.' })
+        }
+        console.error('Shared Home PIN setting unavailable:', error?.message)
+        return response.status(503).json({ error: 'Home PIN preference unavailable.' })
+      }
+    })
 
   app.use('/api/households', (_request, response) => {
     response.status(404).json({ error: 'Not found.' })
