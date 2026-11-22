@@ -240,7 +240,8 @@ function safeDeviceLabel(value) {
 }
 
 export function installFamilyAuth(app, database, directory, mode = process.env.FAMILY_CALENDAR_AUTH_MODE ?? 'disabled',
-  { cookieName = COOKIE_NAME, resolveDevicePersonName = null } = {}) {
+  { cookieName = COOKIE_NAME, resolveDevicePersonName = null,
+    resolveSignedInLanding = null } = {}) {
   // Deliberately restrict the override to the private authenticated gateway.
   // Other sites always use their own port-specific secure cookie name.
   if (cookieName !== COOKIE_NAME && cookieName !== '__Host-fc_gateway_session') {
@@ -252,6 +253,11 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
       (cookieName !== '__Host-fc_gateway_session' ||
        typeof resolveDevicePersonName !== 'function')) {
     throw new Error('Device Person resolver is restricted to the private gateway.')
+  }
+  if (resolveSignedInLanding !== null &&
+      (cookieName !== '__Host-fc_gateway_session' ||
+       typeof resolveSignedInLanding !== 'function')) {
+    throw new Error('Signed-in landing routing is restricted to the private gateway.')
   }
   if (!['required', 'disabled'].includes(mode)) {
     throw new Error('FAMILY_CALENDAR_AUTH_MODE must be required or disabled.')
