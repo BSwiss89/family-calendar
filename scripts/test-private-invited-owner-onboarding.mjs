@@ -352,3 +352,77 @@ test('pending activation inspection holds damaged or populated tenant storage wi
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM private_activated_households')
     .get().n, 0, 'readiness can never register approval')
 })
+
+test('signed-in invited Owner and operator receive session-derived destinations, not a guessed calendar', async t => {
+  const { db, req, routed, operatorId, login, inviteAndJoin } = await fixture(t)
+  const owner = await inviteAndJoin('landingowner', 'Pending Landing Family')
+  const operator = await login('operatorinvites', operatorPassword)
+  const unrelated = await login('notinvited')
+  const landing = (cookie, url = '/api/auth/landing') => req(url, { cookie })
+
+  const denied = await landing(undefined)
+  assert.equal(denied.response.status, 401)
+  const pending = await landing(owner.cookie)
+  assert.equal(pending.response.status, 200)
+  assert.deepEqual(pending.data, { destination: '/my-household' })
+  assert.equal((await landing(owner.cookie, '/')).response.status, 303)
+  assert.equal((await landing(owner.cookie, '/')).response.headers.get('location'), '/my-household')
+  assert.equal((await landing(owner.cookie, '/login')).response.headers.get('location'),
+    '/my-household', 'a remembered login must not bypass pending-activation status')
+  assert.equal((await landing(owner.cookie, '/api/auth/landing?householdId=not-their-home'))
+    .data.destination, '/my-household')
+  assert.equal((await landing(owner.cookie, '/my-household')).response.status, 200)
+
+  const admin = await landing(operator)
+  assert.deepEqual(admin.data, { destination: '/system-admin' })
+  assert.equal((await landing(operator, '/')).response.headers.get('location'), '/system-admin')
+  assert.equal((await landing(operator, '/login')).response.headers.get('location'), '/system-admin')
+  assert.equal((await landing(operator, '/system-admin')).response.status, 200)
+  assert.equal((await landing(owner.cookie, '/system-admin')).response.status, 403)
+  assert.equal((await landing(unrelated)).data.destination, '/',
+    'unrelated signed-in account cannot pretend to be invited Owner or operator')
+  assert.equal((await landing(owner.cookie, '/api/admin/household-overview')).response.status, 403)
+
+  approvePrivateHouseholdActivation(db, { householdId: owner.id })
+  assert.equal((await landing(owner.cookie)).data.destination, '/my-household',
+    'approval is not proof of an actual configured private route')
+  routed.add(owner.id)
+  assert.equal((await landing(owner.cookie)).data.destination, '/',
+    'an approved, configured invited Owner may open the existing calendar')
+  assert.equal((await landing(owner.cookie, '/login')).response.headers.get('location'), '/')
+  assert.equal((await landing(owner.cookie, '/')).response.status, 200)
+  assert.equal((await landing(owner.cookie, '/')).data, 'Disposable household calendar route')
+
+  // A malicious selected People profile or claimed role cannot give the
+  // unrelated account access to the operator or invited Owner landing.
+  assert.equal((await req('/api/auth/landing?role=operator&profile=Home',
+    { cookie: unrelated })).data.destination, '/')
+  db.prepare('UPDATE family_users SET disabled = 1 WHERE id = ?')
+    .run(operatorId)
+  assert.equal((await landing(operator)).response.status, 401)
+  assert.equal((await landing(operator, '/system-admin')).response.status, 303)
+  const ownerId = db.prepare("SELECT id FROM family_users WHERE username='landingowner'")
+    .get().id
+  db.prepare('UPDATE household_memberships SET disabled=1 WHERE user_id=?').run(ownerId)
+  assert.equal((await landing(owner.cookie)).data.destination, '/',
+    'revoked Owner membership cannot retain an activated Owner landing claim')
+  assert.equal((await landing(owner.cookie, '/my-household')).response.status, 403)
+})
+
+test('private login destination never trusts unconfigured identity or arbitrary external URLs', async t => {
+  const { db, operatorId } = await fixture(t)
+  assert.equal(resolvePrivateFamilyLanding(db, {
+    serverVerifiedUserId: 0, trustedAdministratorUserIds: [operatorId],
+    routedHouseholdIds: [],
+  }), null)
+  assert.throws(() => resolvePrivateFamilyLanding(db, {
+    serverVerifiedUserId: operatorId, trustedAdministratorUserIds: [operatorId],
+    routedHouseholdIds: 'https://attacker.example',
+  }), /Trusted private login routing/)
+  assert.throws(() => installFamilyAuth(express(), db, directory, 'required', {
+    resolveSignedInLanding: () => 'https://attacker.example',
+  }), /restricted to the private gateway/)
+  assert.throws(() => installPrivateFamilyEntryRouting(express(), {
+    identityDatabase: db, trustedAdministratorUserIds: [operatorId],
+  }), /Authenticated private gateway/)
+})
