@@ -280,7 +280,23 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
     response.sendFile(path.join(uiFolder, file))
   }
   app.get('/login', (request, response) => {
-    if (privateSession(request, response)) return response.redirect(303, '/')
+    const session = privateSession(request, response)
+    if (session) {
+      if (resolveSignedInLanding !== null) {
+        try {
+          const target = resolveSignedInLanding(session)
+          if (!['/', '/my-household', '/system-admin'].includes(target)) {
+            return response.status(403).send('Account access unavailable.')
+          }
+          response.set('Cache-Control', 'no-store')
+          return response.redirect(303, target)
+        } catch (error) {
+          console.error('Signed-in login destination unavailable:', error?.message)
+          return response.status(503).send('Account routing temporarily unavailable.')
+        }
+      }
+      return response.redirect(303, '/')
+    }
     sendUi('login.html')(request, response)
   })
   app.get('/auth/login.js', sendUi('login.js'))
