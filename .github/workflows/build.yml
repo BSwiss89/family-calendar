@@ -126,6 +126,8 @@ jobs:
         run: node --test scripts/test-private-approved-household-startup.mjs
       - name: Exercise disposable supervisor against real Node children and authenticated loopback health
         run: node --test scripts/test-private-disposable-reviewed-windows-supervisor-runtime.mjs
+      - name: Boot real Phase 1 primary Owner gateway under disposable supervised backend ownership
+        run: node --test scripts/test-private-disposable-reviewed-phase1-gateway-runtime.mjs
       - name: Rehearse pinned Windows scheduler handoff around real disposable Node children
         run: node --test scripts/test-private-disposable-pinned-windows-host-handoff.mjs
       - name: Verify real-household supervisor OS child ownership and durable crash hold
