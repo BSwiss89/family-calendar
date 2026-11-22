@@ -63,6 +63,11 @@ test('known API reads and event/list writes are categorized; unknown or alias ro
     ['POST', '/api/ai/cancel-confirmed', ['events.edit', 'events.delete']],
     ['POST', '/api/ai/event-action-confirm', ['events.edit', 'events.delete']],
     ['POST', '/api/recipes', ['recipes.edit']],
+    ['GET', '/api/capture-inbox', ['captures.view']],
+    ['POST', '/api/capture-inbox', ['captures.edit']],
+    ['PATCH', '/api/capture-inbox/7/type', ['captures.edit']],
+    ['PATCH', '/api/capture-inbox/7/analysis', ['captures.edit']],
+    ['DELETE', '/api/capture-inbox/7', ['captures.edit']],
     ['GET', '/api/shared-events/accepted', ['calendar.view']],
     ['POST', '/api/shared-events/invite', ['events.create']],
     ['PUT', '/api/people/2', ['settings.manage']],
@@ -92,6 +97,14 @@ test('known API reads and event/list writes are categorized; unknown or alias ro
     ['GET', '/api/private-debug'],
     ['POST', '/api/unknown-action'],
     ['POST', '/api/capture/analyze-photo'],
+    ['POST', '/api/capture-inbox/7/analyze'], // Expensive local AI is not yet approved for tenants.
+    ['POST', '/api/capture-inbox/7/analysis'],
+    ['PATCH', '/api/capture-inbox/07/type'],
+    ['PATCH', '/api/capture-inbox/7/type?privilege=owner'],
+    ['PATCH', '/api/capture-inbox/7/TYPE'],
+    ['PATCH', '/API/capture-inbox/7/type'],
+    ['DELETE', '/api/capture-inbox/7/'],
+    ['GET', '/api/capture-inbox/7'],
   ]) assert.equal(requiredFamilyMemberActions(method, route), null, method + ' ' + route)
 })
 
@@ -219,6 +232,105 @@ test('real express middleware rejects Home avatar bypass, cross-family request h
   assert.equal((await request('owner', '/api/events', 'POST', {})).status, 200)
   assert.equal((await request('owner', '/api/unreviewed-data')).status, 403)
   assert.equal((await request('child', '/api/households')).status, 200)
+})
+
+test('Capture Inbox requires distinct household capture rights and ignores Home/role spoofing', async t => {
+  const { db, ownerId, adultId, childId, outsiderId } = fixture(t)
+  const check = (userId, method, originalUrl) => authorizeFamilyMemberApiRequest(db, {
+    serverVerifiedUserId: userId, householdId: 'family-a', method, originalUrl,
+  }).allowed
+  const read = ['GET', '/api/capture-inbox']
+  const upload = ['POST', '/api/capture-inbox']
+  const classify = ['PATCH', '/api/capture-inbox/7/type']
+  const update = ['PATCH', '/api/capture-inbox/7/analysis']
+  const remove = ['DELETE', '/api/capture-inbox/7']
+  for (const route of [read, upload, classify, update, remove]) {
+    assert.equal(check(ownerId, ...route), true, 'Owner: ' + route.join(' '))
+    assert.equal(check(adultId, ...route), true, 'Adult: ' + route.join(' '))
+    assert.equal(check(childId, ...route), false, 'Child: ' + route.join(' '))
+    assert.equal(check(outsiderId, ...route), false, 'Other household: ' + route.join(' '))
+  }
+  // Access to events or recipes is not a substitute for a grant to read a
+  // Capture Inbox that can contain screenshots of several types of data.
+  setFamilyMemberPermission(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'recipes.view', enabled: true,
+  })
+  assert.equal(check(childId, ...read), false)
+  setFamilyMemberPermission(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'captures.view', enabled: true,
+  })
+  assert.equal(check(childId, ...read), true)
+  for (const route of [upload, classify, update, remove]) {
+    assert.equal(check(childId, ...route), false, 'view-only Child cannot edit captures')
+  }
+  setFamilyMemberPermission(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'captures.edit', enabled: true,
+  })
+  assert.equal(check(childId, ...upload), true)
+  assert.equal(check(childId, ...classify), true)
+  assert.equal(check(childId, ...update), true)
+  assert.equal(check(childId, ...remove), true)
+  assert.equal(check(childId, 'POST', '/api/capture-inbox/7/analyze'), false,
+    'an explicit Capture Inbox grant cannot bypass the unreviewed AI analyzer')
+  setFamilyMemberPermission(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'captures.edit', enabled: false,
+  })
+  assert.equal(check(childId, ...upload), false, 'grant revocation applies immediately')
+  db.prepare('UPDATE household_memberships SET disabled=1 WHERE user_id=?').run(childId)
+  assert.equal(check(childId, ...read), false, 'membership revocation overrides capture grant')
+
+  const app = express()
+  app.use(express.json())
+  app.use((req, _res, next) => {
+    req.familyAccount = { user_id: ({
+      owner: ownerId, adult: adultId, child: childId, other: outsiderId,
+    })[req.get('x-fixture-login')] ?? null }
+    next()
+  })
+  const trustedHousehold = (req, res) => {
+    const membership = lookupGrantedHouseholdForSessionUser(db, {
+      serverVerifiedUserId: req.familyAccount.user_id,
+      requestedHouseholdId: 'family-a',
+    })
+    if (!membership) res.status(403).json({ error: 'No family access.' })
+    return membership
+  }
+  installPrivateMemberRouteEnforcement(app, {
+    identityDatabase: db, trustedHousehold,
+  })
+  app.get('/api/capture-inbox', (_req, res) => res.json({ privateCaptures: true }))
+  app.post('/api/capture-inbox', (_req, res) => res.json({ saved: true }))
+  app.patch('/api/capture-inbox/:id/type', (_req, res) => res.json({ modified: true }))
+  const listener = await new Promise(resolve => {
+    const server = app.listen(0, '127.0.0.1', () => resolve(server))
+  })
+  t.after(() => new Promise(resolve => listener.close(resolve)))
+  const base = 'http://127.0.0.1:' + listener.address().port
+  async function request(member, route, method = 'GET', body = undefined) {
+    const response = await fetch(base + route, {
+      method,
+      headers: { 'x-fixture-login': member,
+        'x-household-id': 'family-b', 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    return response.status
+  }
+  assert.equal(await request('adult', '/api/capture-inbox'), 200)
+  assert.equal(await request('owner', '/api/capture-inbox', 'POST'), 200)
+  assert.equal(await request('child', '/api/capture-inbox'), 403)
+  assert.equal(await request('child', '/api/capture-inbox', 'POST', {
+    selectedProfile: 'Home', role: 'owner',
+  }), 403, 'a forged Home avatar cannot upload')
+  assert.equal(await request('child', '/api/capture-inbox/7/type', 'PATCH', {
+    selectedProfile: 'Home', actor: 'owner',
+  }), 403, 'a forged Home avatar cannot reclassify a capture')
+  assert.equal(await request('other', '/api/capture-inbox'), 403)
+  assert.equal(await request('owner', '/API/capture-inbox'), 403,
+    'Express case-insensitive aliases are not a permission bypass')
 })
 
 test('recurring occurrence skips require edit and delete while restores only require edit', t => {
