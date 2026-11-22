@@ -717,6 +717,49 @@ test('two invited Owners activate into isolated real localhost backends without 
       householdId: b.id, port: backendB.port, upstreamToken: backendB.upstreamToken,
     }), { householdId: b.id, activation: 'active' })
     assert.equal((await request('/api/events', { cookie: b.cookie })).status, 200)
+    // Home PIN is a future kiosk preference, NOT a bypass around the current
+    // verified user session/role checks. Default ON, controlled by the one
+    // signed-in household Owner plus their password, isolated from B.
+    const homePinRoute = '/api/households/home-pin'
+    assert.deepEqual((await request(homePinRoute, { cookie: a.cookie })).payload,
+      { pinEnabled: true })
+    assert.deepEqual((await request(homePinRoute, { cookie: b.cookie })).payload,
+      { pinEnabled: true })
+    assert.equal((await request(homePinRoute, { cookie: operator })).status, 403)
+    assert.equal((await request(homePinRoute, {
+      cookie: a.cookie, body: { pinEnabled: false, ownerPassword: 'incorrect' },
+    })).status, 403, 'wrong Owner password cannot disable shared Home PIN')
+    assert.equal((await request(homePinRoute, {
+      cookie: a.cookie, body: { pinEnabled: 'false', ownerPassword: password },
+    })).status, 400, 'the input must be a strict boolean')
+    assert.equal((await request(homePinRoute, {
+      cookie: a.cookie, body: { pinEnabled: false, ownerPassword: password },
+      headers: { Origin: 'https://untrusted.example' },
+    })).status, 403, 'cross-origin form cannot bypass account protection')
+    assert.equal((await request(homePinRoute, {
+      cookie: a.cookie, body: { pinEnabled: false, ownerPassword: password },
+      headers: { 'x-household-id': b.id },
+    })).status, 200)
+    assert.deepEqual((await request(homePinRoute, { cookie: a.cookie })).payload,
+      { pinEnabled: false })
+    assert.deepEqual((await request(homePinRoute, { cookie: b.cookie })).payload,
+      { pinEnabled: true }, 'A Owner toggle never affects B')
+    assert.equal((await request(homePinRoute, {
+      cookie: b.cookie, body: { pinEnabled: false, ownerPassword: password },
+      headers: { 'x-household-id': a.id },
+    })).status, 200)
+    assert.deepEqual((await request(homePinRoute, { cookie: a.cookie })).payload,
+      { pinEnabled: false }, 'B cannot change A policy through forged header')
+    assert.equal((await request(homePinRoute, {
+      cookie: a.cookie, body: { pinEnabled: true, ownerPassword: password },
+    })).status, 200, 'Owner can re-enable a disabled Home PIN')
+    assert.deepEqual((await request(homePinRoute, { cookie: a.cookie })).payload,
+      { pinEnabled: true })
+    assert.deepEqual((await request(homePinRoute, { cookie: b.cookie })).payload,
+      { pinEnabled: false })
+    assert.equal((await request(homePinRoute + '/', { cookie: a.cookie })).status, 404,
+      'noncanonical PIN API aliases cannot read the policy')
+
     // The original Capture Inbox was intentionally retired. There is no
     // reason for a multi-family gateway to expose its old API as a side door.
     // The real backend may still retain historical records for safe recovery.
@@ -821,6 +864,9 @@ test('two invited Owners activate into isolated real localhost backends without 
     assert.equal(memberSignup.response.headers.get('set-cookie'), null,
       'joining cannot automatically grant an authenticated session')
     const childCookie = await login(memberUsername, password)
+    assert.equal((await request(homePinRoute, {
+      cookie: childCookie, body: { pinEnabled: false, ownerPassword: password },
+    })).status, 403, 'Child cannot toggle PIN using a guessed Owner password')
     const memberId = identityDatabase.prepare(
       'SELECT id FROM family_users WHERE username = ?'
     ).get(memberUsername).id
