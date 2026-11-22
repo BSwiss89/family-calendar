@@ -116,6 +116,8 @@ jobs:
         run: node --test scripts/test-private-legacy-household-reconciliation.mjs
       - name: Test invite-only independent household owner onboarding
         run: node --test scripts/test-independent-household-onboarding.mjs
+      - name: Verify private Owner/operator login destinations with real signed sessions
+        run: node --test scripts/test-private-invited-owner-onboarding.mjs
       - name: Activate a real third private household and verify event/List isolation
         run: node --test scripts/test-independent-household-activation.mjs
       - name: Verify reviewed primary household and invited friend TEST startup plan
