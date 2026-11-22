@@ -714,6 +714,20 @@ test('two invited Owners activate into isolated real localhost backends without 
       householdId: b.id, port: backendB.port, upstreamToken: backendB.upstreamToken,
     }), { householdId: b.id, activation: 'active' })
     assert.equal((await request('/api/events', { cookie: b.cookie })).status, 200)
+    // The original Capture Inbox was intentionally retired. There is no
+    // reason for a multi-family gateway to expose its old API as a side door.
+    // The real backend may still retain historical records for safe recovery.
+    for (const owner of [a, b]) {
+      assert.equal((await request('/api/capture-inbox', {
+        cookie: owner.cookie,
+      })).status, 404, 'no legacy inbox read access after activation')
+      assert.equal((await request('/api/capture-inbox', {
+        cookie: owner.cookie, body: { note: 'legacy upload attempt' },
+      })).status, 404, 'no legacy inbox upload access after activation')
+      assert.equal((await request('/api/capture-inbox/1', {
+        cookie: owner.cookie, method: 'DELETE',
+      })).status, 404, 'no legacy inbox deletion access after activation')
+    }
     assert.equal((await request('/api/auth/landing', {
       cookie: b.cookie,
     })).payload.destination, '/')
