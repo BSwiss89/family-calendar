@@ -1261,15 +1261,23 @@ test('two invited Owners activate into isolated real localhost backends without 
     assert.equal((await request(verifyPin, {
       cookie: a.cookie, body: { memberId: ownerAId, pin: '2468' },
     })).status, 200, 'PIN enabled can again verify the linked actor')
-    assert.deepEqual((await request(homeDevice + '/revoke', {
+    assert.equal((await request('/api/auth/device-profile', {
+      cookie: untrustedSession, body: { kind: 'person', personId },
+    })).status, 200, 'separate Owner phone keeps its own People display')
+    const kioskRetired = await request(homeDevice + '/revoke', {
       cookie: a.cookie, body: { ownerPassword: password },
-    })).payload, { trustedHome: false, changed: true })
+    })
+    assert.deepEqual(kioskRetired.payload, { trustedHome: false, changed: true })
+    assert.match(kioskRetired.response.headers.get('set-cookie') ?? '',
+      /__Host-fc_gateway_session=.*Max-Age=0/i, 'kiosk cookie is cleared')
     assert.equal((await request(verifyPin, {
       cookie: a.cookie, body: { memberId: ownerAId, pin: '2468' },
-    })).status, 403, 'revoked kiosk loses PIN verification immediately')
+    })).status, 401, 'retired kiosk loses the Owner login, not just the PIN')
+    assert.equal((await request('/api/events', { cookie: a.cookie })).status, 401,
+      'retiring a kiosk must not restore unrestricted Owner event access')
 
     const peopleA = await request('/api/people', {
-      cookie: a.cookie, headers: { 'x-household-id': b.id },
+      cookie: untrustedSession, headers: { 'x-household-id': b.id },
     })
     const peopleB = await request('/api/people', {
       cookie: b.cookie, headers: { 'x-household-id': a.id },
@@ -1281,7 +1289,7 @@ test('two invited Owners activate into isolated real localhost backends without 
     assert.match(JSON.stringify(peopleB.payload), /Visible only to household two/)
     assert.doesNotMatch(JSON.stringify(peopleB.payload), /Visible only to household one/)
     assert.deepEqual((await request('/api/households', {
-      cookie: a.cookie,
+      cookie: untrustedSession,
     })).payload.households.map(h => h.householdId), [a.id])
     assert.deepEqual((await request('/api/households', {
       cookie: b.cookie,
@@ -1293,10 +1301,10 @@ test('two invited Owners activate into isolated real localhost backends without 
       'UPDATE household_memberships SET disabled=1',
       'WHERE household_id=(SELECT id FROM household_registry WHERE storage_id=?)',
     ].join(' ')).run(a.id)
-    assert.equal((await request('/api/events', { cookie: a.cookie })).status, 403)
+    assert.equal((await request('/api/events', { cookie: untrustedSession })).status, 403)
     assert.equal((await request('/api/auth/devices', {
-      cookie: a.cookie,
-    })).payload.devices[0].selectedProfile, null)
+      cookie: untrustedSession,
+    })).payload.devices.find(device => device.current)?.selectedProfile, null)
     assert.equal((await request('/api/events', { cookie: b.cookie })).status, 200)
     assert.equal(identityDatabase.prepare(
       'SELECT COUNT(*) AS n FROM private_activated_households'
