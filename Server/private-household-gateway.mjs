@@ -57,6 +57,7 @@ import { revokeHouseholdMemberAccess } from './household-member-access-revocatio
 import { readPrivateHomePinPolicy, setPrivateHomePinPolicy } from './private-home-pin-policy.mjs'
 import { installPrivateHomeKioskIdentity } from './private-home-kiosk-api.mjs'
 import { installPrivateSharedHomeWriteGate } from './private-shared-home-write-gate.mjs'
+import { installPrivatePhase1OwnerPilotGate } from './private-phase1-owner-pilot-gate.mjs'
 import { createPrivateHomeWriteAuditTables, recordPrivateHomeWriteAudit } from './private-home-write-audit.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { createPrivateActivationRecords, approvePrivateHouseholdActivation,
@@ -391,11 +392,19 @@ export async function startPrivateHouseholdGateway({
   independentHouseholdAdministratorUserIds = [],
   // Private disposable preview only. Never enable via request header or URL.
   enforceFamilyMemberPermissions = false,
+  // Source-only, trusted startup switch for an intentionally NARROW first TEST
+  // pilot. It cannot be toggled by login, URL or owner settings.
+  phase1OwnerPilotOnly = false,
   // Explicit OFF-by-default first-family control-plane bootstrap (loopback only).
   allowEmptyGatewayBootstrap = false,
 }) {
   if (typeof enforceFamilyMemberPermissions !== 'boolean') {
     throw new Error('Private family permission enforcement must be a trusted boolean setting.')
+  }
+  if (typeof phase1OwnerPilotOnly !== 'boolean' ||
+      (phase1OwnerPilotOnly && !enforceFamilyMemberPermissions) ||
+      (phase1OwnerPilotOnly && independentHouseholdAdministratorUserIds.length === 0)) {
+    throw new Error('Phase 1 Owner pilot requires explicit trusted operator and strict member enforcement.')
   }
   if (!Array.isArray(independentHouseholdAdministratorUserIds) ||
       independentHouseholdAdministratorUserIds.some(id => !Number.isSafeInteger(id) || id < 1)) {
@@ -627,6 +636,15 @@ export async function startPrivateHouseholdGateway({
       ].join(' ')).get(session.id)
     ),
   })
+  // Before ANY gateway-controlled administration, kiosk routes, AI or
+  // backend proxy, restrict the first pilot to invited Owners + operator
+  // metadata. All nonessential APIs and uploads fail closed.
+  if (phase1OwnerPilotOnly) {
+    installPrivatePhase1OwnerPilotGate(app, {
+      identityDatabase,
+      trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+    })
+  }
   // Register the dedicated PIN enrollment/challenge routes BEFORE the Home
   // action gate. Owner changes here always require a real account password.
   const privateHomeIdentity = installPrivateHomeKioskIdentity(app, {
