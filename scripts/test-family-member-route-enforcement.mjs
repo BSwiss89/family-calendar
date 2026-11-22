@@ -189,14 +189,12 @@ test('four-digit Home proof requires an Owner-enrolled device, real linked Perso
   assert.equal(resolve(kioskSessionId, next.proof), null,
     'resetting PIN must revoke previously issued proof')
   assert.deepEqual(await attempt('1234'), { status: 'invalid' })
-  assert.equal((await attempt('9876')).status, 'verified')
+  const finalProof = await attempt('9876')
+  assert.equal(finalProof.status, 'verified')
   db.prepare('UPDATE household_memberships SET disabled=1 WHERE user_id=?')
     .run(childId)
-  assert.equal(verifier.resolve(db, {
-    ...home(), proof: db.prepare(
-      'SELECT token_hash FROM private_home_actor_proofs LIMIT 1'
-    ).get()?.token_hash ?? '', householdDatabase: calendarDb,
-  }), null)
+  assert.equal(resolve(kioskSessionId, finalProof.proof), null,
+    'revoking membership must invalidate an otherwise valid raw proof')
   const denied = await attempt('9876')
   assert.equal(denied.status, 'invalid', 'removed member cannot verify stale PIN')
   assert.deepEqual(disablePrivateHomeKiosk(db, {
