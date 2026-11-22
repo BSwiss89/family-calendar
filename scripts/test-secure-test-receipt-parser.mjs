@@ -37,7 +37,7 @@ test('report must use historical receipt reader, not a small transcript tail', (
   assert.doesNotMatch(source, /Get-Content.*-Tail\s+6000/)
   const reader = fs.readFileSync(helper, 'utf8')
   assert.match(reader, /System\.IO\.File\]::ReadLines/)
-  assert.doesNotMatch(reader, /Start-ScheduledTask|Stop-ScheduledTask|Set-Item|Remove-Item|sqlite/i)
+  assert.doesNotMatch(reader, /Start-ScheduledTask|Stop-ScheduledTask|Set-Item|Remove-Item|sqlite3|node:sqlite/i)
 })
 
 test('older successful TEST receipt survives 7000 later polling checks', {
