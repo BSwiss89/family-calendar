@@ -146,7 +146,11 @@ export function installPrivateSharedHomeWriteGate(app, {
     const sessionId = request.familyAccount?.id
     const enrollment = currentEnrollment(identityDatabase, sessionId)
     if (!enrollment) return next()
-    if (!request.path.toLowerCase().startsWith('/api/')) return next()
+    if (!request.path.toLowerCase().startsWith('/api/')) {
+      if (['GET', 'HEAD'].includes(request.method)) return next()
+      response.set('Cache-Control', 'no-store')
+      return response.status(403).json({ error: 'Shared Home cannot use unreviewed upload or write routes.' })
+    }
     // This includes Owner-only /api/households routes and all unreviewed
     // writes: do NOT inherit the Owner cookie's authority on a shared display.
     const household = trustedHousehold(request, response)
