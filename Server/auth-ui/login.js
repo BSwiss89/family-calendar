@@ -7,6 +7,20 @@ const content = document.getElementById('login-content')
 // Only the PRIVATE invitation gateway exposes this read-only Owner status.
 // Legacy TEST/LIVE return 404 and preserve the existing sign-in behavior.
 async function successfulSignInDestination() {
+  // Only the private gateway publishes this session-authorized destination.
+  // Existing TEST/LIVE return 404 and retain their previous behavior.
+  try {
+    const landing = await fetch('/api/auth/landing', {
+      credentials: 'same-origin', cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    })
+    if (landing.ok) {
+      const result = await landing.json()
+      if (['/', '/my-household', '/system-admin'].includes(result?.destination)) {
+        return result.destination
+      }
+    }
+  } catch { /* Preserve existing site compatibility. */ }
   try {
     const response = await fetch('/api/households/my-onboarding', {
       credentials: 'same-origin', cache: 'no-store',
