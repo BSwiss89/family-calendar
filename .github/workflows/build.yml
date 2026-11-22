@@ -151,7 +151,7 @@ jobs:
           if (@($errors).Count -ne 0) { throw 'Read-only Windows inspector PowerShell 5.1 syntax failed.' }
           $source = Get-Content -LiteralPath 'scripts/inspect-private-phase1-windows-test-route.ps1' -Raw
           foreach ($command in @('Stop-Process', 'Start-Process', 'Set-ScheduledTask', 'Disable-ScheduledTask', 'Enable-ScheduledTask', 'Remove-Item', 'New-NetFirewallRule')) {
-            if ($source -match ('(?im)^\\s*' + [regex]::Escape($command) + '\\b')) { throw 'Read-only inspector contains an unreviewed mutation command.' }
+            if ($source -match ('(?im)^\s*' + [regex]::Escape($command) + '\b')) { throw 'Read-only inspector contains an unreviewed mutation command.' }
           }
       - name: Check one-family TEST pilot inspection and cutover blockers without touching installed sites
         run: node --test scripts/test-private-one-family-test-pilot.mjs
