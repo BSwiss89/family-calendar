@@ -138,6 +138,8 @@ jobs:
         run: node --test scripts/test-private-windows-test-readiness.mjs
       - name: Check one-family TEST pilot inspection and cutover blockers without touching installed sites
         run: node --test scripts/test-private-one-family-test-pilot.mjs
+      - name: Verify historical TEST deployment receipts remain discoverable after many polling checks
+        run: node --test scripts/test-secure-test-receipt-parser.mjs
       - name: Verify accepted shared event overlays and parsing
         run: node --test scripts/test-live-received-shared-calendar.mjs scripts/test-shared-event-overlay.mjs
       - name: Verify LIVE desktop and mobile household invitation inbox
