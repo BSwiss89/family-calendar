@@ -641,6 +641,15 @@ export async function startPrivateHouseholdGateway({
     trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
     getRoutedHouseholdIds: () => [...portByHousehold.keys()],
   })
+  // The former Capture Inbox is retired. Do not let an authenticated Owner,
+  // Adult or Child use the old inbox read/write API through a private family
+  // backend, even while the optional member-enforcement pilot is OFF.
+  // This does NOT block the separate direct Analyze Photo / Take Photo flow.
+  // Old SQLite capture records and uploads are never erased here.
+  app.use('/api/capture-inbox', (_request, response) => {
+    response.status(404).json({ error: 'Not found.' })
+  })
+
   // Never forward an unknown administrator API to a family backend.
   app.use('/api/admin', (_request, response) =>
     response.status(404).json({ error: 'Not found.' }))
