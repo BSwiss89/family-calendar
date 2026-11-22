@@ -1,5 +1,7 @@
 // All fixtures are synthetic. No real Windows tasks, ports, or calendar data.
 import test from 'node:test'
+// The existing CI boundary test also loads the staged handoff regression suite.
+import './test-private-phase1-test-staged-handoff-review.mjs'
 import assert from 'node:assert/strict'
 import { assessPrivatePhase1TestRoutingBoundary as inspect }
   from '../Server/private-phase1-test-network-boundary.mjs'
@@ -83,6 +85,74 @@ test('deny wrong/duplicate portproxy and gateway to backend bypass', () => {
   x.portproxyRules.push({ listenAddress: '127.0.0.1', listenPort: 13004,
     connectAddress: '127.0.0.1', connectPort: 13005 })
   assert(inspect(x).blockers.some(x => /conflicting/.test(x)))
+})
+function preRoute() {
+  const x = candidate()
+  x.phase = 'pre-route'
+  x.portproxyRules = [{ ...proxy }]
+  return x
+}
+test('legacy-fenced maintenance window contains zero active calendar backend or gateway listeners', () => {
+  const quiet = base()
+  quiet.phase = 'legacy-fenced'
+  quiet.listeners = [listener('127.0.0.1', 13003, 'portproxy')]
+  const review = inspect(quiet)
+  assert.equal(review.legacyFenceTopologyMatches, true)
+  assert.equal(review.observedBaselineMatches, false)
+  assert.equal(review.testDeploymentAuthorized, false)
+  assert.equal(review.portproxyOrServiceChanged, false)
+  for (const active of [
+    listener(address, 13002, 'legacy-test'),
+    listener('127.0.0.1', gatewayPort, 'private-gateway'),
+    listener('127.0.0.1', 13005, 'household-backend'),
+  ]) {
+    const bad = { ...quiet, listeners: [...quiet.listeners, active] }
+    assert.equal(inspect(bad).legacyFenceTopologyMatches, false)
+    assert(inspect(bad).blockers.some(x => /fully quiesced/.test(x)))
+  }
+})
+test('pre-route stage confirms legacy service stopped while forwarding is still unchanged', () => {
+  const phase = inspect(preRoute())
+  assert.equal(phase.observedBaselineMatches, false)
+  assert.equal(phase.preRouteTopologyMatches, true)
+  assert.equal(phase.candidateNetworkTopologyMatches, false)
+  assert.deepEqual(phase.rollbackReference.originalPortproxy, proxy)
+  assert.equal(phase.testDeploymentAuthorized, false)
+  assert.equal(phase.portproxyOrServiceChanged, false)
+  const wrong = preRoute()
+  wrong.portproxyRules[0].connectPort = 13004
+  assert.equal(inspect(wrong).preRouteTopologyMatches, false,
+    'gateway may not be routed until old backend is fenced and reviewed')
+  const activeLegacy = preRoute()
+  activeLegacy.listeners.push(listener(address, 13002, 'legacy-test'))
+  assert.equal(inspect(activeLegacy).preRouteTopologyMatches, false)
+  assert(inspect(activeLegacy).blockers.some(b => /direct bypass/.test(b)))
+})
+test('deny extra portproxy paths to legacy backend or household SQLite services', () => {
+  let x = candidate()
+  x.portproxyRules.push({
+    listenAddress: '127.0.0.1', listenPort: 14222,
+    connectAddress: address, connectPort: 13002,
+  })
+  assert(inspect(x).blockers.some(b => /Unreviewed forwarding/.test(b)))
+  x = candidate()
+  x.portproxyRules.push({
+    listenAddress: '0.0.0.0', listenPort: 14223,
+    connectAddress: '127.0.0.1', connectPort: 13005,
+  })
+  assert(inspect(x).blockers.some(b => /Unreviewed forwarding/.test(b)))
+  x = candidate()
+  x.portproxyRules.push({
+    listenAddress: '0.0.0.0', listenPort: 14224,
+    connectAddress: '127.0.0.1', connectPort: 13004,
+  })
+  assert(inspect(x).blockers.some(b => /Unreviewed forwarding/.test(b)))
+  x = preRoute()
+  x.portproxyRules.push({
+    listenAddress: '127.0.0.1', listenPort: 14225,
+    connectAddress: '127.0.0.1', connectPort: 13006,
+  })
+  assert.equal(inspect(x).preRouteTopologyMatches, false)
 })
 test('deny exposed, missing, duplicated and protected private listeners', () => {
   let x = candidate()
