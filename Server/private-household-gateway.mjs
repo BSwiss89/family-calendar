@@ -395,7 +395,8 @@ function proxyRequest(
 
 /**
  * Starts a disposable single-origin authentication/routing fixture on a
- * random localhost port by default. An explicit Phase 1 pinned port requires\n * trusted startup configuration and is still loopback only; no public listener.
+ * random localhost port by default. An explicit Phase 1 pinned port requires
+ * trusted startup configuration and is still loopback only; no public listener.
  *
  * identityDatabase: CENTRAL identity+membership SQLite, not a family DB.
  * backendPorts: server-owned {"family-a": 54321}, never supplied by a browser.
