@@ -29,7 +29,13 @@ function canonicalRoute(method, originalUrl) {
       typeof originalUrl !== 'string' || !originalUrl.startsWith('/') ||
       originalUrl.includes('\\') || originalUrl.includes('//')) return null
   const [pathname, ...query] = originalUrl.split('?')
-  if ((pathname !== '/' && !PATH_RE.test(pathname)) || pathname.includes('%') ||
+  // Vite asset chunk hashes may legitimately contain uppercase letters.
+  // Permit that spelling ONLY under the static /assets/ namespace, never
+  // on API or uploaded-media paths (Express may otherwise normalize aliases).
+  const staticAsset = /^\/assets\/[A-Za-z0-9._/-]+$/.test(pathname)
+  if ((pathname !== '/' && !PATH_RE.test(pathname) && !staticAsset) ||
+      pathname.includes('%') ||
+      pathname.split('/').some(segment => segment === '.' || segment === '..') ||
       (pathname !== '/' && pathname.endsWith('/')) ||
       (query.length && !['GET', 'HEAD'].includes(method))) return null
   return pathname
