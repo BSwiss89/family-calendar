@@ -20,17 +20,31 @@ const validUser = value => Number.isSafeInteger(value) && value > 0
  */
 export function createPrivateGatewayDevicePersonResolver({
   identityDatabase, serverDirectory, storageRoot, routedHouseholdIds,
+  getRoutedHouseholdIds,
 }) {
   if (!identityDatabase?.prepare ||
       typeof serverDirectory !== 'string' || !serverDirectory ||
       typeof storageRoot !== 'string' || !storageRoot ||
-      !Array.isArray(routedHouseholdIds) || routedHouseholdIds.length === 0 ||
-      routedHouseholdIds.some(id => typeof id !== 'string')) {
+      (getRoutedHouseholdIds !== undefined && typeof getRoutedHouseholdIds !== 'function') ||
+      (routedHouseholdIds !== undefined &&
+        (!Array.isArray(routedHouseholdIds) ||
+         routedHouseholdIds.some(id => typeof id !== 'string'))) ||
+      (typeof getRoutedHouseholdIds !== 'function' &&
+        (!Array.isArray(routedHouseholdIds) || routedHouseholdIds.length === 0))) {
     throw new Error('Trusted central identity and approved private household routes required.')
   }
-  const routed = new Set(routedHouseholdIds)
   return ({ serverVerifiedUserId, personId }) => {
     if (!validUser(serverVerifiedUserId) || !validUser(personId)) return null
+    // An operator may enroll the first verified tenant without restarting.
+    // Re-read only server-owned routes; never trust a selected avatar or URL.
+    let configuredRoutes
+    try {
+      configuredRoutes = typeof getRoutedHouseholdIds === 'function'
+        ? getRoutedHouseholdIds() : routedHouseholdIds
+    } catch { return null }
+    if (!Array.isArray(configuredRoutes) ||
+        configuredRoutes.some(id => typeof id !== 'string')) return null
+    const routed = new Set(configuredRoutes)
     // A normal central Person account currently belongs to exactly ONE
     // household. Never fall back to another home when the grant is revoked.
     const households = listGrantedHouseholdsForSessionUser(identityDatabase, {
