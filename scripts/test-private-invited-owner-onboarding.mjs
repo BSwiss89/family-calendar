@@ -536,7 +536,7 @@ test('two invited Owners activate into isolated real localhost backends without 
   fs.mkdirSync(storageRoot)
   const identityDatabase = new DatabaseSync(path.join(work, 'identity.sqlite'))
   const backends = []
-  const occupied = new Set([3001, 13001, 13002, 13003, 11434])
+  const occupied = new Set([443, 8443, 3001, 13001, 13002, 13003, 11434])
   let gateway
   async function freePort() {
     for (let i = 0; i < 30; i++) {
@@ -1300,6 +1300,7 @@ test('two invited Owners activate into isolated real localhost backends without 
     // No third persistent calendar/site, deployed TEST, or LIVE host exists.
     await gateway.close()
     gateway = null
+    const pinnedPilotPort = await freePort()
     gateway = await startPrivateHouseholdGateway({
       identityDatabase, serverDirectory: directory, storageRoot,
       backendPorts: { [a.id]: backendA.port, [b.id]: backendB.port },
@@ -1307,7 +1308,12 @@ test('two invited Owners activate into isolated real localhost backends without 
       independentHouseholdAdministratorUserIds: [operatorId],
       enforceFamilyMemberPermissions: true,
       phase1OwnerPilotOnly: true,
+      trustedPhase1GatewayPort: pinnedPilotPort,
     })
+    assert.equal(gateway.port, pinnedPilotPort,
+      'trusted Phase 1 gateway binds the explicitly reviewed loopback port')
+    assert.equal(new URL(gateway.base).hostname, '127.0.0.1',
+      'fixed-port Phase 1 gateway remains private to local host')
     base = gateway.base
     const pilotStart = await request('/', { cookie: untrustedSession })
     assert.equal(pilotStart.status, 303)
