@@ -67,14 +67,26 @@ function decision(db, {
         householdId, serverVerifiedSessionId: sessionId,
       })) return { status: 'untrusted-home' }
 
-  // Auth and administrative endpoints are not routine Home actions.
-  // The Home PIN setup/revoke routes are handled BEFORE this guard and
-  // always require a genuine Owner PASSWORD; a PIN never unlocks them.
+  // Express may accept uppercase/trailing/encoded URL aliases. The kiosk
+  // must not use one to bypass an exact permission classification.
+  if (typeof originalUrl !== 'string' || !originalUrl.startsWith('/api/') ||
+      !/^\/api\/[a-z0-9/_-]+$/.test(originalUrl.split('?')[0]) ||
+      originalUrl.split('?')[0].includes('//') ||
+      originalUrl.split('?')[0].endsWith('/')) {
+    return { status: 'unreviewed-home-route' }
+  }
+  // Auth and administration are not routine Home actions. These PIN setup
+  // routes were registered BEFORE the gate and require Owner password.
   if (/^\/api\/households(\/|$)/.test(originalUrl) &&
       !(method === 'GET' && originalUrl === '/api/households')) {
     return { status: 'unreviewed-home-route' }
   }
-  if (['GET', 'HEAD'].includes(method)) return { status: 'allowed-read' }
+  if (['GET', 'HEAD'].includes(method)) {
+    if (originalUrl === '/api/health' || originalUrl === '/api/event-creators' ||
+        originalUrl === '/api/households') return { status: 'allowed-read' }
+    return requiredFamilyMemberActions(method, originalUrl)
+      ? { status: 'allowed-read' } : { status: 'unreviewed-home-route' }
+  }
   if (method === 'POST' && READ_ONLY_POSTS.has(originalUrl)) {
     return { status: 'allowed-read' }
   }
@@ -134,7 +146,7 @@ export function installPrivateSharedHomeWriteGate(app, {
     const sessionId = request.familyAccount?.id
     const enrollment = currentEnrollment(identityDatabase, sessionId)
     if (!enrollment) return next()
-    if (!request.path.startsWith('/api/')) return next()
+    if (!request.path.toLowerCase().startsWith('/api/')) return next()
     // This includes Owner-only /api/households routes and all unreviewed
     // writes: do NOT inherit the Owner cookie's authority on a shared display.
     const household = trustedHousehold(request, response)
