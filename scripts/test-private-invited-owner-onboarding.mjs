@@ -522,3 +522,264 @@ test('first invited household can register with NO existing backend, without gai
     fs.rmSync(work, { recursive: true, force: true })
   }
 })
+
+
+test('two invited Owners activate into isolated real localhost backends without gateway restart', {
+  // The two disposable calendar child processes must finish their real
+  // startup/binding checks; no installed LIVE/TEST process or data is used.
+  timeout: 120000,
+}, async () => {
+  const { spawn } = await import('node:child_process')
+  const { randomBytes } = await import('node:crypto')
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-two-invited-activation-'))
+  const storageRoot = path.join(work, 'households')
+  fs.mkdirSync(storageRoot)
+  const identityDatabase = new DatabaseSync(path.join(work, 'identity.sqlite'))
+  const backends = []
+  const occupied = new Set([3001, 13001, 13002, 13003, 11434])
+  let gateway
+  async function freePort() {
+    for (let i = 0; i < 30; i++) {
+      const probe = createServer()
+      await new Promise((resolve, reject) => {
+        probe.once('error', reject)
+        probe.listen(0, '127.0.0.1', resolve)
+      })
+      const port = probe.address().port
+      await new Promise(resolve => probe.close(resolve))
+      if (!occupied.has(port) && port >= 1024) {
+        occupied.add(port)
+        return port
+      }
+    }
+    throw new Error('No unused private test port available.')
+  }
+  async function startBackend(householdId) {
+    const port = await freePort()
+    const upstreamToken = randomBytes(32).toString('hex')
+    const child = spawn(process.execPath, [path.join(directory, 'index.mjs')], {
+      cwd: path.dirname(directory),
+      env: {
+        ...process.env,
+        FAMILY_CALENDAR_HOST: '127.0.0.1',
+        FAMILY_CALENDAR_PORT: String(port),
+        FAMILY_CALENDAR_AUTH_MODE: 'disabled',
+        FAMILY_CALENDAR_HOUSEHOLD_STORAGE_ROOT: storageRoot,
+        FAMILY_CALENDAR_HOUSEHOLD_ID: householdId,
+        FAMILY_CALENDAR_HOUSEHOLD_TEST_ONLY: 'YES',
+        FAMILY_CALENDAR_PRIVATE_UPSTREAM_TOKEN: upstreamToken,
+      },
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    })
+    let logs = ''
+    for (const stream of [child.stdout, child.stderr]) {
+      stream.on('data', bytes => { logs = (logs + bytes.toString()).slice(-2500) })
+    }
+    const backend = { householdId, port, upstreamToken, child, logs: () => logs }
+    backends.push(backend)
+    for (let attempt = 0; attempt < 60; attempt++) {
+      if (child.exitCode !== null || child.signalCode !== null) break
+      try {
+        const health = await fetch('http://127.0.0.1:' + port + '/api/health', {
+          headers: { 'x-family-calendar-upstream-token': upstreamToken },
+          signal: AbortSignal.timeout(1000),
+        })
+        if (health.status === 200 && (await health.json()).status === 'ok') {
+          return backend
+        }
+      } catch { /* Disposable Node backend still starting. */ }
+      await new Promise(resolve => setTimeout(resolve, 250))
+    }
+    throw new Error('Disposable backend did not start: ' + logs)
+  }
+  async function stopBackend(backend) {
+    const child = backend.child
+    if (child.exitCode !== null || child.signalCode !== null) return
+    const stopped = new Promise(resolve => child.once('exit', resolve))
+    if (child.connected) child.send({
+      type: 'private-household-test-shutdown', householdId: backend.householdId,
+    })
+    const orderly = await Promise.race([
+      stopped.then(() => true),
+      new Promise(resolve => setTimeout(() => resolve(false), 6000)),
+    ])
+    if (!orderly) {
+      child.kill()
+      await Promise.race([
+        stopped,
+        new Promise(resolve => setTimeout(resolve, 2500)),
+      ])
+      throw new Error('Disposable backend refused supervised shutdown.')
+    }
+  }
+  try {
+    setFamilyAccount(identityDatabase, 'twofamilyoperator', 'Operator', operatorPassword)
+    const operatorId = identityDatabase.prepare(
+      "SELECT id FROM family_users WHERE username='twofamilyoperator'"
+    ).get().id
+    gateway = await startPrivateHouseholdGateway({
+      identityDatabase, serverDirectory: directory, storageRoot,
+      backendPorts: {}, backendTokens: {},
+      independentHouseholdAdministratorUserIds: [operatorId],
+      allowEmptyGatewayBootstrap: true,
+    })
+    const base = gateway.base
+    async function request(route, { cookie, body, method, headers = {} } = {}) {
+      const verb = method ?? (body === undefined ? 'GET' : 'POST')
+      const response = await fetch(base + route, {
+        method: verb, redirect: 'manual',
+        headers: {
+          ...(cookie ? { Cookie: cookie } : {}),
+          ...(verb !== 'GET' ? { Origin: 'https://' + new URL(base).host } : {}),
+          ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          ...headers,
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(7000),
+      })
+      const payload = response.headers.get('content-type')?.includes('application/json')
+        ? await response.json() : await response.text()
+      return { status: response.status, payload, response }
+    }
+    async function login(username, secret) {
+      const result = await request('/api/auth/login', {
+        body: { username, password: secret, deviceLabel: 'Disposable device' },
+      })
+      assert.equal(result.status, 200, 'login ' + username)
+      const sessionCookie = result.response.headers.get('set-cookie')
+      assert.match(sessionCookie, /__Host-fc_gateway_session=/)
+      return sessionCookie.split(';')[0]
+    }
+    const operator = await login('twofamilyoperator', operatorPassword)
+    async function registerOwner(username, householdName) {
+      const issued = await request('/api/households/independent-invitations', {
+        cookie: operator, method: 'POST',
+      })
+      assert.equal(issued.status, 201)
+      const signup = await request('/api/households/create-from-invitation', {
+        body: {
+          token: issued.payload.token, username, displayName: username,
+          password, householdName,
+        },
+      })
+      assert.equal(signup.status, 201)
+      const cookie = await login(username, password)
+      const status = await request('/api/households/my-onboarding', { cookie })
+      assert.equal(status.status, 200)
+      assert.equal(status.payload.households.length, 1)
+      assert.equal(status.payload.households[0].state, 'pending-activation')
+      return { id: status.payload.households[0].householdId, cookie }
+    }
+    const a = await registerOwner('firsttwofamilyowner', 'Private family one')
+    const b = await registerOwner('secondtwofamilyowner', 'Private family two')
+    assert.notEqual(a.id, b.id)
+    assert.equal((await request('/api/events', { cookie: a.cookie })).status, 503)
+    assert.equal((await request('/api/events', { cookie: b.cookie })).status, 503)
+    assert.equal((await request('/api/events')).status, 401)
+    assert.equal((await request('/api/events', { cookie: operator })).status, 403)
+    assert.equal((await request('/api/admin/activate', {
+      cookie: operator, body: { householdId: a.id },
+    })).status, 404, 'browser cannot approve even its own invitation')
+
+    // The wrong tenant's running backend must not activate a valid invited
+    // Owner, even when a trusted test supervisor supplies its real secret.
+    const backendB = await startBackend(b.id)
+    await assert.rejects(gateway.enrollHouseholdBackend({
+      householdId: a.id, port: backendB.port, upstreamToken: backendB.upstreamToken,
+    }), /refused unverified household backend/)
+    assert.equal((await request('/api/events', { cookie: a.cookie })).status, 503)
+    assert.equal(identityDatabase.prepare(
+      'SELECT COUNT(*) AS n FROM private_activated_households'
+    ).get().n, 0, 'rejected tenant binding cannot create approval')
+
+    const backendA = await startBackend(a.id)
+    assert.deepEqual(await gateway.enrollHouseholdBackend({
+      householdId: a.id, port: backendA.port, upstreamToken: backendA.upstreamToken,
+    }), { householdId: a.id, activation: 'active' })
+    assert.equal((await request('/api/auth/landing', {
+      cookie: a.cookie,
+    })).payload.destination, '/')
+    assert.equal((await request('/api/events', { cookie: a.cookie })).status, 200)
+    assert.equal((await request('/api/events', {
+      cookie: b.cookie, headers: { 'x-household-id': a.id },
+    })).status, 503, 'pending B cannot spoof the active Family A')
+    assert.equal((await request('/api/auth/landing', {
+      cookie: b.cookie,
+    })).payload.destination, '/my-household')
+    await assert.rejects(gateway.enrollHouseholdBackend({
+      householdId: b.id, port: backendA.port, upstreamToken: backendA.upstreamToken,
+    }), /already in use|overlap/i, 'two families cannot share one backend port')
+    assert.deepEqual(await gateway.enrollHouseholdBackend({
+      householdId: b.id, port: backendB.port, upstreamToken: backendB.upstreamToken,
+    }), { householdId: b.id, activation: 'active' })
+    assert.equal((await request('/api/events', { cookie: b.cookie })).status, 200)
+    assert.equal((await request('/api/auth/landing', {
+      cookie: b.cookie,
+    })).payload.destination, '/')
+
+    // Reuse the same local Person ID to prove lookup is tenant-scoped, not a
+    // central People table or the currently selected browser avatar.
+    const personId = 991
+    for (const [owner, display] of [
+      [a, 'Visible only to household one'],
+      [b, 'Visible only to household two'],
+    ]) {
+      const storage = resolveHouseholdStorage({
+        serverDirectory: directory, storageRoot, householdId: owner.id,
+      })
+      const db = new DatabaseSync(storage.databasePath)
+      try {
+        db.prepare([
+          'INSERT INTO people(id,name,color,image,sort_order)',
+          'VALUES (?,?,?,NULL,0)',
+        ].join(' ')).run(personId, display, '#64748b')
+      } finally { db.close() }
+      const selected = await request('/api/auth/device-profile', {
+        cookie: owner.cookie, body: { kind: 'person', personId },
+      })
+      assert.equal(selected.status, 200)
+      const devices = await request('/api/auth/devices', { cookie: owner.cookie })
+      assert.equal(devices.status, 200)
+      assert.equal(devices.payload.devices[0].selectedProfile, display)
+    }
+    const peopleA = await request('/api/people', {
+      cookie: a.cookie, headers: { 'x-household-id': b.id },
+    })
+    const peopleB = await request('/api/people', {
+      cookie: b.cookie, headers: { 'x-household-id': a.id },
+    })
+    assert.equal(peopleA.status, 200)
+    assert.equal(peopleB.status, 200)
+    assert.match(JSON.stringify(peopleA.payload), /Visible only to household one/)
+    assert.doesNotMatch(JSON.stringify(peopleA.payload), /Visible only to household two/)
+    assert.match(JSON.stringify(peopleB.payload), /Visible only to household two/)
+    assert.doesNotMatch(JSON.stringify(peopleB.payload), /Visible only to household one/)
+    assert.deepEqual((await request('/api/households', {
+      cookie: a.cookie,
+    })).payload.households.map(h => h.householdId), [a.id])
+    assert.deepEqual((await request('/api/households', {
+      cookie: b.cookie,
+    })).payload.households.map(h => h.householdId), [b.id])
+
+    // A revoked Owner's previously valid browser cookie may not continue to
+    // reach their backend or disclose the saved Person name. B remains active.
+    identityDatabase.prepare([
+      'UPDATE household_memberships SET disabled=1',
+      'WHERE household_id=(SELECT id FROM household_registry WHERE storage_id=?)',
+    ].join(' ')).run(a.id)
+    assert.equal((await request('/api/events', { cookie: a.cookie })).status, 403)
+    assert.equal((await request('/api/auth/devices', {
+      cookie: a.cookie,
+    })).payload.devices[0].selectedProfile, null)
+    assert.equal((await request('/api/events', { cookie: b.cookie })).status, 200)
+    assert.equal(identityDatabase.prepare(
+      'SELECT COUNT(*) AS n FROM private_activated_households'
+    ).get().n, 2)
+  } finally {
+    if (gateway) await gateway.close()
+    for (const backend of [...backends].reverse()) await stopBackend(backend)
+    identityDatabase.close()
+    fs.rmSync(work, { recursive: true, force: true })
+  }
+})
