@@ -22,6 +22,9 @@ import {
   installPrivateInvitedOwnerOnboarding, listMyInvitedHouseholdOnboarding,
 } from '../Server/private-invited-owner-onboarding.mjs'
 import {
+  installPrivateFamilyEntryRouting, resolvePrivateFamilyLanding,
+} from '../Server/private-family-entry-routing.mjs'
+import {
   installPrivateSystemAdministrator,
 } from '../Server/private-system-administration.mjs'
 import { resolveHouseholdStorage } from '../Server/household-storage.mjs'
@@ -50,8 +53,14 @@ async function fixture(t) {
     identityDatabase: db, serverDirectory: directory, storageRoot,
     trustedAdministratorUserIds: [operatorId],
   })
+  const redirect = session => resolvePrivateFamilyLanding(db, {
+    serverVerifiedUserId: session.user_id,
+    trustedAdministratorUserIds: [operatorId],
+    routedHouseholdIds: [...routed],
+  })
   installFamilyAuth(app, db, directory, 'required', {
     cookieName: '__Host-fc_gateway_session',
+    resolveSignedInLanding: redirect,
   })
   installPrivateSystemAdministrator(app, {
     identityDatabase: db, serverDirectory: directory, storageRoot,
@@ -64,6 +73,11 @@ async function fixture(t) {
     identityDatabase: db, serverDirectory: directory,
     getRoutedHouseholdIds: () => [...routed],
   })
+  installPrivateFamilyEntryRouting(app, {
+    identityDatabase: db, trustedAdministratorUserIds: [operatorId],
+    getRoutedHouseholdIds: () => [...routed],
+  })
+  app.get('/', (_request, response) => response.send('Disposable household calendar route'))
   app.use('/api/admin', (_request, response) =>
     response.status(404).json({ error: 'Not found.' }))
   app.get('/api/households', (request, response) => {
