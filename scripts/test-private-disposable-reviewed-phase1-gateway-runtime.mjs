@@ -10,8 +10,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { setFamilyAccount } from '../Server/family-auth.mjs'
 import { createHouseholdMembershipTables, registerHousehold,
   grantHouseholdMembership } from '../Server/household-memberships.mjs'
-import { createPrivateActivationRecords } from '../Server/private-household-activation-records.mjs'
-import { createIndependentHouseholdInvitationTables } from '../Server/independent-household-invitations.mjs'
+import { createPrivateActivationRecords, approvePrivateHouseholdActivation } from '../Server/private-household-activation-records.mjs'
+import { createIndependentHouseholdInvitationTables,
+  issueIndependentHouseholdInvitation, redeemIndependentHouseholdInvitation }
+  from '../Server/independent-household-invitations.mjs'
 import { provisionEmptyHousehold } from '../Server/household-storage.mjs'
 import { launchDisposableReviewedPhase1Gateway } from '../Server/private-disposable-reviewed-phase1-gateway-runtime.mjs'
 import { inspectReviewedWindowsSupervisorOwnership } from '../Server/private-reviewed-windows-supervisor-ownership.mjs'
@@ -20,7 +22,7 @@ const serverDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), 
 const password = 'Disposable-Primary-Owner-Only-2026!'
 const primaryHouseholdId = 'household-primary-phase1'
 
-function fixture(t) {
+function fixture(t, { invited = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fc-phase1-real-gateway-host-'))
   const storageRoot = path.join(root, 'families')
   const stateDirectory = path.join(root, 'supervisor-state')
@@ -48,25 +50,48 @@ function fixture(t) {
     provisionEmptyHousehold({
       serverDirectory, storageRoot, householdId: primaryHouseholdId,
     })
+    // Exactly one invitation may create a second independent Owner in this
+    // disposable fixture. No backend boot is triggered by registration.
+    let invitedHouseholdId = null
+    if (invited) {
+      const invitation = issueIndependentHouseholdInvitation(db, {
+        serverVerifiedAdministratorUserId: operatorId,
+        trustedAdministratorUserIds: [operatorId],
+      })
+      const redeemed = redeemIndependentHouseholdInvitation(db, {
+        token: invitation.token,
+        username: 'phase1invitedowner',
+        displayName: 'Invited Owner',
+        password,
+        householdName: 'Invited private family',
+        trustedAdministratorUserIds: [operatorId],
+        serverDirectory, storageRoot,
+      })
+      invitedHouseholdId = redeemed.householdId
+      assert.match(invitedHouseholdId, /^family-[0-9a-f]{24}$/)
+      assert.equal(redeemed.activation, 'pending')
+      approvePrivateHouseholdActivation(db, { householdId: invitedHouseholdId })
+    }
     t.after(() => fs.rmSync(root, {
       recursive: true, force: true, maxRetries: 6, retryDelay: 150,
     }))
     return {
       fixtureRoot: root, storageRoot, stateDirectory,
       identityDatabasePath, serverDirectory,
-      primaryHouseholdId, operatorUserIds: [operatorId],
+      primaryHouseholdId, operatorUserIds: [operatorId], invitedHouseholdId,
     }
   } finally {
     db.close()
   }
 }
-async function request(base, route, { method = 'GET', cookie, body } = {}) {
+async function request(base, route, { method = 'GET', cookie, body, headers = {} } = {}) {
   const response = await fetch(base + route, {
     method, redirect: 'manual', signal: AbortSignal.timeout(7000),
     headers: {
       ...(cookie ? { Cookie: cookie } : {}),
       ...(method !== 'GET' ? { Origin: 'https://' + new URL(base).host } : {}),
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
@@ -148,6 +173,146 @@ test('real Phase 1 Owner gateway runs only after supervised localhost backend pr
     // kill an unrelated process. The fixture remains quarantined for review.
     if (!shutdown) {
       try { await runtime.shutdown() } catch { /* retain failure evidence */ }
+    }
+  }
+})
+
+
+test('two supervised real families remain isolated by signed Owner session and backend storage', {
+  timeout: 120000,
+}, async t => {
+  const options = fixture(t, { invited: true })
+  const privateId = options.invitedHouseholdId
+  const runtime = await launchDisposableReviewedPhase1Gateway(options)
+  let closed = false
+  try {
+    const snapshot = runtime.snapshot()
+    assert.deepEqual(snapshot.householdIds, [primaryHouseholdId, privateId])
+    assert.equal(snapshot.capturedCount, 2)
+    assert.equal(snapshot.childPorts.length, 2)
+    assert.notEqual(snapshot.childPorts[0], snapshot.childPorts[1])
+    assert.equal(snapshot.gatewayLocalhostOnly, true)
+    assert.equal(snapshot.testDeploymentAuthorized, false)
+    assert.equal(snapshot.osWideWriterFencingVerified, false)
+    assert.equal(snapshot.windowsTaskInstalled, false)
+
+    async function login(username) {
+      const res = await request(runtime.base, '/api/auth/login', {
+        method: 'POST', body: { username, password, deviceLabel: 'Private CI phone' },
+      })
+      assert.equal(res.response.status, 200)
+      const cookie = res.response.headers.get('set-cookie')
+      assert.match(cookie, /__Host-fc_gateway_session=/)
+      return cookie.split(';')[0]
+    }
+    const homeCookie = await login('phase1primaryowner')
+    const invitedCookie = await login('phase1invitedowner')
+    const operatorCookie = await login('phase1systemoperator')
+    assert.notEqual(homeCookie, invitedCookie)
+
+    // Both Owners see only the narrow pilot, not the system operator UI.
+    for (const cookie of [homeCookie, invitedCookie]) {
+      assert.equal((await request(runtime.base, '/phase1', { cookie }))
+        .response.status, 200)
+      assert.equal((await request(runtime.base, '/api/admin/household-overview',
+        { cookie })).response.status, 404)
+    }
+    assert.equal((await request(runtime.base, '/api/events',
+      { cookie: operatorCookie })).response.status, 404)
+    assert.equal((await request(runtime.base, '/api/events')).response.status, 401)
+
+    const homeEvent = 'Primary-only supervised Phase 1 event'
+    const privateEvent = 'Invited-only supervised Phase 1 event'
+    for (const [cookie, title, date, forgery] of [
+      [homeCookie, homeEvent, '2027-02-03', privateId],
+      [invitedCookie, privateEvent, '2027-02-04', primaryHouseholdId],
+    ]) {
+      const create = await request(runtime.base, '/api/events', {
+        cookie, method: 'POST',
+        headers: { 'x-household-id': forgery },
+        body: { title, date, time: '13:00', householdId: forgery },
+      })
+      assert.equal(create.response.status, 201)
+    }
+
+    for (const [cookie, own, other, forgery] of [
+      [homeCookie, homeEvent, privateEvent, privateId],
+      [invitedCookie, privateEvent, homeEvent, primaryHouseholdId],
+    ]) {
+      const events = await request(runtime.base,
+        '/api/events?householdId=' + encodeURIComponent(forgery), {
+          cookie, headers: { 'x-household-id': forgery },
+        })
+      assert.equal(events.response.status, 200)
+      assert.match(JSON.stringify(events.content), new RegExp(own))
+      assert.doesNotMatch(JSON.stringify(events.content), new RegExp(other))
+    }
+
+    const homeList = 'Primary-only Phase 1 list'
+    const invitedList = 'Invited-only Phase 1 list'
+    for (const [cookie, name, forged] of [
+      [homeCookie, homeList, privateId],
+      [invitedCookie, invitedList, primaryHouseholdId],
+    ]) {
+      const create = await request(runtime.base, '/api/lists', {
+        cookie, method: 'POST',
+        headers: { 'x-household-id': forged },
+        body: { name },
+      })
+      assert.equal(create.response.status, 201)
+    }
+    for (const [cookie, own, other] of [
+      [homeCookie, homeList, invitedList],
+      [invitedCookie, invitedList, homeList],
+    ]) {
+      const lists = await request(runtime.base, '/api/lists', { cookie })
+      assert.equal(lists.response.status, 200)
+      assert.match(JSON.stringify(lists.content), new RegExp(own))
+      assert.doesNotMatch(JSON.stringify(lists.content), new RegExp(other))
+    }
+
+    // A valid browser session cannot bypass the central gateway on either
+    // unshared localhost household backend.
+    for (const port of snapshot.childPorts) {
+      for (const cookie of [homeCookie, invitedCookie]) {
+        const direct = await fetch('http://127.0.0.1:' + port + '/api/events', {
+          headers: { Cookie: cookie, 'x-household-id': privateId },
+          signal: AbortSignal.timeout(5000),
+        })
+        assert.equal(direct.status, 403)
+      }
+    }
+
+    const stopped = await runtime.shutdown()
+    closed = true
+    assert.equal(stopped.allChildrenExited, true)
+    assert.equal(stopped.gatewayClosed, true)
+    assert.equal(inspectReviewedWindowsSupervisorOwnership(options.stateDirectory)
+      .instanceLockPresent, false)
+    for (const port of snapshot.childPorts) {
+      await assert.rejects(fetch('http://127.0.0.1:' + port + '/api/health', {
+        signal: AbortSignal.timeout(1000),
+      }))
+    }
+    const storageNames = fs.readdirSync(path.join(options.storageRoot, 'households'))
+    assert.deepEqual(new Set(storageNames), new Set([primaryHouseholdId, privateId]))
+    for (const [id, own, other] of [
+      [primaryHouseholdId, homeEvent, privateEvent],
+      [privateId, privateEvent, homeEvent],
+    ]) {
+      const dbPath = path.join(options.storageRoot, 'households', id,
+        'data', 'calendar.db')
+      const db = new DatabaseSync(dbPath, { readOnly: true })
+      try {
+        const titles = db.prepare('SELECT title FROM events').all().map(x => x.title)
+        assert(titles.includes(own))
+        assert(!titles.includes(other))
+        assert.equal(db.prepare('PRAGMA quick_check').get().quick_check, 'ok')
+      } finally { db.close() }
+    }
+  } finally {
+    if (!closed) {
+      try { await runtime.shutdown() } catch { /* do not reclaim unsafe locks */ }
     }
   }
 })
