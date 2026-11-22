@@ -29,7 +29,7 @@ function canonicalRoute(method, originalUrl) {
       typeof originalUrl !== 'string' || !originalUrl.startsWith('/') ||
       originalUrl.includes('\\') || originalUrl.includes('//')) return null
   const [pathname, ...query] = originalUrl.split('?')
-  if (!PATH_RE.test(pathname) || pathname.includes('%') ||
+  if ((pathname !== '/' && !PATH_RE.test(pathname)) || pathname.includes('%') ||
       (pathname !== '/' && pathname.endsWith('/')) ||
       (query.length && !['GET', 'HEAD'].includes(method))) return null
   return pathname
@@ -94,6 +94,9 @@ export function installPrivatePhase1OwnerPilotGate(app, {
     throw new Error('Phase 1 gate requires a server-owned trusted operator allowlist.')
   }
   app.use((request, response, next) => {
+    // Auth middleware intentionally leaves generic health public.
+    if (['GET', 'HEAD'].includes(request.method) &&
+        request.originalUrl === '/api/health') return next()
     const userId = request.familyAccount?.user_id
     if (!Number.isSafeInteger(userId) || userId < 1) {
       return response.status(401).json({ error: 'Verified family login required.' })
