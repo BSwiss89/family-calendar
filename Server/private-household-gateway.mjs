@@ -101,9 +101,11 @@ function verifiedBackendPort(port) {
   return port
 }
 
-function validateUpstreams({ identityDatabase, serverDirectory, storageRoot, backendPorts }) {
+function validateUpstreams({ identityDatabase, serverDirectory, storageRoot, backendPorts,
+  allowEmptyBootstrap = false }) {
   if (backendPorts === null || typeof backendPorts !== 'object'
-      || Array.isArray(backendPorts) || Object.keys(backendPorts).length === 0) {
+      || Array.isArray(backendPorts) ||
+      (Object.keys(backendPorts).length === 0 && !allowEmptyBootstrap)) {
     throw new Error('At least one explicit household backend must be configured.')
   }
   const ports = new Map()
@@ -383,6 +385,8 @@ export async function startPrivateHouseholdGateway({
   independentHouseholdAdministratorUserIds = [],
   // Private disposable preview only. Never enable via request header or URL.
   enforceFamilyMemberPermissions = false,
+  // Explicit OFF-by-default first-family control-plane bootstrap (loopback only).
+  allowEmptyGatewayBootstrap = false,
 }) {
   if (typeof enforceFamilyMemberPermissions !== 'boolean') {
     throw new Error('Private family permission enforcement must be a trusted boolean setting.')
@@ -391,8 +395,13 @@ export async function startPrivateHouseholdGateway({
       independentHouseholdAdministratorUserIds.some(id => !Number.isSafeInteger(id) || id < 1)) {
     throw new Error('Invalid private administrator allowlist.')
   }
+  if (typeof allowEmptyGatewayBootstrap !== 'boolean' ||
+      (allowEmptyGatewayBootstrap && independentHouseholdAdministratorUserIds.length === 0)) {
+    throw new Error('Private empty-backend bootstrap needs an explicit trusted administrator.')
+  }
   const portByHousehold = validateUpstreams({
     identityDatabase, serverDirectory, storageRoot, backendPorts,
+    allowEmptyBootstrap: allowEmptyGatewayBootstrap,
   })
   if (!backendTokens || typeof backendTokens !== 'object' ||
       Array.isArray(backendTokens) ||
@@ -592,7 +601,7 @@ export async function startPrivateHouseholdGateway({
   // keeps its own database. The display resolver never grants actor rights.
   const resolveDevicePersonName = createPrivateGatewayDevicePersonResolver({
     identityDatabase, serverDirectory, storageRoot,
-    routedHouseholdIds: [...portByHousehold.keys()],
+    getRoutedHouseholdIds: () => [...portByHousehold.keys()],
   })
   // An existing invited Owner must not be redirected to the calendar
   // before the operator has activated that exact household. Operator login
