@@ -84,7 +84,7 @@ import {
   countPendingEventShareSync, replayEventShareSyncPending,
 } from './event-share-sync-journal.mjs'
 
-const BLOCKED_PORTS = new Set([3001, 13001, 13002, 13003, 11434])
+const BLOCKED_PORTS = new Set([443, 8443, 3001, 13001, 13002, 13003, 11434])
 const HOP_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
   'te', 'trailer', 'transfer-encoding', 'upgrade',
@@ -105,6 +105,23 @@ const HTTP_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', '
 function verifiedBackendPort(port) {
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535 || BLOCKED_PORTS.has(port)) {
     throw new Error('Private household backend port must be a safe nonproduction port.')
+  }
+  return port
+}
+
+// Trusted startup-only bridge for a later guarded Windows TEST portproxy cutover.
+// The old disposable harness remains random-port/loopback by default. A pinned
+// port can only be requested in the explicitly restricted Phase 1 Owner mode.
+// This NEVER starts a public listener or changes OS routing/firewall rules.
+export function resolvePrivatePhase1GatewayLoopbackPort({
+  port = null, phase1OwnerPilotOnly = false, backendPorts = [],
+} = {}) {
+  if (port == null) return 0
+  if (phase1OwnerPilotOnly !== true ||
+      !Number.isSafeInteger(port) || port < 1024 || port > 65535 ||
+      BLOCKED_PORTS.has(port) || !Array.isArray(backendPorts) ||
+      backendPorts.includes(port)) {
+    throw new Error('Trusted Phase 1 gateway listener port must be a distinct nonproduction loopback port.')
   }
   return port
 }
@@ -378,7 +395,7 @@ function proxyRequest(
 
 /**
  * Starts a disposable single-origin authentication/routing fixture on a
- * random localhost port. No supported public-host or fixed-port option.
+ * random localhost port by default. An explicit Phase 1 pinned port requires\n * trusted startup configuration and is still loopback only; no public listener.
  *
  * identityDatabase: CENTRAL identity+membership SQLite, not a family DB.
  * backendPorts: server-owned {"family-a": 54321}, never supplied by a browser.
@@ -396,6 +413,9 @@ export async function startPrivateHouseholdGateway({
   // Source-only, trusted startup switch for an intentionally NARROW first TEST
   // pilot. It cannot be toggled by login, URL or owner settings.
   phase1OwnerPilotOnly = false,
+  // Trusted, opt-in fixed localhost port for future guarded TEST portproxy only.
+  // Does not modify routes or allow public listening; default 0 stays ephemeral.
+  trustedPhase1GatewayPort = null,
   // Explicit OFF-by-default first-family control-plane bootstrap (loopback only).
   allowEmptyGatewayBootstrap = false,
 }) {
@@ -418,6 +438,11 @@ export async function startPrivateHouseholdGateway({
   const portByHousehold = validateUpstreams({
     identityDatabase, serverDirectory, storageRoot, backendPorts,
     allowEmptyBootstrap: allowEmptyGatewayBootstrap,
+  })
+  // Resolve before any gateway lock, SQLite mutation or listening socket.
+  const gatewayLoopbackPort = resolvePrivatePhase1GatewayLoopbackPort({
+    port: trustedPhase1GatewayPort, phase1OwnerPilotOnly,
+    backendPorts: [...portByHousehold.values()],
   })
   if (!backendTokens || typeof backendTokens !== 'object' ||
       Array.isArray(backendTokens) ||
@@ -1814,7 +1839,7 @@ export async function startPrivateHouseholdGateway({
   try {
     await new Promise((resolve, reject) => {
       server.once('error', reject)
-      server.listen(0, '127.0.0.1', resolve)
+      server.listen(gatewayLoopbackPort, '127.0.0.1', resolve)
     })
   } catch (error) {
     server.close()
@@ -1823,7 +1848,8 @@ export async function startPrivateHouseholdGateway({
 
   const address = server.address()
   if (typeof address !== 'object' || address?.address !== '127.0.0.1'
-      || BLOCKED_PORTS.has(address.port)) {
+      || BLOCKED_PORTS.has(address.port)
+      || (gatewayLoopbackPort !== 0 && address.port !== gatewayLoopbackPort)) {
     server.close()
     throw new Error('Gateway failed private listener validation.')
   }
