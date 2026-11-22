@@ -62,17 +62,14 @@ if (!(Test-Path -LiteralPath $logFile)) {
     $problems.Add('deployment_log_missing')
 } else {
     try {
-        $lastCheckAt = 'UNKNOWN'
-        foreach ($line in @(Get-Content -LiteralPath $logFile -Tail 6000 -ErrorAction Stop)) {
-            if ($line -match 'TEST AUTO DEPLOY CHECK (\d{4}-\d\d-\d\dT\S+)') {
-                $lastCheckAt = $Matches[1]
-            }
-            if ($line -match 'TEST AUTO DEPLOY SUCCESS ([a-fA-F0-9]{40})\. Backup: (.+)$') {
-                $lastSuccessSha = $Matches[1].ToLowerInvariant()
-                $lastSuccessAt = $lastCheckAt
-                $lastBackup = $Matches[2].Trim()
-            }
-        }
+        # Read historical successes even after thousands of later no-op
+        # polling checks. The verified backup path is checked below.
+        $parser = Join-Path $PSScriptRoot 'read-secure-test-success-receipt.ps1'
+        . $parser
+        $receipt = Read-SecureTestLastSuccessReceipt -LogFile $logFile
+        $lastSuccessSha = $receipt.LastSuccessSha
+        $lastSuccessAt = $receipt.LastSuccessAt
+        $lastBackup = $receipt.LastBackup
     } catch { $problems.Add('deployment_log_unreadable') }
     if ($lastSuccessSha -eq 'UNKNOWN' -or $lastSuccessSha -ne $testSha) {
         $problems.Add('installed_sha_not_receipted')
