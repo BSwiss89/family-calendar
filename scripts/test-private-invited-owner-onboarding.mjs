@@ -732,6 +732,72 @@ test('two invited Owners activate into isolated real localhost backends without 
       cookie: b.cookie,
     })).payload.destination, '/')
 
+    // Real post-activation writes must reach ONLY the signed-in Owner's
+    // verified family, even when both freshly provisioned SQLite databases
+    // assign the same numeric IDs and the browser spoofs another tenant.
+    const eventA = await request('/api/events', {
+      cookie: a.cookie, body: {
+        date: '2026-12-20', title: 'Only invited household A', time: '12:00',
+      }, headers: { 'x-household-id': b.id },
+    })
+    const eventB = await request('/api/events', {
+      cookie: b.cookie, body: {
+        date: '2026-12-21', title: 'Only invited household B', time: '13:00',
+      }, headers: { 'x-household-id': a.id },
+    })
+    assert.equal(eventA.status, 201)
+    assert.equal(eventB.status, 201)
+    assert.equal(eventA.payload.id, eventB.payload.id,
+      'disposable tenants intentionally reuse the same event row ID')
+    const editedA = await request('/api/events/' + eventB.payload.id, {
+      cookie: a.cookie, method: 'PUT',
+      body: { date: '2026-12-20', title: 'Edited only in invited A', time: '12:30' },
+      headers: { 'x-household-id': b.id },
+    })
+    assert.equal(editedA.status, 200)
+    const ownEventsA = await request('/api/events?householdId=' + encodeURIComponent(b.id), {
+      cookie: a.cookie, headers: { 'x-household-id': b.id },
+    })
+    const ownEventsB = await request('/api/events?householdId=' + encodeURIComponent(a.id), {
+      cookie: b.cookie, headers: { 'x-household-id': a.id },
+    })
+    assert.equal(ownEventsA.status, 200)
+    assert.equal(ownEventsB.status, 200)
+    assert.deepEqual(ownEventsA.payload.map(e => e.title), ['Edited only in invited A'])
+    assert.deepEqual(ownEventsB.payload.map(e => e.title), ['Only invited household B'])
+
+    const listA = await request('/api/lists', {
+      cookie: a.cookie, body: { name: 'Invited A shopping' },
+      headers: { 'x-household-id': b.id },
+    })
+    const listB = await request('/api/lists', {
+      cookie: b.cookie, body: { name: 'Invited B shopping' },
+      headers: { 'x-household-id': a.id },
+    })
+    assert.equal(listA.status, 201)
+    assert.equal(listB.status, 201)
+    assert.equal(listA.payload.id, listB.payload.id,
+      'disposable tenants intentionally reuse the same list row ID')
+    assert.equal((await request('/api/lists', {
+      cookie: a.cookie, headers: { 'x-household-id': b.id },
+    })).payload[0].name, 'Invited A shopping')
+    assert.equal((await request('/api/lists', {
+      cookie: b.cookie, headers: { 'x-household-id': a.id },
+    })).payload[0].name, 'Invited B shopping')
+    const deleteA = await request('/api/lists/' + listB.payload.id, {
+      cookie: a.cookie, method: 'DELETE', headers: { 'x-household-id': b.id },
+    })
+    assert.equal(deleteA.status, 200)
+    assert.deepEqual((await request('/api/lists', { cookie: a.cookie })).payload, [])
+    assert.equal((await request('/api/lists', { cookie: b.cookie })).payload[0].name,
+      'Invited B shopping', 'a forged tenant header cannot delete B data')
+    assert.equal((await request('/api/events/' + eventB.payload.id, {
+      cookie: a.cookie, method: 'DELETE', headers: { 'x-household-id': b.id },
+    })).status, 200)
+    assert.deepEqual((await request('/api/events', { cookie: a.cookie })).payload, [])
+    assert.deepEqual((await request('/api/events', { cookie: b.cookie })).payload
+      .map(e => e.title), ['Only invited household B'])
+
     // Reuse the same local Person ID to prove lookup is tenant-scoped, not a
     // central People table or the currently selected browser avatar.
     const personId = 991
