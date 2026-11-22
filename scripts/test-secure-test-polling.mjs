@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 
 const polling = readFileSync(new URL('./configure-secure-test-polling.ps1', import.meta.url), 'utf8');
 const report = readFileSync(new URL('./report-secure-test-deployment.ps1', import.meta.url), 'utf8');
+const receiptReader = readFileSync(new URL('./read-secure-test-success-receipt.ps1', import.meta.url), 'utf8');
 const updater = readFileSync(new URL('./secure-test-auto-deploy.ps1', import.meta.url), 'utf8');
 
 test('schedule change is explicit, one minute and only for existing TEST updater', () => {
@@ -69,7 +70,12 @@ test('status reporter cannot mutate deployment, tasks or local data', () => {
   assert.match(report, /Export-ScheduledTask/);
   assert.match(report, /REQUIRES-REVIEW\.txt/);
   assert.match(report, /IN-PROGRESS\.txt/);
-  assert.match(report, /TEST AUTO DEPLOY SUCCESS/);
+  assert.match(report, /Read-SecureTestLastSuccessReceipt/);
+  assert.match(report, /read-secure-test-success-receipt\.ps1/);
+  assert.match(receiptReader, /TEST AUTO DEPLOY SUCCESS/);
+  assert.match(receiptReader, /System\.IO\.File\]::ReadLines/);
+  assert.doesNotMatch(receiptReader, /(?:Set|Register|Unregister|Start|Stop|Disable|Enable)-ScheduledTask/);
+  assert.doesNotMatch(receiptReader, /New-Item|Set-Content|Remove-Item|Copy-Item|git\s+(?:reset|checkout|fetch|merge|pull)|schtasks\.exe/);
   assert.match(report, /installed_sha_not_receipted/);
   assert.match(report, /last_backup_unverified/);
   assert.match(report, /\/api\/health/);
