@@ -55,6 +55,7 @@ import { installPrivateInvitedOwnerOnboarding } from './private-invited-owner-on
 import { installPrivateMemberRouteEnforcement } from './family-member-route-enforcement.mjs'
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { readPrivateHomePinPolicy, setPrivateHomePinPolicy } from './private-home-pin-policy.mjs'
+import { installPrivateHomeKioskIdentity } from './private-home-kiosk-api.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { createPrivateActivationRecords, approvePrivateHouseholdActivation,
   assertApprovedPrivateHousehold } from './private-household-activation-records.mjs'
@@ -1114,6 +1115,13 @@ export async function startPrivateHouseholdGateway({
         return response.status(503).json({ error: 'Home PIN preference unavailable.' })
       }
     })
+
+  // Private opt-in kiosk/PIN identity endpoints; these never weaken the
+  // existing member route policy or activate shared Home writes by themselves.
+  installPrivateHomeKioskIdentity(app, {
+    identityDatabase, serverDirectory, storageRoot,
+    trustedHousehold, ownerPasswordStepUp,
+  })
 
   app.use('/api/households', (_request, response) => {
     response.status(404).json({ error: 'Not found.' })
