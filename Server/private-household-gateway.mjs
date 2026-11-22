@@ -23,6 +23,7 @@ import {
 } from './event-only-shares.mjs'
 import { installFamilyAuth } from './family-auth.mjs'
 import { createPrivateGatewayDevicePersonResolver } from './private-gateway-device-profiles.mjs'
+import { resolvePrivateFamilyLanding, installPrivateFamilyEntryRouting } from './private-family-entry-routing.mjs'
 import {
   createEventCreatorAuditTables, recordAuthenticatedEventCreator,
   listAuthenticatedEventCreators, cleanupDeletedEventCreator,
@@ -593,8 +594,17 @@ export async function startPrivateHouseholdGateway({
     identityDatabase, serverDirectory, storageRoot,
     routedHouseholdIds: [...portByHousehold.keys()],
   })
+  // An existing invited Owner must not be redirected to the calendar
+  // before the operator has activated that exact household. Operator login
+  // goes directly to its separate metadata-only system dashboard.
+  const resolveSignedInLanding = session => resolvePrivateFamilyLanding(identityDatabase, {
+    serverVerifiedUserId: session.user_id,
+    trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+    routedHouseholdIds: [...portByHousehold.keys()],
+  })
   installFamilyAuth(app, identityDatabase, serverDirectory, 'required', {
     cookieName: '__Host-fc_gateway_session', resolveDevicePersonName,
+    resolveSignedInLanding,
   })
   // Operator review and opt-in contact editing require a verified existing
   // session, and one more real password check before sensitive writes.
@@ -615,6 +625,11 @@ export async function startPrivateHouseholdGateway({
   // and current activated, trusted gateway routing. Never activate via UI.
   installPrivateInvitedOwnerOnboarding(app, {
     identityDatabase, serverDirectory,
+    getRoutedHouseholdIds: () => [...portByHousehold.keys()],
+  })
+  installPrivateFamilyEntryRouting(app, {
+    identityDatabase,
+    trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
     getRoutedHouseholdIds: () => [...portByHousehold.keys()],
   })
   // Never forward an unknown administrator API to a family backend.
