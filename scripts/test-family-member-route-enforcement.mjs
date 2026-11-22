@@ -7,12 +7,17 @@ import {
 } from '../Server/household-memberships.mjs'
 import {
   createFamilyMemberAccessTables, setFamilyMemberType, setFamilyMemberPermission,
+  setFamilyMemberPersonLink,
 } from '../Server/family-member-access.mjs'
 import {
   requiredFamilyMemberActions, authorizeFamilyMemberApiRequest,
   installPrivateMemberRouteEnforcement,
 } from '../Server/family-member-route-enforcement.mjs'
 import { readPrivateHomePinPolicy, setPrivateHomePinPolicy } from '../Server/private-home-pin-policy.mjs'
+import {
+  createPrivateHomeActorTables, enrollPrivateHomeKiosk, disablePrivateHomeKiosk,
+  isPrivateHomeKioskTrusted, setPrivateHomeActorPin, createPrivateHomePinVerifier,
+} from '../Server/private-home-kiosk-identity.mjs'
 
 function fixture(t) {
   const db = new DatabaseSync(':memory:')
@@ -68,6 +73,181 @@ test('shared Home PIN preference defaults ON, is Owner-only, and cannot grant me
   assert.throws(() => change('family-a', ownerId, false), /Active household Owner required/)
   assert.throws(() => read('family-a', ownerId), /Active household Owner required/)
   assert.deepEqual(read('family-b', outsiderId), { pinEnabled: true })
+})
+
+test('four-digit Home proof requires an Owner-enrolled device, real linked Person and current grants', async t => {
+  const { db, ownerId, adultId, childId, outsiderId } = fixture(t)
+  const calendarDb = new DatabaseSync(':memory:')
+  t.after(() => calendarDb.close())
+  calendarDb.exec('CREATE TABLE people(id INTEGER PRIMARY KEY, name TEXT NOT NULL)')
+  calendarDb.prepare('INSERT INTO people(id,name) VALUES (?,?)').run(11, 'Linked Child')
+  calendarDb.prepare('INSERT INTO people(id,name) VALUES (?,?)').run(12, 'Linked Owner')
+  createPrivateHomeActorTables(db)
+  for (const [userId, personId] of [[ownerId, 12], [childId, 11]]) {
+    setFamilyMemberPersonLink(db, {
+      householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+      targetUserId: userId, personId, householdDatabase: calendarDb,
+    })
+  }
+  const now = Date.now()
+  const makeSession = (userId, selected) => Number(db.prepare([
+    'INSERT INTO family_sessions',
+    '(user_id,token_hash,device_label,created_at,last_seen_at,expires_at,selected_profile_kind)',
+    'VALUES (?,?,?,?,?,?,?)',
+  ].join(' ')).run(userId, 'testhash-' + userId + '-' + selected, 'Disposable Home',
+    now, now, now + 3600000, selected).lastInsertRowid)
+  const kioskSessionId = makeSession(ownerId, 'person')
+  const otherSessionId = makeSession(outsiderId, 'home')
+  const verifier = createPrivateHomePinVerifier()
+  const home = () => ({
+    householdId: 'family-a', serverVerifiedSessionId: kioskSessionId,
+  })
+  assert.equal(isPrivateHomeKioskTrusted(db, home()), false)
+  assert.throws(() => enrollPrivateHomeKiosk(db, {
+    ...home(), serverVerifiedOwnerUserId: ownerId,
+  }), /Select Home/)
+  db.prepare("UPDATE family_sessions SET selected_profile_kind='home' WHERE id=?")
+    .run(kioskSessionId)
+  assert.equal(isPrivateHomeKioskTrusted(db, home()), false,
+    'choosing Home is NOT kiosk enrollment')
+  assert.deepEqual(enrollPrivateHomeKiosk(db, {
+    ...home(), serverVerifiedOwnerUserId: ownerId,
+  }), { trustedHome: true })
+  assert.equal(isPrivateHomeKioskTrusted(db, home()), true)
+  assert.throws(() => setPrivateHomeActorPin(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: outsiderId,
+    targetUserId: childId, pin: '1234', householdDatabase: calendarDb,
+  }), /Owner required/)
+  assert.throws(() => setPrivateHomeActorPin(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, pin: '12345', householdDatabase: calendarDb,
+  }), /four digits/)
+  assert.throws(() => setPrivateHomeActorPin(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: adultId, pin: '1234', householdDatabase: calendarDb,
+  }), /linked active family Person/)
+  assert.deepEqual(setPrivateHomeActorPin(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, pin: '1234', householdDatabase: calendarDb,
+  }), { pinConfigured: true })
+  const savedPin = db.prepare(
+    'SELECT pin_hash FROM private_home_actor_pins WHERE user_id=?'
+  ).get(childId).pin_hash
+  assert.match(savedPin, /^scrypt-home-v1:[a-f0-9]{32}:[a-f0-9]{128}$/)
+  const attempt = (pin, userId = childId) => verifier.verify(db, {
+    ...home(), targetUserId: userId, pin, householdDatabase: calendarDb,
+  })
+  assert.deepEqual(await attempt('9999'), { status: 'invalid' })
+  const good = await attempt('1234')
+  assert.equal(good.status, 'verified')
+  assert.match(good.proof, /^[a-f0-9]{64}$/)
+  const resolve = (sessionId = kioskSessionId, proof = good.proof) =>
+    verifier.resolve(db, {
+      householdId: 'family-a', serverVerifiedSessionId: sessionId,
+      proof, householdDatabase: calendarDb,
+    })
+  assert.equal(resolve().userId, childId)
+  assert.equal(resolve().personId, 11)
+  assert.equal(resolve().role, 'child')
+  assert.equal(resolve(otherSessionId), null, 'proof cannot move to another session')
+  assert.equal(verifier.resolve(db, {
+    householdId: 'family-b', serverVerifiedSessionId: kioskSessionId,
+    proof: good.proof, householdDatabase: calendarDb,
+  }), null, 'proof cannot move to another household')
+  assert.equal(authorizeFamilyMemberApiRequest(db, {
+    serverVerifiedUserId: childId, householdId: 'family-a',
+    method: 'POST', originalUrl: '/api/events',
+  }).allowed, false, 'verified child PIN is not permission to write')
+  setFamilyMemberPermission(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'events.create', enabled: true,
+  })
+  assert.equal(resolve().permissions.includes('events.create'), true,
+    'proof resolves current grants instead of stale cached grants')
+  setFamilyMemberPermission(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, action: 'events.create', enabled: false,
+  })
+  assert.equal(resolve().permissions.includes('events.create'), false)
+  setPrivateHomePinPolicy(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    pinEnabled: false,
+  })
+  assert.equal(resolve(), null, 'PIN off invalidates all existing proofs')
+  assert.deepEqual(await attempt('1234'), { status: 'disabled' })
+  setPrivateHomePinPolicy(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    pinEnabled: true,
+  })
+  assert.equal(resolve(), null, 'PIN reenabled cannot resurrect old proof')
+  const next = await attempt('1234')
+  assert.equal(next.status, 'verified')
+  setPrivateHomeActorPin(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, pin: '9876', householdDatabase: calendarDb,
+  })
+  assert.equal(resolve(kioskSessionId, next.proof), null,
+    'resetting PIN must revoke previously issued proof')
+  assert.deepEqual(await attempt('1234'), { status: 'invalid' })
+  assert.equal((await attempt('9876')).status, 'verified')
+  db.prepare('UPDATE household_memberships SET disabled=1 WHERE user_id=?')
+    .run(childId)
+  assert.equal(verifier.resolve(db, {
+    ...home(), proof: db.prepare(
+      'SELECT token_hash FROM private_home_actor_proofs LIMIT 1'
+    ).get()?.token_hash ?? '', householdDatabase: calendarDb,
+  }), null)
+  const denied = await attempt('9876')
+  assert.equal(denied.status, 'invalid', 'removed member cannot verify stale PIN')
+  assert.deepEqual(disablePrivateHomeKiosk(db, {
+    ...home(), serverVerifiedOwnerUserId: ownerId,
+  }), { trustedHome: false, changed: true })
+  assert.equal(isPrivateHomeKioskTrusted(db, home()), false)
+  assert.deepEqual(await attempt('9876'), { status: 'untrusted' })
+})
+
+test('shared Home PIN attempts rate-limit across people and trust is revoked with the session', async t => {
+  const { db, ownerId, childId } = fixture(t)
+  const calendarDb = new DatabaseSync(':memory:')
+  t.after(() => calendarDb.close())
+  calendarDb.exec('CREATE TABLE people(id INTEGER PRIMARY KEY, name TEXT NOT NULL)')
+  calendarDb.exec("INSERT INTO people VALUES(99,'Linked child')")
+  setFamilyMemberPersonLink(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, personId: 99, householdDatabase: calendarDb,
+  })
+  const now = Date.now()
+  const sessionId = Number(db.prepare([
+    'INSERT INTO family_sessions',
+    '(user_id,token_hash,device_label,created_at,last_seen_at,expires_at,selected_profile_kind)',
+    "VALUES (?,'ratelimit-kiosk','Fixture',?,?,?,'home')",
+  ].join(' ')).run(ownerId, now, now, now + 3600000).lastInsertRowid)
+  enrollPrivateHomeKiosk(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    serverVerifiedSessionId: sessionId,
+  })
+  setPrivateHomeActorPin(db, {
+    householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
+    targetUserId: childId, pin: '0000', householdDatabase: calendarDb,
+  })
+  const verifier = createPrivateHomePinVerifier()
+  const attempt = (memberId, pin) => verifier.verify(db, {
+    householdId: 'family-a', serverVerifiedSessionId: sessionId,
+    targetUserId: memberId, pin, householdDatabase: calendarDb,
+  })
+  for (let i = 0; i < 5; i++) {
+    assert.deepEqual(await attempt(i % 2 ? ownerId : childId, '9999'),
+      { status: 'invalid' })
+  }
+  const blocked = await attempt(childId, '0000')
+  assert.equal(blocked.status, 'limited')
+  assert.ok(blocked.retryAfter > 0)
+  db.prepare('UPDATE family_sessions SET revoked_at=? WHERE id=?')
+    .run(Date.now(), sessionId)
+  assert.equal(isPrivateHomeKioskTrusted(db, {
+    householdId: 'family-a', serverVerifiedSessionId: sessionId,
+  }), false)
+  assert.deepEqual(await attempt(childId, '0000'), { status: 'untrusted' })
 })
 
 test('known API reads and event/list writes are categorized; unknown or alias routes fail closed', () => {
