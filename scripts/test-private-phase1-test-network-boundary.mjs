@@ -1,5 +1,7 @@
 // All fixtures are synthetic. No real Windows tasks, ports, or calendar data.
 import test from 'node:test'
+// The existing CI boundary test also loads the staged handoff regression suite.
+import './test-private-phase1-test-staged-handoff-review.mjs'
 import assert from 'node:assert/strict'
 import { assessPrivatePhase1TestRoutingBoundary as inspect }
   from '../Server/private-phase1-test-network-boundary.mjs'
