@@ -140,6 +140,19 @@ jobs:
         run: node --test scripts/test-private-windows-test-readiness.mjs
       - name: Verify Phase 1 TEST routing cutover rejects legacy bypass and preserves rollback reference
         run: node --test scripts/test-private-phase1-test-network-boundary.mjs
+      - name: Verify read-only Phase 1 Windows TEST route evidence decoder
+        run: node --test scripts/test-private-phase1-windows-test-route-snapshot.mjs
+      - name: Parse read-only Windows PowerShell TEST route inspector without executing it
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile('scripts/inspect-private-phase1-windows-test-route.ps1', [ref]$tokens, [ref]$errors) | Out-Null
+          if (@($errors).Count -ne 0) { throw 'Read-only Windows inspector PowerShell 5.1 syntax failed.' }
+          $source = Get-Content -LiteralPath 'scripts/inspect-private-phase1-windows-test-route.ps1' -Raw
+          foreach ($command in @('Stop-Process', 'Start-Process', 'Set-ScheduledTask', 'Disable-ScheduledTask', 'Enable-ScheduledTask', 'Remove-Item', 'New-NetFirewallRule')) {
+            if ($source -match ('(?im)^\\s*' + [regex]::Escape($command) + '\\b')) { throw 'Read-only inspector contains an unreviewed mutation command.' }
+          }
       - name: Check one-family TEST pilot inspection and cutover blockers without touching installed sites
         run: node --test scripts/test-private-one-family-test-pilot.mjs
       - name: Verify historical TEST deployment receipts remain discoverable after many polling checks
