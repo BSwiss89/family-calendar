@@ -56,6 +56,7 @@ import { installPrivateMemberRouteEnforcement } from './family-member-route-enfo
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { readPrivateHomePinPolicy, setPrivateHomePinPolicy } from './private-home-pin-policy.mjs'
 import { installPrivateHomeKioskIdentity } from './private-home-kiosk-api.mjs'
+import { installPrivateSharedHomeWriteGate } from './private-shared-home-write-gate.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { createPrivateActivationRecords, approvePrivateHouseholdActivation,
   assertApprovedPrivateHousehold } from './private-household-activation-records.mjs'
@@ -89,6 +90,8 @@ const REQUEST_REMOVED = new Set([
   ...HOP_HEADERS,
   'cookie', 'authorization', 'host', PRIVATE_UPSTREAM_HEADER,
   'forwarded', 'x-forwarded-for', 'x-forwarded-host',
+  // A proof is a session-bound secret. NEVER forward it to the legacy backend.
+  'x-fc-home-actor-proof',
   'x-forwarded-proto', 'x-real-ip', 'cf-connecting-ip',
 ])
 const RESPONSE_REMOVED = new Set([
@@ -616,6 +619,25 @@ export async function startPrivateHouseholdGateway({
   installFamilyAuth(app, identityDatabase, serverDirectory, 'required', {
     cookieName: '__Host-fc_gateway_session', resolveDevicePersonName,
     resolveSignedInLanding,
+    denyPrivateGatewayKioskDeviceManagement: session => Boolean(
+      identityDatabase.prepare([
+        'SELECT 1 FROM private_home_kiosk_sessions',
+        'WHERE session_id=? AND disabled_at IS NULL',
+      ].join(' ')).get(session.id)
+    ),
+  })
+  // Register the dedicated PIN enrollment/challenge routes BEFORE the Home
+  // action gate. Owner changes here always require a real account password.
+  const privateHomeIdentity = installPrivateHomeKioskIdentity(app, {
+    identityDatabase, serverDirectory, storageRoot,
+    trustedHousehold, ownerPasswordStepUp,
+  })
+  // Every later route, including Owner administrative routes, Arney and the
+  // backend proxy, is subject to a DENY-by-default shared Home action gate.
+  // A Home avatar alone is not an enrollment; personal phones are unchanged.
+  installPrivateSharedHomeWriteGate(app, {
+    identityDatabase, serverDirectory, storageRoot, trustedHousehold,
+    resolveHomeActorProof: privateHomeIdentity.resolveHomeActorProof,
   })
   // Operator review and opt-in contact editing require a verified existing
   // session, and one more real password check before sensitive writes.
@@ -1115,13 +1137,6 @@ export async function startPrivateHouseholdGateway({
         return response.status(503).json({ error: 'Home PIN preference unavailable.' })
       }
     })
-
-  // Private opt-in kiosk/PIN identity endpoints; these never weaken the
-  // existing member route policy or activate shared Home writes by themselves.
-  installPrivateHomeKioskIdentity(app, {
-    identityDatabase, serverDirectory, storageRoot,
-    trustedHousehold, ownerPasswordStepUp,
-  })
 
   app.use('/api/households', (_request, response) => {
     response.status(404).json({ error: 'Not found.' })
