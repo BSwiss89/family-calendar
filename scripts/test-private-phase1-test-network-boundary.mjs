@@ -90,6 +90,25 @@ function preRoute() {
   x.portproxyRules = [{ ...proxy }]
   return x
 }
+test('legacy-fenced maintenance window contains zero active calendar backend or gateway listeners', () => {
+  const quiet = base()
+  quiet.phase = 'legacy-fenced'
+  quiet.listeners = [listener('127.0.0.1', 13003, 'portproxy')]
+  const review = inspect(quiet)
+  assert.equal(review.legacyFenceTopologyMatches, true)
+  assert.equal(review.observedBaselineMatches, false)
+  assert.equal(review.testDeploymentAuthorized, false)
+  assert.equal(review.portproxyOrServiceChanged, false)
+  for (const active of [
+    listener(address, 13002, 'legacy-test'),
+    listener('127.0.0.1', gatewayPort, 'private-gateway'),
+    listener('127.0.0.1', 13005, 'household-backend'),
+  ]) {
+    const bad = { ...quiet, listeners: [...quiet.listeners, active] }
+    assert.equal(inspect(bad).legacyFenceTopologyMatches, false)
+    assert(inspect(bad).blockers.some(x => /fully quiesced/.test(x)))
+  }
+})
 test('pre-route stage confirms legacy service stopped while forwarding is still unchanged', () => {
   const phase = inspect(preRoute())
   assert.equal(phase.observedBaselineMatches, false)
