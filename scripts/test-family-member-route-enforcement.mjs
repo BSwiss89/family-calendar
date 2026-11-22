@@ -14,6 +14,8 @@ import {
   installPrivateMemberRouteEnforcement,
 } from '../Server/family-member-route-enforcement.mjs'
 import { readPrivateHomePinPolicy, setPrivateHomePinPolicy } from '../Server/private-home-pin-policy.mjs'
+import { authorizePrivateHomeRequest } from '../Server/private-shared-home-write-gate.mjs'
+import { recordPrivateHomeWriteAudit } from '../Server/private-home-write-audit.mjs'
 import {
   createPrivateHomeActorTables, enrollPrivateHomeKiosk, disablePrivateHomeKiosk,
   isPrivateHomeKioskTrusted, setPrivateHomeActorPin, createPrivateHomePinVerifier,
@@ -146,6 +148,25 @@ test('four-digit Home proof requires an Owner-enrolled device, real linked Perso
       householdId: 'family-a', serverVerifiedSessionId: sessionId,
       proof, householdDatabase: calendarDb,
     })
+  const homeDecision = (method, originalUrl, proof = good.proof) =>
+    authorizePrivateHomeRequest(db, {
+      householdId: 'family-a', sessionId: kioskSessionId,
+      method, originalUrl, proof, householdDatabase: calendarDb,
+      resolveHomeActorProof: args => verifier.resolve(db, args),
+    })
+  assert.equal(homeDecision('GET', '/api/events').status, 'allowed-read')
+  assert.equal(homeDecision('GET', '/api/households/member-access').status,
+    'unreviewed-home-route', 'Owner administration is not a Home read')
+  assert.equal(homeDecision('GET', '/API/households/member-access').status,
+    'unreviewed-home-route', 'case aliases cannot bypass kiosk Owner restrictions')
+  assert.equal(homeDecision('POST', '/api/households/member-invitations').status,
+    'unreviewed-home-route', 'Owner invitation is not a shared Home action')
+  assert.equal(homeDecision('POST', '/api/ai/event-action-confirm').status,
+    'unreviewed-home-route', 'unreviewed Arney writes cannot inherit Owner')
+  assert.equal(homeDecision('POST', '/api/events', null).status, 'pin-required')
+  assert.equal(homeDecision('POST', '/api/events').status, 'permission-denied',
+    'a real Child PIN is not event-create permission')
+
   assert.equal(resolve().userId, childId)
   assert.equal(resolve().personId, 11)
   assert.equal(resolve().role, 'child')
@@ -164,6 +185,26 @@ test('four-digit Home proof requires an Owner-enrolled device, real linked Perso
   })
   assert.equal(resolve().permissions.includes('events.create'), true,
     'proof resolves current grants instead of stale cached grants')
+  const childWrite = homeDecision('POST', '/api/events')
+  assert.equal(childWrite.status, 'allowed-write')
+  assert.deepEqual(childWrite.attribution, {
+    kind: 'verified-person', userId: childId, personId: 11, role: 'child',
+  })
+  assert.equal(homeDecision('DELETE', '/api/events/1').status, 'permission-denied')
+  assert.equal(homeDecision('POST', '/API/events').status, 'unreviewed-home-route')
+  assert.equal(homeDecision('POST', '/api/events/01').status, 'unreviewed-home-route')
+  const audited = recordPrivateHomeWriteAudit(db, {
+    householdId: 'family-a', serverVerifiedKioskUserId: ownerId,
+    serverVerifiedSessionId: kioskSessionId, attribution: childWrite.attribution,
+    method: 'POST', route: '/api/events', resourceId: 1,
+  })
+  assert.ok(audited > 0)
+  assert.deepEqual(db.prepare([
+    'SELECT actor_kind AS kind, actor_user_id AS userId,',
+    'kiosk_session_id AS sessionId FROM private_home_write_audit WHERE id=?',
+  ].join(' ')).get(audited), {
+    kind: 'verified-person', userId: childId, sessionId: kioskSessionId,
+  })
   setFamilyMemberPermission(db, {
     householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
     targetUserId: childId, action: 'events.create', enabled: false,
@@ -174,6 +215,24 @@ test('four-digit Home proof requires an Owner-enrolled device, real linked Perso
     pinEnabled: false,
   })
   assert.equal(resolve(), null, 'PIN off invalidates all existing proofs')
+  const sharedCreate = homeDecision('POST', '/api/events', null)
+  assert.equal(sharedCreate.status, 'allowed-write')
+  assert.deepEqual(sharedCreate.attribution, {
+    kind: 'shared-home', userId: null, personId: null,
+  })
+  assert.equal(homeDecision('PUT', '/api/events/1', null).status, 'allowed-write')
+  assert.equal(homeDecision('POST', '/api/lists', null).status, 'allowed-write')
+  assert.equal(homeDecision('DELETE', '/api/events/1', null).status, 'permission-denied')
+  assert.equal(homeDecision('POST', '/api/people', null).status, 'unreviewed-home-route')
+  const sharedAuditId = recordPrivateHomeWriteAudit(db, {
+    householdId: 'family-a', serverVerifiedKioskUserId: ownerId,
+    serverVerifiedSessionId: kioskSessionId, attribution: sharedCreate.attribution,
+    method: 'POST', route: '/api/events', resourceId: 2,
+  })
+  assert.deepEqual(db.prepare([
+    'SELECT actor_kind AS kind, actor_user_id AS userId',
+    'FROM private_home_write_audit WHERE id=?',
+  ].join(' ')).get(sharedAuditId), { kind: 'shared-home', userId: null })
   assert.deepEqual(await attempt('1234'), { status: 'disabled' })
   setPrivateHomePinPolicy(db, {
     householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
