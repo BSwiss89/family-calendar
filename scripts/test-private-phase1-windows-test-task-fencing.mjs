@@ -7,8 +7,9 @@ import { fileURLToPath } from 'node:url'
 const psFile = fileURLToPath(new URL('./inspect-private-phase1-windows-test-task-fingerprints.ps1', import.meta.url))
 test('PowerShell 5.1 inspector parses without touching Windows Task Scheduler',()=>{
   if (process.platform !== 'win32') return
-  const expression = "$t=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseFile($args[0],[ref]$t,[ref]$e)|Out-Null;if(@($e).Count){exit 23}"
-  const output=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',expression,psFile],{
+  const escapedPath=psFile.replaceAll("'", "''")
+  const expression = `$t=$null;$e=$null;[System.Management.Automation.Language.Parser]::ParseFile('${escapedPath}',[ref]$t,[ref]$e)|Out-Null;if(@($e).Count){exit 23}`
+  const output=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',expression],{
     encoding:'utf8', windowsHide:true, timeout:12000,
   })
   assert.equal(output.status,0,'read-only Task Scheduler inspector must parse cleanly')
