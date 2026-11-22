@@ -1337,7 +1337,7 @@ test('two invited Owners activate into isolated real localhost backends without 
     })).status, 403, 'operator cannot load Owner-specific pilot assets')
     assert.equal((await request('/phase1', {
       cookie: childHomeCookie,
-    })).status, 403, 'Child cannot enter Owner-only Phase 1')
+    })).status, 404, 'Phase 1 gate hides Owner-only page from Child')
     assert.equal((await request('/phase1')).status, 303,
       'anonymous browser must be sent through signed-in login')
     assert.equal((await request('/phase1?role=owner', {
