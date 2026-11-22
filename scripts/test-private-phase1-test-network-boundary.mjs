@@ -84,6 +84,55 @@ test('deny wrong/duplicate portproxy and gateway to backend bypass', () => {
     connectAddress: '127.0.0.1', connectPort: 13005 })
   assert(inspect(x).blockers.some(x => /conflicting/.test(x)))
 })
+function preRoute() {
+  const x = candidate()
+  x.phase = 'pre-route'
+  x.portproxyRules = [{ ...proxy }]
+  return x
+}
+test('pre-route stage confirms legacy service stopped while forwarding is still unchanged', () => {
+  const phase = inspect(preRoute())
+  assert.equal(phase.observedBaselineMatches, false)
+  assert.equal(phase.preRouteTopologyMatches, true)
+  assert.equal(phase.candidateNetworkTopologyMatches, false)
+  assert.deepEqual(phase.rollbackReference.originalPortproxy, proxy)
+  assert.equal(phase.testDeploymentAuthorized, false)
+  assert.equal(phase.portproxyOrServiceChanged, false)
+  const wrong = preRoute()
+  wrong.portproxyRules[0].connectPort = 13004
+  assert.equal(inspect(wrong).preRouteTopologyMatches, false,
+    'gateway may not be routed until old backend is fenced and reviewed')
+  const activeLegacy = preRoute()
+  activeLegacy.listeners.push(listener(address, 13002, 'legacy-test'))
+  assert.equal(inspect(activeLegacy).preRouteTopologyMatches, false)
+  assert(inspect(activeLegacy).blockers.some(b => /direct bypass/.test(b)))
+})
+test('deny extra portproxy paths to legacy backend or household SQLite services', () => {
+  let x = candidate()
+  x.portproxyRules.push({
+    listenAddress: '127.0.0.1', listenPort: 14222,
+    connectAddress: address, connectPort: 13002,
+  })
+  assert(inspect(x).blockers.some(b => /Unreviewed forwarding/.test(b)))
+  x = candidate()
+  x.portproxyRules.push({
+    listenAddress: '0.0.0.0', listenPort: 14223,
+    connectAddress: '127.0.0.1', connectPort: 13005,
+  })
+  assert(inspect(x).blockers.some(b => /Unreviewed forwarding/.test(b)))
+  x = candidate()
+  x.portproxyRules.push({
+    listenAddress: '0.0.0.0', listenPort: 14224,
+    connectAddress: '127.0.0.1', connectPort: 13004,
+  })
+  assert(inspect(x).blockers.some(b => /Unreviewed forwarding/.test(b)))
+  x = preRoute()
+  x.portproxyRules.push({
+    listenAddress: '127.0.0.1', listenPort: 14225,
+    connectAddress: '127.0.0.1', connectPort: 13006,
+  })
+  assert.equal(inspect(x).preRouteTopologyMatches, false)
+})
 test('deny exposed, missing, duplicated and protected private listeners', () => {
   let x = candidate()
   x.listeners[1].address = '0.0.0.0'
