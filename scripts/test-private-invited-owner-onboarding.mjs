@@ -623,6 +623,9 @@ test('two invited Owners activate into isolated real localhost backends without 
       backendPorts: {}, backendTokens: {},
       independentHouseholdAdministratorUserIds: [operatorId],
       allowEmptyGatewayBootstrap: true,
+      // This is the strict member-role pilot. Other existing test and hosted
+      // calendars keep their previous default-OFF enforcement behavior.
+      enforceFamilyMemberPermissions: true,
     })
     const base = gateway.base
     async function request(route, { cookie, body, method, headers = {} } = {}) {
@@ -797,6 +800,137 @@ test('two invited Owners activate into isolated real localhost backends without 
     assert.deepEqual((await request('/api/events', { cookie: a.cookie })).payload, [])
     assert.deepEqual((await request('/api/events', { cookie: b.cookie })).payload
       .map(e => e.title), ['Only invited household B'])
+
+    // A household Owner can invite a non-Owner account, but that account is
+    // NOT allowed to use calendar APIs until the Owner configures a role.
+    // All checks below go through real signed sessions, the optional strict
+    // gateway role middleware and the separate localhost calendar backends.
+    const memberInvitation = await request('/api/households/member-invitations', {
+      cookie: a.cookie, method: 'POST',
+    })
+    assert.equal(memberInvitation.status, 201)
+    assert.match(memberInvitation.payload.token, /^[a-f0-9]{64}$/)
+    const memberUsername = 'invitedfamilychild'
+    const memberSignup = await request('/api/households/join', {
+      body: {
+        token: memberInvitation.payload.token,
+        username: memberUsername, displayName: 'Invited family Child', password,
+      },
+    })
+    assert.equal(memberSignup.status, 201)
+    assert.equal(memberSignup.response.headers.get('set-cookie'), null,
+      'joining cannot automatically grant an authenticated session')
+    const childCookie = await login(memberUsername, password)
+    const memberId = identityDatabase.prepare(
+      'SELECT id FROM family_users WHERE username = ?'
+    ).get(memberUsername).id
+    assert.equal((await request('/api/events', { cookie: childCookie })).status, 403,
+      'unconfigured member fails closed, even with a real signed login')
+    assert.equal((await request('/api/households/member-access', {
+      cookie: childCookie,
+    })).status, 403, 'Child/member never gains the Owner roster')
+    const memberTypeUrl = '/api/households/members/' + memberId + '/type'
+    const memberGrantUrl = '/api/households/members/' + memberId + '/permission'
+    assert.equal((await request(memberTypeUrl, {
+      cookie: b.cookie, body: {
+        memberType: 'adult', ownerPassword: password,
+      },
+    })).status, 403, 'another Owner cannot change this family member')
+    assert.equal((await request(memberTypeUrl, {
+      cookie: a.cookie, body: {
+        memberType: 'child', ownerPassword: password,
+      },
+    })).status, 200)
+    assert.equal((await request('/api/households/my-member-access', {
+      cookie: childCookie,
+    })).payload.memberType, 'child')
+    assert.equal((await request('/api/events', { cookie: childCookie })).status, 200)
+    assert.equal((await request('/api/people', { cookie: childCookie })).status, 200)
+    assert.equal((await request('/api/lists', { cookie: childCookie })).status, 403,
+      'Child has no list-view grant by default')
+    const childHome = await request('/api/auth/device-profile', {
+      cookie: childCookie, body: { kind: 'home' },
+    })
+    assert.equal(childHome.status, 200)
+    assert.equal((await request('/api/events', {
+      cookie: childCookie,
+      body: { title: 'Forged Home event', date: '2026-12-22',
+        selectedProfile: 'Home', role: 'owner' },
+      headers: { 'x-household-id': b.id },
+    })).status, 403, 'Home avatar and household header cannot elevate Child')
+    assert.equal((await request('/api/events/' + eventB.payload.id, {
+      cookie: childCookie, method: 'DELETE',
+      headers: { 'x-household-id': b.id },
+    })).status, 403)
+    assert.equal((await request('/api/lists', {
+      cookie: childCookie, body: { name: 'Unauthorized shopping list' },
+    })).status, 403)
+    assert.deepEqual((await request('/api/events', { cookie: b.cookie })).payload
+      .map(event => event.title), ['Only invited household B'])
+
+    // Actual Owner password step-up can explicitly allow one action, and
+    // revoking that grant must take effect on the same signed-in session.
+    assert.equal((await request(memberGrantUrl, {
+      cookie: a.cookie, body: {
+        action: 'events.create', enabled: true, ownerPassword: password,
+      },
+    })).status, 200)
+    const authorizedChildEvent = await request('/api/events', {
+      cookie: childCookie, body: {
+        date: '2026-12-23', title: 'A Child-created event in family A', time: '09:00',
+      }, headers: { 'x-household-id': b.id },
+    })
+    assert.equal(authorizedChildEvent.status, 201)
+    assert.deepEqual((await request('/api/events', { cookie: b.cookie })).payload
+      .map(event => event.title), ['Only invited household B'],
+    'a Child grant in A can never write to B')
+    assert.equal((await request(memberGrantUrl, {
+      cookie: a.cookie, body: {
+        action: 'events.create', enabled: false, ownerPassword: password,
+      },
+    })).status, 200)
+    assert.equal((await request('/api/events', {
+      cookie: childCookie, body: {
+        date: '2026-12-24', title: 'Must not be created', time: '10:00',
+      },
+    })).status, 403)
+
+    // Upgrading to Adult changes the effective permissions ONLY inside the
+    // verified family. A second Owner cannot see or remove this member.
+    assert.equal((await request(memberTypeUrl, {
+      cookie: a.cookie, body: {
+        memberType: 'adult', ownerPassword: password,
+      },
+    })).status, 200)
+    assert.equal((await request('/api/households/my-member-access', {
+      cookie: childCookie,
+    })).payload.memberType, 'adult')
+    const adultList = await request('/api/lists', {
+      cookie: childCookie, body: { name: 'Adult shopping within A' },
+      headers: { 'x-household-id': b.id },
+    })
+    assert.equal(adultList.status, 201)
+    assert.deepEqual((await request('/api/lists', { cookie: b.cookie })).payload
+      .map(list => list.name), ['Invited B shopping'])
+    const otherOwnerMembers = await request('/api/households/member-access', {
+      cookie: b.cookie,
+    })
+    assert.equal(otherOwnerMembers.status, 200)
+    assert.equal(otherOwnerMembers.payload.members.some(member =>
+      member.userId === memberId), false)
+    assert.equal((await request('/api/households/members/' + memberId + '/remove', {
+      cookie: b.cookie, method: 'POST',
+    })).status, 404, 'another Owner cannot remove the member')
+    const memberRemoved = await request('/api/households/members/' + memberId + '/remove', {
+      cookie: a.cookie, method: 'POST',
+    })
+    assert.equal(memberRemoved.status, 200)
+    assert.equal((await request('/api/events', { cookie: childCookie })).status, 403,
+      'revoked member immediately loses calendar data access')
+    assert.equal((await request('/api/lists', { cookie: childCookie })).status, 403,
+      'revoked member immediately loses list access')
+    assert.equal((await request('/api/events', { cookie: b.cookie })).status, 200,
+      'revocation in household A never affects B')
 
     // Reuse the same local Person ID to prove lookup is tenant-scoped, not a
     // central People table or the currently selected browser avatar.
