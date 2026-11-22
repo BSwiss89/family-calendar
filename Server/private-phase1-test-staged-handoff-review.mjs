@@ -3,11 +3,12 @@
 // move portproxy, register tasks, authorize TEST or touch LIVE. All evidence is
 // caller-supplied (synthetic in CI) and is NOT an independently verified receipt.
 import { assessPrivatePhase1TestRoutingBoundary } from './private-phase1-test-network-boundary.mjs'
+import { assessPrivatePhase1WindowsTaskFencing } from './private-phase1-windows-test-task-fencing.mjs'
 
 const SHA = /^[a-f0-9]{40}$/
 const KIND = 'phase1-test-cutover-simulation-v1'
 const PHASES = Object.freeze([
-  'baseline-reviewed', 'preparation-reported', 'legacy-fenced-reported',
+  'baseline-reviewed', 'preparation-reported', 'test-tasks-fenced-reported', 'legacy-fenced-reported',
   'offline-backup-reported', 'private-ready-reported', 'new-route-reported',
   'canary-reported', 'requires-operator-review',
 ])
@@ -20,8 +21,12 @@ const STEP_RULES = Object.freeze({
       'liveProcessAndRoutingProtected', 'approvedMigrationPlanReviewed',
     ],
   },
+  'observe-test-task-fence': {
+    from: 'preparation-reported', to: 'test-tasks-fenced-reported',
+    taskFencing: true,
+  },
   'observe-legacy-fence': {
-    from: 'preparation-reported', to: 'legacy-fenced-reported',
+    from: 'test-tasks-fenced-reported', to: 'legacy-fenced-reported',
     topology: 'legacy-fenced', check: 'legacyFenceTopologyMatches',
   },
   'report-offline-backup': {
@@ -129,7 +134,7 @@ export function beginPrivatePhase1TestCutoverReview({
   return review
 }
 export function advancePrivatePhase1TestCutoverReview(review, {
-  step, topology = null, evidence = null,
+  step, topology = null, evidence = null, taskSnapshots = null,
 } = {}) {
   assertReview(review)
   if (review.phase === 'requires-operator-review') {
@@ -139,15 +144,36 @@ export function advancePrivatePhase1TestCutoverReview(review, {
   if (!rule || review.phase !== rule.from) {
     refuse('unexpected cutover order or stage replay.')
   }
-  if (rule.topology) {
-    if (evidence !== null) refuse('topology steps cannot replace observations with attestations.')
+  if (rule.taskFencing) {
+    if (topology !== null || evidence !== null || !taskSnapshots ||
+        typeof taskSnapshots !== 'object' || Array.isArray(taskSnapshots) ||
+        Object.keys(taskSnapshots).length !== 2) {
+      refuse('exact task baseline and fenced observations are required.')
+    }
+    // This check correlates the fixed TEST revision with both Task Scheduler
+    // snapshots. They remain caller-supplied and NEVER prove process exit or
+    // watchdog exclusion: see explicit false receipt flags below.
+    const reviewed = assessPrivatePhase1WindowsTaskFencing({
+      baseline: taskSnapshots.baseline,
+      maintenance: taskSnapshots.maintenance,
+      expectedInstalledTestSha: review.installedTestSha,
+    })
+    if (!reviewed.observedTaskStatesMatch ||
+        reviewed.blockers.length ||
+        reviewed.safeToCutover !== false) {
+      refuse('TEST scheduler collision, task-definition drift or incomplete fencing.')
+    }
+  } else if (rule.topology) {
+    if (taskSnapshots !== null || evidence !== null) {
+      refuse('topology steps cannot replace observations with attestations.')
+    }
     const check = snapshotMatches(review, topology, rule.topology)
     if (!check[rule.check] || check.blockers.length !== 0 ||
         check.testDeploymentAuthorized !== false) {
       refuse('private TEST stage has unexpected listeners or bypass routing.')
     }
   } else {
-    if (topology !== null || !evidence || typeof evidence !== 'object' ||
+    if (topology !== null || taskSnapshots !== null || !evidence || typeof evidence !== 'object' ||
         Array.isArray(evidence) ||
         Object.keys(evidence).length !== rule.checks.length ||
         rule.checks.some(name => evidence[name] !== true)) {
