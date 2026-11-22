@@ -30,6 +30,14 @@ export function createEventCreatorAuditTables(identityDb) {
     ') STRICT;',
     'CREATE INDEX IF NOT EXISTS event_creator_user_idx',
     'ON event_creator_audit(created_by_user_id);',
+    // Separate source attribution for PIN-disabled shared Home creation.
+    // Do not pretend the kiosk Owner personally created that event.
+    'CREATE TABLE IF NOT EXISTS private_home_event_creator_audit (',
+    'household_id INTEGER NOT NULL REFERENCES household_registry(id),',
+    'event_id INTEGER NOT NULL CHECK(event_id > 0),',
+    'created_at INTEGER NOT NULL,',
+    'PRIMARY KEY(household_id,event_id)',
+    ') STRICT;',
   ].join(' '))
 }
 
@@ -63,6 +71,41 @@ export function recordAuthenticatedEventCreator(identityDb, {
     'created_by_user_id = excluded.created_by_user_id,',
     'created_at = excluded.created_at',
   ].join(' ')).run(householdDbId, eventId, verifiedUserId, Date.now())
+  identityDb.prepare([
+    'DELETE FROM private_home_event_creator_audit',
+    'WHERE household_id=? AND event_id=?',
+  ].join(' ')).run(householdDbId, eventId)
+}
+
+// PIN OFF is still a verified, enrolled shared Home session, not a human
+// author. Only call after a successful real backend event creation.
+export function recordSharedHomeEventCreator(identityDb, {
+  verifiedKioskOwnerUserId, verifiedHouseholdId, eventId, trustedSourceDb,
+}) {
+  createEventCreatorAuditTables(identityDb)
+  const householdDbId = authorized(identityDb,
+    verifiedKioskOwnerUserId, verifiedHouseholdId)
+  if (!Number.isSafeInteger(eventId) || eventId < 1 ||
+      !trustedSourceDb || typeof trustedSourceDb.prepare !== 'function' ||
+      !trustedSourceDb.prepare('SELECT 1 FROM events WHERE id=?').get(eventId)) {
+    throw new Error('Created shared Home event was not committed.')
+  }
+  identityDb.exec('BEGIN IMMEDIATE')
+  try {
+    identityDb.prepare([
+      'DELETE FROM event_creator_audit WHERE household_id=? AND event_id=?',
+    ].join(' ')).run(householdDbId, eventId)
+    identityDb.prepare([
+      'INSERT INTO private_home_event_creator_audit',
+      '(household_id,event_id,created_at) VALUES (?,?,?)',
+      'ON CONFLICT(household_id,event_id) DO UPDATE SET',
+      'created_at=excluded.created_at',
+    ].join(' ')).run(householdDbId, eventId, Date.now())
+    identityDb.exec('COMMIT')
+  } catch (error) {
+    identityDb.exec('ROLLBACK')
+    throw error
+  }
 }
 
 /**
@@ -87,13 +130,24 @@ export function listAuthenticatedEventCreators(identityDb, {
     'LIMIT 5000',
   ].join(' ')).all(householdDbId)
   const exists = trustedSourceDb.prepare('SELECT 1 FROM events WHERE id = ?')
-  return all.filter(row => exists.get(row.eventId)).map(row => ({
+  const people = all.filter(row => exists.get(row.eventId)).map(row => ({
     eventId: row.eventId,
     displayName: row.displayName,
     username: row.username,
     accountKind: row.accountKind,
     createdAt: row.createdAt,
   }))
+  const sharedHome = identityDb.prepare([
+    'SELECT event_id AS eventId, created_at AS createdAt',
+    'FROM private_home_event_creator_audit',
+    'WHERE household_id=? ORDER BY event_id LIMIT 5000',
+  ].join(' ')).all(householdDbId)
+    .filter(row => exists.get(row.eventId))
+    .map(row => ({
+      eventId: row.eventId, displayName: 'Shared Home',
+      username: null, accountKind: 'home', createdAt: row.createdAt,
+    }))
+  return [...people, ...sharedHome].sort((a, b) => a.eventId - b.eventId)
 }
 
 /**
@@ -112,5 +166,9 @@ export function cleanupDeletedEventCreator(identityDb, {
   const changed = identityDb.prepare([
     'DELETE FROM event_creator_audit WHERE household_id = ? AND event_id = ?',
   ].join(' ')).run(householdDbId, eventId)
-  return changed.changes === 1
+  const home = identityDb.prepare([
+    'DELETE FROM private_home_event_creator_audit',
+    'WHERE household_id=? AND event_id=?',
+  ].join(' ')).run(householdDbId, eventId)
+  return changed.changes === 1 || home.changes === 1
 }

@@ -133,15 +133,33 @@ export function disablePrivateHomeKiosk(db, {
   householdId, serverVerifiedOwnerUserId, serverVerifiedSessionId, now = Date.now(),
 }) {
   createPrivateHomeActorTables(db)
-  const key = requireOwner(db, householdId, serverVerifiedOwnerUserId)
-  const sessionId = requireId(serverVerifiedSessionId)
-  const changes = db.prepare([
-    'UPDATE private_home_kiosk_sessions SET disabled_at=?',
-    'WHERE household_id=? AND session_id=? AND enrolled_by_user_id=?',
-    'AND disabled_at IS NULL',
-  ].join(' ')).run(now, key, sessionId, serverVerifiedOwnerUserId).changes
-  db.prepare('DELETE FROM private_home_actor_proofs WHERE session_id=?').run(sessionId)
-  return { trustedHome: false, changed: changes === 1 }
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const key = requireOwner(db, householdId, serverVerifiedOwnerUserId)
+    const sessionId = requireId(serverVerifiedSessionId)
+    const changes = db.prepare([
+      'UPDATE private_home_kiosk_sessions SET disabled_at=?',
+      'WHERE household_id=? AND session_id=? AND enrolled_by_user_id=?',
+      'AND disabled_at IS NULL',
+    ].join(' ')).run(now, key, sessionId, serverVerifiedOwnerUserId).changes
+    db.prepare('DELETE FROM private_home_actor_proofs WHERE session_id=?').run(sessionId)
+    // Critical: reverting an enrolled shared display to an ordinary Owner
+    // browser session would immediately restore unrestricted Owner rights.
+    // Retire the Owner cookie together with the kiosk enrollment so that a
+    // person must explicitly sign in again on a personal device.
+    if (changes === 1) {
+      const revoked = db.prepare([
+        'UPDATE family_sessions SET revoked_at=?',
+        'WHERE id=? AND user_id=? AND revoked_at IS NULL',
+      ].join(' ')).run(now, sessionId, serverVerifiedOwnerUserId).changes
+      if (revoked !== 1) throw new Error('Kiosk Owner session revocation unavailable.')
+    }
+    db.exec('COMMIT')
+    return { trustedHome: false, changed: changes === 1 }
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
 }
 
 export function isPrivateHomeKioskTrusted(db, {

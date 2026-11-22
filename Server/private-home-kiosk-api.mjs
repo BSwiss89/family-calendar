@@ -114,11 +114,18 @@ export function installPrivateHomeKioskIdentity(app, {
         typeof request.body.ownerPassword !== 'string') {
       return response.status(400).json({ error: 'Owner password required.' })
     }
-    return verifiedOwner(request, response, (householdId, ownerUserId, sessionId) =>
-      response.json(disablePrivateHomeKiosk(identityDatabase, {
+    return verifiedOwner(request, response, (householdId, ownerUserId, sessionId) => {
+      const result = disablePrivateHomeKiosk(identityDatabase, {
         householdId, serverVerifiedOwnerUserId: ownerUserId,
         serverVerifiedSessionId: sessionId,
-      })))
+      })
+      if (result.changed) {
+        response.clearCookie('__Host-fc_gateway_session', {
+          httpOnly: true, secure: true, sameSite: 'strict', path: '/',
+        })
+      }
+      return response.json(result)
+    })
   })
 
   app.post(prefix + '/home-pins/:memberId', parse, (request, response) => {

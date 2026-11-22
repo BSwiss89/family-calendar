@@ -26,7 +26,7 @@ import { createPrivateGatewayDevicePersonResolver } from './private-gateway-devi
 import { resolvePrivateFamilyLanding, installPrivateFamilyEntryRouting } from './private-family-entry-routing.mjs'
 import {
   createEventCreatorAuditTables, recordAuthenticatedEventCreator,
-  listAuthenticatedEventCreators, cleanupDeletedEventCreator,
+  recordSharedHomeEventCreator, listAuthenticatedEventCreators, cleanupDeletedEventCreator,
 } from './event-creator-audit.mjs'
 import {
   listGrantedHouseholdsForSessionUser,
@@ -56,6 +56,8 @@ import { installPrivateMemberRouteEnforcement } from './family-member-route-enfo
 import { revokeHouseholdMemberAccess } from './household-member-access-revocation.mjs'
 import { readPrivateHomePinPolicy, setPrivateHomePinPolicy } from './private-home-pin-policy.mjs'
 import { installPrivateHomeKioskIdentity } from './private-home-kiosk-api.mjs'
+import { installPrivateSharedHomeWriteGate } from './private-shared-home-write-gate.mjs'
+import { createPrivateHomeWriteAuditTables, recordPrivateHomeWriteAudit } from './private-home-write-audit.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { createPrivateActivationRecords, approvePrivateHouseholdActivation,
   assertApprovedPrivateHousehold } from './private-household-activation-records.mjs'
@@ -89,6 +91,8 @@ const REQUEST_REMOVED = new Set([
   ...HOP_HEADERS,
   'cookie', 'authorization', 'host', PRIVATE_UPSTREAM_HEADER,
   'forwarded', 'x-forwarded-for', 'x-forwarded-host',
+  // A proof is a session-bound secret. NEVER forward it to the legacy backend.
+  'x-fc-home-actor-proof',
   'x-forwarded-proto', 'x-real-ip', 'cf-connecting-ip',
 ])
 const RESPONSE_REMOVED = new Set([
@@ -616,6 +620,25 @@ export async function startPrivateHouseholdGateway({
   installFamilyAuth(app, identityDatabase, serverDirectory, 'required', {
     cookieName: '__Host-fc_gateway_session', resolveDevicePersonName,
     resolveSignedInLanding,
+    denyPrivateGatewayKioskDeviceManagement: session => Boolean(
+      identityDatabase.prepare([
+        'SELECT 1 FROM private_home_kiosk_sessions',
+        'WHERE session_id=? AND disabled_at IS NULL',
+      ].join(' ')).get(session.id)
+    ),
+  })
+  // Register the dedicated PIN enrollment/challenge routes BEFORE the Home
+  // action gate. Owner changes here always require a real account password.
+  const privateHomeIdentity = installPrivateHomeKioskIdentity(app, {
+    identityDatabase, serverDirectory, storageRoot,
+    trustedHousehold, ownerPasswordStepUp,
+  })
+  // Every later route, including Owner administrative routes, Arney and the
+  // backend proxy, is subject to a DENY-by-default shared Home action gate.
+  // A Home avatar alone is not an enrollment; personal phones are unchanged.
+  installPrivateSharedHomeWriteGate(app, {
+    identityDatabase, serverDirectory, storageRoot, trustedHousehold,
+    resolveHomeActorProof: privateHomeIdentity.resolveHomeActorProof,
   })
   // Operator review and opt-in contact editing require a verified existing
   // session, and one more real password check before sensitive writes.
@@ -663,6 +686,7 @@ export async function startPrivateHouseholdGateway({
     })
   }
   createEventCreatorAuditTables(identityDatabase)
+  createPrivateHomeWriteAuditTables(identityDatabase)
 
   app.get('/api/health', (_request, response) => {
     response.json({ status: 'ok' })
@@ -1116,13 +1140,6 @@ export async function startPrivateHouseholdGateway({
       }
     })
 
-  // Private opt-in kiosk/PIN identity endpoints; these never weaken the
-  // existing member route policy or activate shared Home writes by themselves.
-  installPrivateHomeKioskIdentity(app, {
-    identityDatabase, serverDirectory, storageRoot,
-    trustedHousehold, ownerPasswordStepUp,
-  })
-
   app.use('/api/households', (_request, response) => {
     response.status(404).json({ error: 'Not found.' })
   })
@@ -1568,6 +1585,7 @@ export async function startPrivateHouseholdGateway({
     const shouldSync = sourceEventId !== null
     const safeEventId = shouldSync
     const isCreate = policy.isCreate === true
+    const privateHomeActor = response.locals.privateHomeActor ?? null
     // Persist source-event intent BEFORE forwarding the request. Once the
     // household backend commits, a process death cannot lose this marker.
     // Even a failed backend request is safe to reconcile against final truth.
@@ -1609,7 +1627,7 @@ export async function startPrivateHouseholdGateway({
       response.locals.eventMutationSettled = settle
     }
 
-    const mutationHook = (shouldSync && safeEventId) || isCreate
+    const mutationHook = (shouldSync && safeEventId) || isCreate || privateHomeActor
       ? (backendResponseBody) => {
         const resolved = resolveHouseholdStorage({
           serverDirectory,
@@ -1618,15 +1636,24 @@ export async function startPrivateHouseholdGateway({
         })
         const sourceDatabase = new DatabaseSync(resolved.databasePath, { readOnly: true })
         try {
-          if (isCreate && typeof backendResponseBody === 'string') {
-            let created
+          let created
+          if (typeof backendResponseBody === 'string') {
             try { created = JSON.parse(backendResponseBody) } catch { created = null }
-            if (Number.isSafeInteger(created?.id) && created.id > 0) {
-              recordAuthenticatedEventCreator(identityDatabase, {
-                verifiedUserId: request.familyAccount.user_id,
+          }
+          if (isCreate && Number.isSafeInteger(created?.id) && created.id > 0) {
+            if (privateHomeActor?.kind === 'shared-home') {
+              recordSharedHomeEventCreator(identityDatabase, {
+                verifiedKioskOwnerUserId: request.familyAccount.user_id,
                 verifiedHouseholdId: household.householdId,
-                eventId: created.id,
-                trustedSourceDb: sourceDatabase,
+                eventId: created.id, trustedSourceDb: sourceDatabase,
+              })
+            } else {
+              // On a kiosk, the real PIN-verified person is the author,
+              // never the Owner identity that enrolled the shared device.
+              recordAuthenticatedEventCreator(identityDatabase, {
+                verifiedUserId: privateHomeActor?.userId ?? request.familyAccount.user_id,
+                verifiedHouseholdId: household.householdId,
+                eventId: created.id, trustedSourceDb: sourceDatabase,
               })
             }
           } else if (shouldSync && safeEventId) {
@@ -1640,6 +1667,20 @@ export async function startPrivateHouseholdGateway({
                 trustedSourceDb: sourceDatabase,
               })
             }
+          }
+          if (privateHomeActor) {
+            // A successful backend response, not a claimed browser role,
+            // determines whether a Home write is attributed. This audit is
+            // not yet a crash-proof intent journal: keep release on HOLD.
+            recordPrivateHomeWriteAudit(identityDatabase, {
+              householdId: household.householdId,
+              serverVerifiedKioskUserId: request.familyAccount.user_id,
+              serverVerifiedSessionId: request.familyAccount.id,
+              attribution: privateHomeActor,
+              method: request.method, route: request.originalUrl,
+              resourceId: Number.isSafeInteger(created?.id) && created.id > 0
+                ? created.id : sourceEventId,
+            })
           }
         } finally {
           sourceDatabase.close()
