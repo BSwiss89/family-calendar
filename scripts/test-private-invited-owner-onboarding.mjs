@@ -1315,6 +1315,27 @@ test('two invited Owners activate into isolated real localhost backends without 
     assert.equal(new URL(gateway.base).hostname, '127.0.0.1',
       'fixed-port Phase 1 gateway remains private to local host')
     base = gateway.base
+    // Phase 1 must not be bypassed by connecting directly to the privately
+    // bound family backend. A valid gateway cookie/tenant header is NOT an
+    // upstream service secret. A different household's secret also fails.
+    for (const [backend, other] of [[backendA, backendB], [backendB, backendA]]) {
+      const directUrl = 'http://127.0.0.1:' + backend.port + '/api/events'
+      const withoutServiceToken = await fetch(directUrl, {
+        headers: { Cookie: untrustedSession, 'x-household-id': other.householdId },
+        signal: AbortSignal.timeout(7000),
+      })
+      assert.equal(withoutServiceToken.status, 403,
+        'Owner cookie and forged tenant selector cannot bypass private upstream guard')
+      const wrongHouseholdToken = await fetch(directUrl, {
+        headers: {
+          'x-family-calendar-upstream-token': other.upstreamToken,
+          Cookie: untrustedSession,
+        },
+        signal: AbortSignal.timeout(7000),
+      })
+      assert.equal(wrongHouseholdToken.status, 403,
+        'another household upstream token cannot unlock this backend')
+    }
     const pilotStart = await request('/', { cookie: untrustedSession })
     assert.equal(pilotStart.status, 303)
     assert.equal(pilotStart.response.headers.get('location'), '/phase1',
