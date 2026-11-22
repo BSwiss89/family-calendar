@@ -1309,6 +1309,41 @@ test('two invited Owners activate into isolated real localhost backends without 
       phase1OwnerPilotOnly: true,
     })
     base = gateway.base
+    const pilotStart = await request('/', { cookie: untrustedSession })
+    assert.equal(pilotStart.status, 303)
+    assert.equal(pilotStart.response.headers.get('location'), '/phase1',
+      'activated household Owner enters the limited Phase 1 UI')
+    for (const ownerCookie of [untrustedSession, b.cookie]) {
+      const screen = await request('/phase1', { cookie: ownerCookie })
+      assert.equal(screen.status, 200)
+      assert.match(screen.payload, /Phase 1: household account isolation/)
+      assert.match(screen.payload, /id="event-form"/)
+      assert.match(screen.payload, /id="list-form"/)
+      assert.match(screen.response.headers.get('content-security-policy'), /frame-ancestors 'none'/)
+      assert.equal(screen.response.headers.get('cache-control'), 'no-store')
+      const script = await request('/auth/phase1-pilot.js', { cookie: ownerCookie })
+      assert.equal(script.status, 200)
+      assert.match(script.payload, /\/api\/events/)
+      assert.match(script.payload, /\/api\/lists/)
+      const stylesheet = await request('/auth/phase1-pilot.css', {
+        cookie: ownerCookie,
+      })
+      assert.equal(stylesheet.status, 200)
+    }
+    assert.equal((await request('/phase1', { cookie: operator })).status, 403,
+      'operator cannot enter household calendar screen')
+    assert.equal((await request('/auth/phase1-pilot.js', {
+      cookie: operator,
+    })).status, 403, 'operator cannot load Owner-specific pilot assets')
+    assert.equal((await request('/phase1', {
+      cookie: childHomeCookie,
+    })).status, 404, 'Phase 1 gate hides Owner-only page from Child')
+    assert.equal((await request('/phase1')).status, 303,
+      'anonymous browser must be sent through signed-in login')
+    assert.equal((await request('/phase1?role=owner', {
+      cookie: untrustedSession,
+    })).status, 404, 'query alias cannot impersonate Owner landing')
+
     assert.equal((await request('/api/health')).status, 200,
       'private Phase 1 keeps generic no-session health status')
     assert.equal((await request('/api/events')).status, 401,

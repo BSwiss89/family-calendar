@@ -58,6 +58,7 @@ import { readPrivateHomePinPolicy, setPrivateHomePinPolicy } from './private-hom
 import { installPrivateHomeKioskIdentity } from './private-home-kiosk-api.mjs'
 import { installPrivateSharedHomeWriteGate } from './private-shared-home-write-gate.mjs'
 import { installPrivatePhase1OwnerPilotGate } from './private-phase1-owner-pilot-gate.mjs'
+import { installPrivatePhase1OwnerPilotUi } from './private-phase1-owner-pilot-ui.mjs'
 import { createPrivateHomeWriteAuditTables, recordPrivateHomeWriteAudit } from './private-home-write-audit.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { createPrivateActivationRecords, approvePrivateHouseholdActivation,
@@ -643,6 +644,13 @@ export async function startPrivateHouseholdGateway({
     installPrivatePhase1OwnerPilotGate(app, {
       identityDatabase,
       trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+    })
+    // Only after the strict phase gate: give configured invited Owners a
+    // usable narrow page instead of the full calendar SPA's disabled APIs.
+    installPrivatePhase1OwnerPilotUi(app, {
+      identityDatabase,
+      trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+      getRoutedHouseholdIds: () => [...portByHousehold.keys()],
     })
   }
   // Register the dedicated PIN enrollment/challenge routes BEFORE the Home

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Family Calendar — Phase 1 Owner Pilot</title>
+  <link rel="stylesheet" href="/auth/phase1-pilot.css">
+  <script src="/auth/phase1-pilot.js" type="module"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">FAMILY CALENDAR · TEST PILOT</p>
+        <h1 id="family-name">My household</h1>
+        <p class="summary">Phase 1: household account isolation and everyday events/lists. This is not the full family dashboard.</p>
+      </div>
+      <nav aria-label="Pilot actions">
+        <button type="button" id="refresh">Refresh</button>
+        <button type="button" id="logout">Sign out</button>
+      </nav>
+    </header>
+    <p id="notice" role="status" aria-live="polite">Loading your household…</p>
+    <section class="columns">
+      <article>
+        <h2>Calendar events</h2>
+        <form id="event-form">
+          <label>Title <input id="event-title" name="title" maxlength="120" required placeholder="Family appointment"></label>
+          <div class="pair">
+            <label>Date <input id="event-date" name="date" type="date" required></label>
+            <label>Time <input id="event-time" name="time" type="time"></label>
+          </div>
+          <button type="submit">Add event</button>
+        </form>
+        <div id="events" class="items" aria-live="polite"></div>
+      </article>
+      <article>
+        <h2>Shopping and lists</h2>
+        <form id="list-form">
+          <label>List name <input id="list-name" name="name" maxlength="100" required placeholder="Grocery list"></label>
+          <button type="submit">Create list</button>
+        </form>
+        <div id="lists" class="items" aria-live="polite"></div>
+      </article>
+      <article>
+        <h2>People (view only)</h2>
+        <p class="small">These profiles belong only to this household. Member account and permission editing comes in Phase 2.</p>
+        <div id="people" class="items" aria-live="polite"></div>
+      </article>
+    </section>
+    <footer>Advanced recipes, photos, Arney, shared Home PIN and member administration are intentionally unavailable during Phase 1.</footer>
+  </main>
+</body>
+</html>

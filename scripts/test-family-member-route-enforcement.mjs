@@ -17,6 +17,7 @@ import { readPrivateHomePinPolicy, setPrivateHomePinPolicy } from '../Server/pri
 import { authorizePrivateHomeRequest } from '../Server/private-shared-home-write-gate.mjs'
 import { recordPrivateHomeWriteAudit } from '../Server/private-home-write-audit.mjs'
 import { classifyPrivatePhase1PilotRoute, installPrivatePhase1OwnerPilotGate } from '../Server/private-phase1-owner-pilot-gate.mjs'
+import { getReadyPrivatePhase1Owner } from '../Server/private-phase1-owner-pilot-ui.mjs'
 import {
   createPrivateHomeActorTables, enrollPrivateHomeKiosk, disablePrivateHomeKiosk,
   isPrivateHomeKioskTrusted, setPrivateHomeActorPin, createPrivateHomePinVerifier,
@@ -309,6 +310,24 @@ test('shared Home PIN attempts rate-limit across people and trust is revoked wit
     householdId: 'family-a', serverVerifiedSessionId: sessionId,
   }), false)
   assert.deepEqual(await attempt(childId, '0000'), { status: 'untrusted' })
+})
+
+test('Phase 1 Owner pilot page requires current single-household Owner and active route', t => {
+  const { db, ownerId, childId, outsiderId } = fixture(t)
+  const ready = (id, operatorIds = []) => getReadyPrivatePhase1Owner(db, {
+    serverVerifiedUserId: id,
+    trustedAdministratorUserIds: operatorIds,
+    routedHouseholdIds: ['family-a'],
+  })
+  assert.deepEqual(ready(ownerId), { householdId: 'family-a', displayName: 'A' })
+  assert.equal(ready(ownerId, [ownerId]), null,
+    'a designated system operator cannot enter a tenant just because also Owner')
+  assert.equal(ready(childId), null)
+  assert.equal(ready(outsiderId), null, 'no configured route for the other family')
+  assert.equal(ready(null), null)
+  db.prepare('UPDATE household_memberships SET disabled=1 WHERE user_id=?')
+    .run(ownerId)
+  assert.equal(ready(ownerId), null, 'revocation takes effect without fresh login')
 })
 
 test('Phase 1 pilot allows only Owner calendar/lists and operator metadata', () => {
