@@ -199,10 +199,10 @@ test('four-digit Home proof requires an Owner-enrolled device, real linked Perso
     method: 'POST', route: '/api/events', resourceId: 1,
   })
   assert.ok(audited > 0)
-  assert.deepEqual(db.prepare([
+  assert.deepEqual({ ...db.prepare([
     'SELECT actor_kind AS kind, actor_user_id AS userId,',
     'kiosk_session_id AS sessionId FROM private_home_write_audit WHERE id=?',
-  ].join(' ')).get(audited), {
+  ].join(' ')).get(audited) }, {
     kind: 'verified-person', userId: childId, sessionId: kioskSessionId,
   })
   setFamilyMemberPermission(db, {
@@ -229,10 +229,10 @@ test('four-digit Home proof requires an Owner-enrolled device, real linked Perso
     serverVerifiedSessionId: kioskSessionId, attribution: sharedCreate.attribution,
     method: 'POST', route: '/api/events', resourceId: 2,
   })
-  assert.deepEqual(db.prepare([
+  assert.deepEqual({ ...db.prepare([
     'SELECT actor_kind AS kind, actor_user_id AS userId',
     'FROM private_home_write_audit WHERE id=?',
-  ].join(' ')).get(sharedAuditId), { kind: 'shared-home', userId: null })
+  ].join(' ')).get(sharedAuditId) }, { kind: 'shared-home', userId: null })
   assert.deepEqual(await attempt('1234'), { status: 'disabled' })
   setPrivateHomePinPolicy(db, {
     householdId: 'family-a', serverVerifiedOwnerUserId: ownerId,
