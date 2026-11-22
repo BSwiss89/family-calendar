@@ -1056,7 +1056,7 @@ test('two invited Owners activate into isolated real localhost backends without 
     assert.equal(verifiedPin.payload.verified, true)
     assert.match(verifiedPin.payload.proof, /^[a-f0-9]{64}$/)
     assert.equal(verifiedPin.payload.actorUserId, ownerAId)
-    const untrustedSession = await login('firsttwofamilyowner')
+    const untrustedSession = await login('firsttwofamilyowner', password)
     assert.equal((await request(verifyPin, {
       cookie: untrustedSession, body: { memberId: ownerAId, pin: '2468' },
     })).status, 403, 'same account on another device cannot borrow kiosk trust')
