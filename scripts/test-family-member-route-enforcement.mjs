@@ -259,6 +259,9 @@ test('four-digit Home proof requires an Owner-enrolled device, real linked Perso
   assert.deepEqual(disablePrivateHomeKiosk(db, {
     ...home(), serverVerifiedOwnerUserId: ownerId,
   }), { trustedHome: false, changed: true })
+  assert.ok(db.prepare('SELECT revoked_at FROM family_sessions WHERE id=?')
+    .get(kioskSessionId).revoked_at > 0,
+  'retiring a kiosk must also retire its underlying Owner login')
   assert.equal(isPrivateHomeKioskTrusted(db, home()), false)
   assert.deepEqual(await attempt('9876'), { status: 'untrusted' })
 })
