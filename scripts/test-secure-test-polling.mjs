@@ -71,11 +71,11 @@ test('status reporter cannot mutate deployment, tasks or local data', () => {
   assert.match(report, /REQUIRES-REVIEW\.txt/);
   assert.match(report, /IN-PROGRESS\.txt/);
   assert.match(report, /Read-SecureTestLastSuccessReceipt/);
-  assert.match(report, /read-secure-test-success-receipt\\.ps1/);
+  assert.match(report, /read-secure-test-success-receipt\.ps1/);
   assert.match(receiptReader, /TEST AUTO DEPLOY SUCCESS/);
-  assert.match(receiptReader, /System\\.IO\\.File\\]::ReadLines/);
+  assert.match(receiptReader, /System\.IO\.File\]::ReadLines/);
   assert.doesNotMatch(receiptReader, /(?:Set|Register|Unregister|Start|Stop|Disable|Enable)-ScheduledTask/);
-  assert.doesNotMatch(receiptReader, /New-Item|Set-Content|Remove-Item|Copy-Item|git\\s+(?:reset|checkout|fetch|merge|pull)|schtasks\\.exe/);
+  assert.doesNotMatch(receiptReader, /New-Item|Set-Content|Remove-Item|Copy-Item|git\s+(?:reset|checkout|fetch|merge|pull)|schtasks\.exe/);
   assert.match(report, /installed_sha_not_receipted/);
   assert.match(report, /last_backup_unverified/);
   assert.match(report, /\/api\/health/);
