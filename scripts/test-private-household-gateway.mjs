@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { startPrivateHouseholdGateway } from '../Server/private-household-gateway.mjs'
+import { startPrivateHouseholdGateway, resolvePrivatePhase1GatewayLoopbackPort } from '../Server/private-household-gateway.mjs'
 import { installPrivateEventIdentity } from '../Server/private-event-identity.mjs'
 import { installPrivateEventSourceOutbox } from '../Server/private-event-source-outbox.mjs'
 import { setPrivateLocalAiMonthlyLimit } from '../Server/private-local-ai-budget.mjs'
@@ -37,6 +37,30 @@ const serverDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 const entry = path.join(serverDirectory, 'index.mjs')
 const forbiddenPorts = new Set([3001, 13001, 13002, 13003, 11434])
 const testPassword = 'Strong-Only-For-Disposable-Gateway-Tests!'
+
+// A future Windows TEST cutover may pin a private gateway port, but only in
+// trusted Phase 1 mode. The ordinary disposable preview stays ephemeral.
+test('Phase 1 gateway fixed localhost port validates mode and protected bindings', () => {
+  assert.equal(resolvePrivatePhase1GatewayLoopbackPort(), 0)
+  assert.equal(resolvePrivatePhase1GatewayLoopbackPort({
+    port: null, phase1OwnerPilotOnly: false,
+  }), 0)
+  assert.equal(resolvePrivatePhase1GatewayLoopbackPort({
+    port: 13004, phase1OwnerPilotOnly: true, backendPorts: [13005, 13006],
+  }), 13004)
+  assert.throws(() => resolvePrivatePhase1GatewayLoopbackPort({
+    port: 13004, phase1OwnerPilotOnly: false,
+  }), /Phase 1 gateway listener port/)
+  assert.throws(() => resolvePrivatePhase1GatewayLoopbackPort({
+    port: 13004, phase1OwnerPilotOnly: true, backendPorts: [13004],
+  }), /Phase 1 gateway listener port/)
+  for (const port of [0, -1, 443, 8443, 3001, 13001, 13002, 13003,
+    11434, 65536, 13004.5, '13004', NaN]) {
+    assert.throws(() => resolvePrivatePhase1GatewayLoopbackPort({
+      port, phase1OwnerPilotOnly: true, backendPorts: [],
+    }), /Phase 1 gateway listener port/)
+  }
+})
 
 async function randomPort(used) {
   for (let i = 0; i < 30; i++) {
