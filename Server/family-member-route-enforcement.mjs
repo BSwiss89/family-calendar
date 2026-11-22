@@ -11,7 +11,9 @@ const VIEWS = new Map([
   ['/api/recipes', 'recipes.view'],
   ['/api/meal-plans', 'recipes.view'],
   ['/api/meal-plan-items', 'recipes.view'],
-  ['/api/capture-inbox', 'recipes.view'],
+  // The shared Capture Inbox can hold event, shopping and recipe photos.
+  // Neither an event-only nor a recipe-only grant may expose its contents.
+  ['/api/capture-inbox', 'captures.view'],
   ['/api/event-creators', 'calendar.view'],
   ['/api/shared-events/recipients', 'calendar.view'],
   ['/api/shared-events/invitations', 'calendar.view'],
@@ -91,10 +93,17 @@ export function requiredFamilyMemberActions(method, originalUrl) {
     if (route === '/api/lists' || /^\/api\/lists\/[1-9][0-9]*\/(items|organize|sort-stores)$/.test(route) ||
       route === '/api/shopping-stores') return ['lists.edit']
     if (route === '/api/recipes') return ['recipes.edit']
+    // Uploading a household capture is an independently authorized write;
+    // never infer authority from the declared capture type or selected avatar.
+    if (route === '/api/capture-inbox') return ['captures.edit']
     if (route === '/api/people') return ['settings.manage']
     return null
   }
   if (method === 'PUT' || method === 'PATCH') {
+    if (method === 'PATCH' &&
+        /^\/api\/capture-inbox\/[1-9][0-9]*\/(type|analysis)$/.test(route)) {
+      return ['captures.edit']
+    }
     if (method === 'PUT' && /^\/api\/events\/[1-9][0-9]*$/.test(route)) return ['events.edit']
     if (method === 'PUT' && /^\/api\/emoji-markers\/[1-9][0-9]*$/.test(route)) return ['events.edit']
     if (method === 'PUT' && route === '/api/family-daily-note') return ['events.edit']
@@ -110,6 +119,7 @@ export function requiredFamilyMemberActions(method, originalUrl) {
     return null
   }
   if (method === 'DELETE') {
+    if (/^\/api\/capture-inbox\/[1-9][0-9]*$/.test(route)) return ['captures.edit']
     // Deleting an exception restores the existing recurring occurrence;
     // it does not delete the event. The backend validates the actual date.
     if (/^\/api\/events\/[1-9][0-9]*\/exceptions\/[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(route)) {
