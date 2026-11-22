@@ -78,6 +78,17 @@ export function setPrivateHomePinPolicy(identityDatabase, {
       'updated_at=excluded.updated_at',
     ].join(' ')).run(householdKey, pinEnabled ? 1 : 0,
       serverVerifiedOwnerUserId, now)
+    // PIN off/on switches invalidate any previously verified kiosk actor
+    // proofs. The optional credential tables may not exist in older drafts.
+    const proofTable = identityDatabase.prepare([
+      "SELECT name FROM sqlite_master WHERE type='table'",
+      "AND name='private_home_actor_proofs'",
+    ].join(' ')).get()
+    if (proofTable) {
+      identityDatabase.prepare(
+        'DELETE FROM private_home_actor_proofs WHERE household_id=?'
+      ).run(householdKey)
+    }
     identityDatabase.exec('COMMIT')
     return { pinEnabled }
   } catch (error) {

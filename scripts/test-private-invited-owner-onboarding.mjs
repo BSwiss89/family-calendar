@@ -1003,6 +1003,85 @@ test('two invited Owners activate into isolated real localhost backends without 
       assert.equal(devices.status, 200)
       assert.equal(devices.payload.devices[0].selectedProfile, display)
     }
+    // A verified Owner creates a real actor PIN only for an account linked to
+    // a current Person in A's own calendar database. Selecting Home alone
+    // never approves a kiosk or unlocks the PIN for another household.
+    const ownerAId = identityDatabase.prepare(
+      'SELECT id FROM family_users WHERE username=?'
+    ).get('firsttwofamilyowner').id
+    const memberLink = await request(
+      '/api/households/members/' + ownerAId + '/person', {
+        cookie: a.cookie, body: { ownerPassword: password, personId },
+      })
+    assert.equal(memberLink.status, 200, 'Owner can link their current family Person')
+    const homeDevice = '/api/households/home-device'
+    const verifyPin = '/api/households/home-actor/verify'
+    const setOwnerPin = '/api/households/home-pins/' + ownerAId
+    assert.deepEqual((await request(homeDevice, { cookie: a.cookie })).payload,
+      { trustedHome: false })
+    assert.equal((await request(homeDevice + '/enroll', {
+      cookie: a.cookie, body: { ownerPassword: password },
+    })).status, 403, 'unselected Home device cannot be enrolled')
+    assert.equal((await request('/api/auth/device-profile', {
+      cookie: a.cookie, body: { kind: 'home' },
+    })).status, 200)
+    assert.deepEqual((await request(homeDevice, { cookie: a.cookie })).payload,
+      { trustedHome: false }, 'selecting Home does not make a trusted kiosk')
+    assert.equal((await request(homeDevice + '/enroll', {
+      cookie: a.cookie, body: { ownerPassword: 'incorrect' },
+    })).status, 403, 'Owner password is required to register a shared device')
+    assert.deepEqual((await request(homeDevice + '/enroll', {
+      cookie: a.cookie, body: { ownerPassword: password },
+    })).payload, { trustedHome: true })
+    assert.deepEqual((await request(homeDevice, { cookie: a.cookie })).payload,
+      { trustedHome: true })
+    assert.deepEqual((await request(homeDevice, { cookie: b.cookie })).payload,
+      { trustedHome: false }, 'B is not enrolled by A device setup')
+    assert.equal((await request(setOwnerPin, {
+      cookie: b.cookie, body: { ownerPassword: password, pin: '2468' },
+    })).status, 400, 'Owner B cannot assign Owner A private PIN')
+    assert.equal((await request(setOwnerPin, {
+      cookie: a.cookie, body: { ownerPassword: password, pin: '2468' },
+      headers: { 'x-household-id': b.id },
+    })).status, 200)
+    const wrongPin = await request(verifyPin, {
+      cookie: a.cookie, body: { memberId: ownerAId, pin: '0000' },
+    })
+    assert.equal(wrongPin.status, 403)
+    const verifiedPin = await request(verifyPin, {
+      cookie: a.cookie, body: { memberId: ownerAId, pin: '2468' },
+      headers: { 'x-household-id': b.id },
+    })
+    assert.equal(verifiedPin.status, 200)
+    assert.equal(verifiedPin.payload.verified, true)
+    assert.match(verifiedPin.payload.proof, /^[a-f0-9]{64}$/)
+    assert.equal(verifiedPin.payload.actorUserId, ownerAId)
+    const untrustedSession = await login('firsttwofamilyowner', password)
+    assert.equal((await request(verifyPin, {
+      cookie: untrustedSession, body: { memberId: ownerAId, pin: '2468' },
+    })).status, 403, 'same account on another device cannot borrow kiosk trust')
+    assert.equal((await request(verifyPin, {
+      cookie: b.cookie, body: { memberId: ownerAId, pin: '2468' },
+    })).status, 403, 'other household cannot use the PIN or trusted device')
+    assert.equal((await request(homePinRoute, {
+      cookie: a.cookie, body: { pinEnabled: false, ownerPassword: password },
+    })).status, 200)
+    assert.equal((await request(verifyPin, {
+      cookie: a.cookie, body: { memberId: ownerAId, pin: '2468' },
+    })).status, 409, 'PIN disabled stops PIN challenge')
+    assert.equal((await request(homePinRoute, {
+      cookie: a.cookie, body: { pinEnabled: true, ownerPassword: password },
+    })).status, 200)
+    assert.equal((await request(verifyPin, {
+      cookie: a.cookie, body: { memberId: ownerAId, pin: '2468' },
+    })).status, 200, 'PIN enabled can again verify the linked actor')
+    assert.deepEqual((await request(homeDevice + '/revoke', {
+      cookie: a.cookie, body: { ownerPassword: password },
+    })).payload, { trustedHome: false, changed: true })
+    assert.equal((await request(verifyPin, {
+      cookie: a.cookie, body: { memberId: ownerAId, pin: '2468' },
+    })).status, 403, 'revoked kiosk loses PIN verification immediately')
+
     const peopleA = await request('/api/people', {
       cookie: a.cookie, headers: { 'x-household-id': b.id },
     })
