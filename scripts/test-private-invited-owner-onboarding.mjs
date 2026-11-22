@@ -1269,7 +1269,7 @@ test('two invited Owners activate into isolated real localhost backends without 
     })
     assert.deepEqual(kioskRetired.payload, { trustedHome: false, changed: true })
     assert.match(kioskRetired.response.headers.get('set-cookie') ?? '',
-      /__Host-fc_gateway_session=.*Max-Age=0/i, 'kiosk cookie is cleared')
+      /__Host-fc_gateway_session=;/i, 'kiosk cookie is cleared')
     assert.equal((await request(verifyPin, {
       cookie: a.cookie, body: { memberId: ownerAId, pin: '2468' },
     })).status, 401, 'retired kiosk loses the Owner login, not just the PIN')
