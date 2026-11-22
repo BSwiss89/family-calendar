@@ -52,7 +52,7 @@ function validRule(entry) {
 function validatedSnapshot(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input) ||
       input.schemaVersion !== 1 || input.site !== 'existing-secure-test' ||
-      !['baseline', 'pre-route', 'candidate-review'].includes(input.phase) ||
+      !['baseline', 'legacy-fenced', 'pre-route', 'candidate-review'].includes(input.phase) ||
       !SHA.test(input.installedTestSha) ||
       !ipv4(input.legacyTestAddress) ||
       !input.legacyTestAddress.startsWith('100.') ||
@@ -114,6 +114,18 @@ export function assessPrivatePhase1TestRoutingBoundary(input) {
     }
     if (gateway.length) {
       add(blockers, 'No proposed Phase 1 gateway may be wired during baseline inspection.')
+    }
+  } else if (input.phase === 'legacy-fenced') {
+    // This is the ONLY intended quiet window for a coordinated offline
+    // backup: the old listener must be gone and no family services started.
+    // Existing HTTPS portproxy still points to the stopped legacy backend.
+    if (legacy.length || gateway.length ||
+        input.listeners.some(x => x.role === 'household-backend')) {
+      add(blockers, 'Legacy TEST has not fully quiesced for offline backup.')
+    }
+    if (input.portproxyRules.some(x => x.listenPort !== 13003 &&
+        (x.connectPort === 13002 || x.connectPort === input.gatewayPort))) {
+      add(blockers, 'Unexpected TEST forwarding still targets the old backend or private gateway.')
     }
   } else {
     // A live legacy endpoint can bypass family gateway authentication. The
@@ -178,6 +190,7 @@ export function assessPrivatePhase1TestRoutingBoundary(input) {
     site: input.site,
     phase: input.phase,
     observedBaselineMatches: input.phase === 'baseline' && blockers.length === 0,
+    legacyFenceTopologyMatches: input.phase === 'legacy-fenced' && blockers.length === 0,
     preRouteTopologyMatches: input.phase === 'pre-route' && blockers.length === 0,
     candidateNetworkTopologyMatches: input.phase === 'candidate-review' && blockers.length === 0,
     blockers: Object.freeze(blockers),
