@@ -768,16 +768,24 @@ test('central authenticated gateway denies one family access to another family b
     assert.equal((await json(gateway.base, '/api/ai-budget')).response.status, 401)
     console.log('[PASS] Household local model requests are disabled by default and capped independently.')
 
+    // Legacy AI routes and direct photo analysis stay held for separate review.
     for (const endpoint of [
       '/api/ai/cancel-preview',
       '/api/ai/reschedule-preview',
       '/api/capture/analyze-photo',
-      '/api/capture-inbox/1/analyze',
     ]) {
       const denied = await json(gateway.base, endpoint, {
         cookie: cookieA, body: { text: 'Find private events' },
       })
       assert.equal(denied.response.status, 409, endpoint)
+    }
+    // The discarded Capture Inbox is a removed route, NOT a still-available
+    // service hidden behind a temporary 409 hold. No forwarding is possible.
+    for (const cookie of [cookieA, cookieB]) {
+      const retired = await json(gateway.base, '/api/capture-inbox/1/analyze', {
+        cookie, body: { text: 'Obsolete inbox route' },
+      })
+      assert.equal(retired.response.status, 404, 'retired Inbox remains unavailable')
     }
     const spoofedUpstream = await json(gateway.base, '/api/events', {
       cookie: cookieA,

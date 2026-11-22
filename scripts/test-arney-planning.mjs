@@ -394,12 +394,21 @@ test('Analyze Photo opens native file chooser directly, camera asks for rear cam
   assert.doesNotMatch(modal, /View Capture Inbox|type="file"|setPage\('capture'\)/)
 })
 
-test('existing Capture Inbox data and APIs remain intact despite removing popup button', () => {
+test('obsolete Capture Inbox UI is gone while direct photo analysis stays available', () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const app = fs.readFileSync(path.join(root, 'src/App.tsx'), 'utf8')
-  assert.match(app, /async function loadCaptureInbox\(\)/)
-  assert.match(app, /page === 'capture'/)
-  assert.match(app, /function openCaptureDestination\(/)
+  const backend = fs.readFileSync(path.join(root, 'Server/index.mjs'), 'utf8')
+  const gateway = fs.readFileSync(path.join(root, 'Server/private-household-gateway.mjs'), 'utf8')
+  assert.doesNotMatch(app, /async function loadCaptureInbox\(\)/)
+  assert.doesNotMatch(app, /page === 'capture'/)
+  assert.doesNotMatch(app, /function openCaptureDestination\(/)
+  assert.doesNotMatch(app, /\/api\/capture-inbox/)
   assert.match(app, /function openCapturedEventForReview\(/)
   assert.match(app, /async function analyzeQuickAddPhoto\(\)/)
+  assert.match(app, /\/api\/capture\/analyze-photo/)
+  // Historical files are not destroyed as a side effect of UI removal.
+  // This is a separate data-retention/recovery decision from offering Inbox UI.
+  assert.match(backend, /app\.get\('\/api\/capture-inbox'/)
+  // No independent household can accidentally reach the deprecated proxy.
+  assert.match(gateway, /app\.use\('\/api\/capture-inbox'/)
 })
