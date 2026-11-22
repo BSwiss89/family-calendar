@@ -27,6 +27,8 @@ const PERMISSIONS: Permission[] = [
   { action: 'tasks.manage', label: 'Manage family tasks' },
   { action: 'recipes.view', label: 'View recipes' },
   { action: 'recipes.edit', label: 'Edit recipes' },
+  { action: 'captures.view', label: 'View captured photos' },
+  { action: 'captures.edit', label: 'Upload and edit captured photos' },
   { action: 'settings.manage', label: 'Manage routine settings', adultOnly: true },
   { action: 'members.invite', label: 'Invite members', adultOnly: true },
 ]
