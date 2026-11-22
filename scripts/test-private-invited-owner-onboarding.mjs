@@ -627,7 +627,7 @@ test('two invited Owners activate into isolated real localhost backends without 
       // calendars keep their previous default-OFF enforcement behavior.
       enforceFamilyMemberPermissions: true,
     })
-    const base = gateway.base
+    let base = gateway.base
     async function request(route, { cookie, body, method, headers = {} } = {}) {
       const verb = method ?? (body === undefined ? 'GET' : 'POST')
       const response = await fetch(base + route, {
@@ -1295,13 +1295,113 @@ test('two invited Owners activate into isolated real localhost backends without 
       cookie: b.cookie,
     })).payload.households.map(h => h.householdId), [b.id])
 
+    // PHASE 1 PILOT RESTART: same two real backends/SQLite tenants, but with
+    // a fresh explicitly opted-in, Owner-only limited gateway route surface.
+    // No third persistent calendar/site, deployed TEST, or LIVE host exists.
+    await gateway.close()
+    gateway = null
+    gateway = await startPrivateHouseholdGateway({
+      identityDatabase, serverDirectory: directory, storageRoot,
+      backendPorts: { [a.id]: backendA.port, [b.id]: backendB.port },
+      backendTokens: { [a.id]: backendA.upstreamToken, [b.id]: backendB.upstreamToken },
+      independentHouseholdAdministratorUserIds: [operatorId],
+      enforceFamilyMemberPermissions: true,
+      phase1OwnerPilotOnly: true,
+    })
+    base = gateway.base
+    assert.equal((await request('/api/health')).status, 200,
+      'private Phase 1 keeps generic no-session health status')
+    assert.equal((await request('/api/events')).status, 401,
+      'pilot still needs an authenticated central session')
+    assert.equal((await request('/api/admin/household-overview', {
+      cookie: operator,
+    })).status, 200, 'operator sees metadata-only inventory')
+    assert.equal((await request('/api/events', { cookie: operator })).status, 404,
+      'operator never receives a household calendar route')
+    assert.equal((await request('/api/admin/household-overview', {
+      cookie: untrustedSession,
+    })).status, 404, 'Owner cannot access system operator metadata')
+    assert.equal((await request('/api/households/my-onboarding', {
+      cookie: untrustedSession,
+    })).status, 200, 'Owner can inspect their activation status')
+    assert.equal((await request('/api/households/my-onboarding', {
+      cookie: b.cookie,
+    })).status, 200, 'second Owner can inspect own activation status')
+    const pilotPeopleA = await request('/api/people', {
+      cookie: untrustedSession, headers: { 'x-household-id': b.id },
+    })
+    const pilotPeopleB = await request('/api/people', {
+      cookie: b.cookie, headers: { 'x-household-id': a.id },
+    })
+    assert.equal(pilotPeopleA.status, 200)
+    assert.equal(pilotPeopleB.status, 200)
+    assert.match(JSON.stringify(pilotPeopleA.payload), /Visible only to household one/)
+    assert.doesNotMatch(JSON.stringify(pilotPeopleA.payload), /Visible only to household two/)
+    assert.match(JSON.stringify(pilotPeopleB.payload), /Visible only to household two/)
+    assert.equal((await request('/api/lists', {
+      cookie: untrustedSession,
+    })).status, 200, 'existing household lists remain readable')
+    assert.equal((await request('/api/events', {
+      cookie: b.cookie,
+    })).status, 200, 'other Owner events remain readable')
+    const pilotCreated = await request('/api/events', {
+      cookie: untrustedSession, body: {
+        date: '2027-01-03', title: 'Only private Phase 1 family A',
+        time: '14:00', role: 'owner', householdId: b.id,
+      }, headers: { 'x-household-id': b.id },
+    })
+    assert.equal(pilotCreated.status, 201)
+    assert.deepEqual((await request('/api/events', { cookie: b.cookie })).payload
+      .map(e => e.title), ['Only invited household B'],
+    'the pilot never lets one Owner write another family calendar')
+    const pilotList = await request('/api/lists', {
+      cookie: b.cookie, body: { name: 'Only private Phase 1 family B' },
+      headers: { 'x-household-id': a.id },
+    })
+    assert.equal(pilotList.status, 201)
+    assert.equal((await request('/api/lists', { cookie: untrustedSession }))
+      .payload.some(list => list.name === 'Only private Phase 1 family B'), false)
+    for (const [method, route, body] of [
+      ['GET', '/api/recipes'],
+      ['GET', '/api/meal-plans'],
+      ['GET', '/api/households/member-access'],
+      ['GET', '/api/households/home-pin'],
+      ['GET', '/uploads/any-private-photo.png'],
+      ['GET', '/api/ai-budget'],
+      ['POST', '/api/people', { name: 'Unreviewed People write' }],
+      ['POST', '/api/households/member-invitations', {}],
+      ['POST', '/api/households/home-pin',
+        { pinEnabled: false, ownerPassword: password }],
+      ['POST', '/api/ai/intent', { text: 'Change event' }],
+      ['POST', '/api/capture/analyze-photo', { image: 'blocked' }],
+      ['POST', '/api/arney/public-recipe-image', { imageUrl: 'https://example.org/' }],
+      ['POST', '/API/events', { title: 'Bad route' }],
+      ['POST', '/api/events/', { title: 'Bad route' }],
+      ['POST', '/api/events?role=owner', { title: 'Bad route' }],
+    ]) {
+      const denied = await request(route, {
+        cookie: untrustedSession, method, ...(body === undefined ? {} : { body }),
+      })
+      assert.equal(denied.status, 404, method + ' ' + route + ' is not Phase 1 approved')
+    }
+    assert.equal((await request('/api/events', {
+      cookie: childHomeCookie, headers: { 'x-household-id': a.id },
+    })).status, 404, 'registered Child must wait for Phase 2')
+    assert.equal((await request('/api/lists', {
+      cookie: childHomeCookie, body: { name: 'Child bypass' },
+    })).status, 404, 'member UI is not enabled by known URL')
+    assert.equal((await request('/api/households/independent-invitations', {
+      cookie: untrustedSession, method: 'POST',
+    })).status, 404, 'household Owner cannot become a system operator')
+
     // A revoked Owner's previously valid browser cookie may not continue to
     // reach their backend or disclose the saved Person name. B remains active.
     identityDatabase.prepare([
       'UPDATE household_memberships SET disabled=1',
       'WHERE household_id=(SELECT id FROM household_registry WHERE storage_id=?)',
     ].join(' ')).run(a.id)
-    assert.equal((await request('/api/events', { cookie: untrustedSession })).status, 403)
+    assert.equal((await request('/api/events', { cookie: untrustedSession })).status, 404,
+      'revoked Owner fails closed before backend access in Phase 1')
     assert.equal((await request('/api/auth/devices', {
       cookie: untrustedSession,
     })).payload.devices.find(device => device.current)?.selectedProfile, null)

@@ -16,6 +16,7 @@ import {
 import { readPrivateHomePinPolicy, setPrivateHomePinPolicy } from '../Server/private-home-pin-policy.mjs'
 import { authorizePrivateHomeRequest } from '../Server/private-shared-home-write-gate.mjs'
 import { recordPrivateHomeWriteAudit } from '../Server/private-home-write-audit.mjs'
+import { classifyPrivatePhase1PilotRoute, installPrivatePhase1OwnerPilotGate } from '../Server/private-phase1-owner-pilot-gate.mjs'
 import {
   createPrivateHomeActorTables, enrollPrivateHomeKiosk, disablePrivateHomeKiosk,
   isPrivateHomeKioskTrusted, setPrivateHomeActorPin, createPrivateHomePinVerifier,
@@ -308,6 +309,112 @@ test('shared Home PIN attempts rate-limit across people and trust is revoked wit
     householdId: 'family-a', serverVerifiedSessionId: sessionId,
   }), false)
   assert.deepEqual(await attempt(childId, '0000'), { status: 'untrusted' })
+})
+
+test('Phase 1 pilot allows only Owner calendar/lists and operator metadata', () => {
+  const valid = [
+    ['GET', '/', 'owner'],
+    ['GET', '/assets/index-B123.js', 'owner'],
+    ['GET', '/system-admin', 'operator'],
+    ['GET', '/api/health', 'owner'],
+    ['GET', '/api/households/my-onboarding', 'owner'],
+    ['GET', '/api/events?from=2026-11-22&to=2026-11-29', 'owner'],
+    ['GET', '/api/people', 'owner'],
+    ['GET', '/api/lists', 'owner'],
+    ['GET', '/api/shopping-stores', 'owner'],
+    ['GET', '/api/event-creators', 'owner'],
+    ['POST', '/api/events', 'owner'],
+    ['POST', '/api/lists', 'owner'],
+    ['POST', '/api/lists/1/items', 'owner'],
+    ['PUT', '/api/events/9', 'owner'],
+    ['PUT', '/api/list-items/7', 'owner'],
+    ['DELETE', '/api/events/9', 'owner'],
+    ['DELETE', '/api/lists/2', 'owner'],
+    ['DELETE', '/api/list-items/3', 'owner'],
+    ['GET', '/api/admin/household-overview', 'operator'],
+    ['POST', '/api/households/independent-invitations', 'operator'],
+  ]
+  for (const [method, route, role] of valid) {
+    assert.notEqual(classifyPrivatePhase1PilotRoute(method, route, role), 'denied',
+      method + ' ' + route + ' ' + role)
+  }
+  for (const [method, route, role] of [
+    ['GET', '/uploads/parent-photo.png', 'owner'],
+    ['GET', '/UPLOADS/parent-photo.png', 'owner'],
+    ['GET', '/api/recipes', 'owner'],
+    ['GET', '/api/meal-plans', 'owner'],
+    ['GET', '/api/households/member-access', 'owner'],
+    ['GET', '/api/households/home-pin', 'owner'],
+    ['POST', '/api/households/member-invitations', 'owner'],
+    ['POST', '/api/households/home-pin', 'owner'],
+    ['POST', '/api/people', 'owner'],
+    ['POST', '/api/capture/analyze-photo', 'owner'],
+    ['POST', '/api/ai/intent', 'owner'],
+    ['POST', '/api/arney/public-recipe-image', 'owner'],
+    ['GET', '/api/internal/household-binding', 'owner'],
+    ['POST', '/api/events/', 'owner'],
+    ['POST', '/API/events', 'owner'],
+    ['POST', '/api/events?role=owner', 'owner'],
+    ['POST', '/api/events/%31', 'owner'],
+    ['PUT', '/api/events/01', 'owner'],
+    ['POST', '/uploads/fake.jpg', 'owner'],
+    ['GET', '/api/events', 'operator'],
+    ['POST', '/api/lists', 'operator'],
+    ['GET', '/api/admin/household-overview', 'owner'],
+    ['GET', '/api/households', 'child'],
+    ['POST', '/api/events', 'child'],
+    ['POST', '/api/events', 'adult'],
+  ]) {
+    assert.equal(classifyPrivatePhase1PilotRoute(method, route, role), 'denied',
+      method + ' ' + route + ' ' + role)
+  }
+})
+
+test('Phase 1 Express policy derives Owner/operator server-side and blocks member impersonation', async t => {
+  const { db, ownerId, childId, adultId, outsiderId } = fixture(t)
+  const operatorId = Number(db.prepare(
+    'INSERT INTO family_users(username,display_name,password_hash) VALUES(?,?,?)'
+  ).run('testphase1operator', 'Operator', 'dummy').lastInsertRowid)
+  const app = express()
+  app.use((request, response, next) => {
+    const id = Number(request.get('x-fixture-user'))
+    request.familyAccount = Number.isSafeInteger(id) && id > 0
+      ? { user_id: id } : null
+    next()
+  })
+  installPrivatePhase1OwnerPilotGate(app, {
+    identityDatabase: db, trustedAdministratorUserIds: [operatorId],
+  })
+  app.use((_request, response) => response.status(200).json({ allowed: true }))
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise(resolve => server.once('listening', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const base = 'http://127.0.0.1:' + server.address().port
+  const probe = async (id, method, route, headers = {}) => {
+    const response = await fetch(base + route, {
+      method,
+      headers: { 'x-fixture-user': String(id), ...headers },
+    })
+    return response.status
+  }
+  assert.equal(await probe(0, 'GET', '/api/events'), 401)
+  assert.equal(await probe(ownerId, 'GET', '/api/events'), 200)
+  assert.equal(await probe(ownerId, 'POST', '/api/events'), 200)
+  assert.equal(await probe(ownerId, 'POST', '/api/people'), 404)
+  assert.equal(await probe(ownerId, 'GET', '/uploads/a.png'), 404)
+  assert.equal(await probe(ownerId, 'GET', '/api/households/my-onboarding'), 200)
+  assert.equal(await probe(operatorId, 'GET', '/api/admin/household-overview'), 200)
+  assert.equal(await probe(operatorId, 'POST', '/api/households/independent-invitations'), 200)
+  assert.equal(await probe(operatorId, 'GET', '/api/events'), 404)
+  assert.equal(await probe(childId, 'GET', '/api/events',
+    { 'x-household-id': 'family-a', 'x-fixture-role': 'owner' }), 404)
+  assert.equal(await probe(adultId, 'POST', '/api/events'), 404)
+  assert.equal(await probe(outsiderId, 'GET', '/api/people'), 200,
+    'a separately authorized Owner keeps their own isolated backend route')
+  db.prepare('UPDATE household_memberships SET disabled=1 WHERE user_id=?')
+    .run(ownerId)
+  assert.equal(await probe(ownerId, 'GET', '/api/events'), 404,
+    'revoked Owner loses pilot access even on the same session')
 })
 
 test('known API reads and event/list writes are categorized; unknown or alias routes fail closed', () => {
