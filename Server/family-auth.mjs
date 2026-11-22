@@ -241,7 +241,8 @@ function safeDeviceLabel(value) {
 
 export function installFamilyAuth(app, database, directory, mode = process.env.FAMILY_CALENDAR_AUTH_MODE ?? 'disabled',
   { cookieName = COOKIE_NAME, resolveDevicePersonName = null,
-    resolveSignedInLanding = null } = {}) {
+    resolveSignedInLanding = null,
+    denyPrivateGatewayKioskDeviceManagement = null } = {}) {
   // Deliberately restrict the override to the private authenticated gateway.
   // Other sites always use their own port-specific secure cookie name.
   if (cookieName !== COOKIE_NAME && cookieName !== '__Host-fc_gateway_session') {
@@ -258,6 +259,11 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
       (cookieName !== '__Host-fc_gateway_session' ||
        typeof resolveSignedInLanding !== 'function')) {
     throw new Error('Signed-in landing routing is restricted to the private gateway.')
+  }
+  if (denyPrivateGatewayKioskDeviceManagement !== null &&
+      (cookieName !== '__Host-fc_gateway_session' ||
+       typeof denyPrivateGatewayKioskDeviceManagement !== 'function')) {
+    throw new Error('Private kiosk device-management gate is restricted to the gateway.')
   }
   if (!['required', 'disabled'].includes(mode)) {
     throw new Error('FAMILY_CALENDAR_AUTH_MODE must be required or disabled.')
@@ -450,6 +456,9 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   })
 
   app.get('/api/auth/devices', (request, response) => {
+    if (denyPrivateGatewayKioskDeviceManagement?.(request.familyAccount)) {
+      return response.status(403).json({ error: 'Shared Home cannot manage account devices.' })
+    }
     try {
     const sessions = database.prepare([
       'SELECT id, device_label, created_at, last_seen_at, expires_at, selected_profile_kind, selected_person_id FROM family_sessions',
@@ -486,6 +495,9 @@ export function installFamilyAuth(app, database, directory, mode = process.env.F
   })
 
   app.post('/api/auth/devices/:id/revoke', (request, response) => {
+    if (denyPrivateGatewayKioskDeviceManagement?.(request.familyAccount)) {
+      return response.status(403).json({ error: 'Shared Home cannot revoke account devices.' })
+    }
     const id = Number(request.params.id)
     if (!Number.isSafeInteger(id) || id < 1) return response.status(400).json({ error: 'Invalid device.' })
     const result = database.prepare([
