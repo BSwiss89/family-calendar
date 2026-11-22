@@ -1057,21 +1057,204 @@ test('two invited Owners activate into isolated real localhost backends without 
     assert.match(verifiedPin.payload.proof, /^[a-f0-9]{64}$/)
     assert.equal(verifiedPin.payload.actorUserId, ownerAId)
     const untrustedSession = await login('firsttwofamilyowner', password)
+    assert.equal((await request('/api/auth/devices', { cookie: a.cookie })).status, 403,
+      'a shared kiosk cannot inspect or revoke Owner personal devices')
+    assert.equal((await request('/api/households/member-access', {
+      cookie: a.cookie,
+    })).status, 403, 'shared Home cannot read privileged Owner account roster')
+    assert.equal((await request('/api/households/member-invitations', {
+      cookie: a.cookie, method: 'POST',
+    })).status, 403, 'shared Home cannot issue Owner-only invitations')
+    assert.equal((await request('/api/events', {
+      cookie: a.cookie, body: {
+        date: '2026-12-26', title: 'PIN missing must not create event', time: '15:00',
+        createdBy: 'owner', role: 'owner', selectedProfile: 'Home',
+      },
+    })).status, 428, 'PIN-enabled shared Home cannot inherit Owner event-create rights')
+    assert.equal((await request('/api/events', {
+      cookie: a.cookie, body: {
+        date: '2026-12-26', title: 'Forged actor should not create', time: '15:00',
+      }, headers: { 'x-fc-home-actor-proof': '0'.repeat(64) },
+    })).status, 428, 'arbitrary actor proof cannot authorize writes')
+    const ownerHomeCreate = await request('/api/events', {
+      cookie: a.cookie,
+      body: { date: '2026-12-26', title: 'Owner verified at kiosk', time: '15:00' },
+      headers: { 'x-fc-home-actor-proof': verifiedPin.payload.proof },
+    })
+    assert.equal(ownerHomeCreate.status, 201)
+    const homeCreator = await request('/api/event-creators', { cookie: a.cookie })
+    assert.equal(homeCreator.status, 200)
+    assert.equal(homeCreator.payload.creators.find(
+      creator => creator.eventId === ownerHomeCreate.payload.id,
+    )?.displayName, 'firsttwofamilyowner')
+
     assert.equal((await request(verifyPin, {
       cookie: untrustedSession, body: { memberId: ownerAId, pin: '2468' },
     })).status, 403, 'same account on another device cannot borrow kiosk trust')
     assert.equal((await request(verifyPin, {
       cookie: b.cookie, body: { memberId: ownerAId, pin: '2468' },
     })).status, 403, 'other household cannot use the PIN or trusted device')
+
+    // Invite a real Child using the Owner's separately authenticated PHONE,
+    // link a distinct Person in family A, then use that Child's PIN on kiosk.
+    const kioskChildInvite = await request('/api/households/member-invitations', {
+      cookie: untrustedSession, method: 'POST',
+    })
+    assert.equal(kioskChildInvite.status, 201)
+    const newHomeChild = 'kioskverifiedchild'
+    assert.equal((await request('/api/households/join', {
+      body: {
+        token: kioskChildInvite.payload.token, username: newHomeChild,
+        displayName: 'Home verified child', password,
+      },
+    })).status, 201)
+    const childHomeUserId = identityDatabase.prepare(
+      'SELECT id FROM family_users WHERE username=?',
+    ).get(newHomeChild).id
+    const childHomeCookie = await login(newHomeChild, password)
+    assert.equal((await request('/api/households/members/' + childHomeUserId + '/type', {
+      cookie: untrustedSession, body: {
+        memberType: 'child', ownerPassword: password,
+      },
+    })).status, 200)
+    const childHomePersonId = 992
+    {
+      const storage = resolveHouseholdStorage({
+        serverDirectory: directory, storageRoot, householdId: a.id,
+      })
+      const db = new DatabaseSync(storage.databasePath)
+      try {
+        db.prepare([
+          'INSERT INTO people(id,name,color,image,sort_order)',
+          'VALUES (?,?,?,NULL,0)',
+        ].join(' ')).run(childHomePersonId, 'Home verified child', '#64748b')
+      } finally { db.close() }
+    }
+    assert.equal((await request('/api/households/members/' + childHomeUserId + '/person', {
+      cookie: untrustedSession, body: {
+        personId: childHomePersonId, ownerPassword: password,
+      },
+    })).status, 200)
+    assert.equal((await request('/api/households/home-pins/' + childHomeUserId, {
+      cookie: untrustedSession, body: { pin: '1357', ownerPassword: password },
+    })).status, 200)
+    const verifiedChild = await request(verifyPin, {
+      cookie: a.cookie, body: { memberId: childHomeUserId, pin: '1357' },
+      headers: { 'x-household-id': b.id },
+    })
+    assert.equal(verifiedChild.status, 200)
+    assert.equal(verifiedChild.payload.actorUserId, childHomeUserId)
+    assert.equal((await request('/api/events', {
+      cookie: a.cookie, body: {
+        date: '2026-12-27', title: 'Child before grant should fail', time: '10:00',
+      },
+      headers: { 'x-fc-home-actor-proof': verifiedChild.payload.proof },
+    })).status, 403, 'Child PIN cannot inherit shared kiosk Owner grants')
+    assert.equal((await request('/api/households/members/' + childHomeUserId + '/permission', {
+      cookie: untrustedSession, body: {
+        action: 'events.create', enabled: true, ownerPassword: password,
+      },
+    })).status, 200)
+    const allowedChildEvent = await request('/api/events', {
+      cookie: a.cookie, body: {
+        date: '2026-12-27', title: 'PIN-verified child creator', time: '10:00',
+        createdBy: ownerAId, selectedProfile: 'Home', role: 'owner',
+      },
+      headers: {
+        'x-fc-home-actor-proof': verifiedChild.payload.proof,
+        'x-household-id': b.id,
+      },
+    })
+    assert.equal(allowedChildEvent.status, 201)
+    const childAuthors = await request('/api/event-creators', { cookie: a.cookie })
+    assert.equal(childAuthors.payload.creators.find(
+      creator => creator.eventId === allowedChildEvent.payload.id,
+    )?.displayName, 'Home verified child',
+    'a spoofed role and Owner cookie never forge the event author')
+    assert.equal((await request('/api/events/' + allowedChildEvent.payload.id, {
+      cookie: a.cookie, method: 'DELETE',
+      headers: { 'x-fc-home-actor-proof': verifiedChild.payload.proof },
+    })).status, 403, 'Child may create but not delete family events')
+    assert.equal((await request('/api/households/members/' + childHomeUserId + '/permission', {
+      cookie: untrustedSession, body: {
+        action: 'events.create', enabled: false, ownerPassword: password,
+      },
+    })).status, 200)
+    assert.equal((await request('/api/events', {
+      cookie: a.cookie, body: {
+        date: '2026-12-27', title: 'Revoked Child grant', time: '11:00',
+      },
+      headers: { 'x-fc-home-actor-proof': verifiedChild.payload.proof },
+    })).status, 403, 'a current proof cannot retain revoked Child permissions')
+    assert.equal((await request('/api/events', { cookie: childHomeCookie })).status, 200)
+    assert.deepEqual((await request('/api/events', { cookie: b.cookie })).payload
+      .map(event => event.title), ['Only invited household B'],
+    'PIN-selected actor cannot write into the other household')
+
     assert.equal((await request(homePinRoute, {
       cookie: a.cookie, body: { pinEnabled: false, ownerPassword: password },
+    })).status, 403, 'shared kiosk cannot change protected Owner settings')
+    assert.equal((await request(homePinRoute, {
+      cookie: untrustedSession, body: { pinEnabled: false, ownerPassword: password },
     })).status, 200)
     assert.equal((await request(verifyPin, {
       cookie: a.cookie, body: { memberId: ownerAId, pin: '2468' },
     })).status, 409, 'PIN disabled stops PIN challenge')
+    // PIN disabled: usable Home event/list writes, but no silent Owner role.
+    const sharedHomeEvent = await request('/api/events', {
+      cookie: a.cookie, body: {
+        date: '2026-12-28', title: 'Created on Shared Home', time: '08:00',
+        createdBy: ownerAId, actor: 'owner', selectedProfile: 'Home',
+      },
+      headers: { 'x-household-id': b.id },
+    })
+    assert.equal(sharedHomeEvent.status, 201)
+    const sharedHomeList = await request('/api/lists', {
+      cookie: a.cookie, body: { name: 'Shared Home shopping' },
+      headers: { 'x-household-id': b.id },
+    })
+    assert.equal(sharedHomeList.status, 201)
+    assert.equal((await request('/api/events/' + sharedHomeEvent.payload.id, {
+      cookie: a.cookie, method: 'DELETE',
+    })).status, 403, 'PIN-off Shared Home cannot delete events')
+    assert.equal((await request('/api/households/member-access', {
+      cookie: a.cookie,
+    })).status, 403, 'PIN off does not expose Owner member management')
+    assert.equal((await request('/api/households/member-invitations', {
+      cookie: a.cookie, method: 'POST',
+    })).status, 403, 'PIN off does not issue member invitations')
+    const creatorsAfterHome = await request('/api/event-creators', { cookie: a.cookie })
+    assert.equal(creatorsAfterHome.status, 200)
+    const sharedAttribution = creatorsAfterHome.payload.creators.find(
+      creator => creator.eventId === sharedHomeEvent.payload.id,
+    )
+    assert.equal(sharedAttribution?.displayName, 'Shared Home')
+    assert.equal(sharedAttribution?.accountKind, 'home')
+    assert.equal(sharedAttribution?.username, null)
+    const homeWriteAudits = identityDatabase.prepare([
+      'SELECT actor_kind AS kind, actor_user_id AS actorUserId,',
+      'method,route FROM private_home_write_audit',
+      'WHERE kiosk_session_id=? ORDER BY id',
+    ].join(' ')).all(identityDatabase.prepare([
+      'SELECT id FROM family_sessions WHERE user_id=?',
+      'AND selected_profile_kind=? ORDER BY id LIMIT 1',
+    ].join(' ')).get(ownerAId, 'home').id)
+    assert.ok(homeWriteAudits.some(record =>
+      record.kind === 'shared-home' && record.actorUserId === null &&
+      record.method === 'POST' && record.route === '/api/lists'),
+    'shared shopping actions must be audited without pretending Owner did them')
+    assert.deepEqual((await request('/api/lists', { cookie: b.cookie })).payload
+      .map(list => list.name), ['Invited B shopping'],
+    'Shared Home write remains isolated to household A')
+
     assert.equal((await request(homePinRoute, {
-      cookie: a.cookie, body: { pinEnabled: true, ownerPassword: password },
+      cookie: untrustedSession, body: { pinEnabled: true, ownerPassword: password },
     })).status, 200)
+    assert.equal((await request('/api/events', {
+      cookie: a.cookie, body: {
+        date: '2026-12-29', title: 'Must require reverify', time: '08:00',
+      }, headers: { 'x-fc-home-actor-proof': verifiedChild.payload.proof },
+    })).status, 428, 'PIN toggle invalidates old proofs')
     assert.equal((await request(verifyPin, {
       cookie: a.cookie, body: { memberId: ownerAId, pin: '2468' },
     })).status, 200, 'PIN enabled can again verify the linked actor')
