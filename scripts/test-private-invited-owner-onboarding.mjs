@@ -1065,6 +1065,9 @@ test('two invited Owners activate into isolated real localhost backends without 
     assert.equal((await request('/api/households/member-invitations', {
       cookie: a.cookie, method: 'POST',
     })).status, 403, 'shared Home cannot issue Owner-only invitations')
+    assert.equal((await request('/uploads/unsafe-image.jpg', {
+      cookie: a.cookie, body: { pretend: 'owner upload' },
+    })).status, 403, 'an unreviewed non-API upload cannot inherit kiosk Owner authority')
     assert.equal((await request('/api/events', {
       cookie: a.cookie, body: {
         date: '2026-12-26', title: 'PIN missing must not create event', time: '15:00',
