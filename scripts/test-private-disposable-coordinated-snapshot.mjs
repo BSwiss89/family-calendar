@@ -20,6 +20,8 @@ import { installPrivateEventIdentity } from '../Server/private-event-identity.mj
 import { verifyOfflinePrivateRestoreSet } from '../Server/private-restore-preflight.mjs'
 import { copyVerifiedPrivateRestoreSet } from '../Server/private-offline-restore-rehearsal.mjs'
 import { captureDisposableCoordinatedHouseholdSnapshot } from '../Server/private-disposable-coordinated-snapshot.mjs'
+import { reviewDisposablePhase1PostWriteRollback }
+  from '../Server/private-phase1-post-write-rollback-review.mjs'
 
 const pass = 'Disposable-Only-Strong-Password-123!'
 function fixture(t) {
@@ -213,4 +215,90 @@ test('root or nested destination and non-temporary source cannot be used', t => 
     ...f.args, sourceRoot: path.dirname(process.execPath),
   }), /only separate disposable/)
   assert.equal(fs.existsSync(f.args.destinationRoot), false)
+})
+
+function rollbackEvidence(f, before, after) {
+  return reviewDisposablePhase1PostWriteRollback({
+    serverDirectory: f.args.serverDirectory,
+    baselineSnapshotRoot: before.snapshotRoot,
+    baselineAttestation: before.attestation,
+    laterSnapshotRoot: after.snapshotRoot,
+    laterAttestation: after.attestation,
+  })
+}
+
+test('later household list and uploaded-photo writes are detected without allowing an automatic rollback', t => {
+  const f = fixture(t)
+  const before = captured(f)
+  const family = new DatabaseSync(f.homes[1].databasePath)
+  try {
+    family.prepare('INSERT INTO lists(name) VALUES(?)').run('Created after first snapshot')
+  } finally { family.close() }
+  fs.writeFileSync(path.join(f.homes[1].uploadFolder, 'photos', 'image.bin'),
+    Buffer.from([9, 8, 7, 6]))
+  const after = captureDisposableCoordinatedHouseholdSnapshot({
+    ...f.args, destinationRoot: path.join(f.work, 'after-household-writes'),
+  })
+  const report = rollbackEvidence(f, before, after)
+  assert.equal(report.baselineVerified, true)
+  assert.equal(report.laterBackupVerified, true)
+  assert.equal(report.newerBackupDiffers, true)
+  assert.equal(report.possibleNewerDataLoss, true)
+  assert.equal(report.changedCategories.database, 1)
+  assert.equal(report.changedCategories.uploads, 1)
+  assert.equal(report.changedCategories.central, 0)
+  assert.deepEqual(report.backupFileChanges, { added: 0, missing: 0, changed: 2 })
+  assert.equal(report.automaticRollbackAllowed, false)
+  assert.equal(report.restoreAuthorized, false)
+  assert.equal(report.deploymentAuthorized, false)
+  assert.equal(report.manualOwnerReviewRequired, true)
+  assert.equal(report.allSystemWritersFenced, false)
+  assert.equal(report.accountSessionReconciliationProven, false)
+  assert.equal(report.writesAfterLaterSnapshotUnknown, true)
+  assert.equal(fs.existsSync(path.join(f.work, 'rollback-target')), false)
+})
+
+test('matching independently captured snapshots do not establish absence of future writes', t => {
+  const f = fixture(t)
+  const before = captured(f)
+  const after = captureDisposableCoordinatedHouseholdSnapshot({
+    ...f.args, destinationRoot: path.join(f.work, 'identical-second-backup'),
+  })
+  const report = rollbackEvidence(f, before, after)
+  assert.equal(report.newerBackupDiffers, false)
+  assert.equal(report.possibleNewerDataLoss, false)
+  assert.equal(report.writesAfterLaterSnapshotUnknown, true)
+  assert.equal(report.automaticRollbackAllowed, false)
+  assert.equal(report.manualOwnerReviewRequired, true)
+})
+
+test('tampered after-write backup refuses before producing a rollback decision', t => {
+  const f = fixture(t)
+  const before = captured(f)
+  const after = captureDisposableCoordinatedHouseholdSnapshot({
+    ...f.args, destinationRoot: path.join(f.work, 'tamper-target'),
+  })
+  fs.writeFileSync(path.join(after.snapshotRoot, 'households', 'family-b',
+    'uploads', 'photos', 'image.bin'), Buffer.from('modified after attestation'))
+  assert.throws(() => rollbackEvidence(f, before, after),
+    /do not match the approved/)
+})
+
+test('same, nested or non-disposable snapshot roots refuse rollback review', t => {
+  const f = fixture(t)
+  const before = captured(f)
+  assert.throws(() => reviewDisposablePhase1PostWriteRollback({
+    serverDirectory: f.args.serverDirectory,
+    baselineSnapshotRoot: before.snapshotRoot,
+    baselineAttestation: before.attestation,
+    laterSnapshotRoot: before.snapshotRoot,
+    laterAttestation: before.attestation,
+  }), /distinct non-overlapping/)
+  assert.throws(() => reviewDisposablePhase1PostWriteRollback({
+    serverDirectory: f.args.serverDirectory,
+    baselineSnapshotRoot: process.cwd(),
+    baselineAttestation: before.attestation,
+    laterSnapshotRoot: before.snapshotRoot,
+    laterAttestation: before.attestation,
+  }), /only independently stored OS-temp backups/)
 })
