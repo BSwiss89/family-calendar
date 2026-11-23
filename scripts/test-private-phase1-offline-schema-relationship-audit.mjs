@@ -112,7 +112,7 @@ function fixture(t) {
       .run(1,1,null,Date.now()+24*60*60*1000)
     db.prepare('INSERT INTO events(id,title,creator_id,batch_id,person) VALUES(?,?,?,?,?)')
       .run(46,SECRET,1,'synthetic-batch',SECRET)
-    db.prepare('INSERT INTO people VALUES(?,?)').run(7,SECRET)
+    db.prepare('INSERT INTO people(id,display_name) VALUES(?,?)').run(7,SECRET)
     db.prepare('INSERT INTO notification_event_baselines(id,event_id,actor_id,secret_data) VALUES(?,?,?,?)')
       .run(4,46,1,SECRET)
     db.prepare('INSERT INTO assignment_notification_outbox(id,content,event_id,person_id,cancelled_details_json) VALUES(?,?,?,?,?)')
