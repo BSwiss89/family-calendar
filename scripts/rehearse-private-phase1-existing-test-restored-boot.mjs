@@ -17,6 +17,7 @@ const INSTALLED_SHA='76caa3e46186c3c5c6408f11b55800eb06779776'
 const SNAPSHOT='TEST-20261122-163327-c8b184db'
 const NODE='C:\\ProgramData\\FamilyCalendar\\Runtime\\node-v24.22.1\\node.exe'
 const DIR='fc-phase1-legacy-boot-'
+let reviewStep='preflight'
 const BLOCKED=new Set([443,8443,3001,11434,13001,13002,13003,13004,13005,13006])
 function refuse(message){throw new Error(message)}
 function expectedPath(base){return path.join(os.homedir(),'Projects',base)}
@@ -136,11 +137,11 @@ function get(pathname,port){
     req.once('timeout',()=>req.destroy(new Error('Loopback request timed out.')))
   })
 }
-async function checkBoot(port,child){
+async function checkBoot(port,child,hasSpawnError){
   const deadline=Date.now()+20000
   let health
   while(Date.now()<deadline){
-    if(child.exitCode!==null)refuse('Isolated restored Node exited before health checks.')
+    if(hasSpawnError()||child.exitCode!==null)refuse('Isolated restored Node exited before health checks.')
     try{
       health=await get('/api/health',port)
       if(health.status===200)break
@@ -160,7 +161,7 @@ async function checkBoot(port,child){
   }
 }
 async function shutDown(child){
-  if(!child)return true
+  if(!child||!child.pid)return true
   if(child.exitCode!==null||child.signalCode!==null)return true
   const close=new Promise(resolve=>{
     if(child.exitCode!==null||child.signalCode!==null)return resolve(true)
@@ -198,6 +199,7 @@ async function main(){
   let child=null
   let stopped=true
   try{
+    reviewStep='isolate-source'
     stage=fs.mkdtempSync(path.join(os.tmpdir(),DIR))
     const checkout=path.join(stage,'source')
     git(['clone','--quiet','--local','--no-hardlinks','--no-checkout',installed,checkout])
@@ -207,7 +209,9 @@ async function main(){
     }
     // All these are PHYSICAL copies. Never link dependencies, DB or assets
     // back to the running TEST junction locations.
+    reviewStep='copy-dependencies'
     copyTree(deps,path.join(checkout,'node_modules'))
+    reviewStep='restore-files'
     fs.mkdirSync(path.join(checkout,'Server','data'),{recursive:true})
     fs.copyFileSync(originalDb,path.join(checkout,'Server','data','calendar.db'),
       fs.constants.COPYFILE_EXCL)
@@ -242,19 +246,24 @@ async function main(){
       FAMILY_CALENDAR_TEST_FAMILY_ACCESS_MODE:'off',
       NODE_ENV:'production',
     }
+    reviewStep='isolated-loopback-boot'
     child=spawn(nodeBinary,[path.join(checkout,'Server','index.mjs')],{
       cwd:checkout,env,windowsHide:true,stdio:['ignore','ignore','ignore'],
     })
-    await checkBoot(port,child)
+    let spawnFailed=false
+    child.once('error',()=>{spawnFailed=true})
+    await checkBoot(port,child,()=>spawnFailed)
     if(git(['-C',installed,'rev-parse','HEAD'])!==INSTALLED_SHA){
       refuse('Installed TEST source changed during isolated verification.')
     }
     for(const f of original){
       if(hash(f.full)!==f.sha256)refuse('Original backup bytes drifted during restore.')
     }
+    reviewStep='isolated-shutdown'
     stopped=await shutDown(child)
     child=null
     if(!stopped)refuse('Isolated restored backend failed to exit.')
+    reviewStep='post-boot-restore-validation'
     const post=verifyDatabase(stagedDb)
     if(post.account!==counts.account||post.sessions!==counts.sessions){
       refuse('Restored account/session counts changed unexpectedly on boot.')
@@ -268,6 +277,6 @@ async function main(){
 }
 main().catch(()=>{
   // Never print credentials, source paths or backend stderr.
-  console.error('ISOLATED_TEST_RESTORE_BOOT=REVIEW | original_backup_not_intentionally_modified=YES | no_service_or_route_changes_requested=YES | deployment_authorized=NO')
+  console.error('ISOLATED_TEST_RESTORE_BOOT=REVIEW | step='+reviewStep+' | no_service_or_route_changes_requested=YES | deployment_authorized=NO')
   process.exitCode=2
 })
