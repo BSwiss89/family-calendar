@@ -34,7 +34,10 @@ foreach($call in $allCommands){
 $scriptLiteralCount=@($allStrings | Where-Object {$_.Value -match '(?i)\.ps1$'}).Count
 $explicitTest=@($allStrings | Where-Object {$_.Value -match '(?i)(?:secure[\s_-]*test|family-calendar-test|test-security-stage|13002|13003)'}).Count
 $processInspect=@($names | Where-Object {@('Get-Process','Get-CimInstance','Get-WmiObject','Get-NetTCPConnection') -icontains $_}).Count
-$hash=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+$sha256=[Security.Cryptography.SHA256]::Create()
+$stream=[IO.File]::OpenRead($item.FullName)
+try{$hash=[BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-','').ToLowerInvariant()}
+finally{$stream.Dispose();$sha256.Dispose()}
 $targetLabel=if($targets.Count){$targets -join ','}else{'none-detected'}
 $mutationLabel=if($mutations.Count){(@($mutations | Sort-Object -Unique) -join ',')}else{'none-detected'}
 Write-Output ('SCRIPT_SHA256='+$hash+' | COMMANDS='+$allCommands.Count+' | KNOWN_TASK_LITERALS='+$targetLabel+' | TASK_PROCESS_CONTROL_COMMANDS='+$mutationLabel+' | DYNAMIC_COMMANDS='+$dynamic.Count+' | DYNAMIC_TASK_TARGETS='+$dynamicTaskTargets+' | PS1_LITERALS='+$scriptLiteralCount+' | TEST_HINT_STRINGS='+$explicitTest+' | PROCESS_INSPECTION_COMMANDS='+$processInspect)
