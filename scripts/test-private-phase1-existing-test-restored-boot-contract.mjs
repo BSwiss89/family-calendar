@@ -25,7 +25,10 @@ test('historical restore boot is fixed, local and cannot modify deployed tasks/r
     "child=spawn(nodeBinary,",
     "await shutDown(child)",
     "child.kill()",
-    "process.argv.length!==2",
+    "process.argv[2]==='--preflight'",
+    "process.argv[2]==='--boot'",
+    "existing_test_shutdown_required=YES",
+    "requireTestMaintenanceFence()",
   ])assert(source.includes(text),text)
   assert.doesNotMatch(source,/\b(Stop-ScheduledTask|Start-ScheduledTask|Disable-ScheduledTask|Register-ScheduledTask|netsh|schtasks|Start-Service|Stop-Service|Restart-Computer)\b/i)
   assert.doesNotMatch(source,/https?:\/\/(?!127\.0\.0\.1)/i)
