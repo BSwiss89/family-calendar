@@ -3,6 +3,7 @@ import test from 'node:test'
 // Also verify sanitized Windows task-definition drift before any TEST pilot.
 import './test-private-phase1-windows-test-task-fencing.mjs'
 import './test-private-phase1-test-restart-schedule-review.mjs'
+import './test-private-phase1-watchdog-source-audit.mjs'
 // The existing CI boundary test also loads the staged handoff regression suite.
 import './test-private-phase1-test-staged-handoff-review.mjs'
 import assert from 'node:assert/strict'
