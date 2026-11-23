@@ -14,6 +14,8 @@ import { listPrivatePhase1LegacyDispositionRules }
   from '../Server/private-phase1-legacy-table-disposition-review.mjs'
 import { auditPrivatePhase1OfflineLegacySchema as audit }
   from '../Server/private-phase1-offline-schema-relationship-audit.mjs'
+import { inspectPrivatePhase1ArchivedTriggerLinks as reviewLinks }
+  from '../Server/private-phase1-archive-trigger-link-evidence.mjs'
 
 const sha='76caa3e46186c3c5c6408f11b55800eb06779776'
 const SECRET='SYNTHETIC_PRIVATE_UPLOAD_USER_TOKEN_EVENT_DO_NOT_ECHO'
@@ -39,13 +41,13 @@ function fixture(t) {
           ddl='CREATE TABLE family_users(id INTEGER PRIMARY KEY, username TEXT, password_hash TEXT)'
           break
         case 'family_sessions':
-          ddl='CREATE TABLE family_sessions(id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES family_users(id), revoked_at INTEGER, expires_at INTEGER)'
+          ddl='CREATE TABLE family_sessions(id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES family_users(id), revoked_at INTEGER, expires_at INTEGER, selected_person_id INTEGER)'
           break
         case 'events':
-          ddl="CREATE TABLE events(id INTEGER PRIMARY KEY, title TEXT DEFAULT '"+SECRET+"', creator_id INTEGER, person_ref INTEGER)"
+          ddl="CREATE TABLE events(id INTEGER PRIMARY KEY, title TEXT DEFAULT '"+SECRET+"', creator_id INTEGER, person_ref INTEGER, batch_id TEXT, person TEXT)"
           break
         case 'people':
-          ddl='CREATE TABLE people(id INTEGER PRIMARY KEY, display_name TEXT)'
+          ddl='CREATE TABLE people(id INTEGER PRIMARY KEY, display_name TEXT, image TEXT)'
           break
         case 'emoji_markers':
           ddl='CREATE TABLE emoji_markers(id INTEGER PRIMARY KEY, marker TEXT)'
@@ -69,10 +71,28 @@ function fixture(t) {
           ddl='CREATE TABLE event_exceptions(id INTEGER PRIMARY KEY,event_id INTEGER REFERENCES events(id))'
           break
         case 'list_items':
-          ddl='CREATE TABLE list_items(id INTEGER PRIMARY KEY,list_id INTEGER REFERENCES lists(id))'
+          ddl='CREATE TABLE list_items(id INTEGER PRIMARY KEY,list_id INTEGER REFERENCES lists(id),store_id INTEGER)'
           break
         case 'notification_event_baselines':
-          ddl='CREATE TABLE notification_event_baselines(id INTEGER PRIMARY KEY, event_id INTEGER, actor_id INTEGER, secret_data TEXT)'
+          ddl='CREATE TABLE notification_event_baselines(id INTEGER PRIMARY KEY, event_id INTEGER, actor_id INTEGER, secret_data TEXT, person_ids_json TEXT)'
+          break
+        case 'assignment_notification_outbox':
+          ddl='CREATE TABLE assignment_notification_outbox(id INTEGER PRIMARY KEY, content TEXT, event_id INTEGER, person_id INTEGER, cancelled_details_json TEXT)'
+          break
+        case 'notification_deleted_event_details':
+        case 'notification_dirty_event_attribution':
+        case 'notification_dirty_event_fields':
+        case 'notification_dirty_events':
+          ddl='CREATE TABLE "'+table+'"(id INTEGER PRIMARY KEY,content TEXT,event_id INTEGER,person_id INTEGER)'
+          break
+        case 'test_push_subscriptions':
+          ddl='CREATE TABLE test_push_subscriptions(id INTEGER PRIMARY KEY,content TEXT,user_id INTEGER,session_id INTEGER,person_id INTEGER)'
+          break
+        case 'test_push_deliveries':
+          ddl='CREATE TABLE test_push_deliveries(id INTEGER PRIMARY KEY,content TEXT,notification_id INTEGER)'
+          break
+        case 'recipes':
+          ddl='CREATE TABLE recipes(id INTEGER PRIMARY KEY,content TEXT,image TEXT,source_image TEXT)'
           break
         default:
           ddl='CREATE TABLE "'+table+'"(id INTEGER PRIMARY KEY, content TEXT)'
@@ -83,19 +103,28 @@ function fixture(t) {
     db.exec("CREATE INDEX events_partial_idx ON events(person_ref) WHERE person_ref IS NOT NULL")
     db.exec("CREATE INDEX events_expression_idx ON events(lower(title))")
     db.exec("CREATE TRIGGER secret_event_trigger AFTER INSERT ON events BEGIN SELECT '"+SECRET+"'; END")
+    for(const [table,n] of [['events',4],['event_people',3],['event_exceptions',6]]) {
+      for(let i=0;i<n;i++)db.exec('CREATE TRIGGER phase1_fixture_'+table+'_'+i+' AFTER UPDATE ON '+table+' BEGIN SELECT 1; END')
+    }
     db.exec('CREATE VIEW test_schema_view AS SELECT id FROM events')
     db.prepare('INSERT INTO family_users VALUES(?,?,?)').run(1,SECRET,SECRET)
-    db.prepare('INSERT INTO family_sessions VALUES(?,?,?,?)')
+    db.prepare('INSERT INTO family_sessions(id,user_id,revoked_at,expires_at) VALUES(?,?,?,?)')
       .run(1,1,null,Date.now()+24*60*60*1000)
-    db.prepare('INSERT INTO events(id,title,creator_id) VALUES(?,?,?)')
-      .run(46,SECRET,1)
-    db.prepare('INSERT INTO people VALUES(?,?)').run(7,SECRET)
-    db.prepare('INSERT INTO notification_event_baselines VALUES(?,?,?,?)')
+    db.prepare('INSERT INTO events(id,title,creator_id,batch_id,person) VALUES(?,?,?,?,?)')
+      .run(46,SECRET,1,'synthetic-batch',SECRET)
+    db.prepare('INSERT INTO people(id,display_name) VALUES(?,?)').run(7,SECRET)
+    db.prepare('INSERT INTO notification_event_baselines(id,event_id,actor_id,secret_data) VALUES(?,?,?,?)')
       .run(4,46,1,SECRET)
-    db.prepare('INSERT INTO assignment_notification_outbox VALUES(?,?)')
-      .run(2,SECRET)
+    db.prepare('INSERT INTO assignment_notification_outbox(id,content,event_id,person_id,cancelled_details_json) VALUES(?,?,?,?,?)')
+      .run(2,SECRET,46,7,JSON.stringify({cancelled:SECRET}))
     db.prepare('INSERT INTO test_assignment_acknowledgements VALUES(?,?)')
       .run(1,2)
+    db.prepare('INSERT INTO shopping_stores(id,title) VALUES(?,?)').run(3,'synthetic store')
+    db.prepare('INSERT INTO list_items(id,store_id) VALUES(?,?)').run(23,3)
+    db.prepare('INSERT INTO notification_deleted_event_details(id,content,event_id) VALUES(?,?,?)').run(1,SECRET,999)
+    db.prepare('INSERT INTO notification_dirty_event_attribution(id,content,event_id,person_id) VALUES(?,?,?,?)').run(1,SECRET,46,7)
+    db.prepare('INSERT INTO test_push_subscriptions(id,content,user_id,session_id,person_id) VALUES(?,?,?,?,?)').run(1,SECRET,1,1,7)
+    db.prepare('INSERT INTO test_push_deliveries(id,content,notification_id) VALUES(?,?,?)').run(1,SECRET,2)
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[])
   } finally {db.close()}
   const rel=['calendar.db','uploads/pictures/photo.bin',
@@ -129,14 +158,14 @@ test('27-table source schema reports safe columns, FKs, indexes, triggers and im
   assert(result.totalExplicitForeignKeys>=6)
   assert(result.totalIndexes>=3)
   assert.equal(result.totalViews,1)
-  assert.equal(result.totalTriggers,1)
+  assert.equal(result.totalTriggers,14)
   assert(result.undeclaredIdColumnHints>=2)
   const events=result.historicalTables.find(x=>x.table==='events')
   assert(events.columns.some(x=>x.column==='creator_id'))
   assert(events.indexes.some(x=>x.partial))
   assert(events.indexes.some(x=>x.keyParts.some(p=>p.expression===true)))
   assert(events.unlinkedIdColumnHints.includes('creator_id'))
-  assert.equal(events.triggerCount,1)
+  assert.equal(events.triggerCount,5)
   const marker=result.historicalTables.find(x=>x.table==='emoji_marker_exceptions')
   assert(marker.foreignKeys.some(x=>x.referencedTable==='emoji_markers'))
   const ack=result.historicalTables.find(x=>x.table==='test_assignment_acknowledgements')
@@ -185,4 +214,48 @@ test('archive path cannot target installed site even with a plausible marker',t=
   })
   assert.equal(bad.status,2)
   assert.equal(bad.stdout,'')
+})
+
+test('14 archived synthetic triggers and 15 implied links are fingerprinted without exporting private data', t=>{
+  const f=fixture(t)
+  const originalDb=fileHash(f.dbFile),originalManifest=fileHash(f.manifest)
+  const result=reviewLinks(f.args)
+  assert.equal(result.kind,'phase1-readonly-archived-trigger-link-evidence-v1')
+  assert.equal(result.verifiedHistoricalArchive,true)
+  assert.equal(result.triggersObserved,14)
+  assert.equal(result.expectedHistoricalTriggerLayout,true)
+  assert.equal(result.triggerFingerprints.filter(x=>x.table==='events').length,5)
+  assert.equal(result.triggerFingerprints.filter(x=>x.table==='event_people').length,3)
+  assert.equal(result.triggerFingerprints.filter(x=>x.table==='event_exceptions').length,6)
+  assert.equal(result.nineUnlinkedIdentifierHintsExplicitlyMapped,9)
+  assert.equal(result.otherImplicitOrQuarantinedLinksMapped,6)
+  assert.equal(result.aggregateReferenceReview.length,15)
+  const find=(table,col)=>result.aggregateReferenceReview.find(x=>
+    x.table===table&&x.column===col)
+  assert.equal(find('events','batch_id').nonNullReferences,1)
+  assert.equal(find('events','batch_id').unmatchedReferences,null)
+  assert.equal(find('list_items','store_id').nonNullReferences,1)
+  assert.equal(find('list_items','store_id').unmatchedReferences,0)
+  assert.equal(find('notification_deleted_event_details','event_id').unmatchedReferences,1)
+  assert.equal(find('test_push_subscriptions','user_id').nonNullReferences,1)
+  assert.equal(find('test_push_subscriptions','user_id').unmatchedReferences,0)
+  assert.equal(find('test_push_deliveries','notification_id').unmatchedReferences,0)
+  assert.equal(result.aggregateReferenceReview.every(x=>x.referenceRewriteAuthorized===false),true)
+  assert.equal(result.triggerFingerprints.every(x=>x.semanticEffectReviewed===false),true)
+  for(const key of [
+    'rawTriggerSqlOrNamesExposed','rawCalendarOrAccountRowsExposed',
+    'allTriggerSemanticsApproved','allIdentifierLinksApproved',
+    'originalArchiveModified','installedCalendarsModified','realMigrationExecuted',
+    'backupAuthorized','rollbackAuthorized','testDeploymentAuthorized',
+    'liveDeploymentAuthorized',
+  ])assert.equal(result[key],false,key)
+  const printed=JSON.stringify(result)
+  assert.doesNotMatch(printed,/SYNTHETIC_PRIVATE|secret_event_trigger|password_hash|test_schema_view/)
+  assert.equal(fileHash(f.dbFile),originalDb)
+  assert.equal(fileHash(f.manifest),originalManifest)
+})
+test('read-only trigger and link inspection refuses a damaged archived snapshot',t=>{
+  const f=fixture(t)
+  fs.writeFileSync(path.join(f.snap,'uploads','pictures','photo.bin'),'modified')
+  assert.throws(()=>reviewLinks(f.args),/bytes differ|unlisted|inventory|refused/)
 })
