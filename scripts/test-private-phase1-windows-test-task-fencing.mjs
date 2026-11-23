@@ -120,7 +120,7 @@ test('changed watchdog, LIVE, unrelated tasks or app task set cannot pass',()=>{
   assert.throws(()=>review(baseline(),other),/unreviewed additional/)
   other=maintenance()
   other.tasks.pop()
-  assert.throws(()=>review(baseline(),other),/protected LIVE\/TEST task is missing/)
+  assert.throws(()=>review(baseline(),other),/complete pinned sanitized task inventory|protected LIVE\/TEST task is missing/)
 })
 test('Running and Ready can change while enabled tasks remain protected',()=>{
   const data=maintenance()
