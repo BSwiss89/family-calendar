@@ -90,6 +90,25 @@ function requireTestMaintenanceFence(){
     refuse('Legacy TEST maintenance fence is not independently verified.')
   }
 }
+function countPhysicalDeps(folder){
+  let files=0
+  const dirs=[folder]
+  while(dirs.length){
+    const current=dirs.pop()
+    for(const name of fs.readdirSync(current)){
+      if(name==='.bin'&&current===folder)continue
+      const target=path.join(current,name)
+      const entry=fs.lstatSync(target)
+      if(entry.isSymbolicLink())refuse('Unreviewed dependency link requires inspection.')
+      if(entry.isDirectory())dirs.push(target)
+      else if(entry.isFile())files++
+      else refuse('Unexpected runtime dependency file type.')
+      if(files>150000||dirs.length>150000)refuse('Dependency inventory is unexpectedly large.')
+    }
+  }
+  if(files<5)refuse('Missing runtime dependency files.')
+  return files
+}
 function git(args){
   const r=spawnSync('git',args,{
     windowsHide:true,encoding:'utf8',timeout:120000,
@@ -188,7 +207,12 @@ async function shutDown(child){
 async function main(){
   // Exact fixed historical backup only. A newer snapshot requires a new
   // reviewed revision; no untrusted arbitrary paths or target ports.
-  if(process.argv.length!==2)refuse('No user-supplied paths, ports or options are supported.')
+  const mode=process.argv.length===3&&process.argv[2]==='--preflight'
+    ? 'preflight'
+    : process.argv.length===3&&process.argv[2]==='--boot'
+      ? 'boot'
+      : null
+  if(mode===null)refuse('Use explicit --preflight or --boot, never arbitrary arguments.')
   if(process.platform!=='win32')refuse('Windows TEST restore rehearsal only.')
   const installed=physicalDir(expectedPath('family-calendar-test-security-stage'))
   const recovery=physicalDir(expectedPath('family-calendar-phase1-recovery'))
@@ -206,10 +230,16 @@ async function main(){
     git(['-C',installed,'status','--porcelain','--untracked-files=no'])!==''){
     refuse('Installed TEST Git revision or tracked files changed.')
   }
-  // No temporary Node instance while the existing TEST calendar is active.
-  requireTestMaintenanceFence()
   const original=exactFiles(backup)
   verifyDatabase(originalDb)
+  reviewStep='dependency-inventory'
+  const dependencyFiles=countPhysicalDeps(deps)
+  if(mode==='preflight'){
+    console.log('ISOLATED_TEST_RESTORE_PREFLIGHT=PASS | historical_backup_files=34 | accounts=1 | session_rows=21 | installed_test_sha='+INSTALLED_SHA+' | dependency_files='+dependencyFiles+' | boot_performed=NO | existing_test_shutdown_required=YES | installed_sites_written=NO | deployment_authorized=NO')
+    return
+  }
+  // No temporary Node instance while the existing TEST calendar is active.
+  requireTestMaintenanceFence()
   let stage=null
   let child=null
   let stopped=true
