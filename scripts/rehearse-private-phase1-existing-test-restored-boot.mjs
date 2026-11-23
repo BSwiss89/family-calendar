@@ -18,6 +18,7 @@ const SNAPSHOT='TEST-20261122-163327-c8b184db'
 const NODE='C:\\ProgramData\\FamilyCalendar\\Runtime\\node-v24.22.1\\node.exe'
 const DIR='fc-phase1-legacy-boot-'
 let reviewStep='preflight'
+let temporaryProcessExitUnverified=false
 const BLOCKED=new Set([443,8443,3001,11434,13001,13002,13003,13004,13005,13006])
 function refuse(message){throw new Error(message)}
 function expectedPath(base){return path.join(os.homedir(),'Projects',base)}
@@ -329,11 +330,17 @@ async function main(){
   }finally{
     if(child)stopped=await shutDown(child)
     if(stage&&stopped)fs.rmSync(stage,{recursive:true,force:true})
-    if(!stopped)refuse('Isolated Node could not be stopped; temporary folder retained for operator review.')
+    if(!stopped){
+      temporaryProcessExitUnverified=true
+      refuse('Isolated Node could not be stopped; temporary folder retained for operator review.')
+    }
   }
 }
 main().catch(()=>{
   // Never print credentials, source paths or backend stderr.
-  console.error('ISOLATED_TEST_RESTORE_BOOT=REVIEW | step='+reviewStep+' | no_service_or_route_changes_requested=YES | deployment_authorized=NO')
+  console.error('ISOLATED_TEST_RESTORE_BOOT=REVIEW | step='+reviewStep+
+    ' | temporary_process_exit_unverified='+(temporaryProcessExitUnverified?'YES':'NO')+
+    ' | '+(temporaryProcessExitUnverified?'DO_NOT_RESTART_TEST=YES | ':'')+
+    'no_service_or_route_changes_requested=YES | deployment_authorized=NO')
   process.exitCode=2
 })
