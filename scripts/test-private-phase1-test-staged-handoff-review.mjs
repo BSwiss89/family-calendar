@@ -62,14 +62,20 @@ const requiredTasks=[
   'Family Calendar Server','Family Calendar Ollama Server',
   'Family Calendar Watchdog','Family Calendar Secure TEST',
   'Family Calendar Secure TEST Auto Deploy','Family Calendar Auto Deploy',
-  'Family Calendar Backup Sender',
+  'Family Calendar Auto Preview','Family Calendar Backup Ack Processor',
+  'Family Calendar Backup Catchup Sender','Family Calendar Backup Cleanup',
+  'Family Calendar Backup Sender','Family Calendar Local STT',
+  'Family Calendar Monthly Restart','Family Calendar Project Backup',
+  'Family Calendar Secure LIVE Auto Deploy',
 ]
 function taskInventory(stage) {
   return {
     schemaVersion:1,site:'existing-secure-test',stage,
     installedTestSha:oldSha,enumerationSucceeded:true,
     tasks:requiredTasks.map((name,i)=>{
-      const disabled=(name==='Family Calendar Auto Deploy') ||
+      const disabled=['Family Calendar Auto Deploy',
+        'Family Calendar Auto Preview','Family Calendar Secure LIVE Auto Deploy',
+      ].includes(name) ||
         (stage==='maintenance-fenced' && [
           'Family Calendar Secure TEST','Family Calendar Secure TEST Auto Deploy',
         ].includes(name))
@@ -78,7 +84,10 @@ function taskInventory(stage) {
         actionDigest:(i+1).toString(16).padStart(64,'0'),
         principalDigest:(i+21).toString(16).padStart(64,'0'),
         triggerDigest:(i+41).toString(16).padStart(64,'0'),
-        triggerCount:1,restartCount:3,multipleInstances:'IgnoreNew',
+        triggerCount:1,restartCount:[
+          'Family Calendar Server','Family Calendar Ollama Server',
+          'Family Calendar Secure TEST','Family Calendar Local STT',
+        ].includes(name)?3:0,multipleInstances:'IgnoreNew',
       }
     }),
   }
