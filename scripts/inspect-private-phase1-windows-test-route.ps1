@@ -53,12 +53,21 @@ if($liveUpdater.Count -ne 1 -or ([string]$liveUpdater[0].State) -cne 'Disabled')
 # Require a complete export across ALL portproxy families, not just v4tov4.
 # A hidden v6tov4 or other mixed-family forward could bypass the reviewed
 # single TEST entry even if the original v4tov4 rule still looks correct.
+$allFamilyShow = @(& netsh interface portproxy show all)
+if($LASTEXITCODE -ne 0 -or $allFamilyShow.Count -lt 1) {
+  throw 'Complete Windows portproxy table unavailable; manual review required.'
+}
 $allFamilyDump = @(& netsh interface portproxy dump)
 if($LASTEXITCODE -ne 0 -or $allFamilyDump.Count -lt 1) {
   throw 'Complete Windows portproxy-family export unavailable; manual review required.'
 }
+$repeatAllFamilyShow = @(& netsh interface portproxy show all)
+if($LASTEXITCODE -ne 0 -or [string]::Join("`n",[string[]]$repeatAllFamilyShow) -cne [string]::Join("`n",[string[]]$allFamilyShow)) {
+  throw 'Windows portproxy changed while collecting read-only evidence; manual review required.'
+}
 $allFamilyEvidence = @{
   dump = [string]::Join("`n", [string[]]$allFamilyDump)
+  showAll = [string]::Join("`n", [string[]]$allFamilyShow)
   installedTestSha = $ExpectedInstalledTestSha
   legacyTestAddress = $ExpectedLegacyTestAddress
 } | ConvertTo-Json -Depth 4 -Compress
