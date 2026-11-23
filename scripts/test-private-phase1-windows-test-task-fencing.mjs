@@ -31,21 +31,30 @@ function item(name, state='Ready', index=1) {
     actionDigest:index.toString(16).padStart(64,'0'),
     principalDigest:(index+100).toString(16).padStart(64,'0'),
     triggerDigest:(index+200).toString(16).padStart(64,'0'),
-    triggerCount:1, restartCount:3, multipleInstances:'IgnoreNew',
+    triggerCount:1, restartCount:[
+      'Family Calendar Server','Family Calendar Ollama Server',
+      'Family Calendar Secure TEST','Family Calendar Local STT',
+    ].includes(name)?3:0, multipleInstances:'IgnoreNew',
   }
 }
 const names = [
   'Family Calendar Server', 'Family Calendar Ollama Server',
   'Family Calendar Watchdog', 'Family Calendar Secure TEST',
   'Family Calendar Secure TEST Auto Deploy',
-  'Family Calendar Auto Deploy', 'Family Calendar Backup Sender',
+  'Family Calendar Auto Deploy', 'Family Calendar Auto Preview',
+  'Family Calendar Backup Ack Processor', 'Family Calendar Backup Catchup Sender',
+  'Family Calendar Backup Cleanup', 'Family Calendar Backup Sender',
+  'Family Calendar Local STT','Family Calendar Monthly Restart',
+  'Family Calendar Project Backup','Family Calendar Secure LIVE Auto Deploy',
 ]
 function baseline() {
   return {
     schemaVersion:1,site:'existing-secure-test',stage:'baseline',
     installedTestSha:sha,enumerationSucceeded:true,
     tasks:names.map((name,i)=>item(name,
-      name==='Family Calendar Auto Deploy'?'Disabled':'Ready',i+1)),
+      ['Family Calendar Auto Deploy','Family Calendar Auto Preview',
+        'Family Calendar Secure LIVE Auto Deploy'].includes(name)
+        ?'Disabled':'Ready',i+1)),
   }
 }
 function maintenance() {
@@ -66,12 +75,15 @@ const review=(one=baseline(),two=maintenance())=>
 test('only both TEST scheduler tasks may be reported disabled; all attestation and release flags remain false',()=>{
   const r=review()
   assert.equal(r.observedTaskStatesMatch,true)
+  assert.equal(r.protectedTaskCount,15)
   assert.deepEqual(r.blockers,[])
   assert.equal(r.legacyTestTaskDisabledOnReportedSnapshot,true)
   assert.equal(r.legacyTestAutoDeployDisabledOnReportedSnapshot,true)
   for(const field of [
     'taskActionDefinitionAttestedByOperator',
     'watchdogTestRestartExcludedByCodeReview',
+    'monthlyRestartTestCollisionExcludedByCodeReview',
+    'backupAndMaintenanceTestCollisionExcludedByCodeReview',
     'installedLegacyProcessStopped','installedLegacyBackendPortClosed',
     'sqliteWritersQuiesced','liveIsolationVerified','backupAndRollbackVerified',
     'safeToCutover','testDeploymentAuthorized','liveDeploymentAuthorized',
@@ -94,7 +106,8 @@ test('unfenced TEST auto-deployer or legacy start task remains a blocker',()=>{
 test('changed watchdog, LIVE, unrelated tasks or app task set cannot pass',()=>{
   for(const name of ['Family Calendar Watchdog',
     'Family Calendar Server','Family Calendar Ollama Server',
-    'Family Calendar Backup Sender']){
+    'Family Calendar Backup Sender','Family Calendar Monthly Restart',
+    'Family Calendar Local STT','Family Calendar Project Backup']){
     const other=maintenance()
     const current=other.tasks.find(x=>x.name===name)
     current.state='Disabled';current.enabled=false
@@ -104,10 +117,27 @@ test('changed watchdog, LIVE, unrelated tasks or app task set cannot pass',()=>{
   }
   let other=maintenance()
   other.tasks.push(item('Family Calendar Notes', 'Ready',80))
-  assert(review(baseline(),other).blockers.some(x=>/Task set changed/.test(x)))
+  assert.throws(()=>review(baseline(),other),/unreviewed additional/)
   other=maintenance()
   other.tasks.pop()
-  assert(review(baseline(),other).blockers.some(x=>/Task set changed/.test(x)))
+  assert.throws(()=>review(baseline(),other),/protected LIVE\/TEST task is missing/)
+})
+test('Running and Ready can change while enabled tasks remain protected',()=>{
+  const data=maintenance()
+  for(const name of ['Family Calendar Server','Family Calendar Local STT',
+    'Family Calendar Watchdog','Family Calendar Monthly Restart']){
+    data.tasks.find(x=>x.name===name).state='Running'
+  }
+  assert.equal(review(baseline(),data).observedTaskStatesMatch,true)
+})
+test('existing monthly restart and backup task actions must not change',()=>{
+  for(const name of ['Family Calendar Monthly Restart',
+    'Family Calendar Backup Sender','Family Calendar Backup Cleanup',
+    'Family Calendar Secure LIVE Auto Deploy']){
+    const data=maintenance()
+    data.tasks.find(x=>x.name===name).actionDigest='f'.repeat(64)
+    assert(review(baseline(),data).blockers.some(x=>/task definition/.test(x)))
+  }
 })
 test('action, principal, trigger, retry and instance drift are all blockers',()=>{
   for(const [key,value] of [
@@ -152,5 +182,5 @@ test('baseline LIVE deployer enabled or TEST settings changed refuses start',()=
   const baselineTasks=baseline()
   baselineTasks.tasks.find(x=>x.name==='Family Calendar Secure TEST Auto Deploy')
     .multipleInstances='Parallel'
-  assert.throws(()=>review(baselineTasks,maintenance()),/replay prevention/)
+  assert.throws(()=>review(baselineTasks,maintenance()),/scheduled task definition/)
 })
