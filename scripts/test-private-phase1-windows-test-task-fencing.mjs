@@ -135,6 +135,7 @@ test('wrong or malformed task inventories fail before comparison, never auto-acc
     data=>data.tasks[0].path='\\Other\\',
     data=>data.tasks.push({...data.tasks[0]}),
     data=>data.tasks.push(item('Family Calendar Secure TEST Shadow','Ready',88)),
+    data=>data.tasks.push(item('Family Calendar TEST Alternate Runner','Ready',89)),
   ]){
     const other=maintenance()
     changed(other)
