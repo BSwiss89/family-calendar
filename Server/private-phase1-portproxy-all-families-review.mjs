@@ -39,18 +39,18 @@ function properties(words) {
 // IPv4-to-IPv4 rule and compare that row to the exported rule.
 function parseCompleteShowAll(showAll, legacyTestAddress) {
   if (typeof showAll !== 'string' || showAll.length < 30 ||
-      showAll.length > 32768 || /\\0/.test(showAll)) {
+      showAll.length > 32768 || /\0/.test(showAll)) {
     refuse('complete bounded show-all forwarding evidence required.')
   }
-  const lines = showAll.replace(/^\\uFEFF/, '').split(/\\r?\\n/)
+  const lines = showAll.replace(/^\uFEFF/, '').split(/\r?\n/)
     .map(line => line.trim()).filter(Boolean)
   if (lines.length !== 4 ||
-      !/^Listen on ipv4:\\s+Connect to ipv4:$/i.test(lines[0]) ||
-      !/^Address\\s+Port\\s+Address\\s+Port$/i.test(lines[1]) ||
-      !/^-+\\s+-+\\s+-+\\s+-+$/.test(lines[2])) {
+      !/^Listen on ipv4:\s+Connect to ipv4:$/i.test(lines[0]) ||
+      !/^Address\s+Port\s+Address\s+Port$/i.test(lines[1]) ||
+      !/^-+\s+-+\s+-+\s+-+$/.test(lines[2])) {
     refuse('unexpected, incomplete or additional portproxy show-all sections.')
   }
-  const row = lines[3].split(/\\s+/)
+  const row = lines[3].split(/\s+/)
   if (row.length !== 4 || row[0] !== '127.0.0.1' ||
       row[1] !== '13003' || row[2] !== legacyTestAddress ||
       row[3] !== '13002') {
