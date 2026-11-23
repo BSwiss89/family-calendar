@@ -25,6 +25,7 @@ function reviewObservation(observed,phase,baseline) {
       observed.schemaVersion!==1||observed.phase!==phase||
       observed.site!=='existing-secure-test'||observed.complete!==true||
       observed.installedTestSha!==baseline.installedTestSha||
+      !Number.isSafeInteger(observed.observedAtMs)||observed.observedAtMs<0||
       !Array.isArray(observed.listeners)||observed.listeners.length>40||
       !Array.isArray(observed.testProcesses)||observed.testProcesses.length>40||
       !Array.isArray(observed.testServices)||observed.testServices.length>20) {
@@ -93,10 +94,26 @@ export function reviewPrivatePhase1WindowsWriterFence({
   reviewObservation(baseline,'baseline',baseline)
   reviewObservation(maintenanceFirst,'maintenance-fenced',baseline)
   reviewObservation(maintenanceSecond,'maintenance-fenced',baseline)
-  // Separate time-separated observations MUST agree in these exact protected
-  // facts, but identical observations alone never prove there is no other
-  // process with an open SQLite handle.
-  if(JSON.stringify(maintenanceFirst)!==JSON.stringify(maintenanceSecond)) {
+  // Require two different operator-observed sampling moments after the
+  // running baseline. Timestamps are still caller-supplied, not OS proof.
+  const elapsed=maintenanceSecond.observedAtMs-maintenanceFirst.observedAtMs
+  if(maintenanceFirst.observedAtMs<=baseline.observedAtMs||
+     elapsed<1000||elapsed>15*60*1000) {
+    refuse('independent ordered maintenance observations at least one second apart required.')
+  }
+  const protectedView=value=>JSON.stringify({
+    installedTestSha:value.installedTestSha,
+    livePid:value.livePid,portproxyPid:value.portproxyPid,
+    legacyPid:value.legacyPid,
+    listeners:[...value.listeners].sort((a,b)=>
+      (a.address+':'+a.port).localeCompare(b.address+':'+b.port)),
+    testProcesses:[...value.testProcesses].sort((a,b)=>a.pid-b.pid),
+    testServices:[...value.testServices].sort(),
+  })
+  // Compare the protected identities, ignoring timestamp and enumeration
+  // order differences. Matching observed facts alone never prove that no
+  // unrelated process retained an open SQLite file handle.
+  if(protectedView(maintenanceFirst)!==protectedView(maintenanceSecond)) {
     refuse('protected listener or TEST writer reappeared between maintenance samples.')
   }
   const tasks=assessPrivatePhase1WindowsTaskFencing({
