@@ -47,6 +47,16 @@ function verifyRequiredColumns(db,name,columns) {
 export function inspectPrivatePhase1OfflineLegacyMigration({
   recoveryParent,snapshotRoot,expectedInstalledTestSha,
 }={}) {
+  // Never treat an installed TEST/LIVE checkout or a browser-chosen folder
+  // as a recovery archive, even if someone forges a plausible manifest.
+  if(typeof recoveryParent!=='string'||!path.isAbsolute(recoveryParent)||
+     path.basename(path.resolve(recoveryParent)).toLowerCase()!==
+       'family-calendar-phase1-recovery'||
+     path.resolve(recoveryParent).split(path.sep).some(part=>
+       ['family-calendar','family-calendar-preview',
+         'family-calendar-test-security-stage'].includes(part.toLowerCase()))) {
+    refuse('only the separately protected legacy recovery root may be inspected.')
+  }
   const args={recoveryParent,snapshotRoot,expectedInstalledTestSha}
   const initial=verifyOfflineLegacyTestSnapshot(args)
   if(initial.result!=='PASS') refuse('legacy TEST cold backup must verify.')
