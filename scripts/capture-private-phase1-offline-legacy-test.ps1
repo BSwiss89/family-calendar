@@ -96,6 +96,18 @@ function CompareAndCopy([string]$source,[string]$destination){
   if($items.Count -ne $written.Count){Refuse 'Snapshot file enumeration mismatched.'}
   return $items.Count
 }
+function VerifySameTree([string]$source,[string]$snapshot){
+  $a=@(ListFiles $source)
+  $b=@(ListFiles $snapshot)
+  if($a.Count -ne $b.Count){Refuse 'An upload/build file was added or removed during offline capture.'}
+  foreach($file in $a){
+    $rel=$file.Substring((Normal $source).Length).TrimStart('\')
+    $saved=Join-Path $snapshot $rel
+    if(-not [IO.File]::Exists($saved) -or (ShaFile $file) -cne (ShaFile $saved)){
+      Refuse 'Upload/build bytes changed after the initial copy.'
+    }
+  }
+}
 function CheckSqlite([string]$filename){
   $js="const {DatabaseSync}=require('node:sqlite');const d=new DatabaseSync(process.argv[1],{readOnly:true});try{if(d.prepare('PRAGMA integrity_check').get().integrity_check!=='ok'||d.prepare('PRAGMA foreign_key_check').all().length!==0)process.exitCode=3}finally{d.close()}"
   & $node -e $js $filename 2>$null | Out-Null
@@ -201,6 +213,18 @@ try{
   Copy-Item -LiteralPath $supervisor -Destination $backupSupervisor -ErrorAction Stop
   if((ShaFile $supervisor) -cne (ShaFile $backupSupervisor)){Refuse 'Supervisor backup changed.'}
   CheckSqlite $copyDb
+  VerifySameTree $uploads (Join-Path $folder 'uploads')
+  VerifySameTree $dist (Join-Path $folder 'dist')
+  if((ShaFile $db) -cne (ShaFile $copyDb)){
+    Refuse 'Legacy SQLite bytes drifted after the initial copy.'
+  }
+  $lastSha=((& git -C $test rev-parse HEAD 2>$null)|Out-String).Trim()
+  if($LASTEXITCODE -ne 0 -or $lastSha -cne $actual){
+    Refuse 'Installed TEST Git source changed while capturing its data.'
+  }
+  if((Get-ScheduledTask -TaskName 'Family Calendar Server' -ErrorAction Stop).State -cne 'Running'){
+    Refuse 'LIVE server was no longer running after TEST capture.'
+  }
   # Recheck every task/port that could have resumed while copying.
   if((Get-ScheduledTask -TaskName $testName -ErrorAction Stop).State -cne 'Disabled' -or
      (Get-ScheduledTask -TaskName $updaterName -ErrorAction Stop).State -cne 'Disabled' -or
