@@ -117,9 +117,6 @@ $dist=ExactFolder (Join-Path $test 'dist')
 $null=ExactFile (Join-Path $dist 'index.html')
 $db=ExactFile (Join-Path $data 'calendar.db')
 $dataItems=@(ListFiles $data)
-if($dataItems.Count -ne 1 -or $dataItems[0] -cne $db){
-  Refuse 'Legacy data folder contains unreviewed files, journal or WAL sidecars.'
-}
 $uploadFiles=@(ListFiles $uploads)
 $distFiles=@(ListFiles $dist)
 $testTask=Get-ScheduledTask -TaskName $testName -ErrorAction Stop
@@ -151,6 +148,11 @@ if(-not $Capture){
 }
 # An explicitly invoked -Capture does NOT stop tasks or disconnect TEST.
 # The caller must independently approve shutdown and fence both TEST tasks.
+# The normal read-only inventory may see SQLite WAL sidecars while
+# legacy TEST is running. A cold capture may NOT omit those files.
+if($dataItems.Count -ne 1 -or $dataItems[0] -cne $db){
+  Refuse 'Legacy data folder contains unreviewed files, journal or WAL sidecars.'
+}
 if($testTask.State -cne 'Disabled' -or $updaterTask.State -cne 'Disabled' -or
    $old.Count -ne 0 -or $new.Count -ne 0){
   Refuse 'Both legacy TEST tasks must already be disabled, and all old/new TEST backends closed.'
