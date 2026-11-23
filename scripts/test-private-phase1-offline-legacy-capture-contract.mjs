@@ -42,7 +42,7 @@ test('PowerShell script parses and has no scheduled-task/process-control command
   const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',program],
     {encoding:'utf8',windowsHide:true,timeout:12000})
   assert.equal(result.status,0,result.stderr||'PowerShell AST validation refused')
-  assert.equal((source.match(/& git -C \$test rev-parse HEAD/g)||[]).length,1)
+  assert.equal((source.match(/& git -C \$test rev-parse HEAD/g)||[]).length,2)
   assert.equal((source.match(/& netsh interface portproxy show v4tov4/g)||[]).length,1)
   assert.doesNotMatch(source,/\bnetsh\s+interface\s+portproxy\s+(?:add|delete|reset)\b/i)
 })
