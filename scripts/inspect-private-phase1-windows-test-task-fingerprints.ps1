@@ -59,7 +59,7 @@ foreach($task in $all){
     multipleInstances=$repeat
   }
 }
-if($tasks.Count -lt 6){throw 'Protected task enumeration incomplete.'}
+if($tasks.Count -ne 15){throw 'Full 15-task baseline has changed; review every additional or missing task.'}
 $payload=@{
   schemaVersion=1;site='existing-secure-test';stage=$Stage
   installedTestSha=$ExpectedInstalledTestSha
