@@ -1,0 +1,344 @@
+// DISPOSABLE synthetic-only Phase 1 offline primary-family conversion rehearsal.
+// The saved Nov 22 TEST recovery archive is NOT an accepted input: only
+// disposable, explicitly marked OS-temp fixtures. No installed LIVE/TEST,
+// scheduled tasks, routes, real household identities or active sessions.
+// This IS a real transformation of synthetic fixture BYTES, not an authorized
+// migration path for anyone's actual calendar or credentials.
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { createHash } from 'node:crypto'
+import { DatabaseSync } from 'node:sqlite'
+import { createHouseholdMembershipTables } from './household-memberships.mjs'
+import { listPrivatePhase1LegacyDispositionRules } from './private-phase1-legacy-table-disposition-review.mjs'
+
+const MARKER='.phase1-disposable-legacy-fixture.json'
+const HOUSEHOLD='primary-family'
+const MAX_RECORDS=250000
+const MAX_FILES=20000
+const RETAIN=new Set(['household-data-preserve','household-notice-reconciliation'])
+const STRIP=new Set([
+  'family_sessions','family_users','test_push_deliveries',
+  'test_push_subscriptions','capture_inbox',
+])
+function refuse(reason) { throw new Error('Disposable primary-family conversion refused: '+reason) }
+function inside(parent,child) {
+  const relative=path.relative(parent,child)
+  return relative!=='' && relative!=='..' &&
+    !relative.startsWith('..'+path.sep) && !path.isAbsolute(relative)
+}
+function ordinaryDir(full) {
+  const stat=fs.lstatSync(full)
+  if(!stat.isDirectory()||stat.isSymbolicLink())refuse('non-physical input folder.')
+  return fs.realpathSync(full)
+}
+function paths(sourceRoot,destinationRoot,serverDirectory) {
+  if(![sourceRoot,destinationRoot,serverDirectory].every(
+    p=>typeof p==='string'&&path.isAbsolute(p))) {
+    refuse('absolute source, fresh output and source checkout required.')
+  }
+  const temp=ordinaryDir(os.tmpdir())
+  const src=ordinaryDir(sourceRoot)
+  const out=path.resolve(destinationRoot)
+  const checkout=path.dirname(fs.realpathSync(serverDirectory))
+  if(path.dirname(src)!==temp ||
+     !/^fc-phase1-disposable-legacy-[a-z0-9-]+$/.test(path.basename(src)) ||
+     path.dirname(out)!==temp ||
+     !/^fc-phase1-disposable-converted-[a-z0-9-]+$/.test(path.basename(out)) ||
+     inside(checkout,src)||inside(checkout,out)||
+     inside(src,checkout)||inside(out,checkout)||
+     src===out||fs.existsSync(out)) {
+    refuse('only independent fresh disposable OS-temp roots outside checkout.')
+  }
+  const required=[MARKER,'data','uploads'].sort()
+  if(JSON.stringify(fs.readdirSync(src).sort())!==JSON.stringify(required) ||
+     JSON.stringify(fs.readdirSync(path.join(src,'data')).sort())!==
+       JSON.stringify(['calendar.db'])) {
+    refuse('fixture has unexpected files, SQLite WAL or missing upload folder.')
+  }
+  const markerPath=path.join(src,MARKER)
+  if(!fs.lstatSync(markerPath).isFile() ||
+      fs.lstatSync(markerPath).isSymbolicLink()) {
+    refuse('fixture marker must be an ordinary file.')
+  }
+  let marker
+  try { marker=JSON.parse(fs.readFileSync(markerPath,'utf8')) }
+  catch { refuse('fixture marker is unreadable.') }
+  if(marker?.kind!=='phase1-disposable-synthetic-legacy-only'||
+     marker?.version!==1||marker?.realCalendarDataAllowed!==false) {
+    refuse('explicit synthetic-only input marker required.')
+  }
+  const dbFile=path.join(src,'data','calendar.db')
+  if(!fs.lstatSync(dbFile).isFile()||fs.lstatSync(dbFile).isSymbolicLink()){
+    refuse('fixture SQLite must be a physical file.')
+  }
+  return {src,out,dbFile}
+}
+function digest(filename) {
+  const sha=createHash('sha256'),file=fs.openSync(filename,'r')
+  const buf=Buffer.allocUnsafe(1024*1024)
+  try {for(;;){const n=fs.readSync(file,buf,0,buf.length,null);if(!n)break;sha.update(buf.subarray(0,n))}}
+  finally{fs.closeSync(file)}
+  return sha.digest('hex')
+}
+function scanUploads(root) {
+  const result=[]
+  function visit(folder,rel,depth) {
+    if(depth>24)refuse('unbounded upload nesting.')
+    const stat=fs.lstatSync(folder)
+    if(!stat.isDirectory()||stat.isSymbolicLink())refuse('linked or invalid upload folder.')
+    for(const item of fs.readdirSync(folder,{withFileTypes:true})) {
+      if(item.name==='.'||item.name==='..')refuse('invalid upload entry.')
+      const next=path.join(folder,item.name)
+      const relative=rel?rel+'/'+item.name:item.name
+      if(item.isDirectory())visit(next,relative,depth+1)
+      else if(item.isFile()&&!item.isSymbolicLink()) {
+        if(!inside(root,fs.realpathSync(next)))refuse('upload escapes root.')
+        result.push({relative,sha256:digest(next)})
+      } else refuse('upload links or unexpected file types forbidden.')
+      if(result.length>MAX_FILES)refuse('excessive synthetic uploaded files.')
+    }
+  }
+  visit(root,'',0)
+  return result.sort((a,b)=>a.relative.localeCompare(b.relative))
+}
+function copyUploads(source,dest,files) {
+  // Preserve directory structure, including empty folders, without following
+  // symlinks. A hash inventory detects modifications during source copy.
+  function walk(from,to,depth) {
+    if(depth>24)refuse('unbounded upload nesting.')
+    fs.mkdirSync(to,{recursive:false})
+    for(const item of fs.readdirSync(from,{withFileTypes:true})) {
+      const input=path.join(from,item.name),target=path.join(to,item.name)
+      if(item.isDirectory()&&!item.isSymbolicLink())walk(input,target,depth+1)
+      else if(item.isFile()&&!item.isSymbolicLink())
+        fs.copyFileSync(input,target,fs.constants.COPYFILE_EXCL)
+      else refuse('unsafe upload entry during copy.')
+    }
+  }
+  walk(source,dest,0)
+  const after=scanUploads(dest)
+  if(JSON.stringify(after)!==JSON.stringify(files) ||
+     JSON.stringify(scanUploads(source))!==JSON.stringify(files)) {
+    refuse('uploaded file inventory changed while copying.')
+  }
+}
+function check(db) {
+  const result=db.prepare('PRAGMA integrity_check').get()?.integrity_check
+  if(result!=='ok'||db.prepare('PRAGMA foreign_key_check').all().length) {
+    refuse('offline SQLite integrity or foreign keys failed.')
+  }
+}
+function tableNames(db) {
+  const actual=db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+  ).all().map(x=>x.name)
+  const expected=listPrivatePhase1LegacyDispositionRules().map(x=>x.table).sort()
+  if(JSON.stringify(actual)!==JSON.stringify(expected)) {
+    refuse('unexpected, missing, or renamed archived table.')
+  }
+  const executableObjects=db.prepare(
+    "SELECT name FROM sqlite_master WHERE type IN ('view','trigger')"
+  ).all()
+  if(executableObjects.length) {
+    refuse('unreviewed view or trigger could reference central identity.')
+  }
+  return actual
+}
+function q(name) {
+  if(!/^[a-z][a-z0-9_]*$/.test(name))refuse('unsafe table name.')
+  return '"'+name+'"'
+}
+function snapshot(db,table) {
+  const cols=db.prepare('PRAGMA table_info('+q(table)+')').all().map(x=>x.name)
+  if(!cols.length)refuse('table has no explicit columns.')
+  const schema=db.prepare(
+    'SELECT sql FROM sqlite_master WHERE type=? AND name=?'
+  ).get('table',table)?.sql
+  if(typeof schema!=='string')refuse('missing table schema.')
+  const sha=createHash('sha256')
+  let rows=0
+  for(const row of db.prepare('SELECT * FROM '+q(table)).iterate()) {
+    if(++rows>MAX_RECORDS)refuse('table exceeds disposable comparison limit.')
+    const cells=cols.map(name=>{
+      const v=row[name]
+      if(v===null)return ['null']
+      if(typeof v==='bigint')return ['bigint',v.toString()]
+      if(typeof v==='number')return ['number',v]
+      if(typeof v==='string')return ['text',v]
+      if(v instanceof Uint8Array)return ['blob',Buffer.from(v).toString('hex')]
+      refuse('unsupported database cell type.')
+    })
+    sha.update(JSON.stringify(cells)+'\n')
+  }
+  return {schema,columns:cols.join('\u0000'),rows,sha256:sha.digest('hex')}
+}
+function requireNoCrossBoundaryFks(db) {
+  for(const rule of listPrivatePhase1LegacyDispositionRules()) {
+    if(!RETAIN.has(rule.disposition))continue
+    const foreign=db.prepare('PRAGMA foreign_key_list('+q(rule.table)+')').all()
+    if(foreign.some(x=>STRIP.has(x.table))) {
+      refuse('household table references central account or quarantined device data.')
+    }
+  }
+}
+function readLegacyOwner(db) {
+  const required=['id','username','display_name','password_hash','account_kind','disabled']
+  const cols=new Set(db.prepare('PRAGMA table_info("family_users")').all().map(x=>x.name))
+  if(required.some(c=>!cols.has(c)))refuse('unreviewed legacy Owner account schema.')
+  const accounts=db.prepare('SELECT * FROM family_users').all()
+  if(accounts.length!==1)refuse('exactly one legacy family account required.')
+  const owner=accounts[0]
+  if(!Number.isSafeInteger(owner.id)||owner.id<1||
+     typeof owner.username!=='string'||!/^[a-zA-Z0-9._-]{3,40}$/.test(owner.username)||
+     typeof owner.display_name!=='string'||owner.display_name.length<1||
+     typeof owner.password_hash!=='string'||
+     !/^scrypt-v1:[a-f0-9]{32}:[a-f0-9]{128}$/.test(owner.password_hash)||
+     owner.account_kind!=='person'||owner.disabled!==0) {
+    refuse('single supported, enabled legacy Owner account needed for synthetic rehearsal.')
+  }
+  return owner
+}
+function centralIdentity(file,owner) {
+  const db=new DatabaseSync(file)
+  try {
+    db.exec('PRAGMA foreign_keys=ON')
+    createHouseholdMembershipTables(db)
+    db.prepare([
+      'INSERT INTO family_users',
+      '(id,username,display_name,password_hash,account_kind,disabled)',
+      'VALUES(?,?,?,?,?,1)',
+    ].join(' ')).run(owner.id,owner.username,owner.display_name,
+      owner.password_hash,'person')
+    db.prepare([
+      'INSERT INTO household_registry',
+      '(storage_id,display_name,disabled) VALUES(?,?,1)',
+    ].join(' ')).run(HOUSEHOLD,'Synthetic Primary Family - inactive')
+    const householdId=db.prepare(
+      'SELECT id FROM household_registry WHERE storage_id=?'
+    ).get(HOUSEHOLD).id
+    db.prepare([
+      'INSERT INTO household_memberships',
+      '(user_id,household_id,role,disabled) VALUES(?,?,?,1)',
+    ].join(' ')).run(owner.id,householdId,'owner')
+    check(db)
+    const sessions=db.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n
+    const user=db.prepare('SELECT disabled FROM family_users').get()
+    if(sessions!==0||user.disabled!==1)refuse('staged central login was accidentally activated.')
+  } finally {db.close()}
+}
+function scrubHousehold(file,originals) {
+  const db=new DatabaseSync(file)
+  try {
+    // Only on the fresh synthetic output database; original never altered.
+    db.exec('PRAGMA foreign_keys=OFF')
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      for(const table of ['family_sessions','family_users',
+        'test_push_deliveries','test_push_subscriptions','capture_inbox']) {
+        db.exec('DROP TABLE '+q(table))
+      }
+      db.exec('COMMIT')
+    } catch(error) {db.exec('ROLLBACK');throw error}
+    db.exec('PRAGMA foreign_keys=ON')
+    check(db)
+    const actual=db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    ).all().map(x=>x.name).sort()
+    if(JSON.stringify(actual)!==JSON.stringify([...originals.keys()].sort())) {
+      refuse('synthetic household output contains an unexpected table.')
+    }
+    for(const [name,expected] of originals) {
+      if(JSON.stringify(snapshot(db,name))!==JSON.stringify(expected)) {
+        refuse('a household, notification, or invitation row changed during split.')
+      }
+    }
+    return {preservedTables:originals.size,
+      preservedRows:[...originals.values()].reduce((n,x)=>n+x.rows,0)}
+  } finally {db.close()}
+}
+/**
+ * Does NOT accept the real cold backup path. The destination is an isolated
+ * OS-temp rehearsal, not a service data root. Neither output is bootable.
+ * Saved old sessions and device push endpoints remain ONLY in the unchanged
+ * disposable source; disabled central Owner is not authorized to log in.
+ */
+export function stageDisposablePhase1PrimaryFamily({
+  serverDirectory,sourceRoot,destinationRoot,
+}={}) {
+  const {src,out,dbFile}=paths(sourceRoot,destinationRoot,serverDirectory)
+  const sourceBefore=digest(dbFile)
+  const uploadsBefore=scanUploads(path.join(src,'uploads'))
+  const original=new DatabaseSync(dbFile,{readOnly:true})
+  const preserved=new Map()
+  let owner,retainedRows=0
+  try {
+    original.exec('PRAGMA query_only=ON')
+    check(original)
+    tableNames(original)
+    requireNoCrossBoundaryFks(original)
+    owner=readLegacyOwner(original)
+    for(const rule of listPrivatePhase1LegacyDispositionRules()) {
+      const value=snapshot(original,rule.table)
+      if(RETAIN.has(rule.disposition)) {
+        preserved.set(rule.table,value);retainedRows+=value.rows
+      } else if(rule.table==='capture_inbox'&&value.rows!==0) {
+        refuse('retired capture Inbox has unexpected data.')
+      }
+    }
+    if(preserved.size!==22)refuse('not all 22 family/notification tables were preserved.')
+  } finally {original.close()}
+  let created=false
+  try {
+    fs.mkdirSync(out,{recursive:false,mode:0o700});created=true
+    const centralDir=path.join(out,'central')
+    const home=path.join(out,'households',HOUSEHOLD)
+    const familyData=path.join(home,'data')
+    fs.mkdirSync(centralDir)
+    fs.mkdirSync(path.join(out,'households'))
+    fs.mkdirSync(home)
+    fs.mkdirSync(familyData)
+    const destDb=path.join(familyData,'calendar.db')
+    fs.copyFileSync(dbFile,destDb,fs.constants.COPYFILE_EXCL)
+    const split=scrubHousehold(destDb,preserved)
+    const centralDb=path.join(centralDir,'identity.db')
+    centralIdentity(centralDb,owner)
+    copyUploads(path.join(src,'uploads'),path.join(home,'uploads'),uploadsBefore)
+    fs.writeFileSync(path.join(home,'.family-calendar-household.json'),
+      JSON.stringify({schemaVersion:1,householdId:HOUSEHOLD})+'\n',
+      {flag:'wx',mode:0o600})
+    if(digest(dbFile)!==sourceBefore ||
+       JSON.stringify(scanUploads(path.join(src,'uploads'))) !==
+       JSON.stringify(uploadsBefore)) {
+      refuse('source synthetic database or uploads changed during rehearsal.')
+    }
+    return Object.freeze({
+      kind:'phase1-disposable-primary-family-split-rehearsal-v1',
+      sourceFixtureOnly:true,
+      sourceBytesUnchanged:true,
+      preservedHouseholdAndNoticeTables:split.preservedTables,
+      preservedHouseholdAndNoticeRows:retainedRows,
+      copiedUploadFiles:uploadsBefore.length,
+      stagedOwnersDisabled:1,
+      centralActiveSessions:0,
+      centralSelectedHouseholds:0,
+      archivedLegacySessionsNotActivated:true,
+      savedPushDeviceSubscriptionsNotActivated:true,
+      sourceCredentialsNotPlacedInHouseholdDatabase:true,
+      centralGatewayBootProven:false,
+      fullLegacySchemaCompatibilityProven:false,
+      activeRealCalendarDataHandled:false,
+      actualTestMigrationExecuted:false,
+      automatedReactivationAllowed:false,
+      backupAuthorized:false,
+      rollbackAuthorized:false,
+      testDeploymentAuthorized:false,
+      liveDeploymentAuthorized:false,
+    })
+  } catch(error) {
+    // Only remove an output THIS invocation exclusively created under OS
+    // temp. Neither the original input nor any installed path is touched.
+    if(created)fs.rmSync(out,{recursive:true,force:true})
+    throw error
+  }
+}
