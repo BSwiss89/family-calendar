@@ -7,14 +7,27 @@
 const SHA = /^[a-f0-9]{40}$/
 const HASH = /^[a-f0-9]{64}$/
 const SITE = 'existing-secure-test'
-const REQUIRED = Object.freeze([
-  'Family Calendar Server',
-  'Family Calendar Ollama Server',
-  'Family Calendar Watchdog',
-  'Family Calendar Secure TEST',
-  'Family Calendar Secure TEST Auto Deploy',
-  'Family Calendar Auto Deploy',
-])
+// Exact November 22 installed-host inventory. Unknown tasks refuse preflight;
+// do not interpret the extra backup/maintenance tasks as safe to run during
+// a handoff merely because their state and definition remain unchanged.
+const INVENTORY = Object.freeze({
+  'Family Calendar Server': { enabled: true, restarts: 3 },
+  'Family Calendar Ollama Server': { enabled: true, restarts: 3 },
+  'Family Calendar Watchdog': { enabled: true, restarts: 0 },
+  'Family Calendar Secure TEST': { enabled: true, restarts: 3 },
+  'Family Calendar Secure TEST Auto Deploy': { enabled: true, restarts: 0 },
+  'Family Calendar Auto Deploy': { enabled: false, restarts: 0 },
+  'Family Calendar Auto Preview': { enabled: false, restarts: 0 },
+  'Family Calendar Backup Ack Processor': { enabled: true, restarts: 0 },
+  'Family Calendar Backup Catchup Sender': { enabled: true, restarts: 0 },
+  'Family Calendar Backup Cleanup': { enabled: true, restarts: 0 },
+  'Family Calendar Backup Sender': { enabled: true, restarts: 0 },
+  'Family Calendar Local STT': { enabled: true, restarts: 3 },
+  'Family Calendar Monthly Restart': { enabled: true, restarts: 0 },
+  'Family Calendar Project Backup': { enabled: true, restarts: 0 },
+  'Family Calendar Secure LIVE Auto Deploy': { enabled: false, restarts: 0 },
+})
+const REQUIRED = Object.freeze(Object.keys(INVENTORY))
 const TEST_TASKS = new Set([
   'Family Calendar Secure TEST', 'Family Calendar Secure TEST Auto Deploy',
 ])
@@ -61,7 +74,7 @@ function asMap(snapshot, stage, testSha) {
     if (!map.has(name.toLowerCase())) refuse('a protected LIVE/TEST task is missing.')
   }
   for (const task of map.values()) {
-    if (PROTECTED_NAMES.test(task.name) && !REQUIRED.includes(task.name)) {
+    if (!REQUIRED.includes(task.name)) {
       refuse('unreviewed additional task may collide with TEST or LIVE.')
     }
   }
@@ -79,11 +92,19 @@ function shape(task) {
 }
 function checkedBaseline(map) {
   for (const name of REQUIRED) {
-    const task=map.get(name.toLowerCase())
-    if (name === 'Family Calendar Auto Deploy') {
-      if (task.state !== 'Disabled') refuse('LIVE auto-deploy must remain disabled.')
-    } else if (!task.enabled || !['Ready','Running'].includes(task.state)) {
+    const task = map.get(name.toLowerCase())
+    const expected = INVENTORY[name]
+    if (!expected.enabled && task.state !== 'Disabled') {
+      refuse('LIVE auto-deploy or baseline-disabled scheduled task became enabled.')
+    }
+    if (expected.enabled && !['Ready','Running'].includes(task.state)) {
       refuse('unexpected baseline protected task state.')
+    }
+    if (task.enabled !== expected.enabled ||
+        task.restartCount !== expected.restarts ||
+        task.triggerCount !== 1 ||
+        task.multipleInstances !== 'IgnoreNew') {
+      refuse('scheduled task definition does not match the observed 15-task baseline.')
     }
   }
   for (const name of TEST_TASKS) {
@@ -112,7 +133,9 @@ function reviewedTransition(baseline, fenced) {
         blockers.push('Legacy TEST starter or auto-deployer remains enabled.')
       }
     } else if (current.enabled !== initial.enabled ||
-        current.state !== initial.state) {
+        (current.state === 'Disabled') !== (initial.state === 'Disabled')) {
+      // Running <-> Ready transitions are normal while tasks execute; a
+      // disabled/enabled change is not. Definitions are checked separately.
       blockers.push('LIVE, watchdog or unrelated scheduler task state changed.')
     }
   }
@@ -151,6 +174,8 @@ export function assessPrivatePhase1WindowsTaskFencing({
       after.get('family calendar secure test auto deploy')?.state==='Disabled',
     taskActionDefinitionAttestedByOperator:false,
     watchdogTestRestartExcludedByCodeReview:false,
+    monthlyRestartTestCollisionExcludedByCodeReview:false,
+    backupAndMaintenanceTestCollisionExcludedByCodeReview:false,
     installedLegacyProcessStopped:false,
     installedLegacyBackendPortClosed:false,
     sqliteWritersQuiesced:false,
