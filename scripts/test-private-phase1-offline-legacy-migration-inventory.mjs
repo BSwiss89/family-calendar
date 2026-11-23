@@ -17,8 +17,10 @@ const SECRET='synthetic-credential-and-family-private-title-DO-NOT-PRINT'
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 const entry=fileURLToPath(new URL('./inspect-private-phase1-offline-legacy-migration.mjs',import.meta.url))
 function fixture(t) {
-  const parent=fs.mkdtempSync(path.join(os.tmpdir(),'phase1-legacy-migration-'))
-  t.after(()=>fs.rmSync(parent,{recursive:true,force:true}))
+  const work=fs.mkdtempSync(path.join(os.tmpdir(),'phase1-legacy-migration-'))
+  t.after(()=>fs.rmSync(work,{recursive:true,force:true}))
+  const parent=path.join(work,'family-calendar-phase1-recovery')
+  fs.mkdirSync(parent)
   const archive=path.join(parent,'OFFLINE-LEGACY-TEST-20261122-203000-'+
     randomBytes(16).toString('hex'))
   fs.mkdirSync(path.join(archive,'uploads','people'),{recursive:true})
