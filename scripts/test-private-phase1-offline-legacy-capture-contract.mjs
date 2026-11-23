@@ -18,7 +18,7 @@ test('manual capture checks existing TEST task and live shared protections',()=>
     ".State -cne 'Disabled'",
     'auto-test-deploy',
     'Win32_Process','monthlyInfo.NextRunTime',
-    '100.124.58.19','C:\\ProgramData',
+    String.raw`100\.124\.58\.19`,'C:\\ProgramData',
     'manifestRows','restoreBootVerified=$false',
     'coordinatedCentralAndFamilySnapshot=$false',
     'testDeploymentAuthorized=$false',
