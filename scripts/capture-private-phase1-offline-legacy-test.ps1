@@ -119,6 +119,14 @@ $null=ExactFolder $preview
 $null=ExactFolder $recovery
 $null=ExactFile $supervisor
 $null=ExactFile $node
+# Existing TEST updater journals are authoritative recovery holds. Do not
+# capture a possibly half-deployed TEST as the new rollback baseline.
+$updaterState='C:\ProgramData\FamilyCalendar\SecureTestAutoDeploy'
+foreach($hold in @('REQUIRES-REVIEW.txt','IN-PROGRESS.txt')){
+  if(Test-Path -LiteralPath (Join-Path $updaterState $hold)){
+    Refuse 'Existing TEST updater journal or recovery hold requires resolution first.'
+  }
+}
 $actual=((& git -C $test rev-parse HEAD 2>$null)|Out-String).Trim()
 if($LASTEXITCODE -ne 0 -or $actual -cne $ExpectedInstalledTestSha){
   Refuse 'Installed legacy TEST source SHA no longer matches reviewed baseline.'
