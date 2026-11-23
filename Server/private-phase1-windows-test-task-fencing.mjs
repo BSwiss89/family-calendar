@@ -24,7 +24,7 @@ const NEVER_DISABLE = new Set([
 ])
 const VALID_STATES = new Set(['Running','Ready','Disabled'])
 const INSTANCES = new Set(['IgnoreNew','Parallel','Queue','StopExisting'])
-const PROTECTED_NAMES = /(secure\s+test|watchdog|auto\s+deploy|supervisor|ollama\s+server|calendar\s+server)/i
+const PROTECTED_NAMES = /(\btest\b|\blive\b|watchdog|auto\s+deploy|supervisor|ollama\s+server|calendar\s+server)/i
 function refuse(message) {
   throw new Error('Phase 1 Windows task-fencing review refused: ' + message)
 }
