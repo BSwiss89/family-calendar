@@ -203,7 +203,7 @@ export function copyAndVerifyOfflineLegacyTestSnapshot({
   }
   const temp=ordinaryDirectory(os.tmpdir())
   const copyParent=ordinaryDirectory(path.dirname(restoreCopyRoot))
-  if(copyParent!==temp||!path.basename(restoreCopyRoot).startsWith('family-calendar-offline-restore-')||
+  if(copyParent!==temp||!SNAP.test(path.basename(restoreCopyRoot))||
     fs.existsSync(restoreCopyRoot)||inside(recoveryParent,restoreCopyRoot)){
     refuse('restore destination must be a fresh, direct OS-temp child.')
   }
@@ -226,7 +226,6 @@ export function copyAndVerifyOfflineLegacyTestSnapshot({
   // separate from the first validation and checks all restored file hashes.
   const after=verifyOfflineLegacyTestSnapshot({
     recoveryParent:temp,snapshotRoot:restoreCopyRoot,expectedInstalledTestSha,
-    // The OS-temp target has a different folder name, supported below.
   })
   const again=verifyOfflineLegacyTestSnapshot({
     recoveryParent,snapshotRoot,expectedInstalledTestSha,
