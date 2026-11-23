@@ -43,12 +43,9 @@ export function reviewPrivatePhase1TestMaintenanceSchedule({
     typeof watchdogLegacyTestExclusionIndependentlyVerified!=='boolean'||
     typeof monthlyRestartRebootPreventedDuringWindow!=='boolean'||
     typeof scheduledTaskActionsIndependentlyReviewed!=='boolean' ||
-    // Force a short, same-day maintenance window; changing the clock or
-    // skipping a DST transition is not a supported release shortcut.
-    dayParts(start)!==dayParts(end) ||
-    new Date(start.slice(0,10)+'T00:00:00Z').getUTCDay()===0 &&
-       ['03','11'].includes(start.slice(5,7)) &&
-       start.slice(8,10)!==end.slice(8,10)){
+    // Use same-day wall-clock windows only; do not infer DST behavior or
+    // interpret this advisory as permission to change the host's clock.
+    dayParts(start)!==dayParts(end)){
     refuse('short explicit, pinned same-day TEST window and 5-minute watchdog required.')
   }
   const collisions=[]
