@@ -12,7 +12,15 @@ const prefix = '# Port Proxy configuration\r\npushd interface portproxy\r\n\r\nr
 const suffix = '\r\npopd\r\n# End of Port Proxy configuration\r\n'
 const rule = 'add v4tov4 listenport=13003 listenaddress=127.0.0.1 ' +
   'connectport=13002 connectaddress=100.124.58.19'
-const input = dump => ({ dump, installedTestSha: sha, legacyTestAddress: address })
+const normalShowAll = [
+  'Listen on ipv4:             Connect to ipv4:',
+  'Address         Port        Address         Port',
+  '--------------- ----------  --------------- ----------',
+  '127.0.0.1       13003       100.124.58.19   13002',
+  '',
+].join('\\n')
+const input = (dump, showAll = normalShowAll) =>
+  ({ dump, showAll, installedTestSha: sha, legacyTestAddress: address })
 const full = (...rules) => prefix + rules.join('\r\n') + suffix
 const script = fileURLToPath(
   new URL('./review-private-phase1-portproxy-all-families.mjs', import.meta.url))
@@ -97,4 +105,51 @@ test('refuses wrong source pins and scrubs raw secrets from rejected stdout/stde
     assert.match(result.stderr, /refused/)
     assert.doesNotMatch(result.stderr, /TRAP_SECRET_123/)
   }
+})
+
+test('actual November 23 Windows export omits listenaddress but agrees with complete show all', () => {
+  const windowsDump = [
+    '#========================',
+    '# Port Proxy configuration',
+    '#========================',
+    'pushd interface portproxy',
+    '',
+    'reset',
+    'add v4tov4 listenport=13003 connectaddress=100.124.58.19 connectport=13002',
+    '',
+    '',
+    'popd',
+    '',
+    '# End of Port Proxy configuration',
+    '',
+  ].join('\\n')
+  const evidence = inspect(input(windowsDump))
+  assert.equal(evidence.observedBaselinePortproxyMatches, true)
+  assert.equal(evidence.old13002DirectAccessDenied, false)
+  assert.equal(evidence.testDeploymentAuthorized, false)
+  const wrapper = run(input(windowsDump))
+  assert.equal(wrapper.status, 0, wrapper.stderr)
+  assert.equal(JSON.parse(wrapper.stdout).status, 'PASS')
+})
+
+test('missing export listenaddress is never accepted without matching complete show-all evidence', () => {
+  const omitted = 'add v4tov4 listenport=13003 connectaddress=100.124.58.19 connectport=13002'
+  const suspicious = [
+    normalShowAll.replace('127.0.0.1', '0.0.0.0'),
+    normalShowAll.replace('13003', '13004'),
+    normalShowAll.replace('13002', '13005'),
+    normalShowAll + '0.0.0.0 14000 100.124.58.19 13002\\n',
+    normalShowAll + 'Listen on ipv6: Connect to ipv4:\\n',
+    '',
+  ]
+  for (const showAll of suspicious) {
+    assert.throws(() => inspect(input(full(omitted), showAll)), /refused/)
+    const wrapper = run(input(full(omitted), showAll))
+    assert.equal(wrapper.status, 2)
+    assert.equal(wrapper.stdout, '')
+  }
+  assert.throws(() => inspect(input(
+    full(rule.replace('listenaddress=127.0.0.1',
+      'listenaddress=0.0.0.0')))), /refused/)
+  assert.throws(() => inspect(input(full(omitted), '')), /refused/)
 })
