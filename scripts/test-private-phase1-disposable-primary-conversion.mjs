@@ -9,8 +9,10 @@ import { randomBytes, createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { hashFamilyPassword } from '../Server/family-auth.mjs'
 import { listPrivatePhase1LegacyDispositionRules } from '../Server/private-phase1-legacy-table-disposition-review.mjs'
-import { stageDisposablePhase1PrimaryFamily as convert }
-  from '../Server/private-phase1-disposable-primary-conversion.mjs'
+import {
+  stageDisposablePhase1PrimaryFamily as convert,
+  listPhase1ApprovedSyntheticFixtureTriggerSql,
+} from '../Server/private-phase1-disposable-primary-conversion.mjs'
 
 const secret='THIS_IS_A_SYNTHETIC_PRIVATE_EVENT_AND_USERNAME_DO_NOT_PRINT'
 const suffix=()=>randomBytes(8).toString('hex')
@@ -65,6 +67,9 @@ function fixture(t) {
         case 'test_event_invitations':
           sql='CREATE TABLE test_event_invitations(id INTEGER PRIMARY KEY,event_id INTEGER REFERENCES events(id),status TEXT)'
           break
+        case 'event_exceptions':
+          sql='CREATE TABLE event_exceptions(id INTEGER PRIMARY KEY,event_id INTEGER REFERENCES events(id),value TEXT)'
+          break
         case 'shopping_stores':
           sql='CREATE TABLE shopping_stores(id INTEGER PRIMARY KEY,title TEXT)'
           break
@@ -101,6 +106,8 @@ function fixture(t) {
       'test_push_subscriptions','test_push_deliveries']) {
       db.prepare('INSERT INTO "'+table+'"(id,value) VALUES (?,?)').run(1,secret)
     }
+    db.exec('CREATE INDEX phase1_fixture_list_item_store_idx ON list_items(list_id)')
+    for(const sql of listPhase1ApprovedSyntheticFixtureTriggerSql())db.exec(sql)
     assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0)
   } finally {db.close()}
   return {serverDirectory,sourceRoot:src,destinationRoot:dest,dbFile,avatar}
@@ -117,6 +124,9 @@ test('synthetic first family split preserves all 22 data/history tables while di
   assert.equal(r.sourceFixtureOnly,true)
   assert.equal(r.preservedHouseholdAndNoticeTables,22)
   assert.equal(r.copiedUploadFiles,1)
+  assert.equal(r.approvedSyntheticFixtureTriggersPreserved,3)
+  assert.equal(r.retainedIndexAndTriggerFingerprintsEqual,true)
+  assert.equal(r.realArchivedTriggerBodiesApproved,false)
   assert.equal(r.stagedOwnersDisabled,1)
   assert.equal(r.centralActiveSessions,0)
   assert.equal(r.archivedLegacySessionsNotActivated,true)
@@ -152,6 +162,33 @@ test('synthetic first family split preserves all 22 data/history tables while di
     assert.equal(h.prepare('SELECT status FROM test_event_invitations').get().status,'accepted')
     assert.equal(h.prepare('PRAGMA foreign_key_check').all().length,0)
   } finally {c.close();h.close()}
+  // Exercise only the newly created disposable household DB. The original
+  // source and disabled central login must never be activated by this test.
+  const altered=new DatabaseSync(familyPath)
+  try {
+    const triggers=altered.prepare(
+      "SELECT name FROM sqlite_master WHERE type='trigger'"
+    ).all()
+    assert.equal(triggers.length,3)
+    const indexes=altered.prepare(
+      "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='list_items'"
+    ).all()
+    assert(indexes.some(x=>x.name==='phase1_fixture_list_item_store_idx'))
+    altered.prepare('UPDATE events SET title=? WHERE id=46').run('synthetic changed event')
+    altered.prepare('INSERT INTO event_people(id,event_id,person_id) VALUES(?,?,?)').run(2,46,7)
+    altered.prepare('INSERT INTO event_exceptions(id,event_id,value) VALUES(?,?,?)')
+      .run(1,46,'synthetic recurrence skip')
+    for(const [table,id] of [
+      ['notification_dirty_events',46],
+      ['notification_dirty_event_fields',46],
+      ['notification_dirty_event_attribution',46],
+    ]) {
+      assert.equal(altered.prepare(
+        'SELECT COUNT(*) AS n FROM "'+table+'" WHERE id=?'
+      ).get(id).n,1,'expected synthetic '+table+' trigger side effect')
+    }
+    assert.equal(altered.prepare('PRAGMA foreign_key_check').all().length,0)
+  } finally {altered.close()}
   assert.equal(hash(f.dbFile),beforeDb)
   assert.equal(hash(f.avatar),beforeAvatar)
   assert.equal(hash(path.join(f.destinationRoot,'households','primary-family',
@@ -194,6 +231,13 @@ test('new table, WAL, excluded foreign key or retired inbox content fail closed 
     f=>{
       const db=new DatabaseSync(f.dbFile)
       try{db.exec('CREATE VIEW unsafe_view AS SELECT * FROM family_users')}
+      finally{db.close()}
+    },
+    f=>{
+      const db=new DatabaseSync(f.dbFile)
+      try{db.exec(
+        'CREATE TRIGGER unreviewed_login_trigger AFTER UPDATE ON events BEGIN SELECT password_hash FROM family_users; END'
+      )}
       finally{db.close()}
     },
   ]) {
