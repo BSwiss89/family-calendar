@@ -208,9 +208,16 @@ test('untrusted destination collision, linked uploads, unsupported owner and sep
   assert.throws(()=>stage(f),/refused/)
   fs.rmdirSync(f.destinationRoot)
   const sym=path.join(f.sourceRoot,'uploads','unsafe-link')
-  fs.symlinkSync(f.avatar,sym,'file')
-  assert.throws(()=>stage(f),/refused/)
-  fs.rmSync(sym)
+  // Windows CI runners may not grant unprivileged symlink creation.
+  let linked=false
+  try {fs.symlinkSync(f.avatar,sym,'file');linked=true}
+  catch(error) {
+    if(process.platform!=='win32'||!['EPERM','EACCES','ENOSYS'].includes(error.code))throw error
+  }
+  if(linked) {
+    assert.throws(()=>stage(f),/refused/)
+    fs.rmSync(sym)
+  }
   const db=new DatabaseSync(f.dbFile)
   try{
     db.exec("UPDATE family_users SET account_kind='hub'")
