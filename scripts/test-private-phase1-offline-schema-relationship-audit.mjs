@@ -215,3 +215,47 @@ test('archive path cannot target installed site even with a plausible marker',t=
   assert.equal(bad.status,2)
   assert.equal(bad.stdout,'')
 })
+
+test('14 archived synthetic triggers and 15 implied links are fingerprinted without exporting private data', t=>{
+  const f=fixture(t)
+  const originalDb=fileHash(f.dbFile),originalManifest=fileHash(f.manifest)
+  const result=reviewLinks(f.args)
+  assert.equal(result.kind,'phase1-readonly-archived-trigger-link-evidence-v1')
+  assert.equal(result.verifiedHistoricalArchive,true)
+  assert.equal(result.triggersObserved,14)
+  assert.equal(result.expectedHistoricalTriggerLayout,true)
+  assert.equal(result.triggerFingerprints.filter(x=>x.table==='events').length,5)
+  assert.equal(result.triggerFingerprints.filter(x=>x.table==='event_people').length,3)
+  assert.equal(result.triggerFingerprints.filter(x=>x.table==='event_exceptions').length,6)
+  assert.equal(result.nineUnlinkedIdentifierHintsExplicitlyMapped,9)
+  assert.equal(result.otherImplicitOrQuarantinedLinksMapped,6)
+  assert.equal(result.aggregateReferenceReview.length,15)
+  const find=(table,col)=>result.aggregateReferenceReview.find(x=>
+    x.table===table&&x.column===col)
+  assert.equal(find('events','batch_id').nonNullReferences,1)
+  assert.equal(find('events','batch_id').unmatchedReferences,null)
+  assert.equal(find('list_items','store_id').nonNullReferences,1)
+  assert.equal(find('list_items','store_id').unmatchedReferences,0)
+  assert.equal(find('notification_deleted_event_details','event_id').unmatchedReferences,1)
+  assert.equal(find('test_push_subscriptions','user_id').nonNullReferences,1)
+  assert.equal(find('test_push_subscriptions','user_id').unmatchedReferences,0)
+  assert.equal(find('test_push_deliveries','notification_id').unmatchedReferences,0)
+  assert.equal(result.aggregateReferenceReview.every(x=>x.referenceRewriteAuthorized===false),true)
+  assert.equal(result.triggerFingerprints.every(x=>x.semanticEffectReviewed===false),true)
+  for(const key of [
+    'rawTriggerSqlOrNamesExposed','rawCalendarOrAccountRowsExposed',
+    'allTriggerSemanticsApproved','allIdentifierLinksApproved',
+    'originalArchiveModified','installedCalendarsModified','realMigrationExecuted',
+    'backupAuthorized','rollbackAuthorized','testDeploymentAuthorized',
+    'liveDeploymentAuthorized',
+  ])assert.equal(result[key],false,key)
+  const printed=JSON.stringify(result)
+  assert.doesNotMatch(printed,/SYNTHETIC_PRIVATE|secret_event_trigger|password_hash|test_schema_view/)
+  assert.equal(fileHash(f.dbFile),originalDb)
+  assert.equal(fileHash(f.manifest),originalManifest)
+})
+test('read-only trigger and link inspection refuses a damaged archived snapshot',t=>{
+  const f=fixture(t)
+  fs.writeFileSync(path.join(f.snap,'uploads','pictures','photo.bin'),'modified')
+  assert.throws(()=>reviewLinks(f.args),/bytes differ|unlisted|inventory|refused/)
+})
