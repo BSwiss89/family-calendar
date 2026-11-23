@@ -58,6 +58,44 @@ const canary = {
   liveHttpsAndLiveDataUnchanged: true,
   taskWriterAndBackupHoldsStillEnforced: true,
 }
+const requiredTasks=[
+  'Family Calendar Server','Family Calendar Ollama Server',
+  'Family Calendar Watchdog','Family Calendar Secure TEST',
+  'Family Calendar Secure TEST Auto Deploy','Family Calendar Auto Deploy',
+  'Family Calendar Auto Preview','Family Calendar Backup Ack Processor',
+  'Family Calendar Backup Catchup Sender','Family Calendar Backup Cleanup',
+  'Family Calendar Backup Sender','Family Calendar Local STT',
+  'Family Calendar Monthly Restart','Family Calendar Project Backup',
+  'Family Calendar Secure LIVE Auto Deploy',
+]
+function taskInventory(stage) {
+  return {
+    schemaVersion:1,site:'existing-secure-test',stage,
+    installedTestSha:oldSha,enumerationSucceeded:true,
+    tasks:requiredTasks.map((name,i)=>{
+      const disabled=['Family Calendar Auto Deploy',
+        'Family Calendar Auto Preview','Family Calendar Secure LIVE Auto Deploy',
+      ].includes(name) ||
+        (stage==='maintenance-fenced' && [
+          'Family Calendar Secure TEST','Family Calendar Secure TEST Auto Deploy',
+        ].includes(name))
+      return {
+        name,path:'\\',state:disabled?'Disabled':'Ready',enabled:!disabled,
+        actionDigest:(i+1).toString(16).padStart(64,'0'),
+        principalDigest:(i+21).toString(16).padStart(64,'0'),
+        triggerDigest:(i+41).toString(16).padStart(64,'0'),
+        triggerCount:1,restartCount:[
+          'Family Calendar Server','Family Calendar Ollama Server',
+          'Family Calendar Secure TEST','Family Calendar Local STT',
+        ].includes(name)?3:0,multipleInstances:'IgnoreNew',
+      }
+    }),
+  }
+}
+function taskSnapshots(){
+  return { baseline:taskInventory('baseline'),
+    maintenance:taskInventory('maintenance-fenced') }
+}
 function start() {
   return begin({
     baselineTopology: topology('baseline'), candidateSha,
@@ -67,8 +105,13 @@ function start() {
 function prep() {
   return advance(start(), { step: 'report-preparation', evidence: preparation })
 }
-function fenced() {
+function taskFenced() {
   return advance(prep(), {
+    step: 'observe-test-task-fence', taskSnapshots:taskSnapshots(),
+  })
+}
+function fenced() {
+  return advance(taskFenced(), {
     step: 'observe-legacy-fence', topology: topology('legacy-fenced'),
   })
 }
@@ -95,15 +138,15 @@ function unauthorized(receipt) {
 }
 
 test('baseline-to-private route sequence records exact stages without ever authorizing deployment', () => {
-  const steps = [start(), prep(), fenced(), backed(), privateReady(), routed()]
+  const steps = [start(), prep(), taskFenced(), fenced(), backed(), privateReady(), routed()]
   const last = advance(steps.at(-1), { step: 'report-canary', evidence: canary })
   assert.deepEqual(steps.map(x => x.phase), [
     'baseline-reviewed', 'preparation-reported',
-    'legacy-fenced-reported', 'offline-backup-reported',
+    'test-tasks-fenced-reported', 'legacy-fenced-reported', 'offline-backup-reported',
     'private-ready-reported', 'new-route-reported',
   ])
   assert.equal(last.phase, 'canary-reported')
-  assert.equal(last.recordedSteps.length, 7)
+  assert.equal(last.recordedSteps.length, 8)
   assert.equal(last.candidateSha, candidateSha)
   assert.deepEqual(last.originalTestPortproxy, oldProxy())
   assert.deepEqual(last.proposedTestPortproxy, newProxy())
@@ -179,12 +222,12 @@ test('review stages cannot be replayed or transferred to a different TEST host r
   }), /complete exact-head/)
   const swapped = topology('legacy-fenced')
   swapped.installedTestSha = candidateSha
-  assert.throws(() => advance(prep(), {
+  assert.throws(() => advance(taskFenced(), {
     step: 'observe-legacy-fence', topology: swapped,
   }), /pinned existing TEST baseline/)
   const changedPort = topology('legacy-fenced')
   changedPort.gatewayPort = 13007
-  assert.throws(() => advance(prep(), {
+  assert.throws(() => advance(taskFenced(), {
     step: 'observe-legacy-fence', topology: changedPort,
   }), /pinned existing TEST baseline/)
   assert.throws(() => advance(backed(), {
@@ -192,8 +235,33 @@ test('review stages cannot be replayed or transferred to a different TEST host r
   }), /unexpected cutover order/)
 })
 
+test('scheduler maintenance must be reviewed before claiming legacy has stopped',()=>{
+  assert.throws(()=>advance(prep(),{
+    step:'observe-legacy-fence',topology:topology('legacy-fenced'),
+  }),/unexpected cutover order/)
+  assert.equal(taskFenced().phase,'test-tasks-fenced-reported')
+  const bad=taskSnapshots()
+  bad.maintenance.tasks.find(x=>x.name==='Family Calendar Secure TEST Auto Deploy')
+    .enabled=true
+  bad.maintenance.tasks.find(x=>x.name==='Family Calendar Secure TEST Auto Deploy')
+    .state='Ready'
+  assert.throws(()=>advance(prep(),{
+    step:'observe-test-task-fence',taskSnapshots:bad,
+  }),/scheduler collision/)
+  const changed=taskSnapshots()
+  changed.maintenance.tasks.find(x=>x.name==='Family Calendar Watchdog')
+    .actionDigest='f'.repeat(64)
+  assert.throws(()=>advance(prep(),{
+    step:'observe-test-task-fence',taskSnapshots:changed,
+  }),/scheduler collision/)
+  assert.throws(()=>advance(prep(),{
+    step:'observe-test-task-fence',taskSnapshots:{baseline:taskInventory('baseline')},
+  }),/exact task baseline/)
+  assert.equal(taskFenced().testDeploymentAuthorized,false)
+})
+
 test('any unrecovered fault enters a terminal manual hold, never automatically restores old TEST', () => {
-  for (const item of [start(), fenced(), backed(), privateReady(), routed()]) {
+  for (const item of [start(), taskFenced(), fenced(), backed(), privateReady(), routed()]) {
     const held = hold(item, 'canary-failed')
     assert.equal(held.phase, 'requires-operator-review')
     assert.equal(held.lastReviewedPhase, item.phase)
