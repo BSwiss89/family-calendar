@@ -207,6 +207,14 @@ async function main(){
     if(git(['-C',checkout,'rev-parse','HEAD'])!==INSTALLED_SHA){
       refuse('Isolated source does not match the installed TEST revision.')
     }
+    // Reject any tracked destination link/directory before copying data.
+    // A malicious Git symlink at Server/data would otherwise redirect writes
+    // from the temporary checkout back toward an installed calendar.
+    const server=physicalDir(path.join(checkout,'Server'))
+    for(const location of [path.join(checkout,'node_modules'),
+      path.join(server,'data'),path.join(server,'uploads'),path.join(checkout,'dist')]){
+      if(fs.existsSync(location))refuse('Temporary source contains a pre-existing recovered-data destination.')
+    }
     // All these are PHYSICAL copies. Never link dependencies, DB or assets
     // back to the running TEST junction locations.
     reviewStep='copy-dependencies'
