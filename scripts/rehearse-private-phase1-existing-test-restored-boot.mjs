@@ -112,7 +112,7 @@ function countPhysicalDeps(folder){
 function git(args){
   const r=spawnSync('git',args,{
     windowsHide:true,encoding:'utf8',timeout:120000,
-    env:{...process.env,GIT_TERMINAL_PROMPT:'0',GCM_INTERACTIVE:'Never'},
+    env:{...process.env,GIT_TERMINAL_PROMPT:'0',GCM_INTERACTIVE:'Never',GIT_OPTIONAL_LOCKS:'0'},
   })
   if(r.error||r.status!==0)refuse('Local Git source verification/copy failed.')
   return r.stdout.trim()
