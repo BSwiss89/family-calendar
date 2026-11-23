@@ -18,7 +18,7 @@ const normalShowAll = [
   '--------------- ----------  --------------- ----------',
   '127.0.0.1       13003       100.124.58.19   13002',
   '',
-].join('\\n')
+].join('\n')
 const input = (dump, showAll = normalShowAll) =>
   ({ dump, showAll, installedTestSha: sha, legacyTestAddress: address })
 const full = (...rules) => prefix + rules.join('\r\n') + suffix
@@ -122,7 +122,7 @@ test('actual November 23 Windows export omits listenaddress but agrees with comp
     '',
     '# End of Port Proxy configuration',
     '',
-  ].join('\\n')
+  ].join('\n')
   const evidence = inspect(input(windowsDump))
   assert.equal(evidence.observedBaselinePortproxyMatches, true)
   assert.equal(evidence.old13002DirectAccessDenied, false)
@@ -138,8 +138,8 @@ test('missing export listenaddress is never accepted without matching complete s
     normalShowAll.replace('127.0.0.1', '0.0.0.0'),
     normalShowAll.replace('13003', '13004'),
     normalShowAll.replace('13002', '13005'),
-    normalShowAll + '0.0.0.0 14000 100.124.58.19 13002\\n',
-    normalShowAll + 'Listen on ipv6: Connect to ipv4:\\n',
+    normalShowAll + '0.0.0.0 14000 100.124.58.19 13002\n',
+    normalShowAll + 'Listen on ipv6: Connect to ipv4:\n',
     '',
   ]
   for (const showAll of suspicious) {
