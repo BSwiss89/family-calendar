@@ -76,6 +76,12 @@ function fixture(t) {
         case 'shopping_store_preferences':
           sql='CREATE TABLE shopping_store_preferences(id INTEGER PRIMARY KEY,store_id INTEGER REFERENCES shopping_stores(id),value TEXT)'
           break
+        case 'assignment_notification_outbox':
+          sql='CREATE TABLE assignment_notification_outbox(id INTEGER PRIMARY KEY,value TEXT,event_id INTEGER,person_id INTEGER,cancelled_details_json TEXT)'
+          break
+        case 'test_assignment_acknowledgements':
+          sql='CREATE TABLE test_assignment_acknowledgements(id INTEGER PRIMARY KEY,notification_id INTEGER REFERENCES assignment_notification_outbox(id),value TEXT)'
+          break
         default:
           sql='CREATE TABLE "'+rule.table+'"(id INTEGER PRIMARY KEY,value TEXT)'
       }
@@ -106,6 +112,20 @@ function fixture(t) {
       'test_push_subscriptions','test_push_deliveries']) {
       db.prepare('INSERT INTO "'+table+'"(id,value) VALUES (?,?)').run(1,secret)
     }
+    // Simulate historical TEST notification references: 31 sent notices,
+    // 4 references to now-deleted events and 2 to absent People. The missing
+    // targets are legitimate archival state, never silently cleaned up.
+    db.prepare('UPDATE assignment_notification_outbox SET event_id=?,person_id=?,cancelled_details_json=? WHERE id=1')
+      .run(46,7,JSON.stringify({cancelled:'synthetic historical details'}))
+    const notice=db.prepare('INSERT INTO assignment_notification_outbox(id,value,event_id,person_id,cancelled_details_json) VALUES(?,?,?,?,?)')
+    for(let id=2;id<=31;id++) {
+      const eventId=id<=5?1000+id:46
+      const personId=id>=6&&id<=7?2000+id:7
+      notice.run(id,secret,eventId,personId,
+        JSON.stringify({detail:'historical synthetic notification',id}))
+    }
+    const ack=db.prepare('INSERT INTO test_assignment_acknowledgements(id,notification_id,value) VALUES(?,?,?)')
+    for(let id=2;id<=14;id++)ack.run(id,id,secret)
     db.exec('CREATE INDEX phase1_fixture_list_item_store_idx ON list_items(list_id)')
     for(const sql of listPhase1ApprovedSyntheticFixtureTriggerSql())db.exec(sql)
     assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0)
@@ -124,6 +144,12 @@ test('synthetic first family split preserves all 22 data/history tables while di
   assert.equal(r.sourceFixtureOnly,true)
   assert.equal(r.preservedHouseholdAndNoticeTables,22)
   assert.equal(r.copiedUploadFiles,1)
+  assert.equal(r.historicalOutboxRowsPreserved,31)
+  assert.equal(r.orphanedEventNoticeReferencesPreserved,4)
+  assert.equal(r.orphanedPersonNoticeReferencesPreserved,2)
+  assert.equal(r.historicalAcknowledgementRowsPreserved,14)
+  assert.equal(r.historicalAcknowledgementOrphansPreserved,0)
+  assert.equal(r.deletedEventAndPersonHistoryNeverAutoPruned,true)
   assert.equal(r.approvedSyntheticFixtureTriggersPreserved,3)
   assert.equal(r.retainedIndexAndTriggerFingerprintsEqual,true)
   assert.equal(r.realArchivedTriggerBodiesApproved,false)
@@ -199,6 +225,47 @@ test('synthetic first family split preserves all 22 data/history tables while di
   assert.doesNotMatch(raw,/syntheticowner|Private Groceries|THIS_IS_A_SYNTHETIC/)
   assert.throws(()=>stage(f),/refused/)
 })
+
+test('31 archived synthetic notices retain four missing-event and two missing-Person references with all acknowledgements',t=>{
+  const f=fixture(t)
+  const sourceDigest=hash(f.dbFile)
+  const receipt=stage(f)
+  assert.equal(receipt.historicalOutboxRowsPreserved,31)
+  assert.equal(receipt.orphanedEventNoticeReferencesPreserved,4)
+  assert.equal(receipt.orphanedPersonNoticeReferencesPreserved,2)
+  assert.equal(receipt.historicalAcknowledgementRowsPreserved,14)
+  assert.equal(receipt.historicalAcknowledgementOrphansPreserved,0)
+  const dest=path.join(f.destinationRoot,'households','primary-family','data','calendar.db')
+  const result=new DatabaseSync(dest,{readOnly:true})
+  try {
+    const count=result.prepare('SELECT COUNT(*) AS n FROM assignment_notification_outbox').get().n
+    const eventOrphans=result.prepare(
+      'SELECT COUNT(*) AS n FROM assignment_notification_outbox o WHERE NOT EXISTS(SELECT 1 FROM events e WHERE e.id=o.event_id)'
+    ).get().n
+    const personOrphans=result.prepare(
+      'SELECT COUNT(*) AS n FROM assignment_notification_outbox o WHERE NOT EXISTS(SELECT 1 FROM people p WHERE p.id=o.person_id)'
+    ).get().n
+    const ack=result.prepare(
+      'SELECT COUNT(*) AS n FROM test_assignment_acknowledgements'
+    ).get().n
+    assert.deepEqual([count,eventOrphans,personOrphans,ack],[31,4,2,14])
+    const details=result.prepare(
+      'SELECT cancelled_details_json FROM assignment_notification_outbox WHERE id=2'
+    ).get().cancelled_details_json
+    assert.deepEqual(JSON.parse(details),{
+      detail:'historical synthetic notification',id:2,
+    })
+    assert.equal(result.prepare('PRAGMA foreign_key_check').all().length,0)
+  } finally {result.close()}
+  assert.equal(hash(f.dbFile),sourceDigest)
+  const raw=JSON.stringify(receipt)
+  assert.doesNotMatch(raw,/syntheticowner|THIS_IS_A_SYNTHETIC|historical synthetic notification/)
+  for(const key of [
+    'actualTestMigrationExecuted','testDeploymentAuthorized',
+    'liveDeploymentAuthorized','backupAuthorized','rollbackAuthorized'
+  ])assert.equal(receipt[key],false,key)
+})
+
 test('real recovery layout and unmarked source are never eligible for conversion',t=>{
   const f=fixture(t)
   fs.writeFileSync(path.join(f.sourceRoot,'.phase1-disposable-legacy-fixture.json'),
