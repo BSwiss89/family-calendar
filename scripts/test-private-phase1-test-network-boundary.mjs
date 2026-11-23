@@ -5,6 +5,7 @@ import './test-private-phase1-windows-test-task-fencing.mjs'
 import './test-private-phase1-test-restart-schedule-review.mjs'
 import './test-private-phase1-watchdog-source-audit.mjs'
 import './test-private-phase1-offline-legacy-capture-contract.mjs'
+import './test-private-phase1-legacy-snapshot-verification.mjs'
 // The existing CI boundary test also loads the staged handoff regression suite.
 import './test-private-phase1-test-staged-handoff-review.mjs'
 import assert from 'node:assert/strict'
