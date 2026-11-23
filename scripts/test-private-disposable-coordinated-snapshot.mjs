@@ -22,6 +22,8 @@ import { copyVerifiedPrivateRestoreSet } from '../Server/private-offline-restore
 import { captureDisposableCoordinatedHouseholdSnapshot } from '../Server/private-disposable-coordinated-snapshot.mjs'
 import { reviewDisposablePhase1PostWriteRollback }
   from '../Server/private-phase1-post-write-rollback-review.mjs'
+import { reviewDisposablePhase1IdentityRollbackImpact }
+  from '../Server/private-phase1-identity-rollback-review.mjs'
 
 const pass = 'Disposable-Only-Strong-Password-123!'
 function fixture(t) {
@@ -301,4 +303,128 @@ test('same, nested or non-disposable snapshot roots refuse rollback review', t =
     laterSnapshotRoot: before.snapshotRoot,
     laterAttestation: before.attestation,
   }), /only independently stored OS-temp backups/)
+})
+
+function identityRollbackEvidence(f, before, after) {
+  return reviewDisposablePhase1IdentityRollbackImpact({
+    serverDirectory: f.args.serverDirectory,
+    baselineSnapshotRoot: before.snapshotRoot,
+    baselineAttestation: before.attestation,
+    laterSnapshotRoot: after.snapshotRoot,
+    laterAttestation: after.attestation,
+  })
+}
+
+test('new account, household permission and expired device session are counted, never exposed or auto-rolled back', t => {
+  const f = fixture(t)
+  const before = captured(f)
+  const identity = new DatabaseSync(f.centralPath)
+  try {
+    setFamilyAccount(identity, 'new-private-test-member', 'Synthetic Member', pass)
+    const userId = identity.prepare(
+      "SELECT id FROM family_users WHERE username='new-private-test-member'"
+    ).get().id
+    grantHouseholdMembership(identity, {
+      serverVerifiedUserId: userId, householdId: 'family-a', role: 'member',
+    })
+    const now = Date.now()
+    identity.prepare([
+      'INSERT INTO family_sessions',
+      '(user_id,token_hash,device_label,created_at,last_seen_at,expires_at,revoked_at)',
+      'VALUES(?,?,?,?,?,?,?)',
+    ].join(' ')).run(userId, 'd'.repeat(64), 'test private device',
+      now - 360000, now - 360000, now - 120000, now - 100000)
+  } finally { identity.close() }
+  const after = captureDisposableCoordinatedHouseholdSnapshot({
+    ...f.args, destinationRoot: path.join(f.work, 'identity-after-join'),
+  })
+  const result = identityRollbackEvidence(f, before, after)
+  assert.equal(result.baselineBackupVerified, true)
+  assert.equal(result.laterBackupVerified, true)
+  assert.equal(result.centralFileChanged, true)
+  assert.equal(result.identityRecordsDiffer, true)
+  assert.equal(result.identityChanges.accounts.added, 1)
+  assert.equal(result.identityChanges.memberships.added, 1)
+  assert.equal(result.identityChanges.sessions.added, 1)
+  assert.equal(result.accountOrSessionRollbackImpactPossible, true)
+  assert.equal(result.identityDetailsExposed, false)
+  assert.equal(result.activeSessionsProvenInvalidatedOnRealHost, false)
+  assert.equal(result.writesAfterLaterSnapshotUnknown, true)
+  assert.equal(result.automaticRollbackAllowed, false)
+  assert.equal(result.restoreAuthorized, false)
+  assert.equal(result.deploymentAuthorized, false)
+  assert.equal(result.manualOwnerReviewRequired, true)
+  assert.equal(JSON.stringify(result).includes('new-private-test-member'), false)
+  assert.equal(JSON.stringify(result).includes('test private device'), false)
+  assert.equal(JSON.stringify(result).includes('Disposable-Only-Strong'), false)
+})
+
+test('session revocation and profile selection changes are detected even without account additions', t => {
+  const f = fixture(t)
+  const identity = new DatabaseSync(f.centralPath)
+  let sessionId
+  try {
+    const userId = identity.prepare(
+      "SELECT id FROM family_users WHERE username='synthetic-a'"
+    ).get().id
+    const now = Date.now()
+    sessionId = Number(identity.prepare([
+      'INSERT INTO family_sessions',
+      '(user_id,token_hash,device_label,created_at,last_seen_at,expires_at)',
+      'VALUES(?,?,?,?,?,?)',
+    ].join(' ')).run(userId, 'e'.repeat(64), 'expired test device',
+      now - 300000, now - 250000, now - 100000).lastInsertRowid)
+  } finally { identity.close() }
+  const before = captured(f)
+  const changed = new DatabaseSync(f.centralPath)
+  try {
+    changed.prepare(
+      'UPDATE family_sessions SET revoked_at=?, selected_profile_kind=? WHERE id=?'
+    ).run(Date.now() - 80000, 'home', sessionId)
+  } finally { changed.close() }
+  const after = captureDisposableCoordinatedHouseholdSnapshot({
+    ...f.args, destinationRoot: path.join(f.work, 'identity-after-revoke'),
+  })
+  const result = identityRollbackEvidence(f, before, after)
+  assert.equal(result.identityChanges.sessions.changed, 1)
+  assert.equal(result.identityChanges.accounts.changed, 0)
+  assert.equal(result.identityChanges.memberships.changed, 0)
+  assert.equal(result.identityChanges.sessions.added, 0)
+  assert.equal(result.accountOrSessionRollbackImpactPossible, true)
+  assert.equal(result.automaticRollbackAllowed, false)
+})
+
+test('matching account and session snapshots still cannot authorize restore or future browser sessions', t => {
+  const f = fixture(t)
+  const before = captured(f)
+  const after = captureDisposableCoordinatedHouseholdSnapshot({
+    ...f.args, destinationRoot: path.join(f.work, 'identity-identical'),
+  })
+  const result = identityRollbackEvidence(f, before, after)
+  assert.equal(result.identityRecordsDiffer, false)
+  assert.equal(result.accountOrSessionRollbackImpactPossible, false)
+  assert.equal(result.writesAfterLaterSnapshotUnknown, true)
+  assert.equal(result.ownerReauthenticationRequiredAfterAnyApprovedRecovery, true)
+  assert.equal(result.allSystemWritersFenced, false)
+  assert.equal(result.automaticRollbackAllowed, false)
+  assert.equal(result.manualOwnerReviewRequired, true)
+})
+
+test('identity review rejects altered attestation, overlapping roots and unsafe restored sessions', t => {
+  const f = fixture(t)
+  const before = captured(f)
+  assert.throws(() => reviewDisposablePhase1IdentityRollbackImpact({
+    serverDirectory: f.args.serverDirectory,
+    baselineSnapshotRoot: before.snapshotRoot,
+    baselineAttestation: before.attestation,
+    laterSnapshotRoot: before.snapshotRoot,
+    laterAttestation: before.attestation,
+  }), /distinct non-overlapping/)
+  const later = captureDisposableCoordinatedHouseholdSnapshot({
+    ...f.args, destinationRoot: path.join(f.work, 'identity-tamper'),
+  })
+  fs.writeFileSync(path.join(later.snapshotRoot, 'central', 'identity.db'),
+    Buffer.from('tampered instead of SQLite'))
+  assert.throws(() => identityRollbackEvidence(f, before, later),
+    /quick_check|file is not a database|attestation|approved backup-time/)
 })
