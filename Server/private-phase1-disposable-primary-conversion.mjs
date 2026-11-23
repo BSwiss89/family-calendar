@@ -214,6 +214,51 @@ function snapshot(db,table) {
   }
   return {schema,columns:cols.join('\u0000'),rows,sha256:sha.digest('hex')}
 }
+// Notification outbox intentionally can refer to an event/Person that has
+// since been deleted. Such records must remain byte-for-byte intact, even
+// though a conventional FK cleanup or auto-join would erase history.
+// These counts are only gathered from explicitly synthetic disposable DBs.
+function historicalNoticeIntegrity(db) {
+  const outboxColumns=new Set(db.prepare(
+    'PRAGMA table_info("assignment_notification_outbox")'
+  ).all().map(c=>c.name))
+  const ackColumns=new Set(db.prepare(
+    'PRAGMA table_info("test_assignment_acknowledgements")'
+  ).all().map(c=>c.name))
+  if(['id','event_id','person_id'].some(c=>!outboxColumns.has(c)) ||
+     !ackColumns.has('notification_id')) {
+    refuse('synthetic notification tables lack reviewed reference columns.')
+  }
+  const outbox=db.prepare([
+    'SELECT COUNT(*) AS n,',
+    'COUNT(CASE WHEN o.event_id IS NOT NULL AND NOT EXISTS',
+    '(SELECT 1 FROM events e WHERE e.id=o.event_id) THEN 1 END) AS missingEvents,',
+    'COUNT(CASE WHEN o.person_id IS NOT NULL AND NOT EXISTS',
+    '(SELECT 1 FROM people p WHERE p.id=o.person_id) THEN 1 END) AS missingPeople',
+    'FROM assignment_notification_outbox o',
+  ].join(' ')).get()
+  const ack=db.prepare([
+    'SELECT COUNT(*) AS n,',
+    'COUNT(CASE WHEN a.notification_id IS NOT NULL AND NOT EXISTS',
+    '(SELECT 1 FROM assignment_notification_outbox o',
+    'WHERE o.id=a.notification_id) THEN 1 END) AS missingOutbox',
+    'FROM test_assignment_acknowledgements a',
+  ].join(' ')).get()
+  for(const n of [outbox.n,outbox.missingEvents,outbox.missingPeople,
+    ack.n,ack.missingOutbox]) {
+    if(!Number.isSafeInteger(n)||n<0||n>MAX_RECORDS) {
+      refuse('synthetic historical notice counts are invalid.')
+    }
+  }
+  return Object.freeze({
+    outboxRows:outbox.n,
+    unmatchedEventReferences:outbox.missingEvents,
+    unmatchedPersonReferences:outbox.missingPeople,
+    acknowledgementRows:ack.n,
+    unmatchedAcknowledgementOutbox:ack.missingOutbox,
+  })
+}
+
 function requireNoCrossBoundaryFks(db) {
   for(const rule of listPrivatePhase1LegacyDispositionRules()) {
     if(!RETAIN.has(rule.disposition))continue
@@ -268,7 +313,7 @@ function centralIdentity(file,owner) {
     if(sessions!==0||user.disabled!==1)refuse('staged central login was accidentally activated.')
   } finally {db.close()}
 }
-function scrubHousehold(file,originals,originalSchemaObjects) {
+function scrubHousehold(file,originals,originalSchemaObjects,originalHistoricalNotices) {
   const db=new DatabaseSync(file)
   try {
     // Only on the fresh synthetic output database; original never altered.
@@ -299,6 +344,10 @@ function scrubHousehold(file,originals,originalSchemaObjects) {
       refuse('a retained trigger/index changed or disappeared during synthetic split.')
     }
     trustedSyntheticTriggers(db)
+    if(JSON.stringify(historicalNoticeIntegrity(db)) !==
+       JSON.stringify(originalHistoricalNotices)) {
+      refuse('deleted-event or missing-Person notice history changed during synthetic split.')
+    }
     return {preservedTables:originals.size,
       preservedRows:[...originals.values()].reduce((n,x)=>n+x.rows,0)}
   } finally {db.close()}
@@ -317,7 +366,7 @@ export function stageDisposablePhase1PrimaryFamily({
   const uploadsBefore=scanUploads(path.join(src,'uploads'))
   const original=new DatabaseSync(dbFile,{readOnly:true})
   const preserved=new Map()
-  let owner,retainedRows=0,originalSchemaObjects,approvedFixtureTriggers
+  let owner,retainedRows=0,originalSchemaObjects,approvedFixtureTriggers,originalHistoricalNotices
   try {
     original.exec('PRAGMA query_only=ON')
     check(original)
@@ -326,6 +375,7 @@ export function stageDisposablePhase1PrimaryFamily({
     originalSchemaObjects=preservedSchemaObjectFingerprints(original)
     requireNoCrossBoundaryFks(original)
     owner=readLegacyOwner(original)
+    originalHistoricalNotices=historicalNoticeIntegrity(original)
     for(const rule of listPrivatePhase1LegacyDispositionRules()) {
       const value=snapshot(original,rule.table)
       if(RETAIN.has(rule.disposition)) {
@@ -348,7 +398,7 @@ export function stageDisposablePhase1PrimaryFamily({
     fs.mkdirSync(familyData)
     const destDb=path.join(familyData,'calendar.db')
     fs.copyFileSync(dbFile,destDb,fs.constants.COPYFILE_EXCL)
-    const split=scrubHousehold(destDb,preserved,originalSchemaObjects)
+    const split=scrubHousehold(destDb,preserved,originalSchemaObjects,originalHistoricalNotices)
     const centralDb=path.join(centralDir,'identity.db')
     centralIdentity(centralDb,owner)
     copyUploads(path.join(src,'uploads'),path.join(home,'uploads'),uploadsBefore)
@@ -367,6 +417,12 @@ export function stageDisposablePhase1PrimaryFamily({
       preservedHouseholdAndNoticeTables:split.preservedTables,
       preservedHouseholdAndNoticeRows:retainedRows,
       copiedUploadFiles:uploadsBefore.length,
+      historicalOutboxRowsPreserved:originalHistoricalNotices.outboxRows,
+      orphanedEventNoticeReferencesPreserved:originalHistoricalNotices.unmatchedEventReferences,
+      orphanedPersonNoticeReferencesPreserved:originalHistoricalNotices.unmatchedPersonReferences,
+      historicalAcknowledgementRowsPreserved:originalHistoricalNotices.acknowledgementRows,
+      historicalAcknowledgementOrphansPreserved:originalHistoricalNotices.unmatchedAcknowledgementOutbox,
+      deletedEventAndPersonHistoryNeverAutoPruned:true,
       approvedSyntheticFixtureTriggersPreserved:approvedFixtureTriggers,
       retainedIndexAndTriggerFingerprintsEqual:true,
       realArchivedTriggerBodiesApproved:false,
