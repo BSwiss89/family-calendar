@@ -35,6 +35,11 @@ const RULES=Object.freeze({
   test_push_deliveries:'device-subscription-reenrollment',
   capture_inbox:'retired-table-archive-only',
 })
+// Export only fixed mapping metadata. No row-copy permission is conferred.
+export function listPrivatePhase1LegacyDispositionRules() {
+  return Object.freeze(Object.entries(RULES).map(([table,disposition]) =>
+    Object.freeze({table,disposition})))
+}
 const EXPECTED=Object.freeze(Object.keys(RULES).sort())
 const OPTIONS=new Set(Object.values(RULES))
 function refuse(reason) {
