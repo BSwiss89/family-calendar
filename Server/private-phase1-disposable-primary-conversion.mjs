@@ -21,6 +21,52 @@ const STRIP=new Set([
   'family_sessions','family_users','test_push_deliveries',
   'test_push_subscriptions','capture_inbox',
 ])
+
+// STRICT source-only synthetic harness allowlist. These are three invented,
+// controlled regression triggers, NOT the 14 real archived TEST triggers.
+// Real trigger DDL is NOT allowed here, even with an operator-supplied hash.
+// Do not broaden this list without fresh code review and disposable CI.
+// SQLite stores CREATE TRIGGER SQL in sqlite_schema.sql; exact matching
+// prevents accepting an unreviewed trigger body, even if names match.
+const SYNTHETIC_TRIGGER_SQL=Object.freeze([
+  "CREATE TRIGGER phase1_fixture_event_change AFTER UPDATE OF title ON events BEGIN INSERT OR REPLACE INTO notification_dirty_events(id,value) VALUES (NEW.id,'event-updated'); END",
+  "CREATE TRIGGER phase1_fixture_person_assignment AFTER INSERT ON event_people BEGIN INSERT OR REPLACE INTO notification_dirty_event_fields(id,value) VALUES (NEW.event_id,'people-changed'); END",
+  "CREATE TRIGGER phase1_fixture_exception_change AFTER INSERT ON event_exceptions BEGIN INSERT OR REPLACE INTO notification_dirty_event_attribution(id,value) VALUES (NEW.event_id,'exception-changed'); END",
+])
+export function listPhase1ApprovedSyntheticFixtureTriggerSql() {
+  return SYNTHETIC_TRIGGER_SQL
+}
+function trustedSyntheticTriggers(db) {
+  const entries=db.prepare(
+    "SELECT name,tbl_name,sql,type FROM sqlite_master WHERE type IN ('view','trigger')"
+  ).all()
+  if(entries.some(row=>row.type==='view')) {
+    refuse('unreviewed view cannot be migrated in synthetic rehearsal.')
+  }
+  const seen=new Set()
+  for(const row of entries) {
+    if(row.type!=='trigger' || typeof row.sql!=='string' ||
+       !SYNTHETIC_TRIGGER_SQL.includes(row.sql) || seen.has(row.sql) ||
+       !RETAIN.has(listPrivatePhase1LegacyDispositionRules()
+         .find(rule=>rule.table===row.tbl_name)?.disposition)) {
+      refuse('unreviewed trigger on synthetic source; no real trigger bodies authorized.')
+    }
+    seen.add(row.sql)
+  }
+  return seen.size
+}
+function preservedSchemaObjectFingerprints(db) {
+  const retained=new Set(listPrivatePhase1LegacyDispositionRules()
+    .filter(rule=>RETAIN.has(rule.disposition)).map(rule=>rule.table))
+  return db.prepare(
+    "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('index','trigger')"
+  ).all()
+    .filter(row=>retained.has(row.tbl_name))
+    .map(row=>createHash('sha256').update(JSON.stringify([
+      row.type,row.name,row.tbl_name,row.sql,
+    ])).digest('hex')).sort()
+}
+
 function refuse(reason) { throw new Error('Disposable primary-family conversion refused: '+reason) }
 function inside(parent,child) {
   const relative=path.relative(parent,child)
@@ -137,12 +183,7 @@ function tableNames(db) {
   if(JSON.stringify(actual)!==JSON.stringify(expected)) {
     refuse('unexpected, missing, or renamed archived table.')
   }
-  const executableObjects=db.prepare(
-    "SELECT name FROM sqlite_master WHERE type IN ('view','trigger')"
-  ).all()
-  if(executableObjects.length) {
-    refuse('unreviewed view or trigger could reference central identity.')
-  }
+  trustedSyntheticTriggers(db)
   return actual
 }
 function q(name) {
@@ -227,7 +268,7 @@ function centralIdentity(file,owner) {
     if(sessions!==0||user.disabled!==1)refuse('staged central login was accidentally activated.')
   } finally {db.close()}
 }
-function scrubHousehold(file,originals) {
+function scrubHousehold(file,originals,originalSchemaObjects) {
   const db=new DatabaseSync(file)
   try {
     // Only on the fresh synthetic output database; original never altered.
@@ -253,6 +294,11 @@ function scrubHousehold(file,originals) {
         refuse('a household, notification, or invitation row changed during split.')
       }
     }
+    if(JSON.stringify(preservedSchemaObjectFingerprints(db)) !==
+       JSON.stringify(originalSchemaObjects)) {
+      refuse('a retained trigger/index changed or disappeared during synthetic split.')
+    }
+    trustedSyntheticTriggers(db)
     return {preservedTables:originals.size,
       preservedRows:[...originals.values()].reduce((n,x)=>n+x.rows,0)}
   } finally {db.close()}
@@ -271,11 +317,13 @@ export function stageDisposablePhase1PrimaryFamily({
   const uploadsBefore=scanUploads(path.join(src,'uploads'))
   const original=new DatabaseSync(dbFile,{readOnly:true})
   const preserved=new Map()
-  let owner,retainedRows=0
+  let owner,retainedRows=0,originalSchemaObjects,approvedFixtureTriggers
   try {
     original.exec('PRAGMA query_only=ON')
     check(original)
     tableNames(original)
+    approvedFixtureTriggers=trustedSyntheticTriggers(original)
+    originalSchemaObjects=preservedSchemaObjectFingerprints(original)
     requireNoCrossBoundaryFks(original)
     owner=readLegacyOwner(original)
     for(const rule of listPrivatePhase1LegacyDispositionRules()) {
@@ -300,7 +348,7 @@ export function stageDisposablePhase1PrimaryFamily({
     fs.mkdirSync(familyData)
     const destDb=path.join(familyData,'calendar.db')
     fs.copyFileSync(dbFile,destDb,fs.constants.COPYFILE_EXCL)
-    const split=scrubHousehold(destDb,preserved)
+    const split=scrubHousehold(destDb,preserved,originalSchemaObjects)
     const centralDb=path.join(centralDir,'identity.db')
     centralIdentity(centralDb,owner)
     copyUploads(path.join(src,'uploads'),path.join(home,'uploads'),uploadsBefore)
@@ -319,6 +367,9 @@ export function stageDisposablePhase1PrimaryFamily({
       preservedHouseholdAndNoticeTables:split.preservedTables,
       preservedHouseholdAndNoticeRows:retainedRows,
       copiedUploadFiles:uploadsBefore.length,
+      approvedSyntheticFixtureTriggersPreserved:approvedFixtureTriggers,
+      retainedIndexAndTriggerFingerprintsEqual:true,
+      realArchivedTriggerBodiesApproved:false,
       stagedOwnersDisabled:1,
       centralActiveSessions:0,
       centralSelectedHouseholds:0,
