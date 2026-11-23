@@ -155,9 +155,24 @@ if($testTask.State -cne 'Disabled' -or $updaterTask.State -cne 'Disabled' -or
    $old.Count -ne 0 -or $new.Count -ne 0){
   Refuse 'Both legacy TEST tasks must already be disabled, and all old/new TEST backends closed.'
 }
-$testProcesses=@(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction Stop |
-  Where-Object {[string]$_.CommandLine -like '*family-calendar-test-security-stage*'})
-if($testProcesses.Count -ne 0){Refuse 'Legacy TEST Node process still exists.'}
+# Reject an updater already running even if its scheduled task now says
+# Disabled; otherwise it could independently relaunch the old TEST backend.
+$identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+$admin=([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if(-not $admin -or $identity.Name -eq 'NT AUTHORITY\SYSTEM'){
+  Refuse 'Offline capture must be explicitly run as an elevated interactive administrator, never SYSTEM.'
+}
+$processes=@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+  @('node.exe','powershell.exe','pwsh.exe') -icontains [string]$_.Name
+})
+foreach($process in $processes){
+  if([string]::IsNullOrWhiteSpace([string]$process.CommandLine)){
+    Refuse 'One active Node/PowerShell process cannot be inspected for TEST ownership.'
+  }
+  if([string]$process.CommandLine -match '(?i)family-calendar-test-security-stage|auto-test-deploy\.ps1|secure-test-auto-deploy\.ps1|start-secure-test-patched\.ps1'){
+    Refuse 'Legacy TEST Node, updater or supervisor still has an active process.'
+  }
+}
 # Lock the source SQLite against writers throughout the copy. The lock is
 # not an OS-wide guarantee for uploads; only coordinated shutdown qualifies.
 $guard=[IO.File]::Open($db,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
@@ -183,6 +198,17 @@ try{
      @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object {$_.LocalPort -in @(13002,13004,13005,13006)}).Count -ne 0){
     Refuse 'Legacy or private TEST process restarted during capture.'
   }
+  # Store an independently usable local file-by-file SHA256 inventory; a
+  # count-only receipt cannot prove uploaded data was preserved on restore.
+  $manifestRows=New-Object 'System.Collections.Generic.List[object]'
+  foreach($rootName in @('data','uploads','dist')){
+    $root=Join-Path $folder $rootName
+    foreach($file in @(ListFiles $root)){
+      $relative=$file.Substring((Normal $root).Length).TrimStart('\')
+      $manifestRows.Add(@{path=($rootName+'/'+($relative -replace '\\','/'));sha256=(ShaFile $file)})
+    }
+  }
+  $manifestRows.Add(@{path='start-secure-test-patched.ps1';sha256=(ShaFile $backupSupervisor)})
   $summary=@{
     kind='phase1-offline-legacy-test-snapshot-v1'
     sourceSha=$actual
@@ -192,6 +218,8 @@ try{
     uploads=$copiedUploads
     dist=$copiedDist
     sqliteIntegrity='ok'
+    fileCount=$manifestRows.Count
+    files=@($manifestRows.ToArray())
     restoreBootVerified=$false
     coordinatedCentralAndFamilySnapshot=$false
     safeToCutover=$false
