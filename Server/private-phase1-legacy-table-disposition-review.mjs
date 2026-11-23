@@ -103,8 +103,8 @@ export function reviewPrivatePhase1LegacyTableDispositions(inventory) {
     return checked
   }).sort((a,b)=>a.table.localeCompare(b.table))
   if(EXPECTED.some(x=>!seen.has(x)))refuse('an archived table is missing.')
-  const rows=new Map(OPTIONS.values().map(x=>[x,0]))
-  const tableCounts=new Map(OPTIONS.values().map(x=>[x,0]))
+  const rows=new Map([...OPTIONS].map(x=>[x,0]))
+  const tableCounts=new Map([...OPTIONS].map(x=>[x,0]))
   let unknownForeignKeys=0
   let centralForeignKeysOutsideIdentity=0
   for(const t of tableReview) {
