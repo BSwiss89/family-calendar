@@ -226,6 +226,13 @@ export function auditPrivatePhase1OfflineLegacySchema({
       })
     // Note: sqlite_schema views are counted; their CREATE SQL is never
     // emitted. Any view/trigger is a mandatory semantic migration blocker.
+    const after=inspectPrivatePhase1OfflineLegacyMigration(input)
+    if(after.schemaSha256!==initial.schemaSha256 ||
+       after.tableCount!==initial.tableCount ||
+       after.uploadedFileCount!==initial.uploadedFileCount ||
+       after.savedSessions!==initial.savedSessions) {
+      refuse('verified archival backup changed while checking relationships.')
+    }
     return Object.freeze({
       kind:'phase1-archive-schema-relationship-audit-v1',
       verifiedHistoricalArchive:true,
@@ -253,8 +260,6 @@ export function auditPrivatePhase1OfflineLegacySchema({
     })
   } finally {
     db.close()
-    // NOTE: this finally cannot verify when an earlier error happens before
-    // the full scan. Before/after archive attestation is done on success
-    // below by wrapper rather than from this finally.
+    // The source database is only opened read-only; aborts release its handle.
   }
 }
