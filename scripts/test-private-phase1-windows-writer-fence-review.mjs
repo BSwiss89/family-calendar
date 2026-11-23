@@ -33,6 +33,7 @@ function observed(phase='baseline') {
   return {
     schemaVersion:1,site:'existing-secure-test',phase,complete:true,
     installedTestSha:sha,...pid,
+    observedAtMs:phase==='baseline'?1000:2000,
     listeners:[
       sock('127.0.0.1',3001,pid.livePid,'node.exe'),
       sock('127.0.0.1',13003,pid.portproxyPid,'svchost.exe'),
@@ -76,7 +77,7 @@ function route() {
 function args() {
   return {
     baseline:observed(),maintenanceFirst:observed('maintenance-fenced'),
-    maintenanceSecond:observed('maintenance-fenced'),
+    maintenanceSecond:{...observed('maintenance-fenced'),observedAtMs:4000},
     taskBaseline:tasks('baseline'),taskMaintenance:tasks('maintenance-fenced'),
     topologyLegacyFenced:route(),expectedInstalledTestSha:sha,
   }
@@ -135,6 +136,18 @@ test('TEST task auto-deployer, changed watchdog or route drift refuses',()=>{
     x=>x.topologyLegacyFenced.listeners.push({address:legacyIP,port:13002,role:'legacy-test'}),
     x=>x.expectedInstalledTestSha='f'.repeat(40),
   ]){const x=args();patch(x);assert.throws(()=>review(x),/refused/)}
+})
+test('maintenance snapshots must be time-separated, stable and correctly ordered',()=>{
+  for(const patch of [
+    x=>x.maintenanceSecond.observedAtMs=x.maintenanceFirst.observedAtMs,
+    x=>x.maintenanceFirst.observedAtMs=x.baseline.observedAtMs,
+    x=>x.maintenanceSecond.observedAtMs=x.maintenanceFirst.observedAtMs+15*60*1000+1,
+    x=>x.maintenanceSecond.observedAtMs='4000',
+    x=>x.baseline.observedAtMs=null,
+  ]){const x=args();patch(x);assert.throws(()=>review(x),/refused/)}
+  const reordered=args()
+  reordered.maintenanceSecond.listeners.reverse()
+  assert.equal(review(reordered).reportedMaintenanceSamplesMatch,true)
 })
 test('ambiguous inventories, duplicate listeners and mismatched samples fail closed',()=>{
   for(const patch of [
