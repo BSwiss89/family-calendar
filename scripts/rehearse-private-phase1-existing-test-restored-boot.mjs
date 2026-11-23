@@ -77,6 +77,19 @@ function exactFiles(root){
   }
   return files
 }
+// This is a temporary TEST replacement during an approved maintenance
+// window, never a THIRD concurrently running family calendar. The existing
+// Secure TEST and updater must already be disabled/stopped by an independently
+// authorized operator. This procedure NEVER changes them itself.
+function requireTestMaintenanceFence(){
+  const probe=String.raw`$ErrorActionPreference='Stop';$t=Get-ScheduledTask -TaskName 'Family Calendar Secure TEST' -ErrorAction Stop;$u=Get-ScheduledTask -TaskName 'Family Calendar Secure TEST Auto Deploy' -ErrorAction Stop;$l=Get-ScheduledTask -TaskName 'Family Calendar Server' -ErrorAction Stop;if($t.State -cne 'Disabled' -or $u.State -cne 'Disabled' -or $l.State -cne 'Running'){exit 41};$listen=@(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object {$_.LocalPort -in @(13002,13004,13005,13006)});if($listen.Count){exit 42};$nodes=@(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction Stop);foreach($p in $nodes){if([string]::IsNullOrWhiteSpace([string]$p.CommandLine)){exit 43};if($p.CommandLine -like '*family-calendar-test-security-stage*'){exit 44}};$i=Get-ScheduledTaskInfo -TaskName 'Family Calendar Monthly Restart' -ErrorAction Stop;if($i.NextRunTime -le (Get-Date).AddMinutes(30)){exit 45};exit 0`
+  const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',probe],{
+    windowsHide:true,encoding:'utf8',timeout:20000,
+  })
+  if(result.error||result.status!==0){
+    refuse('Legacy TEST maintenance fence is not independently verified.')
+  }
+}
 function git(args){
   const r=spawnSync('git',args,{
     windowsHide:true,encoding:'utf8',timeout:120000,
@@ -193,6 +206,8 @@ async function main(){
     git(['-C',installed,'status','--porcelain','--untracked-files=no'])!==''){
     refuse('Installed TEST Git revision or tracked files changed.')
   }
+  // No temporary Node instance while the existing TEST calendar is active.
+  requireTestMaintenanceFence()
   const original=exactFiles(backup)
   verifyDatabase(originalDb)
   let stage=null
@@ -254,6 +269,9 @@ async function main(){
       FAMILY_CALENDAR_TEST_FAMILY_ACCESS_MODE:'off',
       NODE_ENV:'production',
     }
+    // Recheck after large local copies: updater or legacy backend may not
+    // have resumed while staging the private restore.
+    requireTestMaintenanceFence()
     reviewStep='isolated-loopback-boot'
     child=spawn(nodeBinary,[path.join(checkout,'Server','index.mjs')],{
       cwd:checkout,env,windowsHide:true,stdio:['ignore','ignore','ignore'],
@@ -272,6 +290,7 @@ async function main(){
     child=null
     if(!stopped)refuse('Isolated restored backend failed to exit.')
     reviewStep='post-boot-restore-validation'
+    requireTestMaintenanceFence()
     const post=verifyDatabase(stagedDb)
     if(post.account!==counts.account||post.sessions!==counts.sessions){
       refuse('Restored account/session counts changed unexpectedly on boot.')
