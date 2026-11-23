@@ -186,14 +186,21 @@ try{
     Refuse 'Recovery destination already exists.'
   }
   $null=New-Item -ItemType Directory -Path $folder -ErrorAction Stop
-  foreach($name in @('data','uploads','dist')){$null=New-Item -ItemType Directory -Path (Join-Path $folder $name) -ErrorAction Stop}
-  $null=CompareAndCopy $data (Join-Path $folder 'data')
+  foreach($name in @('uploads','dist')){$null=New-Item -ItemType Directory -Path (Join-Path $folder $name) -ErrorAction Stop}
+  # Match the already-verified 34-file legacy recovery layout: database at
+  # the snapshot ROOT, with sibling uploads/, dist/ and supervisor script.
+  $copyDb=Join-Path $folder 'calendar.db'
+  $dbBefore=ShaFile $db
+  Copy-Item -LiteralPath $db -Destination $copyDb -ErrorAction Stop
+  if($dbBefore -cne (ShaFile $db) -or $dbBefore -cne (ShaFile $copyDb)){
+    Refuse 'Legacy database changed during offline capture.'
+  }
   $copiedUploads=CompareAndCopy $uploads (Join-Path $folder 'uploads')
   $copiedDist=CompareAndCopy $dist (Join-Path $folder 'dist')
   $backupSupervisor=Join-Path $folder 'start-secure-test-patched.ps1'
   Copy-Item -LiteralPath $supervisor -Destination $backupSupervisor -ErrorAction Stop
   if((ShaFile $supervisor) -cne (ShaFile $backupSupervisor)){Refuse 'Supervisor backup changed.'}
-  CheckSqlite (Join-Path $folder 'data\calendar.db')
+  CheckSqlite $copyDb
   # Recheck every task/port that could have resumed while copying.
   if((Get-ScheduledTask -TaskName $testName -ErrorAction Stop).State -cne 'Disabled' -or
      (Get-ScheduledTask -TaskName $updaterName -ErrorAction Stop).State -cne 'Disabled' -or
@@ -203,7 +210,8 @@ try{
   # Store an independently usable local file-by-file SHA256 inventory; a
   # count-only receipt cannot prove uploaded data was preserved on restore.
   $manifestRows=New-Object 'System.Collections.Generic.List[object]'
-  foreach($rootName in @('data','uploads','dist')){
+  $manifestRows.Add(@{path='calendar.db';sha256=(ShaFile $copyDb)})
+  foreach($rootName in @('uploads','dist')){
     $root=Join-Path $folder $rootName
     foreach($file in @(ListFiles $root)){
       $relative=$file.Substring((Normal $root).Length).TrimStart('\')
@@ -215,7 +223,7 @@ try{
     kind='phase1-offline-legacy-test-snapshot-v1'
     sourceSha=$actual
     capturedAt=(Get-Date -Format o)
-    databaseSha256=(ShaFile (Join-Path $folder 'data\calendar.db'))
+    databaseSha256=(ShaFile $copyDb)
     supervisorSha256=(ShaFile $backupSupervisor)
     uploads=$copiedUploads
     dist=$copiedDist
