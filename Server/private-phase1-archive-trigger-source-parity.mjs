@@ -58,7 +58,7 @@ function safeArchivedTriggerRows(rows) {
  if(!Array.isArray(rows)||rows.length!==14)refuse('expected exactly 14 archived triggers.')
  const seen=new Set()
  for(const x of rows) {
-  if(!x||typeof x.name!=='string'||x.name.length>256||
+  if(!x||typeof x.name!=='string'||! /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(x.name)||
     typeof x.sql!=='string'||x.sql.length>100000||
     !Object.hasOwn(LEGACY_TRIGGER_COUNTS,x.tbl_name)||seen.has(x.name)){
     refuse('duplicate, unexpected or oversized archived trigger.')
