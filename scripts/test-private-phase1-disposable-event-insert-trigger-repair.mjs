@@ -139,10 +139,8 @@ test('already corrected, tampered, or missing notification triggers cannot be si
   db=>{
    const old=triggerSql(db)
    db.exec('DROP TRIGGER notify_event_insert')
-   db.exec(old.replace(
-    'INSERT INTO notification_dirty_events',
-    'INSERT INTO notification_dirty_events'
-   )+' /* unreviewed trailing SQL text */')
+   assert(old.includes('AFTER INSERT ON events'))
+   db.exec(old.replace('AFTER INSERT ON events','BEFORE INSERT ON events'))
   },
  ]) {
   const db=fixture()
