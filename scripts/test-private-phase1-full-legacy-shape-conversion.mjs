@@ -5,6 +5,7 @@
 // not independently verified historical DDL. No actual archived SQL is loaded.
 // Matching the archived aggregate counts does NOT prove exact historical DDL.
 import test from 'node:test'
+import {compareSourceShapedLegacyMetadata} from './private-phase1-source-shaped-schema-parity.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -143,4 +144,24 @@ test('source-shaped 27-table/162-column first-family synthetic fixture splits an
   assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0)
  } finally {db.close()}
  assert.equal(hash(f.file),original)
+})
+
+test('schema comparison detects structural differences even with the same column and table counts',t=>{
+ const f=buildFixture(t)
+ const db=new DatabaseSync(f.file)
+ try {
+  const exact=compareSourceShapedLegacyMetadata(db)
+  assert.equal(exact.structuralMatches,27)
+  assert.equal(exact.exactTableDdlMatches,27)
+  assert.equal(exact.columnOrderMatches,27)
+  assert.equal(exact.exactExplicitIndexDdlMatches,27)
+  assert.equal(exact.fullSchemaCompatibilityProven,false)
+  db.exec('ALTER TABLE lists RENAME COLUMN icon TO fixture_icon')
+  const changed=compareSourceShapedLegacyMetadata(db)
+  assert.equal(changed.tables,27)
+  assert.equal(changed.structuralMatches,26)
+  assert(changed.details.find(x=>x.table==='lists').differences.includes('columns'))
+  assert.equal(changed.realMigrationExecuted,false)
+  assert.equal(changed.rawArchivedSqlExposed,false)
+ } finally {db.close()}
 })
