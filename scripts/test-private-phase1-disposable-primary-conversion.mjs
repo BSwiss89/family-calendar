@@ -7,6 +7,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomBytes, createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
+import { installAssignmentNotificationOutbox } from '../Server/event-assignment-notifications.mjs'
+import { installNotificationMutationCapture, reconcileNotificationMutations } from '../Server/notification-event-mutation-capture.mjs'
 import { hashFamilyPassword } from '../Server/family-auth.mjs'
 import { listPrivatePhase1LegacyDispositionRules } from '../Server/private-phase1-legacy-table-disposition-review.mjs'
 import {
@@ -335,4 +337,133 @@ test('untrusted destination collision, linked uploads, unsupported owner and sep
   } finally {db.close()}
   assert.throws(()=>stage(f),/refused/)
   assert.equal(fs.existsSync(f.destinationRoot),false)
+})
+
+
+// Source-backed notification schema layered on the existing marked synthetic
+// fixture. The event columns needed by the installed source are present, and
+// all notification capture/outbox SQL comes from the real reviewed installers.
+// Other legacy table shapes remain synthetic, so this is NOT full 162-column
+// archive compatibility or a real repair/migration runner.
+function sourceNotificationFixture(t) {
+  const f=fixture(t)
+  fs.writeFileSync(path.join(f.sourceRoot,'.phase1-disposable-legacy-fixture.json'),
+    JSON.stringify({kind:'phase1-disposable-synthetic-legacy-only',
+      version:1,realCalendarDataAllowed:false,notificationSchema:'source-generated-v1'}))
+  const db=new DatabaseSync(f.dbFile)
+  try {
+    for(const {name} of db.prepare("SELECT name FROM sqlite_master WHERE type='trigger'").all()) {
+      assert.match(name,/^phase1_fixture_[a-z_]+$/)
+      db.exec('DROP TRIGGER "'+name+'"')
+    }
+    for(const name of ['date','end_date','time','end_time','person','notes','batch_id',
+      'location','repeat_unit','repeat_end_type','repeat_end_date']) {
+      db.exec('ALTER TABLE events ADD COLUMN '+name+' TEXT')
+    }
+    for(const name of ['repeat_interval','repeat_count']) {
+      db.exec('ALTER TABLE events ADD COLUMN '+name+' INTEGER')
+    }
+    db.exec('ALTER TABLE event_exceptions ADD COLUMN occurrence_date TEXT')
+    db.exec("UPDATE events SET date='2026-11-24',location='Synthetic venue'")
+    for(const name of ['test_assignment_acknowledgements','assignment_notification_outbox',
+      'notification_event_baselines','notification_dirty_events',
+      'notification_dirty_event_attribution','notification_dirty_event_fields',
+      'notification_deleted_event_details']) {
+      db.exec('DROP TABLE '+name)
+    }
+    installAssignmentNotificationOutbox(db)
+    installNotificationMutationCapture(db)
+    // Exact source DDL from test-notification-inbox-pilot.mjs, without routes.
+    db.exec('CREATE TABLE test_assignment_acknowledgements('+
+      'notification_id INTEGER PRIMARY KEY REFERENCES assignment_notification_outbox(id),'+
+      'acknowledged_at INTEGER NOT NULL CHECK(acknowledged_at > 0)) STRICT')
+    const insert=db.prepare('INSERT INTO assignment_notification_outbox'+
+      '(id,event_id,person_id,kind,created_at,delivered_at,cancelled_details_json) VALUES(?,?,?,?,?,?,?)')
+    for(let id=1;id<=31;id++) {
+      insert.run(id,id<=4?1000+id:46,id===5||id===6?2000+id:7,
+        'cancelled',1000+id,2000+id,JSON.stringify({title:'Synthetic cancelled '+id,date:'2026-11-24'}))
+    }
+    const ack=db.prepare('INSERT INTO test_assignment_acknowledgements VALUES(?,?)')
+    for(let id=1;id<=14;id++)ack.run(id,3000+id)
+    assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0)
+  } finally {db.close()}
+  return f
+}
+
+test('source-generated fourteen-trigger notification schema survives first household split and actual reconciliation',t=>{
+  const f=sourceNotificationFixture(t)
+  const before=hash(f.dbFile)
+  const legacy=new DatabaseSync(f.dbFile,{readOnly:true})
+  let passwordHash
+  try {passwordHash=legacy.prepare('SELECT password_hash FROM family_users').get().password_hash}
+  finally {legacy.close()}
+  const receipt=stage(f)
+  assert.equal(receipt.sourceGeneratedCurrentNotificationTriggersPreserved,14)
+  assert.equal(receipt.preservedHouseholdAndNoticeTables,22)
+  assert.equal(receipt.historicalOutboxRowsPreserved,31)
+  assert.equal(receipt.orphanedEventNoticeReferencesPreserved,4)
+  assert.equal(receipt.orphanedPersonNoticeReferencesPreserved,2)
+  assert.equal(receipt.historicalAcknowledgementRowsPreserved,14)
+  assert.equal(receipt.syntheticHouseholdOutputCompacted,true)
+  assert.equal(receipt.fullLegacySchemaCompatibilityProven,false)
+  assert.equal(receipt.actualTestMigrationExecuted,false)
+  const filename=path.join(f.destinationRoot,'households','primary-family','data','calendar.db')
+  const bytes=fs.readFileSync(filename)
+  assert.equal(bytes.includes(Buffer.from(passwordHash)),false)
+  assert.equal(bytes.includes(Buffer.from('f'.repeat(64))),false)
+  assert.equal(bytes.includes(Buffer.from('e'.repeat(64))),false)
+  assert.equal(bytes.includes(Buffer.from('syntheticowner')),false)
+  const db=new DatabaseSync(filename)
+  try {
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='trigger'").get().n,14)
+    assert.equal(db.prepare('PRAGMA freelist_count').get().freelist_count,0)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM test_assignment_acknowledgements').get().n,14)
+    assert.equal(JSON.parse(db.prepare('SELECT cancelled_details_json FROM assignment_notification_outbox WHERE id=1').get().cancelled_details_json).title,'Synthetic cancelled 1')
+    db.prepare('INSERT INTO events(id,title,date,time,location) VALUES(?,?,?,?,?)').run(99,'Synthetic appointment','2026-11-24','12:00','Synthetic room')
+    db.prepare('INSERT INTO event_people(id,event_id,person_id) VALUES(?,?,?)').run(99,99,7)
+    reconcileNotificationMutations(db,{at:4000})
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM assignment_notification_outbox WHERE event_id=99 AND kind='assigned'").get().n,1)
+    db.prepare('UPDATE events SET title=? WHERE id=99').run('Synthetic changed appointment')
+    db.prepare('INSERT INTO event_exceptions(id,event_id,occurrence_date) VALUES(?,?,?)').run(99,99,'2026-11-25')
+    reconcileNotificationMutations(db,{at:5000})
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM assignment_notification_outbox WHERE event_id=99 AND kind='changed'").get().n,1)
+    db.exec('BEGIN IMMEDIATE; DELETE FROM event_exceptions WHERE event_id=99; DELETE FROM event_people WHERE event_id=99; DELETE FROM events WHERE id=99; COMMIT')
+    reconcileNotificationMutations(db,{at:6000})
+    const cancelled=db.prepare("SELECT cancelled_details_json FROM assignment_notification_outbox WHERE event_id=99 AND kind='cancelled'").get()
+    assert.equal(JSON.parse(cancelled.cancelled_details_json).title,'Synthetic changed appointment')
+    // The exact repaired event-insert trigger clears an old deletion snapshot.
+    db.exec("INSERT INTO events(id,title,date) VALUES(100,'Old','2026-11-24'); DELETE FROM events WHERE id=100")
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM notification_deleted_event_details WHERE event_id=100').get().n,1)
+    db.exec("INSERT INTO events(id,title,date) VALUES(100,'New','2026-11-25')")
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM notification_deleted_event_details WHERE event_id=100').get().n,0)
+    assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0)
+  } finally {db.close()}
+  assert.equal(hash(f.dbFile),before)
+})
+
+test('source-generated conversion refuses historical predecessor, unexpected trigger, or wrong fixture mode',t=>{
+  for(const change of [
+    f=>{
+      const db=new DatabaseSync(f.dbFile)
+      try {
+        const sql=db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='notify_event_insert'").get().sql
+        const old=sql.replace('DELETE FROM notification_deleted_event_details WHERE event_id=NEW.id;\n','')
+        assert.notEqual(old,sql)
+        db.exec('DROP TRIGGER notify_event_insert');db.exec(old)
+      } finally {db.close()}
+    },
+    f=>{
+      const db=new DatabaseSync(f.dbFile)
+      try {db.exec('CREATE TRIGGER unexpected_fixture AFTER INSERT ON events BEGIN SELECT 1; END')}
+      finally {db.close()}
+    },
+    f=>fs.writeFileSync(path.join(f.sourceRoot,'.phase1-disposable-legacy-fixture.json'),
+      JSON.stringify({kind:'phase1-disposable-synthetic-legacy-only',version:1,realCalendarDataAllowed:false})),
+  ]) {
+    const f=sourceNotificationFixture(t);change(f)
+    const before=hash(f.dbFile)
+    assert.throws(()=>stage(f),/refused/)
+    assert.equal(fs.existsSync(f.destinationRoot),false)
+    assert.equal(hash(f.dbFile),before)
+  }
 })
