@@ -54,6 +54,35 @@ function trustedReference() {
   return expected
  } finally { db.close() }
 }
+// This single reviewed predecessor is derived from the actual current
+// source-generated statement by removing ONLY the explicit stale-deletion
+// cleanup installed for event-ID reuse. No archived SQL is evaluated, modified,
+// returned or ever executed; the candidate exists solely in memory for an
+// exact SHA-256 comparison. If the archived SQL differs by even whitespace,
+// the result is UNCLASSIFIED, never a claim of semantic equivalence.
+const REUSE_CLEANUP='DELETE FROM notification_deleted_event_details WHERE event_id=NEW.id;\n'
+function eventInsertLegacyCandidate(sourceSql) {
+ if(typeof sourceSql!=='string' ||
+    !sourceSql.includes('CREATE TRIGGER notify_event_insert AFTER INSERT ON events BEGIN\n') ||
+    sourceSql.split(REUSE_CLEANUP).length!==2) {
+  refuse('source event-insert cleanup no longer matches the reviewed template.')
+ }
+ return sourceSql.replace(REUSE_CLEANUP,'')
+}
+function classifyEventInsertDrift(archived,source) {
+ const before=archived.find(x=>x.name==='notify_event_insert')
+ const expected=source.find(x=>x.name==='notify_event_insert')
+ if(!expected||typeof expected.sql!=='string')refuse('trusted event-insert trigger absent.')
+ if(!before)return 'MISSING_EVENT_INSERT_TRIGGER'
+ if(before.tbl_name!==expected.tbl_name)return 'SOURCE_TABLE_MISMATCH'
+ if(digest(before.sql)===digest(expected.sql))return 'EXACT_CURRENT_DEFINITION'
+ const predecessor=eventInsertLegacyCandidate(expected.sql)
+ if(digest(before.sql)===digest(predecessor)) {
+  return 'EXACT_PRE_REUSE_CLEANUP_DEFINITION'
+ }
+ return 'UNCLASSIFIED_DEFINITION_DRIFT'
+}
+
 function safeArchivedTriggerRows(rows) {
  if(!Array.isArray(rows)||rows.length!==14)refuse('expected exactly 14 archived triggers.')
  const seen=new Set()
@@ -100,6 +129,7 @@ export function comparePrivatePhase1SourceTriggerDefinitions(rows,referenceRows)
  })
  const known=new Set(source.map(x=>x.name))
  const unknown=archived.filter(x=>!known.has(x.name))
+ const eventInsertDriftClassification=classifyEventInsertDrift(archived,source)
  const counts=Object.freeze({
   exactSourceMatches:results.filter(x=>x.state==='EXACT_SOURCE_MATCH').length,
   missingKnownSource:results.filter(x=>x.state==='MISSING').length,
@@ -112,6 +142,13 @@ export function comparePrivatePhase1SourceTriggerDefinitions(rows,referenceRows)
   expectedArchivedTriggerCount:14,
   reviewedSourceTriggerCount:14,
   ...counts,
+  eventInsertDriftClassification,
+  // A precise historical predecessor match is useful for designing the
+  // separately approved repair but NOT permission to replay/change SQL.
+  eventInsertNeedsSeparateApproval:
+    eventInsertDriftClassification!=='EXACT_CURRENT_DEFINITION',
+  unreviewedSourceSqlExecuted:false,
+  archivedSourceSqlReturned:false,
   knownSourceReviews:Object.freeze(results),
   unknownTriggerNamesOrSqlExposed:false,
   currentSourceInstallerReproducedInMemory:true,
