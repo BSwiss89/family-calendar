@@ -25,14 +25,42 @@ function selectedPerson(db, account, now) {
   return {kind:'person',personId:row.personId}
 }
 
+function parseCancelledEventJson(value) {
+  if (typeof value !== 'string') return null
+  try {
+    const event = JSON.parse(value)
+    if (!event || typeof event !== 'object' || Array.isArray(event) ||
+      typeof event.title !== 'string' || typeof event.date !== 'string' ||
+      ['endDate','time','endTime','location'].some(key =>
+        event[key] != null && typeof event[key] !== 'string')) return null
+    return {
+      title: event.title, date: event.date,
+      endDate: event.endDate ?? null, time: event.time ?? null,
+      endTime: event.endTime ?? null, location: event.location ?? null,
+    }
+  } catch { return null }
+}
+
 function latest(db, personId) {
   return db.prepare([
     'SELECT id,event_id AS eventId,kind,created_at AS createdAt,',
-    'change_mask AS changeMask',
-    'FROM assignment_notification_outbox WHERE person_id=?',
-    'ORDER BY id DESC LIMIT 50',
-  ].join(' ')).all(personId).map(({changeMask,...note}) => ({
+    'change_mask AS changeMask,cancelled_details_json AS cancelledDetailsJson',
+    'FROM assignment_notification_outbox n WHERE n.person_id=?',
+    // Once a cancellation exists, prior assignment/change notices for this
+    // same event and recipient are no longer actionable. Hide rather than
+    // delete them: historical acknowledgements and delivery data remain intact.
+    // The ID order preserves a fresh assignment if an event ID is later reused.
+    "AND NOT (n.kind IN ('assigned','changed','unassigned') AND EXISTS (",
+    'SELECT 1 FROM assignment_notification_outbox newer',
+    'WHERE newer.person_id=n.person_id AND newer.event_id=n.event_id',
+    "AND newer.kind='cancelled' AND newer.id>n.id))",
+    'ORDER BY n.id DESC LIMIT 50',
+  ].join(' ')).all(personId).map(({changeMask,cancelledDetailsJson,...note}) => ({
     ...note,
+    // Only cancelled notices reveal the stored pre-delete identity, and only
+    // to the authenticated person this outbox row was originally addressed to.
+    cancelledEvent: note.kind === 'cancelled'
+      ? parseCancelledEventJson(cancelledDetailsJson) : null,
     // Only safe field identifiers leave this authenticated TEST-only API.
     changedFields: note.kind === 'changed'
       ? fieldsForAssignmentChangeMask(changeMask) : [],
