@@ -11,7 +11,7 @@ import {comparePrivatePhase1SourceTriggerDefinitions}
   from './private-phase1-archive-trigger-source-parity.mjs'
 
 const MARKER='phase1-disposable-trigger-repair-fixture'
-const TEMPLATE=String.raw\`
+const TEMPLATE=String.raw`
   CREATE TABLE events(
     id INTEGER PRIMARY KEY,date TEXT,title TEXT,time TEXT,person TEXT,notes TEXT,
     repeat_unit TEXT,repeat_interval INTEGER,repeat_end_type TEXT,
@@ -20,7 +20,7 @@ const TEMPLATE=String.raw\`
   CREATE TABLE people(id INTEGER PRIMARY KEY);
   CREATE TABLE event_people(event_id INTEGER,person_id INTEGER);
   CREATE TABLE event_exceptions(event_id INTEGER,occurrence_date TEXT);
-\`
+`
 const namePattern=/^[a-z][a-z0-9_]{0,127}$/
 const checksum=s=>createHash('sha256').update(s).digest('hex')
 function refuse(message) {
