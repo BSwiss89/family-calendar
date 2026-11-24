@@ -41,6 +41,8 @@ test('all 14 source-created triggers match EXACTLY, including deleted-event deta
  assert.equal(result.expectedArchivedTriggerCount,14)
  assert.equal(result.reviewedSourceTriggerCount,14)
  assert.equal(result.exactSourceMatches,14)
+ assert.equal(result.eventInsertDriftClassification,'EXACT_CURRENT_DEFINITION')
+ assert.equal(result.eventInsertNeedsSeparateApproval,false)
  assert.equal(result.archivedTriggersWithoutCurrentSourceDefinition,0)
  assert.equal(result.knownDefinitionDrift,0)
  assert.equal(result.missingKnownSource,0)
@@ -72,6 +74,75 @@ test('changing cancellation details capture or event-insert cleanup is detected 
   assert.equal(result.dataMigrationAuthorized,false)
  }
 })
+
+test('the exact older INSERT definition without event-ID reuse cleanup is classified, never approved',()=>{
+ const source=archive()
+ const row=source.find(x=>x.name==='notify_event_insert')
+ assert(row)
+ const marker='DELETE FROM notification_deleted_event_details WHERE event_id=NEW.id;\n'
+ assert.equal(row.sql.split(marker).length,2)
+ row.sql=row.sql.replace(marker,'')
+ const result=compare(source)
+ assert.equal(result.exactSourceMatches,13)
+ assert.equal(result.knownDefinitionDrift,1)
+ assert.equal(result.eventInsertDriftClassification,'EXACT_PRE_REUSE_CLEANUP_DEFINITION')
+ assert.equal(result.eventInsertNeedsSeparateApproval,true)
+ assert.equal(result.matchingTriggersApprovedToReplay,false)
+ assert.equal(result.unreviewedSourceSqlExecuted,false)
+ assert.equal(result.archivedSourceSqlReturned,false)
+ const report=JSON.stringify(result)
+ assert.doesNotMatch(report,/CREATE TRIGGER|DELETE FROM notification_deleted_event_details/)
+})
+test('a small unreviewed formatting or text change is not misidentified as the old safe predecessor',()=>{
+ const rows=archive()
+ rows.find(x=>x.name==='notify_event_insert').sql+=' /* cosmetic but not reviewed */'
+ const result=compare(rows)
+ assert.equal(result.eventInsertDriftClassification,'UNCLASSIFIED_DEFINITION_DRIFT')
+ assert.equal(result.eventInsertNeedsSeparateApproval,true)
+})
+test('IF NOT EXISTS leaves an old event INSERT trigger unchanged; newer source cannot repair it implicitly',()=>{
+ const db=new DatabaseSync(':memory:')
+ try {
+  db.exec(testSchema)
+  installAssignmentNotificationOutbox(db)
+  installNotificationMutationCapture(db)
+  const current=db.prepare(
+   "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='notify_event_insert'"
+  ).get().sql
+  const marker='DELETE FROM notification_deleted_event_details WHERE event_id=NEW.id;\n'
+  assert.equal(current.split(marker).length,2)
+  const predecessor=current.replace(marker,'')
+  db.exec('DROP TRIGGER notify_event_insert')
+  db.exec(predecessor)
+  assert.equal(db.prepare(
+   "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='notify_event_insert'"
+  ).get().sql,predecessor)
+  installNotificationMutationCapture(db)
+  assert.equal(db.prepare(
+   "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='notify_event_insert'"
+  ).get().sql,predecessor)
+  const state=compare(db.prepare(
+   "SELECT name,tbl_name,sql FROM sqlite_master WHERE type='trigger' ORDER BY name"
+  ).all())
+  assert.equal(state.eventInsertDriftClassification,'EXACT_PRE_REUSE_CLEANUP_DEFINITION')
+  assert.equal(state.eventInsertNeedsSeparateApproval,true)
+  // Old behavior leaves a transient deleted-event identity row across
+  // reuse of the SAME integer event ID until reconciliation. Current
+  // source clears it on reinsertion, preventing stale detail state.
+  db.prepare('INSERT INTO events(id,date,title) VALUES(?,?,?)')
+    .run(8,'2026-12-01','synthetic prior event')
+  db.prepare('DELETE FROM events WHERE id=8').run()
+  assert.equal(db.prepare(
+   'SELECT COUNT(*) AS n FROM notification_deleted_event_details WHERE event_id=8'
+  ).get().n,1)
+  db.prepare('INSERT INTO events(id,date,title) VALUES(?,?,?)')
+    .run(8,'2026-12-02','synthetic replacement event')
+  assert.equal(db.prepare(
+   'SELECT COUNT(*) AS n FROM notification_deleted_event_details WHERE event_id=8'
+  ).get().n,1)
+ } finally {db.close()}
+})
+
 test('missing cancellation capture cannot pass just because 14 triggers remain',()=>{
  const altered=archive().filter(x=>x.name!=='notify_deleted_event_details')
  altered.push({
