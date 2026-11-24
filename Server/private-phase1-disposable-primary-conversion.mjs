@@ -9,6 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
+import { comparePrivatePhase1SourceTriggerDefinitions } from './private-phase1-archive-trigger-source-parity.mjs'
 import { createHouseholdMembershipTables } from './household-memberships.mjs'
 import { listPrivatePhase1LegacyDispositionRules } from './private-phase1-legacy-table-disposition-review.mjs'
 
@@ -24,8 +25,9 @@ const STRIP=new Set([
 
 // STRICT source-only synthetic harness allowlist. These are three invented,
 // controlled regression triggers, NOT the 14 real archived TEST triggers.
-// Real trigger DDL is NOT allowed here, even with an operator-supplied hash.
-// Do not broaden this list without fresh code review and disposable CI.
+// The separate source-generated synthetic fixture mode below verifies all
+// fourteen current installer definitions, never a caller-provided allowlist.
+// No real archive, old trigger repair or archived SQL replay is allowed.
 // SQLite stores CREATE TRIGGER SQL in sqlite_schema.sql; exact matching
 // prevents accepting an unreviewed trigger body, even if names match.
 const SYNTHETIC_TRIGGER_SQL=Object.freeze([
@@ -36,12 +38,21 @@ const SYNTHETIC_TRIGGER_SQL=Object.freeze([
 export function listPhase1ApprovedSyntheticFixtureTriggerSql() {
   return SYNTHETIC_TRIGGER_SQL
 }
-function trustedSyntheticTriggers(db) {
+function trustedSyntheticTriggers(db,sourceGenerated=false) {
   const entries=db.prepare(
     "SELECT name,tbl_name,sql,type FROM sqlite_master WHERE type IN ('view','trigger')"
   ).all()
   if(entries.some(row=>row.type==='view')) {
     refuse('unreviewed view cannot be migrated in synthetic rehearsal.')
+  }
+  if(sourceGenerated) {
+    const comparison=comparePrivatePhase1SourceTriggerDefinitions(entries)
+    if(comparison.exactSourceMatches!==14||comparison.knownDefinitionDrift!==0||
+       comparison.missingKnownSource!==0||comparison.archivedTriggersWithoutCurrentSourceDefinition!==0||
+       comparison.eventInsertDriftClassification!=='EXACT_CURRENT_DEFINITION') {
+      refuse('source-generated synthetic fixture requires all 14 exact current definitions.')
+    }
+    return 14
   }
   const seen=new Set()
   for(const row of entries) {
@@ -118,7 +129,10 @@ function paths(sourceRoot,destinationRoot,serverDirectory) {
   if(!fs.lstatSync(dbFile).isFile()||fs.lstatSync(dbFile).isSymbolicLink()){
     refuse('fixture SQLite must be a physical file.')
   }
-  return {src,out,dbFile}
+  if(marker.notificationSchema!==undefined&&marker.notificationSchema!=='source-generated-v1') {
+    refuse('unrecognized synthetic notification schema marker.')
+  }
+  return {src,out,dbFile,sourceGenerated:marker.notificationSchema==='source-generated-v1'}
 }
 function digest(filename) {
   const sha=createHash('sha256'),file=fs.openSync(filename,'r')
@@ -175,7 +189,7 @@ function check(db) {
     refuse('offline SQLite integrity or foreign keys failed.')
   }
 }
-function tableNames(db) {
+function tableNames(db,sourceGenerated) {
   const actual=db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
   ).all().map(x=>x.name)
@@ -183,7 +197,7 @@ function tableNames(db) {
   if(JSON.stringify(actual)!==JSON.stringify(expected)) {
     refuse('unexpected, missing, or renamed archived table.')
   }
-  trustedSyntheticTriggers(db)
+  trustedSyntheticTriggers(db,sourceGenerated)
   return actual
 }
 function q(name) {
@@ -313,10 +327,13 @@ function centralIdentity(file,owner) {
     if(sessions!==0||user.disabled!==1)refuse('staged central login was accidentally activated.')
   } finally {db.close()}
 }
-function scrubHousehold(file,originals,originalSchemaObjects,originalHistoricalNotices) {
+function scrubHousehold(file,originals,originalSchemaObjects,originalHistoricalNotices,sourceGenerated) {
   const db=new DatabaseSync(file)
   try {
     // Only on the fresh synthetic output database; original never altered.
+    // Scrub deleted identity/session/device data from the disposable copy,
+    // not just its logical table roster. Never change the source fixture.
+    db.exec('PRAGMA secure_delete=ON')
     db.exec('PRAGMA foreign_keys=OFF')
     db.exec('BEGIN IMMEDIATE')
     try {
@@ -327,6 +344,10 @@ function scrubHousehold(file,originals,originalSchemaObjects,originalHistoricalN
       db.exec('COMMIT')
     } catch(error) {db.exec('ROLLBACK');throw error}
     db.exec('PRAGMA foreign_keys=ON')
+    db.exec('VACUUM')
+    if(db.prepare('PRAGMA freelist_count').get().freelist_count!==0) {
+      refuse('disposable household database still contains free pages.')
+    }
     check(db)
     const actual=db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
@@ -343,7 +364,7 @@ function scrubHousehold(file,originals,originalSchemaObjects,originalHistoricalN
        JSON.stringify(originalSchemaObjects)) {
       refuse('a retained trigger/index changed or disappeared during synthetic split.')
     }
-    trustedSyntheticTriggers(db)
+    trustedSyntheticTriggers(db,sourceGenerated)
     if(JSON.stringify(historicalNoticeIntegrity(db)) !==
        JSON.stringify(originalHistoricalNotices)) {
       refuse('deleted-event or missing-Person notice history changed during synthetic split.')
@@ -361,7 +382,7 @@ function scrubHousehold(file,originals,originalSchemaObjects,originalHistoricalN
 export function stageDisposablePhase1PrimaryFamily({
   serverDirectory,sourceRoot,destinationRoot,
 }={}) {
-  const {src,out,dbFile}=paths(sourceRoot,destinationRoot,serverDirectory)
+  const {src,out,dbFile,sourceGenerated}=paths(sourceRoot,destinationRoot,serverDirectory)
   const sourceBefore=digest(dbFile)
   const uploadsBefore=scanUploads(path.join(src,'uploads'))
   const original=new DatabaseSync(dbFile,{readOnly:true})
@@ -370,8 +391,8 @@ export function stageDisposablePhase1PrimaryFamily({
   try {
     original.exec('PRAGMA query_only=ON')
     check(original)
-    tableNames(original)
-    approvedFixtureTriggers=trustedSyntheticTriggers(original)
+    tableNames(original,sourceGenerated)
+    approvedFixtureTriggers=trustedSyntheticTriggers(original,sourceGenerated)
     originalSchemaObjects=preservedSchemaObjectFingerprints(original)
     requireNoCrossBoundaryFks(original)
     owner=readLegacyOwner(original)
@@ -398,7 +419,7 @@ export function stageDisposablePhase1PrimaryFamily({
     fs.mkdirSync(familyData)
     const destDb=path.join(familyData,'calendar.db')
     fs.copyFileSync(dbFile,destDb,fs.constants.COPYFILE_EXCL)
-    const split=scrubHousehold(destDb,preserved,originalSchemaObjects,originalHistoricalNotices)
+    const split=scrubHousehold(destDb,preserved,originalSchemaObjects,originalHistoricalNotices,sourceGenerated)
     const centralDb=path.join(centralDir,'identity.db')
     centralIdentity(centralDb,owner)
     copyUploads(path.join(src,'uploads'),path.join(home,'uploads'),uploadsBefore)
@@ -424,6 +445,8 @@ export function stageDisposablePhase1PrimaryFamily({
       historicalAcknowledgementOrphansPreserved:originalHistoricalNotices.unmatchedAcknowledgementOutbox,
       deletedEventAndPersonHistoryNeverAutoPruned:true,
       approvedSyntheticFixtureTriggersPreserved:approvedFixtureTriggers,
+      sourceGeneratedCurrentNotificationTriggersPreserved:sourceGenerated?approvedFixtureTriggers:0,
+      syntheticHouseholdOutputCompacted:true,
       retainedIndexAndTriggerFingerprintsEqual:true,
       realArchivedTriggerBodiesApproved:false,
       stagedOwnersDisabled:1,
