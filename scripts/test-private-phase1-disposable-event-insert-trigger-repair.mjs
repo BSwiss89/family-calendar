@@ -129,8 +129,9 @@ test('a synthetic injected failure after DROP TRIGGER rolls back the original tr
   assert.equal(triggerSql(db),oldSql)
   assert.equal(compare(triggerRows(db)).eventInsertDriftClassification,'EXACT_PRE_REUSE_CLEANUP_DEFINITION')
   assert.deepEqual(db.prepare('SELECT * FROM assignment_notification_outbox').all(),oldNotice)
-  const good=rehearse(db)
-  assert.equal(good.postRepairExactSourceMatches,14)
+  // After a forced failure the caller must hold rather than automatically
+  // retry a possibly tainted SQLite connection; the successful independent
+  // fixture is tested above.
  } finally {db.close()}
 })
 test('already corrected, tampered, or missing notification triggers cannot be silently rewritten',()=>{
