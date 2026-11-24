@@ -13,9 +13,9 @@ import {auditPrivatePhase1OfflineLegacySchema}
   from './private-phase1-offline-schema-relationship-audit.mjs'
 
 const LEGACY_TRIGGER_COUNTS=Object.freeze({events:5,event_people:3,event_exceptions:6})
-const SOURCE_TRIGGER_COUNTS=Object.freeze({events:4,event_people:3,event_exceptions:6})
+const SOURCE_TRIGGER_COUNTS=Object.freeze({events:5,event_people:3,event_exceptions:6})
 const expectSourceNames=Object.freeze([
- 'notify_event_insert','notify_event_update','notify_event_delete',
+ 'notify_deleted_event_details','notify_event_insert','notify_event_update','notify_event_delete',
  'notify_people_insert','notify_people_update','notify_people_delete',
  'notify_exception_insert','notify_exception_update','notify_exception_delete',
  'notify_changed_event_fields','notify_changed_exception_insert',
@@ -45,7 +45,7 @@ function trustedReference() {
   ].join(' '))
   installNotificationMutationCapture(db)
   const expected=readTriggerRows(db)
-  if(expected.length!==13||
+  if(expected.length!==14||
     expectSourceNames.some(name=>expected.filter(t=>t.name===name).length!==1) ||
     Object.entries(SOURCE_TRIGGER_COUNTS).some(([table,n])=>
       expected.filter(t=>t.tbl_name===table).length!==n)) {
@@ -78,7 +78,7 @@ function safeArchivedTriggerRows(rows) {
 export function comparePrivatePhase1SourceTriggerDefinitions(rows,referenceRows) {
  const archived=safeArchivedTriggerRows(rows)
  const source=referenceRows??trustedReference()
- if(!Array.isArray(source)||source.length!==13||
+ if(!Array.isArray(source)||source.length!==14||
    expectSourceNames.some(n=>source.filter(x=>x.name===n).length!==1)){
   refuse('reference trigger roster changed.')
  }
@@ -110,13 +110,13 @@ export function comparePrivatePhase1SourceTriggerDefinitions(rows,referenceRows)
   kind:'phase1-historical-trigger-source-parity-v1',
   exactSourceComparisonExecuted:true,
   expectedArchivedTriggerCount:14,
-  reviewedSourceTriggerCount:13,
+  reviewedSourceTriggerCount:14,
   ...counts,
   knownSourceReviews:Object.freeze(results),
   unknownTriggerNamesOrSqlExposed:false,
   currentSourceInstallerReproducedInMemory:true,
   // Exact source DDL alone does not prove correct runtime semantics. The
-  // unmatched trigger(s) need separate archived inspection and review.
+  // Definition equality is still not semantic approval for real migration.
   allArchivedTriggerSemanticsReviewed:false,
   matchingTriggersApprovedToReplay:false,
   archivedUnknownTriggersApprovedToReplay:false,
