@@ -49,7 +49,7 @@ function trustedReference() {
     expectSourceNames.some(name=>expected.filter(t=>t.name===name).length!==1) ||
     Object.entries(SOURCE_TRIGGER_COUNTS).some(([table,n])=>
       expected.filter(t=>t.tbl_name===table).length!==n)) {
-   refuse('trusted source no longer generates reviewed 13 notification triggers.')
+   refuse('trusted source no longer generates all 14 installed notification triggers.')
   }
   return expected
  } finally { db.close() }
