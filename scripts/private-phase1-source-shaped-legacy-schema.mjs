@@ -100,9 +100,11 @@ CREATE TABLE test_push_deliveries (
  status TEXT NOT NULL DEFAULT 'pending',PRIMARY KEY(notification_id,endpoint_hash)
 ) STRICT;
 `
-export function installSourceShapedSyntheticLegacySchema(db) {
+export function installSourceShapedSyntheticLegacyBase(db) {
   db.exec(schema)
   createFamilyAuthTables(db)
+}
+export function installSourceShapedSyntheticLegacyNotifications(db) {
   installAssignmentNotificationOutbox(db)
   installNotificationMutationCapture(db)
   db.exec('CREATE TABLE test_assignment_acknowledgements(notification_id INTEGER PRIMARY KEY REFERENCES assignment_notification_outbox(id),acknowledged_at INTEGER NOT NULL CHECK(acknowledged_at > 0)) STRICT')
