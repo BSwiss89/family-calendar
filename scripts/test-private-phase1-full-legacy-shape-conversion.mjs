@@ -5,6 +5,7 @@
 // not independently verified historical DDL. No actual archived SQL is loaded.
 // Matching the archived aggregate counts does NOT prove exact historical DDL.
 import test from 'node:test'
+import {rehearseOfflineHouseholdCopy} from './private-phase1-offline-household-copy-rehearsal.mjs'
 import {reviewLegacyTableDefinitionDifference as reviewDdl,reviewEventPeopleReferencePlacement} from './private-phase1-legacy-ddl-difference-review.mjs'
 import {compareSourceShapedLegacyMetadata} from './private-phase1-source-shaped-schema-parity.mjs'
 import assert from 'node:assert/strict'
@@ -198,4 +199,58 @@ test('event_people review accepts only the two reviewed cascade relationships',(
   table.replace('STRICT','STRICT, WITHOUT ROWID'),
   table.replace('INTEGER NOT NULL','INTEGER')
  ])assert.equal(reviewEventPeopleReferencePlacement(sql),false)
+})
+
+function buildVerifiedOfflineFixture(t){
+ const f=buildFixture(t)
+ const outer=fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()),'fc-phase1-archive-test-'))
+ t.after(()=>fs.rmSync(outer,{recursive:true,force:true}))
+ const recoveryParent=path.join(outer,'family-calendar-phase1-recovery')
+ const snapshotRoot=path.join(recoveryParent,'OFFLINE-LEGACY-TEST-20261122-212047-'+randomBytes(16).toString('hex'))
+ fs.mkdirSync(snapshotRoot,{recursive:true})
+ const file=path.join(snapshotRoot,'calendar.db')
+ fs.copyFileSync(f.file,file)
+ const db=new DatabaseSync(file)
+ try{
+  const current=db.prepare("SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='notify_event_insert'").get().sql
+  const old=current.replace('DELETE FROM notification_deleted_event_details WHERE event_id=NEW.id;\n','')
+  assert.notEqual(old,current)
+  db.exec('DROP TRIGGER notify_event_insert')
+  db.exec(old)
+ }finally{db.close()}
+ fs.cpSync(path.join(f.src,'uploads'),path.join(snapshotRoot,'uploads'),{recursive:true})
+ fs.mkdirSync(path.join(snapshotRoot,'dist'))
+ fs.writeFileSync(path.join(snapshotRoot,'dist','index.html'),'synthetic')
+ fs.writeFileSync(path.join(snapshotRoot,'start-secure-test-patched.ps1'),'# synthetic')
+ const files=['calendar.db','dist/index.html','uploads/people/avatar.bin','uploads/recipes/photo.bin','start-secure-test-patched.ps1'].map(p=>({path:p,sha256:hash(path.join(snapshotRoot,p))}))
+ const expectedInstalledTestSha='76caa3e46186c3c5c6408f11b55800eb06779776'
+ fs.writeFileSync(path.join(snapshotRoot,'OFFLINE-LEGACY-REVIEW.json'),JSON.stringify({
+  kind:'phase1-offline-legacy-test-snapshot-v1',sourceSha:expectedInstalledTestSha,capturedAt:'2026-11-22T21:20:47Z',
+  databaseSha256:hash(file),supervisorSha256:hash(path.join(snapshotRoot,'start-secure-test-patched.ps1')),sqliteIntegrity:'ok',
+  uploads:2,dist:1,fileCount:files.length,files,restoreBootVerified:false,coordinatedCentralAndFamilySnapshot:false,
+  safeToCutover:false,testDeploymentAuthorized:false,liveDeploymentAuthorized:false
+ }))
+ return {recoveryParent,snapshotRoot,expectedInstalledTestSha}
+}
+test('verified offline rehearsal repairs only disposable copy and preserves all household history',t=>{
+ const args=buildVerifiedOfflineFixture(t)
+ const source=path.join(args.snapshotRoot,'calendar.db'),before=hash(source)
+ const r=rehearseOfflineHouseholdCopy(args)
+ assert.equal(r.preservedTables,22)
+ assert.equal(r.currentTriggers,14)
+ assert.equal(r.excludedTables,5)
+ assert.equal(r.notices,31)
+ assert.equal(r.acknowledgements,14)
+ assert.equal(r.uploads,2)
+ assert.equal(r.temporaryCopyRemoved,true)
+ assert.equal(r.archiveUnchanged,true)
+ assert.equal(r.identityMigrationExecuted,false)
+ assert.equal(r.actualTestMigrationExecuted,false)
+ assert.equal(r.testDeploymentAuthorized,false)
+ assert.equal(hash(source),before)
+})
+test('offline rehearsal refuses altered verified archive',t=>{
+ const args=buildVerifiedOfflineFixture(t)
+ fs.appendFileSync(path.join(args.snapshotRoot,'uploads','people','avatar.bin'),'tampered')
+ assert.throws(()=>rehearseOfflineHouseholdCopy(args))
 })
