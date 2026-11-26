@@ -14,6 +14,8 @@ import {copyVerifiedPrivateRestoreSet} from '../Server/private-offline-restore-r
 import {verifyOfflinePrivateRestoreSet} from '../Server/private-restore-preflight.mjs'
 import {reviewDisposablePhase1PostWriteRollback} from '../Server/private-phase1-post-write-rollback-review.mjs'
 import {rehearseOfflineCentralOwner,verifyOfflineCentralOwnerPassword} from './private-phase1-offline-central-owner-rehearsal.mjs'
+import {EventEmitter} from 'node:events'
+import {readHiddenOwnerPassword} from './private-phase1-local-owner-password-proof.mjs'
 import {rehearseOfflineHouseholdCopy} from './private-phase1-offline-household-copy-rehearsal.mjs'
 import {reviewLegacyTableDefinitionDifference as reviewDdl,reviewEventPeopleReferencePlacement} from './private-phase1-legacy-ddl-difference-review.mjs'
 import {compareSourceShapedLegacyMetadata} from './private-phase1-source-shaped-schema-parity.mjs'
@@ -490,4 +492,52 @@ test('offline Owner password proof verifies transferred credential without activ
  assert.equal(hash(source),before)
  fs.appendFileSync(path.join(args.snapshotRoot,'uploads','people','avatar.bin'),'tampered')
  await assert.rejects(()=>verifyOfflineCentralOwnerPassword(args,password))
+})
+
+
+function hiddenProofTerminal({tty=true}={}){
+ const input=new EventEmitter()
+ input.isTTY=tty
+ input.isRaw=false
+ input.setRawMode=value=>{input.isRaw=value}
+ input.resume=()=>{}
+ input.pause=()=>{}
+ const writes=[]
+ const output={isTTY:tty,write:value=>writes.push(value)}
+ return {input,output,writes}
+}
+
+test('local Owner prompt hides input, handles editing and restores normal terminal mode',async()=>{
+ const {input,output,writes}=hiddenProofTerminal()
+ const result=readHiddenOwnerPassword(input,output,{timeoutMs:1000})
+ assert.equal(input.isRaw,true)
+ input.emit('data',Buffer.from('syntheticx'))
+ input.emit('data',Buffer.from([127]))
+ const unicode=Buffer.from('é')
+ input.emit('data',unicode.subarray(0,1))
+ input.emit('data',unicode.subarray(1))
+ input.emit('data',Buffer.from('\r'))
+ assert.equal(await result,'syntheticé')
+ assert.equal(input.isRaw,false)
+ assert.equal(input.listenerCount('data'),0)
+ assert(!writes.join('').includes('synthetic'))
+ assert(!writes.join('').includes('é'))
+})
+
+test('local Owner prompt fails closed for redirected input, controls, excessive length and timeout',async()=>{
+ const redirected=hiddenProofTerminal({tty:false})
+ await assert.rejects(()=>readHiddenOwnerPassword(redirected.input,redirected.output))
+ assert.equal(redirected.input.isRaw,false)
+ for(const value of ['\x03','\x1b[A','x'.repeat(201),'\r','secret\rmore']){
+  const {input,output,writes}=hiddenProofTerminal()
+  const result=readHiddenOwnerPassword(input,output,{timeoutMs:1000})
+  input.emit('data',Buffer.from(value))
+  await assert.rejects(()=>result)
+  assert.equal(input.isRaw,false)
+  assert.equal(input.listenerCount('data'),0)
+  assert(!writes.join('').includes('secret'))
+ }
+ const timed=hiddenProofTerminal()
+ await assert.rejects(()=>readHiddenOwnerPassword(timed.input,timed.output,{timeoutMs:5}))
+ assert.equal(timed.input.isRaw,false)
 })
