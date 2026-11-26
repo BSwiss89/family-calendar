@@ -664,7 +664,7 @@ test('converted source-shaped legacy household boots through the reviewed Phase 
    assert.equal(d.prepare('PRAGMA foreign_key_check').all().length,0)
    return {events:d.prepare('SELECT id,event_uid,title FROM events ORDER BY id').all(),
     notices:d.prepare('SELECT * FROM assignment_notification_outbox ORDER BY id').all(),
-    acks:d.prepare('SELECT * FROM test_assignment_acknowledgements ORDER BY notification_id,person_id').all()}
+    acks:d.prepare('SELECT * FROM test_assignment_acknowledgements ORDER BY notification_id').all()}
   }finally{d.close()}
  }
  const before=readFamily()
