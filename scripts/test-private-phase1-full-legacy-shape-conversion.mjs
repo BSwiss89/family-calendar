@@ -288,7 +288,9 @@ test('verified legacy central Owner stays disabled in memory and no old sessions
 
 test('converted synthetic primary household becomes a coordinated restorable set without active sessions',t=>{
  const f=buildFixture(t),original=hash(f.file)
- stageDisposablePhase1PrimaryFamily({serverDirectory:f.serverDirectory,sourceRoot:f.src,destinationRoot:f.out})
+ const receipt=stageDisposablePhase1PrimaryFamily({serverDirectory:f.serverDirectory,sourceRoot:f.src,destinationRoot:f.out,prepareEventIdentityAndNotices:true})
+ assert.equal(receipt.eventIdentityAndNoticePreparation.uidOnlyIntentsQueued,0)
+ assert.equal(receipt.eventIdentityAndNoticePreparation.pendingMutationQueueDrained,true)
  const temp=fs.realpathSync(os.tmpdir())
  const work=fs.mkdtempSync(path.join(temp,'fc-phase1-converted-recovery-'))
  t.after(()=>fs.rmSync(work,{recursive:true,force:true}))
@@ -304,18 +306,17 @@ test('converted synthetic primary household becomes a coordinated restorable set
  const db=new DatabaseSync(familyPath)
  let uid
  try{
-  const originalEvent=db.prepare('SELECT * FROM events WHERE id=46').get()
-  installPrivateEventIdentity(db)
+  const source=new DatabaseSync(f.file,{readOnly:true})
+  let originalEvent
+  try{originalEvent=source.prepare('SELECT * FROM events WHERE id=46').get()}finally{source.close()}
   const {event_uid,...remaining}=db.prepare('SELECT * FROM events WHERE id=46').get()
   uid=event_uid
   assert.match(uid,/^[a-f0-9]{32}$/)
   assert.deepEqual(remaining,{...originalEvent})
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM assignment_notification_outbox').get().n,31)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM test_assignment_acknowledgements').get().n,14)
-  // Backfill invokes existing event-update triggers. This is not a silent
-  // notification reconciliation; preserve queued work for a later review.
-  assert(db.prepare('SELECT revision FROM notification_dirty_events WHERE event_id=46').get().revision>0)
-  assert.equal(db.prepare('SELECT change_mask FROM notification_dirty_event_fields WHERE event_id=46').get().change_mask,0)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM notification_dirty_events').get().n,0)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM notification_dirty_event_fields').get().n,0)
  }finally{db.close()}
  const args={serverDirectory:f.serverDirectory,sourceRoot:f.out}
  const first=captureDisposableCoordinatedHouseholdSnapshot({...args,destinationRoot:path.join(work,'baseline')})
@@ -403,5 +404,58 @@ for (const scenario of ['clean','pending change','attributed self change']) {
    assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0)
   }finally{db.close()}
   assert.equal(hash(f.file),original)
+ })
+}
+
+
+for(const scenario of ['clean','pending edit','self edit','missing baseline','unlinked transient']){
+ test('guarded disposable conversion prepares notices: '+scenario,t=>{
+  const f=buildFixture(t)
+  const src=new DatabaseSync(f.file)
+  let prior,acks
+  try{
+   if(scenario==='pending edit'||scenario==='self edit'){
+    src.prepare('UPDATE events SET title=? WHERE id=46').run('Synthetic pending edit before conversion')
+    if(scenario==='self edit'){
+     const {revision}=src.prepare('SELECT revision FROM notification_dirty_events WHERE event_id=46').get()
+     src.prepare('INSERT INTO notification_dirty_event_attribution(event_id,person_id,revision) VALUES(?,?,?)').run(46,7,revision)
+    }
+   }else if(scenario==='missing baseline'){
+    src.exec('DELETE FROM notification_event_baselines WHERE event_id=46')
+   }else if(scenario==='unlinked transient'){
+    src.exec('INSERT INTO notification_dirty_event_fields(event_id,change_mask) VALUES(46,1)')
+   }
+   prior=src.prepare('SELECT * FROM assignment_notification_outbox ORDER BY id').all()
+   acks=src.prepare('SELECT * FROM test_assignment_acknowledgements ORDER BY notification_id').all()
+  }finally{src.close()}
+  const before=hash(f.file)
+  const args={serverDirectory:f.serverDirectory,sourceRoot:f.src,destinationRoot:f.out,prepareEventIdentityAndNotices:true}
+  if(scenario==='missing baseline'||scenario==='unlinked transient'){
+   assert.throws(()=>stageDisposablePhase1PrimaryFamily(args),/UID-only backfill changed|unlinked notification transient/)
+   assert.equal(fs.existsSync(f.out),false)
+  }else{
+   const r=stageDisposablePhase1PrimaryFamily(args)
+   const expected=Number(scenario==='pending edit')
+   assert.equal(r.eventIdentityAndNoticePreparation.legitimateLegacyIntentsQueued,expected)
+   assert.equal(r.eventIdentityAndNoticePreparation.legacyDirtyEventsProcessed,Number(scenario!=='clean'))
+   assert.equal(r.eventIdentityAndNoticePreparation.uidOnlyDirtyEventsProcessed,1)
+   assert.equal(r.eventIdentityAndNoticePreparation.uidOnlyIntentsQueued,0)
+   assert.equal(r.eventIdentityAndNoticePreparation.pushTransmitted,false)
+   assert.equal(r.actualTestMigrationExecuted,false)
+   assert.equal(r.testDeploymentAuthorized,false)
+   const db=new DatabaseSync(path.join(f.out,'households','primary-family','data','calendar.db'),{readOnly:true})
+   try{
+    const notices=db.prepare('SELECT * FROM assignment_notification_outbox ORDER BY id').all()
+    assert.equal(notices.length,prior.length+expected)
+    assert.deepEqual(notices.slice(0,prior.length),prior)
+    assert.deepEqual(db.prepare('SELECT * FROM test_assignment_acknowledgements ORDER BY notification_id').all(),acks)
+    assert.match(db.prepare('SELECT event_uid FROM events WHERE id=46').get().event_uid,/^[a-f0-9]{32}$/)
+    if(expected)assert.equal(notices.at(-1).change_mask,1)
+    for(const table of ['notification_dirty_events','notification_dirty_event_fields','notification_dirty_event_attribution','notification_deleted_event_details']){
+     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM '+table).get().n,0)
+    }
+   }finally{db.close()}
+  }
+  assert.equal(hash(f.file),before)
  })
 }
