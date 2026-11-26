@@ -28,7 +28,7 @@ import {
   installPrivateSystemAdministrator,
 } from '../Server/private-system-administration.mjs'
 import { resolveHouseholdStorage } from '../Server/household-storage.mjs'
-import { startPrivateHouseholdGateway } from '../Server/private-household-gateway.mjs'
+import { startPrivateHouseholdGateway, verifyPrivateBackendBindings } from '../Server/private-household-gateway.mjs'
 
 const directory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../Server')
 const password = 'Only-Disposable-Invited-Owner-Secure-Password-2026!'
@@ -1476,5 +1476,48 @@ test('two invited Owners activate into isolated real localhost backends without 
     for (const backend of [...backends].reverse()) await stopBackend(backend)
     identityDatabase.close()
     fs.rmSync(work, { recursive: true, force: true })
+  }
+})
+
+
+test('Phase 1 binding rejects loopback backend that accepts missing or wrong service secret', async () => {
+  const token = 'a'.repeat(64)
+  const householdId = 'probe-family'
+  for (const mode of ['guarded', 'missing-allowed', 'wrong-allowed', 'redirect']) {
+    const requests = []
+    const server = createServer((req, res) => {
+      const supplied = req.headers['x-family-calendar-upstream-token']
+      requests.push(supplied === token ? 'correct' : supplied === undefined ? 'missing' : 'wrong')
+      const correct = supplied === token
+      const bypass = mode === 'missing-allowed' && supplied === undefined ||
+        mode === 'wrong-allowed' && supplied !== undefined && !correct
+      if (correct || bypass) {
+        res.writeHead(200, {'Content-Type':'application/json'})
+        res.end(JSON.stringify({mode:'household',householdId}))
+      } else if (mode === 'redirect') {
+        res.writeHead(302, {Location:'/login'})
+        res.end()
+      } else {
+        res.writeHead(403, {'Cache-Control':'no-store'})
+        res.end()
+      }
+    })
+    await new Promise((resolve,reject) => {
+      server.once('error',reject)
+      server.listen(0,'127.0.0.1',resolve)
+    })
+    try {
+      const ports = new Map([[householdId,server.address().port]])
+      const tokens = new Map([[householdId,token]])
+      if (mode === 'guarded') {
+        await verifyPrivateBackendBindings(ports,tokens,{requireDirectDenial:true})
+        assert.deepEqual(requests,['correct','missing','wrong'])
+      } else {
+        await assert.rejects(verifyPrivateBackendBindings(ports,tokens,{requireDirectDenial:true}), /did not deny direct untrusted access/)
+      }
+    } finally {
+      server.closeAllConnections()
+      await new Promise(resolve => server.close(resolve))
+    }
   }
 })
