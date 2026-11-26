@@ -7300,6 +7300,9 @@ if (privateBackendWriterLock) {
   process.once('SIGTERM', closePrivateBackend)
   process.once('SIGINT', closePrivateBackend)
   if (typeof process.send === 'function') {
+    // If the captured supervisor disappears, stop serving immediately. The
+    // parent's durable instance lock still requires independent recovery.
+    process.once('disconnect', closePrivateBackend)
     process.on('message', message => {
       if (message?.type === 'private-household-test-shutdown' &&
           message.householdId === householdStorage.householdId) {
