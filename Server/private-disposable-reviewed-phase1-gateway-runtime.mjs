@@ -303,8 +303,9 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
         if (shutdownRequested) refuse('supervised shutdown already requested.')
         shutdownRequested = true
         guard.beginGracefulShutdown()
-        await gateway.close()
-        for (const backend of [...backends].reverse()) await stopCaptured(backend)
+        await gateway.closeForOfflineBackup(async () => {
+          for (const backend of [...backends].reverse()) await stopCaptured(backend)
+        })
         central.close()
         guard.beginDisposableOfflineCapture(plan.householdIds)
         const receipt = await captureClosedPhase1SupervisorBackup({paths,plan,guard,backends,gatewayPort:gateway.port})
