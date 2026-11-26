@@ -5,7 +5,7 @@
 // not independently verified historical DDL. No actual archived SQL is loaded.
 // Matching the archived aggregate counts does NOT prove exact historical DDL.
 import test from 'node:test'
-import {reviewLegacyTableDefinitionDifference as reviewDdl} from './private-phase1-legacy-ddl-difference-review.mjs'
+import {reviewLegacyTableDefinitionDifference as reviewDdl,reviewEventPeopleReferencePlacement} from './private-phase1-legacy-ddl-difference-review.mjs'
 import {compareSourceShapedLegacyMetadata} from './private-phase1-source-shaped-schema-parity.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -182,4 +182,20 @@ test('table definition review distinguishes whitespace and declaration order fro
  assert.equal(conflict.checkExpressionTokensMatch,true)
  assert.equal(reviewDdl('unknown @ sql',expected).classification,'UNRECOGNIZED_DDL_REVIEW_REQUIRED')
  assert(!JSON.stringify(changed).includes('n > 0'))
+})
+
+test('event_people review accepts only the two reviewed cascade relationships',()=>{
+ const inline='CREATE TABLE event_people (event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE, person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE, PRIMARY KEY(event_id,person_id)) STRICT'
+ const table='CREATE TABLE event_people (event_id INTEGER NOT NULL, person_id INTEGER NOT NULL, PRIMARY KEY(event_id,person_id), FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE, FOREIGN KEY(person_id) REFERENCES people(id) ON DELETE CASCADE) STRICT'
+ assert.equal(reviewEventPeopleReferencePlacement(inline),true)
+ assert.equal(reviewEventPeopleReferencePlacement(table),true)
+ for(const sql of [
+  table.replace('ON DELETE CASCADE','ON DELETE RESTRICT'),
+  table.replace('ON DELETE CASCADE','ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED'),
+  table.replace('PRIMARY KEY(event_id,person_id)','PRIMARY KEY(person_id,event_id)'),
+  table.replace('PRIMARY KEY(event_id,person_id)','PRIMARY KEY(event_id,person_id) ON CONFLICT REPLACE'),
+  table.replace('REFERENCES events(id)','REFERENCES people(id)'),
+  table.replace('STRICT','STRICT, WITHOUT ROWID'),
+  table.replace('INTEGER NOT NULL','INTEGER')
+ ])assert.equal(reviewEventPeopleReferencePlacement(sql),false)
 })
