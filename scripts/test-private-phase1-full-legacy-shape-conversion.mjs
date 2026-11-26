@@ -27,6 +27,7 @@ import { randomBytes,createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { hashFamilyPassword, verifyFamilyPassword } from '../Server/family-auth.mjs'
 import { fileURLToPath } from 'node:url'
+import { spawnSync } from 'node:child_process'
 import { createPrivateActivationRecords } from '../Server/private-household-activation-records.mjs'
 import { createIndependentHouseholdInvitationTables } from '../Server/independent-household-invitations.mjs'
 import { launchDisposableReviewedPhase1Gateway } from '../Server/private-disposable-reviewed-phase1-gateway-runtime.mjs'
@@ -809,4 +810,27 @@ test('inactive startup preflight binds candidate, archive, credential and durabl
  assert.deepEqual(fs.readFileSync(hold),original)
  assert(!JSON.stringify(r).includes('scrypt-v1'))
  assert(!JSON.stringify(r).includes('syntheticowner'))
+})
+
+
+test('native Windows stage DACL is protected before data copy and refuses a foreign reader', {skip:process.platform!=='win32',timeout:90000},t=>{
+ const dir=path.join(fs.realpathSync(os.tmpdir()),'fc-phase1-acl-fixture-'+randomBytes(16).toString('hex'))
+ const ps=path.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe')
+ const script=fileURLToPath(new URL('./private-phase1-windows-stage-acl.ps1',import.meta.url))
+ const invoke=mode=>spawnSync(ps,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',script,'-Scope','disposable-acl-fixture','-Mode',mode,'-Directory',dir],{encoding:'utf8',windowsHide:true,timeout:20000})
+ t.after(()=>fs.rmSync(dir,{recursive:true,force:true,maxRetries:6,retryDelay:150}))
+ let r=invoke('Create')
+ assert.equal(r.status,0,r.stderr)
+ assert.match(r.stdout,/PRIVATE_DACL=YES/)
+ assert.deepEqual(fs.readdirSync(dir),[])
+ assert.notEqual(invoke('Create').status,0)
+ fs.mkdirSync(path.join(dir,'data'))
+ const file=path.join(dir,'data','synthetic.txt')
+ fs.writeFileSync(file,'fixture')
+ r=invoke('Verify')
+ assert.equal(r.status,0,r.stderr)
+ const grant=spawnSync('icacls.exe',[file,'/grant','*S-1-1-0:(R)'],{encoding:'utf8',windowsHide:true,timeout:10000})
+ assert.equal(grant.status,0,grant.stderr)
+ assert.notEqual(invoke('Verify').status,0)
+ assert.equal(fs.readFileSync(file,'utf8'),'fixture')
 })
