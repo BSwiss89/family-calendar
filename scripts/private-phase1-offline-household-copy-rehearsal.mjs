@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {createHash,randomBytes} from 'node:crypto'
-import {setFamilyAccount} from '../Server/family-auth.mjs'
+import {hashFamilyPassword} from '../Server/family-auth.mjs'
 import {verifyOfflineCentralOwnerPassword} from './private-phase1-offline-central-owner-rehearsal.mjs'
 import {createPrivateActivationRecords} from '../Server/private-household-activation-records.mjs'
 import {createIndependentHouseholdInvitationTables} from '../Server/independent-household-invitations.mjs'
@@ -293,7 +293,8 @@ function rehearseStartupPlan({work,restored,serverDirectory}){
   requireOk(op!==owner.username)
   db.exec('BEGIN IMMEDIATE')
   try{
-   setFamilyAccount(db,op,'Temporary rehearsal operator',randomBytes(32).toString('hex'))
+   db.prepare("INSERT INTO family_users(username,display_name,password_hash,account_kind,disabled) VALUES(?,?,?,'person',0)")
+    .run(op,'Temporary rehearsal operator',hashFamilyPassword(randomBytes(32).toString('hex')))
    const operator=db.prepare('SELECT id FROM family_users WHERE username=?').get(op)
    requireOk(operator.id!==owner.id)
    requireOk(db.prepare('UPDATE family_users SET disabled=0 WHERE id=? AND disabled=1').run(owner.id).changes===1)
