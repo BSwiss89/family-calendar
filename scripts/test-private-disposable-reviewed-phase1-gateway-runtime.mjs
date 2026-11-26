@@ -335,3 +335,49 @@ test('invalid identity, protected ports or non-temporary fixture never start a p
     'invalid preflight must fail before supervisor acquires ownership')
   }
 })
+
+
+test('unexpected captured backend exit holds all gateway admission, including healthy sibling', {
+  timeout: 120000,
+}, async t => {
+  const options = fixture(t, { invited: true })
+  const runtime = await launchDisposableReviewedPhase1Gateway(options)
+  let held = false
+  try {
+    assert.equal(runtime.snapshot().supervisorAdmissionOpen,true)
+    const signedIn = await request(runtime.base,'/api/auth/login',{
+      method:'POST', body:{username:'phase1invitedowner',password,deviceLabel:'Crash fixture'},
+    })
+    assert.equal(signedIn.response.status,200)
+    const cookie=signedIn.response.headers.get('set-cookie').split(';')[0]
+    assert.equal((await request(runtime.base,'/api/events',{cookie})).response.status,200)
+    assert.equal(runtime.crashCapturedBackendForTest(primaryHouseholdId),true)
+    for(let i=0;i<300 && runtime.snapshot().phase!=='held';i++){
+      await new Promise(resolve=>setTimeout(resolve,20))
+    }
+    held=runtime.snapshot().phase==='held'
+    assert.equal(held,true)
+    assert.equal(runtime.snapshot().supervisorAdmissionOpen,false)
+    assert.equal(runtime.snapshot().durableHoldPresent,true)
+    for(const route of ['/api/health','/api/events','/phase1','/api/lists']){
+      const denied=await request(runtime.base,route,{cookie})
+      assert.equal(denied.response.status,503)
+      assert.equal(denied.response.headers.get('cache-control'),'no-store')
+    }
+    assert.equal((await request(runtime.base,'/api/auth/login',{
+      method:'POST',body:{username:'phase1primaryowner',password}
+    })).response.status,503)
+    assert.equal((await request(runtime.base,'/api/events',{
+      method:'POST',cookie,body:{title:'Must never be admitted',date:'2027-02-01'}
+    })).response.status,503)
+    assert.equal(inspectReviewedWindowsSupervisorOwnership(options.stateDirectory).instanceLockPresent,true)
+    await assert.rejects(launchDisposableReviewedPhase1Gateway(options),/persistent crash hold|existing supervisor instance/)
+  } finally {
+    if(held || runtime.snapshot().phase==='held'){
+      const result=await runtime.closeHeldFixtureForTest()
+      assert.equal(result.ownerInstanceRetained,true)
+      assert.equal(inspectReviewedWindowsSupervisorOwnership(options.stateDirectory).instanceLockPresent,true)
+      assert.equal(inspectReviewedWindowsSupervisorOwnership(options.stateDirectory).crashHoldPresent,true)
+    } else await runtime.shutdown()
+  }
+})
