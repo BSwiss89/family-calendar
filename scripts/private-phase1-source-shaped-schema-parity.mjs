@@ -1,7 +1,7 @@
 // Read-only schema metadata comparison. Never executes or prints archived SQL.
 // A matching structure is evidence, not semantic equivalence or migration approval.
 import path from 'node:path'
-import {reviewLegacyTableDefinitionDifference} from './private-phase1-legacy-ddl-difference-review.mjs'
+import {reviewLegacyTableDefinitionDifference,reviewEventPeopleReferencePlacement} from './private-phase1-legacy-ddl-difference-review.mjs'
 import {DatabaseSync} from 'node:sqlite'
 import {createHash} from 'node:crypto'
 import {auditPrivatePhase1OfflineLegacySchema} from '../Server/private-phase1-offline-schema-relationship-audit.mjs'
@@ -53,6 +53,11 @@ export function compareSourceShapedLegacyMetadata(db) {
    const differences=Object.keys(b).filter(k=>JSON.stringify(a[k])!==JSON.stringify(b[k]))
    const sqlFor=d=>d.prepare("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?").get(table).sql
    const ddlReview=reviewLegacyTableDefinitionDifference(sqlFor(db),sqlFor(ref))
+   if(table==='event_people'&&ddlReview.classification==='REVIEW_REQUIRED'&&
+      differences.every(k=>['tableDefinition','order'].includes(k))&&
+      reviewEventPeopleReferencePlacement(sqlFor(db))&&reviewEventPeopleReferencePlacement(sqlFor(ref))) {
+    ddlReview.classification='REVIEWED_REFERENCE_PLACEMENT_ONLY'
+   }
    return {table,differences,ddlReview,structuralMatch:differences.every(k=>['tableDefinition','explicitIndexDefinitions','order'].includes(k)),
     exactTableDdlMatch:!differences.includes('tableDefinition'),
     exactExplicitIndexDdlMatch:!differences.includes('explicitIndexDefinitions')}

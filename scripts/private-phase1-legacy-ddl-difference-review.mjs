@@ -71,3 +71,27 @@ export function reviewLegacyTableDefinitionDifference(actualSql,expectedSql){
   return {classification:'UNRECOGNIZED_DDL_REVIEW_REQUIRED',checkExpressionTokensMatch:false,semanticEquivalenceProven:false}
  }
 }
+
+// The only remaining historical discrepancy is event_people. Recognize
+// exactly the reviewed two single-column CASCADE foreign keys, in either
+// column or table declaration form. Never strip arbitrary SQL clauses.
+export function reviewEventPeopleReferencePlacement(sql) {
+ try {
+  const a=parts(sql)
+  if(!same(a.header,['create','table','event_people'])||!same(a.suffix,['strict']))return false
+  for(const eventInline of [true,false])for(const personInline of [true,false]){
+   const eventRef='REFERENCES events(id) ON DELETE CASCADE'
+   const personRef='REFERENCES people(id) ON DELETE CASCADE'
+   const declarations=[
+    'event_id INTEGER NOT NULL'+(eventInline?' '+eventRef:''),
+    'person_id INTEGER NOT NULL'+(personInline?' '+personRef:''),
+    'PRIMARY KEY(event_id,person_id)',
+    ...(!eventInline?['FOREIGN KEY(event_id) '+eventRef]:[]),
+    ...(!personInline?['FOREIGN KEY(person_id) '+personRef]:[])
+   ]
+   const b=parts('CREATE TABLE event_people ('+declarations.join(',')+') STRICT')
+   if(same(sorted(a.groups),sorted(b.groups)))return true
+  }
+  return false
+ } catch {return false}
+}
