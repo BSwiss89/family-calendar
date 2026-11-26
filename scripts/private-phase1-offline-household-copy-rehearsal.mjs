@@ -34,13 +34,17 @@ function retainedRows(db){
  return keep.map(table=>{
   const h=createHash('sha256'),q=quote(table)
   const ddl=db.prepare("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?").get(table).sql
-  const query=db.prepare('SELECT rowid AS _phase1_rowid_, * FROM '+q+' ORDER BY rowid')
+  const query=db.prepare('SELECT * FROM '+q)
+  const fingerprints=[]
   query.setReadBigInts(true)
   let n=0
   for(const row of query.iterate()){
    requireOk(++n<=250000)
-   h.update(JSON.stringify(Object.entries(row).map(([k,v])=>[k,typeof v==='bigint'?['integer',v.toString()]:v instanceof Uint8Array?['blob',Buffer.from(v).toString('hex')]:[typeof v,v]]))+'\n')
+   fingerprints.push(createHash('sha256').update(JSON.stringify(Object.entries(row).map(([k,v])=>[k,typeof v==='bigint'?['integer',v.toString()]:v instanceof Uint8Array?['blob',Buffer.from(v).toString('hex')]:[typeof v,v]]))).digest('hex'))
   }
+  // VACUUM may renumber implicit rowids. Compare the typed row multiset,
+  // including duplicate multiplicities and explicit keys, not page layout.
+  for(const fingerprint of fingerprints.sort())h.update(fingerprint+'\n')
   return {table,ddl,n,digest:h.digest('hex')}
  })
 }
