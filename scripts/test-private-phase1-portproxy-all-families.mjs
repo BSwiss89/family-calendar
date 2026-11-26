@@ -153,3 +153,34 @@ test('missing export listenaddress is never accepted without matching complete s
       'listenaddress=0.0.0.0')))), /refused/)
   assert.throws(() => inspect(input(full(omitted), '')), /refused/)
 })
+
+
+test('complete portproxy review distinguishes each cutover phase and refuses stale routes', () => {
+  const candidateRule = rule.replace('connectport=13002','connectport=13004').replace('connectaddress='+address,'connectaddress=127.0.0.1')
+  const candidateShowAll = normalShowAll.replace(address,'127.0.0.1').replace('13002','13004')
+  const legacy = input(full(rule))
+  const candidate = input(full(candidateRule),candidateShowAll)
+  for (const phase of ['baseline','legacy-fenced','pre-route']) {
+    const report = inspect({...legacy,phase})
+    assert.equal(report.legacyForwardingMatches,true)
+    assert.equal(report.observedBaselinePortproxyMatches,phase==='baseline')
+    assert.equal(report.candidateGatewayForwardingMatches,false)
+    assert.throws(()=>inspect({...candidate,phase}),/refused/)
+  }
+  const postRoute = {...candidate,phase:'candidate-review'}
+  const report = inspect(postRoute)
+  assert.equal(report.candidateGatewayForwardingMatches,true)
+  assert.equal(report.expectedLegacyRuleCount,0)
+  assert.equal(report.completeNetshRuleCount,1)
+  assert.equal(report.old13002DirectAccessDenied,false)
+  assert.equal(report.testDeploymentAuthorized,false)
+  const cli=run(postRoute)
+  assert.equal(cli.status,0,cli.stderr)
+  assert.equal(JSON.parse(cli.stdout).candidateGatewayForwardingMatches,true)
+  assert.throws(()=>inspect({...legacy,phase:'candidate-review'}),/refused/)
+  assert.throws(()=>inspect({...candidate,phase:'unknown'}),/refused/)
+  assert.throws(()=>inspect({...postRoute,dump:full(candidateRule,rule)}),/refused/)
+  assert.throws(()=>inspect({...postRoute,dump:full(candidateRule,'add v6tov4 listenport=14000 listenaddress=:: connectport=13005 connectaddress=127.0.0.1')}),/refused/)
+  assert.throws(()=>inspect({...postRoute,dump:full(candidateRule.replace('connectport=13004','connectport=13005'))}),/refused/)
+  assert.throws(()=>inspect({...postRoute,showAll:candidateShowAll.replace('13004','13005')}),/refused/)
+})
