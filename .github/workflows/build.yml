@@ -128,6 +128,21 @@ jobs:
         run: node --test scripts/test-private-disposable-reviewed-windows-supervisor-runtime.mjs
       - name: Boot real Phase 1 primary Owner gateway under disposable supervised backend ownership
         run: node --test scripts/test-private-disposable-reviewed-phase1-gateway-runtime.mjs
+      - name: Parse fixed Windows Phase 1 TEST service launcher without installing it
+        shell: powershell
+        run: |
+          foreach ($file in @('scripts/assert-private-phase1-windows-launch-host.ps1','scripts/start-private-phase1-windows-test.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) $file), [ref]$tokens, [ref]$errors) | Out-Null
+            if (@($errors).Count -ne 0) { throw 'Phase 1 Windows launcher PowerShell 5.1 syntax failed.' }
+          }
+          node --check scripts/start-private-phase1-windows-test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Phase 1 service entry syntax failed.' }
+          if (Test-Path (Join-Path $env:USERPROFILE 'Projects\family-calendar-phase1-test-code')) { throw 'CI unexpectedly has fixed TEST installation path.' }
+          node scripts/start-private-phase1-windows-test.mjs
+          if ($LASTEXITCODE -ne 1) { throw 'Uninstalled TEST launcher must refuse startup.' }
+          exit 0
       - name: Rehearse pinned Windows scheduler handoff around real disposable Node children
         run: node --test scripts/test-private-disposable-pinned-windows-host-handoff.mjs
       - name: Verify real-household supervisor OS child ownership and durable crash hold
