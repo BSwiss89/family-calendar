@@ -81,16 +81,16 @@ export function assessPrivatePhase1AllFamilyPortproxyDump({
   const candidate = phase === 'candidate-review'
   const observed = parseCompleteShowAll(showAll, candidate ? '127.0.0.1' : legacyTestAddress, candidate ? '13004' : '13002')
   const lines = dump.replace(/^\uFEFF/, '').split(/\r?\n/)
-  let phase = 'initial'
+  let parserState = 'initial'
   let count = 0
   for (const original of lines) {
     const line = original.trim()
     if (!line || line.startsWith('#')) continue
-    if (phase === 'initial' && /^pushd interface portproxy$/i.test(line)) {
-      phase = 'entered'
-    } else if (phase === 'entered' && /^reset$/i.test(line)) {
-      phase = 'reset'
-    } else if (phase === 'reset' && /^add\s+/i.test(line)) {
+    if (parserState === 'initial' && /^pushd interface portproxy$/i.test(line)) {
+      parserState = 'entered'
+    } else if (parserState === 'entered' && /^reset$/i.test(line)) {
+      parserState = 'reset'
+    } else if (parserState === 'reset' && /^add\s+/i.test(line)) {
       const tokens = line.toLowerCase().split(/\s+/)
       const kind = tokens[1]
       if (!TYPES.has(kind)) refuse('unknown forwarding address-family command.')
@@ -108,13 +108,13 @@ export function assessPrivatePhase1AllFamilyPortproxyDump({
           args.connectaddress !== observed.connectaddress) {
         refuse('unreviewed additional or mismatched TEST portproxy rule.')
       }
-    } else if (phase === 'reset' && /^popd$/i.test(line)) {
-      phase = 'done'
+    } else if (parserState === 'reset' && /^popd$/i.test(line)) {
+      parserState = 'done'
     } else {
       refuse('unrecognized or incomplete complete-family export format.')
     }
   }
-  if (phase !== 'done' || count !== 1) {
+  if (parserState !== 'done' || count !== 1) {
     refuse('complete portproxy family export and exactly one TEST rule required.')
   }
   return Object.freeze({
