@@ -12,15 +12,18 @@ try {
   }
   const input = JSON.parse(Buffer.concat(pieces).toString('utf8'))
   if (!input || typeof input !== 'object' || Array.isArray(input) ||
-      Object.keys(input).sort().join(',') !==
-      'dump,installedTestSha,legacyTestAddress,showAll') {
+      !['dump,installedTestSha,legacyTestAddress,showAll',
+      'dump,installedTestSha,legacyTestAddress,phase,showAll'].includes(Object.keys(input).sort().join(','))) {
     throw new Error('unexpected fields')
   }
   const result = assessPrivatePhase1AllFamilyPortproxyDump(input)
   process.stdout.write(JSON.stringify({
     status: 'PASS',
     kind: result.kind,
+    phase: result.phase,
     legacyRuleCount: result.expectedLegacyRuleCount,
+    candidateGatewayForwardingMatches: result.candidateGatewayForwardingMatches,
+    completeNetshRuleCount: result.completeNetshRuleCount,
     IPv6OrMixedFamilyRuleDetected: result.IPv6OrMixedFamilyRuleDetected,
     verifiedListenerOwnership: result.verifiedListenerOwnership,
     verifiedAllHostForwarders: result.verifiedAllHostForwarders,
