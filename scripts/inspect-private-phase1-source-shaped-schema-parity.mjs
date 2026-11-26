@@ -6,7 +6,9 @@ try {
  const snapshotRoot=path.resolve(process.argv[2])
  const r=inspectSourceShapedLegacyArchive({recoveryParent:path.dirname(snapshotRoot),snapshotRoot,expectedInstalledTestSha:process.argv[3]})
  console.log('LEGACY_STRUCTURE_AUDIT=PASS | TABLES='+r.tables+' | STRUCTURAL_MATCHES='+r.structuralMatches+' | COLUMN_ORDER_MATCHES='+r.columnOrderMatches+' | EXACT_TABLE_DDL='+r.exactTableDdlMatches+' | EXACT_INDEX_DDL='+r.exactExplicitIndexDdlMatches)
- for(const d of r.details)if(d.differences.length)console.log('TABLE='+d.table+' | DIFFERENCES='+d.differences.join(','))
+ const classes=['EXACT','LEXICAL_MATCH','DECLARATION_REORDER_ONLY','REVIEW_REQUIRED','UNRECOGNIZED_DDL_REVIEW_REQUIRED']
+ console.log('DDL_REVIEW | '+classes.map(k=>k+'='+r.details.filter(d=>d.ddlReview.classification===k).length).join(' | ')+' | CHECK_TOKEN_MATCHES='+r.details.filter(d=>d.ddlReview.checkExpressionTokensMatch).length)
+ for(const d of r.details)if(d.differences.length)console.log('TABLE='+d.table+' | DIFFERENCES='+d.differences.join(',')+' | DDL_CLASS='+d.ddlReview.classification+' | CHECK_TOKENS='+ (d.ddlReview.checkExpressionTokensMatch?'MATCH':'REVIEW'))
  console.log('ARCHIVE_UNCHANGED=YES | RUNNING_CALENDARS_ACCESSED=NO | MIGRATION_AUTHORIZED=NO')
 } catch {
  console.error('LEGACY_STRUCTURE_AUDIT=REFUSED')
