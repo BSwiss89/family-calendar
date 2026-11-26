@@ -308,7 +308,7 @@ test('converted synthetic primary household becomes a coordinated restorable set
   const {event_uid,...remaining}=db.prepare('SELECT * FROM events WHERE id=46').get()
   uid=event_uid
   assert.match(uid,/^[a-f0-9]{32}$/)
-  assert.deepEqual(remaining,originalEvent)
+  assert.deepEqual(remaining,{...originalEvent})
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM assignment_notification_outbox').get().n,31)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM test_assignment_acknowledgements').get().n,14)
   // Backfill invokes existing event-update triggers. This is not a silent
