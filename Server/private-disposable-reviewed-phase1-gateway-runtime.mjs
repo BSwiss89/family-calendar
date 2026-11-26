@@ -9,7 +9,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import net from 'node:net'
-import { fork } from 'node:child_process'
+import { fork, spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { planReviewedPrivateTestStartup } from './private-reviewed-test-startup-plan.mjs'
@@ -17,7 +18,7 @@ import { createReviewedWindowsSupervisorOwnership } from './private-reviewed-win
 import { startPrivateHouseholdGateway, verifyPrivateBackendBindings } from './private-household-gateway.mjs'
 import { resolvePrivatePhase1GatewayLoopbackPort } from './private-household-gateway.mjs'
 
-const PROTECTED = new Set([443, 8443, 3001, 11434, 13001, 13002, 13003])
+const PROTECTED = new Set([443, 8443, 3001, 11434, 13001, 13002, 13003, 13004])
 function refuse(message) {
   throw new Error('Disposable Phase 1 gateway supervisor refused: ' + message)
 }
@@ -62,6 +63,7 @@ function verifiedPaths({ fixtureRoot, storageRoot, stateDirectory, identityDatab
   const projects = path.join(os.homedir(), 'Projects')
   const blocked = ['family-calendar', 'family-calendar-test',
     'family-calendar-test-security-stage', 'family-calendar-live-auth-candidate']
+  blocked.push('family-calendar-phase1-test-code')
   if (blocked.some(name => path.resolve(checkout).toLowerCase() ===
       path.resolve(projects, name).toLowerCase())) {
     refuse('installed LIVE/TEST source checkout cannot run this fixture.')
@@ -190,6 +192,12 @@ export async function launchDisposableReviewedPhase1Gateway({
     fixtureRoot, storageRoot, stateDirectory, identityDatabasePath,
     serverDirectory,
   })
+  return launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,trustedPhase1GatewayPort,disposable:true})
+}
+
+// No public path override or fixture bypass: the persistent wrapper below
+// derives every path from the fixed TEST installation and checks the host.
+async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,trustedPhase1GatewayPort,disposable}) {
   if (!Array.isArray(operatorUserIds) || operatorUserIds.length !== 1 ||
       !Number.isSafeInteger(operatorUserIds[0]) || operatorUserIds[0] < 1) {
     refuse('one independently trusted operator ID must be supplied.')
@@ -255,22 +263,22 @@ export async function launchDisposableReviewedPhase1Gateway({
         realGatewayStarted: true,
         supervisorAdmissionOpen: guard.snapshot().phase === 'running' &&
           backends.every(({child}) => child.exitCode === null && child.signalCode === null && child.connected === true),
-        osTempFixtureOnly: true,
+        osTempFixtureOnly: disposable,
         testDeploymentAuthorized: false,
         liveDeploymentAuthorized: false,
         osWideWriterFencingVerified: false,
         windowsTaskInstalled: false,
       }),
       // Fault injection is restricted to the captured OS-temp fixture child.
-      crashCapturedBackendForTest(householdId) {
+      ...(disposable?{crashCapturedBackendForTest(householdId) {
         if (shutdownRequested || guard.snapshot().phase !== 'running') refuse('fixture not running.')
         const backend = backends.find(item => item.householdId === householdId)
         if (!backend) refuse('unknown captured fixture child.')
         return backend.child.kill()
-      },
+      }}:{}),
       // Explicit fixture-only cleanup after a hold. Never clear supervisor
       // ownership or a crash marker; no automatic restart or rollback.
-      async closeHeldFixtureForTest() {
+      async [disposable?'closeHeldFixtureForTest':'closeHeldForReview']() {
         if (shutdownRequested || guard.snapshot().phase !== 'held') refuse('held fixture required.')
         shutdownRequested = true
         await gateway.close()
@@ -294,8 +302,8 @@ export async function launchDisposableReviewedPhase1Gateway({
         for (const backend of [...backends].reverse()) {
           await stopCaptured(backend)
         }
-        guard.finishGracefulShutdown()
         central.close()
+        guard.finishGracefulShutdown()
         return Object.freeze({
           allChildrenExited: true, gatewayClosed: true,
           ownerInstanceReleased: true, osWideWriterFencingVerified: false,
@@ -321,4 +329,48 @@ export async function launchDisposableReviewedPhase1Gateway({
     }
     throw error
   }
+}
+
+
+// Fixed, local persistent TEST launch contract. The inactive staging module
+// cannot create this activation review or remove its DO-NOT-START hold.
+// The separate operator-approved cutover must first prepare both. There is
+// deliberately no CLI flag to override either requirement.
+export async function launchReviewedWindowsPhase1TestGateway(){
+ if(process.platform!=='win32')refuse('Windows TEST host required.')
+ const projects=physicalDirectory(path.join(os.homedir(),'Projects'))
+ const checkout=physicalDirectory(path.join(projects,'family-calendar-phase1-test-code'))
+ const server=physicalDirectory(path.join(checkout,'Server'))
+ if(server!==physicalDirectory(path.dirname(fileURLToPath(import.meta.url))))refuse('fixed TEST code checkout required.')
+ const root=physicalDirectory(path.join(projects,'family-calendar-phase1-test-data'))
+ if(path.dirname(root)!==projects||path.dirname(checkout)!==projects)refuse('fixed physical TEST sibling roots required.')
+ const storage=physicalDirectory(path.join(root,'data'))
+ const state=physicalDirectory(path.join(root,'supervisor-state'))
+ const identity=physicalFile(path.join(storage,'central','identity.db'))
+ if(path.dirname(storage)!==root||path.dirname(state)!==root||path.dirname(identity)!==path.join(storage,'central')||
+    fs.statSync(identity).nlink!==1)refuse('unexpected TEST data layout.')
+ for(const name of ['DO-NOT-START.json','ACTIVATION-IN-PROGRESS.json']){
+  try{fs.lstatSync(path.join(root,name));refuse('inactive or unfinished TEST activation hold present.')}
+  catch(e){if(e.code!=='ENOENT')throw e}
+ }
+ const reviewPath=physicalFile(path.join(root,'ACTIVE-TEST-REVIEW.json'))
+ if(path.dirname(reviewPath)!==root||fs.statSync(reviewPath).nlink!==1||fs.statSync(reviewPath).size>8192)refuse('invalid activation review file.')
+ const r=JSON.parse(fs.readFileSync(reviewPath,'utf8'))
+ const sha=/^[a-f0-9]{40}$/
+ if(r?.kind!=='phase1-windows-active-test-review-v1'||r.site!=='existing-secure-test'||
+    !sha.test(r.candidateSha??'')||!sha.test(r.legacyTestSha??'')||!sha.test(r.liveSha??'')||
+    r.primaryHouseholdId!=='primary-family'||!Number.isSafeInteger(r.operatorUserId)||r.operatorUserId<1||
+    r.testStartupApproved!==true||r.liveDeploymentAuthorized!==false||r.gatewayPort!==13004)refuse('explicit reviewed TEST activation configuration required.')
+ const ps=path.join(process.env.SystemRoot??'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe')
+ const result=spawnSync(ps,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',
+   path.join(checkout,'scripts','assert-private-phase1-windows-launch-host.ps1'),
+   '-ExpectedCandidateSha',r.candidateSha,'-ExpectedInstalledTestSha',r.legacyTestSha,'-ExpectedLiveSha',r.liveSha],{
+    encoding:'utf8',windowsHide:true,timeout:120000,maxBuffer:1024*1024})
+ if(result.error||result.status!==0||result.stdout.trim()!=='PHASE1_WINDOWS_LAUNCH_HOST=PASS | TEST_ONLY=YES')refuse('Windows launch host preflight failed.')
+ // Detect a changed review during the host checks. It is a local protected
+ // operator file, not an externally authenticated deployment receipt.
+ if(JSON.stringify(JSON.parse(fs.readFileSync(reviewPath,'utf8')))!==JSON.stringify(r)||fs.existsSync(path.join(root,'DO-NOT-START.json'))||
+    fs.existsSync(path.join(root,'ACTIVATION-IN-PROGRESS.json')))refuse('activation review changed during host preflight.')
+ return launchReviewedGateway({paths:{root,storage,state,identity,server,checkout},primaryHouseholdId:r.primaryHouseholdId,
+   operatorUserIds:[r.operatorUserId],trustedPhase1GatewayPort:13004,disposable:false})
 }
