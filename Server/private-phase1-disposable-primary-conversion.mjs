@@ -449,6 +449,32 @@ function prepareDisposableEventIdentityAndNotices(file) {
   }finally{db.close()}
 }
 
+// Shared reconciliation for a previously verified offline archive split.
+// Only the internal rehearsal's fresh temporary copy is accepted here;
+// never point it at the recovery archive or installed TEST/LIVE.
+export function preparePhase1OfflineArchiveCopyNotices(workRoot) {
+  const temp=fs.realpathSync(os.tmpdir())
+  const work=ordinaryDir(workRoot)
+  if(path.dirname(work)!==temp||!/^fc-phase1-offline-rehearsal-[a-zA-Z0-9]+$/.test(path.basename(work))) {
+    refuse('verified offline rehearsal temporary root required.')
+  }
+  const file=path.join(work,'calendar.db')
+  const stat=fs.lstatSync(file)
+  if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||fs.realpathSync(file)!==file||
+     ['-wal','-shm','-journal'].some(s=>fs.existsSync(file+s))) {
+    refuse('standalone physical offline archive copy required.')
+  }
+  const db=new DatabaseSync(file,{readOnly:true})
+  try{
+    check(db)
+    const names=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(x=>x.name)
+    const expected=listPrivatePhase1LegacyDispositionRules().filter(x=>RETAIN.has(x.disposition)).map(x=>x.table).sort()
+    if(JSON.stringify(names)!==JSON.stringify(expected))refuse('exact split household table roster required.')
+    trustedSyntheticTriggers(db,true)
+  }finally{db.close()}
+  return prepareDisposableEventIdentityAndNotices(file)
+}
+
 /**
  * Does NOT accept the real cold backup path. The destination is an isolated
  * OS-temp rehearsal, not a service data root. Neither output is bootable.
