@@ -16,7 +16,7 @@ import {reviewDisposablePhase1PostWriteRollback} from '../Server/private-phase1-
 import {rehearseOfflineCentralOwner,verifyOfflineCentralOwnerPassword} from './private-phase1-offline-central-owner-rehearsal.mjs'
 import {EventEmitter} from 'node:events'
 import {readHiddenOwnerPassword} from './private-phase1-local-owner-password-proof.mjs'
-import {rehearseOfflineHouseholdCopy} from './private-phase1-offline-household-copy-rehearsal.mjs'
+import {rehearseOfflineHouseholdCopy,rehearseOfflineCoordinatedPrimaryFamily} from './private-phase1-offline-household-copy-rehearsal.mjs'
 import {reviewLegacyTableDefinitionDifference as reviewDdl,reviewEventPeopleReferencePlacement} from './private-phase1-legacy-ddl-difference-review.mjs'
 import {compareSourceShapedLegacyMetadata} from './private-phase1-source-shaped-schema-parity.mjs'
 import assert from 'node:assert/strict'
@@ -540,4 +540,45 @@ test('local Owner prompt fails closed for redirected input, controls, excessive 
  const timed=hiddenProofTerminal()
  await assert.rejects(()=>readHiddenOwnerPassword(timed.input,timed.output,{timeoutMs:5}))
  assert.equal(timed.input.isRaw,false)
+})
+
+
+test('verified legacy archive becomes coordinated restorable inactive primary family in temporary storage',t=>{
+ const args=buildVerifiedOfflineFixture(t)
+ const source=path.join(args.snapshotRoot,'calendar.db')
+ const manifest=path.join(args.snapshotRoot,'OFFLINE-LEGACY-REVIEW.json')
+ const before=hash(source),manifestBefore=hash(manifest)
+ const r=rehearseOfflineCoordinatedPrimaryFamily(args)
+ assert.equal(r.coordinatedArchiveCopyVerified,true)
+ assert.equal(r.restoredHouseholds,1)
+ assert.equal(r.permanentEventIdentities,1)
+ assert.equal(r.oldSessionsNotImported,1)
+ assert.equal(r.centralSessions,0)
+ assert.equal(r.centralSelections,0)
+ assert.equal(r.restoredOwnerDisabled,true)
+ assert.equal(r.ownerAccessDenied,true)
+ assert.equal(r.notices,31)
+ assert.equal(r.acknowledgements,14)
+ assert.equal(r.notificationPreparation.uidOnlyIntentsQueued,0)
+ assert.equal(r.notificationPreparation.historyAndAcknowledgementsPreserved,true)
+ assert.equal(r.temporaryCopyRemoved,true)
+ assert.equal(r.archiveUnchanged,true)
+ assert.equal(r.persistentIdentityCreated,false)
+ assert.equal(r.installedCalendarsAccessed,false)
+ assert.equal(r.actualTestMigrationExecuted,false)
+ assert.equal(r.testDeploymentAuthorized,false)
+ assert.equal(r.liveDeploymentAuthorized,false)
+ assert.equal(hash(source),before)
+ assert.equal(hash(manifest),manifestBefore)
+ assert(!JSON.stringify(r).includes('scrypt-v1'))
+ assert(!JSON.stringify(r).includes('syntheticowner'))
+})
+
+test('coordinated archived conversion refuses tampered input and preserves archive bytes',t=>{
+ const args=buildVerifiedOfflineFixture(t)
+ const source=path.join(args.snapshotRoot,'calendar.db')
+ const before=hash(source)
+ fs.appendFileSync(path.join(args.snapshotRoot,'uploads','people','avatar.bin'),'tampered')
+ assert.throws(()=>rehearseOfflineCoordinatedPrimaryFamily(args))
+ assert.equal(hash(source),before)
 })
