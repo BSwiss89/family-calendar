@@ -37,7 +37,7 @@ function properties(words) {
 // explicitly lists 127.0.0.1. Never guess a default for a missing address.
 // Require a separately captured, COMPLETE show-all table with exactly one
 // IPv4-to-IPv4 rule and compare that row to the exported rule.
-function parseCompleteShowAll(showAll, legacyTestAddress) {
+function parseCompleteShowAll(showAll, targetAddress, targetPort) {
   if (typeof showAll !== 'string' || showAll.length < 30 ||
       showAll.length > 32768 || /\0/.test(showAll)) {
     refuse('complete bounded show-all forwarding evidence required.')
@@ -52,8 +52,8 @@ function parseCompleteShowAll(showAll, legacyTestAddress) {
   }
   const row = lines[3].split(/\s+/)
   if (row.length !== 4 || row[0] !== '127.0.0.1' ||
-      row[1] !== '13003' || row[2] !== legacyTestAddress ||
-      row[3] !== '13002') {
+      row[1] !== '13003' || row[2] !== targetAddress ||
+      row[3] !== targetPort) {
     refuse('show-all forwarding differs from the one reviewed TEST rule.')
   }
   return Object.freeze({
@@ -69,7 +69,7 @@ function parseCompleteShowAll(showAll, legacyTestAddress) {
  * A matching export alone does NOT prove listener ownership or direct denial.
  */
 export function assessPrivatePhase1AllFamilyPortproxyDump({
-  dump, showAll, installedTestSha, legacyTestAddress,
+  dump, showAll, installedTestSha, legacyTestAddress, phase = 'baseline',
 }) {
   if (typeof dump !== 'string' || dump.length < 15 || dump.length > 32768 ||
       /\0/.test(dump) || !SHA.test(installedTestSha) ||
@@ -77,7 +77,9 @@ export function assessPrivatePhase1AllFamilyPortproxyDump({
       !ipv4(legacyTestAddress) || !legacyTestAddress.startsWith('100.')) {
     refuse('bounded portproxy export and exact installed TEST references required.')
   }
-  const observed = parseCompleteShowAll(showAll, legacyTestAddress)
+  if (!['baseline','legacy-fenced','pre-route','candidate-review'].includes(phase)) refuse('unknown route review phase.')
+  const candidate = phase === 'candidate-review'
+  const observed = parseCompleteShowAll(showAll, candidate ? '127.0.0.1' : legacyTestAddress, candidate ? '13004' : '13002')
   const lines = dump.replace(/^\uFEFF/, '').split(/\r?\n/)
   let phase = 'initial'
   let count = 0
@@ -117,8 +119,11 @@ export function assessPrivatePhase1AllFamilyPortproxyDump({
   }
   return Object.freeze({
     kind: 'phase1-netsh-portproxy-complete-family-review-v1',
-    installedTestSha, expectedLegacyRuleCount: 1,
-    observedBaselinePortproxyMatches: true,
+    installedTestSha, phase, expectedLegacyRuleCount: candidate ? 0 : 1,
+    observedBaselinePortproxyMatches: phase === 'baseline',
+    legacyForwardingMatches: !candidate,
+    candidateGatewayForwardingMatches: candidate,
+    completeNetshRuleCount: 1,
     IPv6OrMixedFamilyRuleDetected: false,
     verifiedListenerOwnership: false,
     verifiedAllHostForwarders: false,
