@@ -10,6 +10,7 @@ import {verifyOfflineCentralOwnerPassword} from './private-phase1-offline-centra
 import {createPrivateActivationRecords} from '../Server/private-household-activation-records.mjs'
 import {createIndependentHouseholdInvitationTables} from '../Server/independent-household-invitations.mjs'
 import {planReviewedPrivateTestStartup} from '../Server/private-reviewed-test-startup-plan.mjs'
+import {launchDisposableReviewedPhase1Gateway} from '../Server/private-disposable-reviewed-phase1-gateway-runtime.mjs'
 import {DatabaseSync} from 'node:sqlite'
 import {fileURLToPath} from 'node:url'
 import {createHouseholdMembershipTables,getSoleActiveHouseholdOwner,listGrantedHouseholdsForSessionUser} from '../Server/household-memberships.mjs'
@@ -109,7 +110,7 @@ function rehearse(args,coordinated,startupProof=null){
  const sourceUploads=path.join(args.snapshotRoot,'uploads'),uploadList=uploads(sourceUploads)
  requireOk(uploadList.length===verified.uploadFiles)
  const temp=fs.realpathSync(os.tmpdir()),work=fs.mkdtempSync(path.join(temp,'fc-phase1-offline-rehearsal-'))
- let result
+ let result,bootContext,handedOff=false
  try{
   const dest=path.join(work,'calendar.db')
   fs.copyFileSync(source,dest,fs.constants.COPYFILE_EXCL)
@@ -155,15 +156,23 @@ function rehearse(args,coordinated,startupProof=null){
   }finally{db.close()}
   copyUploads(sourceUploads,path.join(work,'uploads'),uploadList)
   if(coordinated){
-   result={...result,...rehearseCoordinatedCopy({source,work,uploadList,startupProof})}
+   const converted=rehearseCoordinatedCopy({source,work,uploadList,startupProof})
+   bootContext=converted.bootContext
+   delete converted.bootContext
+   result={...result,...converted}
   }
   requireOk(digest(source)===sourceHash&&digest(manifest)===manifestHash&&same(uploads(sourceUploads),uploadList))
   requireOk(verifyOfflineLegacyTestSnapshot(args).result==='PASS')
   result.archiveUnchanged=true
+  if(startupProof?.boot===true){
+   requireOk(bootContext)
+   handedOff=true
+   return {receipt:result,bootContext,work,sourceHash,manifestHash,uploadList}
+  }
  }finally{
   // Only the unique directory allocated by this invocation; no outputs
   // survive for accidental deployment. Deletion is not forensic erasure.
-  fs.rmSync(work,{recursive:true,force:true})
+  if(!handedOff)fs.rmSync(work,{recursive:true,force:true})
  }
  return {...result,temporaryCopyRemoved:!fs.existsSync(work)}
 }
@@ -179,7 +188,7 @@ export function rehearseOfflineCoordinatedPrimaryFamily(args){return rehearse(ar
 // A successful password proof must refer to exactly the archive being split.
 // No caller-supplied boolean can activate a copy. Only this local wrapper can
 // request the disposable startup-plan exercise; no backend or listener starts.
-export async function rehearseOfflineCoordinatedPrimaryStartupPlan(args,password){
+async function verifiedStartupProof(args,password){
  const manifest=path.join(args.snapshotRoot,'OFFLINE-LEGACY-REVIEW.json')
  const source=path.join(args.snapshotRoot,'calendar.db')
  verifyOfflineLegacyTestSnapshot(args)
@@ -188,7 +197,11 @@ export async function rehearseOfflineCoordinatedPrimaryStartupPlan(args,password
  password=undefined
  requireOk(proof.passwordOwnershipVerified&&proof.archiveUnchanged&&!proof.accountActivationAuthorized&&
   digest(manifest)===startupProof.manifestHash&&digest(source)===startupProof.sourceHash)
- return rehearse(args,true,startupProof)
+ return startupProof
+}
+export async function rehearseOfflineCoordinatedPrimaryStartupPlan(args,password){
+ const proof=await verifiedStartupProof(args,password)
+ return rehearse(args,true,proof)
 }
 
 function rehearseCoordinatedCopy({source,work,uploadList,startupProof}){
@@ -259,8 +272,10 @@ function rehearseCoordinatedCopy({source,work,uploadList,startupProof}){
   requireOk(family.prepare('SELECT COUNT(*) AS n FROM events WHERE event_uid IS NULL').get().n===0)
  }finally{family.close()}
  requireOk(same(uploads(path.join(restoredHome,'uploads')),uploadList))
- const startup=startupProof?rehearseStartupPlan({work,restored,serverDirectory}):null
- return {...(startup?{startupPlanRehearsal:startup}:{}),coordinatedArchiveCopyVerified:true,coordinatedSnapshotFiles:baseline.fileCount,
+ const startup=startupProof?rehearseStartupPlan({work,restored,serverDirectory,boot:startupProof.boot===true}):null
+ const bootContext=startup?.bootContext
+ if(startup)delete startup.bootContext
+ return {...(bootContext?{bootContext}:{}),...(startup?{startupPlanRehearsal:startup}:{}),coordinatedArchiveCopyVerified:true,coordinatedSnapshotFiles:baseline.fileCount,
   restoredHouseholds:baseline.householdCount,permanentEventIdentities:events,
   oldSessionsNotImported:oldSessions,centralSessions:0,centralSelections:0,
   restoredOwnerDisabled:true,ownerAccessDenied:true,notificationPreparation:notice,
@@ -272,7 +287,7 @@ function rehearseCoordinatedCopy({source,work,uploadList,startupProof}){
 // Only inside the unique work directory allocated by rehearse(). The
 // independently verified inactive backup stays unchanged. This is a
 // temporary planning copy, not persistent account activation.
-function rehearseStartupPlan({work,restored,serverDirectory}){
+function rehearseStartupPlan({work,restored,serverDirectory,boot=false}){
  const centralDir=path.join(restored,'central')
  const identity=path.join(work,'startup-identity.db')
  const state=path.join(work,'startup-state')
@@ -291,12 +306,15 @@ function rehearseStartupPlan({work,restored,serverDirectory}){
   requireOk(owner&&db.prepare('SELECT COUNT(*) AS n FROM family_users').get().n===1)
   const op='rehearsal-'+randomBytes(10).toString('hex')
   requireOk(op!==owner.username)
+  const operatorPassword=randomBytes(32).toString('hex')
+  let operatorId
   db.exec('BEGIN IMMEDIATE')
   try{
    db.prepare("INSERT INTO family_users(username,display_name,password_hash,account_kind,disabled) VALUES(?,?,?,'person',0)")
-    .run(op,'Temporary rehearsal operator',hashFamilyPassword(randomBytes(32).toString('hex')))
+    .run(op,'Temporary rehearsal operator',hashFamilyPassword(operatorPassword))
    const operator=db.prepare('SELECT id FROM family_users WHERE username=?').get(op)
    requireOk(operator.id!==owner.id)
+   operatorId=operator.id
    requireOk(db.prepare('UPDATE family_users SET disabled=0 WHERE id=? AND disabled=1').run(owner.id).changes===1)
    requireOk(db.prepare("UPDATE household_registry SET disabled=0 WHERE storage_id='primary-family' AND disabled=1").run().changes===1)
    requireOk(db.prepare("UPDATE household_memberships SET disabled=0 WHERE user_id=? AND role='owner' AND disabled=1").run(owner.id).changes===1)
@@ -312,10 +330,95 @@ function rehearseStartupPlan({work,restored,serverDirectory}){
   const original=new DatabaseSync(path.join(centralDir,'identity.db'),{readOnly:true})
   try{requireOk(original.prepare('SELECT COUNT(*) AS n FROM family_users WHERE disabled=1').get().n===1&&
     getSoleActiveHouseholdOwner(original,'primary-family')===null)}finally{original.close()}
-  return {archivedOwnerPasswordVerified:true,inactiveStartupDenied:true,
+  return {...(boot?{bootContext:{fixtureRoot:work,storageRoot:restored,stateDirectory:state,identityDatabasePath:identity,serverDirectory,primaryHouseholdId:'primary-family',operatorUserIds:[operatorId],ownerUsername:owner.username,operatorUsername:op,operatorPassword}}:{}),archivedOwnerPasswordVerified:true,inactiveStartupDenied:true,
     disposableOwnerActivationRehearsed:true,separateTemporaryOperator:true,
     plannedHouseholds:1,centralSessions:0,centralSelections:0,
     originalRestoredOwnerStillDisabled:true,backendBooted:false,
     persistentAccountActivated:false,testDeploymentAuthorized:false}
  }finally{db.close()}
+}
+
+
+// Explicit offline boot rehearsal, not a deployment. The converted data is
+// reachable only on ephemeral loopback sockets with signed login. No writes
+// are requested through household APIs. Keep the original coordinated
+// snapshot and archive untouched; if shutdown is not proven, retain the
+// unique temporary work directory for local recovery rather than deleting it.
+export async function rehearseOfflineCoordinatedPrimaryBoot(args,password){
+ const proof=await verifiedStartupProof(args,password)
+ const {receipt,bootContext,work,sourceHash,manifestHash,uploadList}=rehearse(args,true,{...proof,boot:true})
+ const {ownerUsername,operatorUsername,operatorPassword,...options}=bootContext
+ let runtime,closed=false,attempted=false
+ const home=path.join(options.storageRoot,'households','primary-family')
+ const readFamily=()=>{
+  const db=new DatabaseSync(path.join(home,'data','calendar.db'),{readOnly:true})
+  try{
+   check(db)
+   const events=db.prepare('SELECT * FROM events ORDER BY id').all()
+   const people=db.prepare('SELECT * FROM people ORDER BY id').all()
+   const lists=db.prepare('SELECT * FROM lists ORDER BY id').all()
+   const notices=db.prepare('SELECT * FROM assignment_notification_outbox ORDER BY id').all()
+   const acks=db.prepare('SELECT * FROM test_assignment_acknowledgements ORDER BY notification_id').all()
+   return {events,people,lists,notices,acks}
+  }finally{db.close()}
+ }
+ try{
+  const before=readFamily()
+  attempted=true
+  runtime=await launchDisposableReviewedPhase1Gateway(options)
+  const status=runtime.snapshot()
+  const base=new URL(runtime.base)
+  requireOk(base.protocol==='http:'&&base.hostname==='127.0.0.1'&&status.householdCount===1&&status.supervisorAdmissionOpen&&status.childPorts.length===1)
+  const request=async(route,{cookie,body}={})=>{
+   const r=await fetch(base.origin+route,{method:body?'POST':'GET',redirect:'manual',signal:AbortSignal.timeout(10000),headers:{
+    ...(cookie?{Cookie:cookie}:{}),...(body?{'Content-Type':'application/json',Origin:'https://'+base.host}:{})
+   },...(body?{body:JSON.stringify(body)}:{})})
+   return r
+  }
+  async function expect(route,status,cookie){
+   const r=await request(route,{cookie})
+   requireOk(r.status===status)
+   await r.body?.cancel()
+  }
+  async function login(username,secret){
+   const r=await request('/api/auth/login',{body:{username,password:secret,deviceLabel:'Local offline rehearsal'}})
+   requireOk(r.status===200)
+   const cookie=r.headers.get('set-cookie')
+   await r.body?.cancel()
+   requireOk(typeof cookie==='string'&&cookie.startsWith('__Host-fc_gateway_session='))
+   return cookie.split(';')[0]
+  }
+  await expect('/api/health',200)
+  await expect('/api/events',401)
+  const direct=await fetch('http://127.0.0.1:'+status.childPorts[0]+'/api/events',{redirect:'manual',signal:AbortSignal.timeout(5000)})
+  requireOk(direct.status===403)
+  await direct.body?.cancel()
+  const owner=await login(ownerUsername,password)
+  password=undefined
+  const operator=await login(operatorUsername,operatorPassword)
+  for(const [route,rows] of [['/api/events',before.events],['/api/people',before.people],['/api/lists',before.lists]]){
+   const r=await request(route,{cookie:owner})
+   requireOk(r.status===200)
+   const payload=await r.json()
+   requireOk(Array.isArray(payload)&&same(payload.map(x=>Number(x.id)).sort((a,b)=>a-b),rows.map(x=>Number(x.id)).sort((a,b)=>a-b)))
+   await expect(route,404,operator)
+  }
+  await expect('/phase1',200,owner)
+  await expect('/api/admin/household-overview',404,owner)
+  await expect('/api/admin/household-overview',200,operator)
+  await expect('/api/recipes',404,owner)
+  requireOk((await runtime.shutdown()).allChildrenExited===true)
+  closed=true
+  requireOk(same(readFamily(),before)&&same(uploads(path.join(home,'uploads')),uploadList))
+  requireOk(digest(path.join(args.snapshotRoot,'calendar.db'))===sourceHash&&digest(path.join(args.snapshotRoot,'OFFLINE-LEGACY-REVIEW.json'))===manifestHash&&verifyOfflineLegacyTestSnapshot(args).result==='PASS')
+  return {...receipt,backendBooted:true,gatewayBooted:true,ownerLoginVerified:true,operatorIsolationVerified:true,
+   anonymousAccessDenied:true,directAccessDenied:true,existingEventCount:before.events.length,existingPeopleCount:before.people.length,existingListCount:before.lists.length,
+   eventAndNoticeRecordsUnchanged:true,uploadedFilesUnchanged:true,allChildrenExited:true,temporaryCopyRemoved:true,persistentAccountActivated:false}
+ }finally{
+  password=undefined
+  if(runtime&&!closed){
+   try{const r=await runtime.shutdown();closed=r.allChildrenExited===true}catch{/* retain temporary data and lock for operator review */}
+  }
+  if(closed||!attempted)fs.rmSync(work,{recursive:true,force:true})
+ }
 }
