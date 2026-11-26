@@ -5,6 +5,7 @@
 // not independently verified historical DDL. No actual archived SQL is loaded.
 // Matching the archived aggregate counts does NOT prove exact historical DDL.
 import test from 'node:test'
+import {reviewLegacyTableDefinitionDifference as reviewDdl} from './private-phase1-legacy-ddl-difference-review.mjs'
 import {compareSourceShapedLegacyMetadata} from './private-phase1-source-shaped-schema-parity.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -164,4 +165,21 @@ test('schema comparison detects structural differences even with the same column
   assert.equal(changed.realMigrationExecuted,false)
   assert.equal(changed.rawArchivedSqlExposed,false)
  } finally {db.close()}
+})
+
+test('table definition review distinguishes whitespace and declaration order from real token drift',()=>{
+ const expected="CREATE TABLE sample (id INTEGER PRIMARY KEY, label TEXT DEFAULT 'A B', n INTEGER CHECK(n > 0)) STRICT"
+ assert.equal(reviewDdl(expected,expected).classification,'EXACT')
+ assert.equal(reviewDdl("create table sample ( id integer primary key, /* format */ label text default 'A B', n integer check ( n>0 )) strict",expected).classification,'LEXICAL_MATCH')
+ assert.equal(reviewDdl("CREATE TABLE sample (n INTEGER CHECK(n > 0), id INTEGER PRIMARY KEY, label TEXT DEFAULT 'A B') STRICT",expected).classification,'DECLARATION_REORDER_ONLY')
+ assert.equal(reviewDdl(expected.replace("'A B'","'a b'"),expected).classification,'REVIEW_REQUIRED')
+ const changed=reviewDdl(expected.replace('n > 0','n >= 0'),expected)
+ assert.equal(changed.classification,'REVIEW_REQUIRED')
+ assert.equal(changed.checkExpressionTokensMatch,false)
+ assert.equal(changed.semanticEquivalenceProven,false)
+ const conflict=reviewDdl(expected.replace('PRIMARY KEY','PRIMARY KEY ON CONFLICT REPLACE'),expected)
+ assert.equal(conflict.classification,'REVIEW_REQUIRED')
+ assert.equal(conflict.checkExpressionTokensMatch,true)
+ assert.equal(reviewDdl('unknown @ sql',expected).classification,'UNRECOGNIZED_DDL_REVIEW_REQUIRED')
+ assert(!JSON.stringify(changed).includes('n > 0'))
 })
