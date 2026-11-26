@@ -98,7 +98,7 @@ const REQUEST_REMOVED = new Set([
   'x-forwarded-proto', 'x-real-ip', 'cf-connecting-ip',
 ])
 const RESPONSE_REMOVED = new Set([
-  ...HOP_HEADERS, 'set-cookie', 'www-authenticate', 'location',
+  ...HOP_HEADERS, 'set-cookie', 'www-authenticate', 'location', PRIVATE_UPSTREAM_HEADER,
 ])
 const HTTP_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
 
@@ -210,7 +210,26 @@ async function verifyBindingOnce(householdId, port, upstreamToken) {
 
 // Exported for direct, disposable loopback-only regression testing; this does
 // not create an HTTP route or relax the gateway's normal authorization.
-export async function verifyPrivateBackendBindings(portByHousehold, tokensByHousehold) {
+export async function verifyPhase1BackendDirectDenial(port, upstreamToken) {
+  verifiedBackendPort(port)
+  requirePrivateUpstreamToken(upstreamToken)
+  // Deliberately wrong, never the real secret. A single flipped nibble
+  // guarantees inequality without printing or persisting either capability.
+  const wrong = (upstreamToken[0] === '0' ? '1' : '0') + upstreamToken.slice(1)
+  for (const headers of [{}, {[PRIVATE_UPSTREAM_HEADER]: wrong}]) {
+    const response = await fetch('http://127.0.0.1:' + port +
+      '/api/internal/household-binding', {
+      method: 'GET', redirect: 'manual', cache: 'no-store', headers,
+      signal: AbortSignal.timeout(2500),
+    })
+    await response.body?.cancel()
+    if (response.status !== 403) {
+      throw new Error('Phase 1 backend did not deny direct untrusted access.')
+    }
+  }
+}
+
+export async function verifyPrivateBackendBindings(portByHousehold, tokensByHousehold, {requireDirectDenial = false} = {}) {
   for (const [householdId, port] of portByHousehold) {
     let verified = false
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -232,6 +251,7 @@ export async function verifyPrivateBackendBindings(portByHousehold, tokensByHous
       throw new Error('Private gateway refused unverified household backend: ' +
         householdId)
     }
+    if (requireDirectDenial) await verifyPhase1BackendDirectDenial(port, tokensByHousehold.get(householdId))
   }
 }
 
@@ -460,7 +480,7 @@ export async function startPrivateHouseholdGateway({
   }
   // Verify the binding to the actual loopback service BEFORE mutating
   // central identity/share tables or opening a client listener.
-  await verifyPrivateBackendBindings(portByHousehold, tokensByHousehold)
+  await verifyPrivateBackendBindings(portByHousehold, tokensByHousehold, {requireDirectDenial: phase1OwnerPilotOnly})
   // Only one private test gateway may mutate central/share SQLite and read
   // household source outboxes at a time. Acquire BEFORE creating any tables.
   const writerLock = acquirePrivateGatewayWriterLock(storageRoot)
@@ -1604,6 +1624,7 @@ export async function startPrivateHouseholdGateway({
       await verifyPrivateBackendBindings(
         new Map([[household.householdId, portByHousehold.get(household.householdId)]]),
         tokensByHousehold,
+        {requireDirectDenial: phase1OwnerPilotOnly},
       )
     } catch {
       response.set('Cache-Control', 'no-store')
@@ -1786,7 +1807,7 @@ export async function startPrivateHouseholdGateway({
       if (!eligible) throw new Error('Household has no active invited owner.')
 
       await verifyPrivateBackendBindings(candidate,
-        new Map([[householdId, token]]))
+        new Map([[householdId, token]]), {requireDirectDenial: phase1OwnerPilotOnly})
       if (closing) throw new Error('Private gateway closed during enrollment.')
       if (activeEventMutations.size !== 0 || activeLocalAi.size !== 0) {
         throw new Error('Private gateway has active work; retry enrollment.')
