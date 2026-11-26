@@ -238,6 +238,8 @@ export async function launchDisposableReviewedPhase1Gateway({
       enforceFamilyMemberPermissions: true,
       phase1OwnerPilotOnly: true,
       trustedPhase1GatewayPort,
+      supervisorAdmissionCheck: () => guard.snapshot().phase === 'running' &&
+        backends.every(({child}) => child.exitCode === null && child.signalCode === null && child.connected === true),
     })
     guard.markHealthy()
     let shutdownRequested = false
@@ -251,12 +253,39 @@ export async function launchDisposableReviewedPhase1Gateway({
         childPorts: Object.freeze([...Object.values(backendPorts)]),
         realCalendarBackendsStarted: true,
         realGatewayStarted: true,
+        supervisorAdmissionOpen: guard.snapshot().phase === 'running' &&
+          backends.every(({child}) => child.exitCode === null && child.signalCode === null && child.connected === true),
         osTempFixtureOnly: true,
         testDeploymentAuthorized: false,
         liveDeploymentAuthorized: false,
         osWideWriterFencingVerified: false,
         windowsTaskInstalled: false,
       }),
+      // Fault injection is restricted to the captured OS-temp fixture child.
+      crashCapturedBackendForTest(householdId) {
+        if (shutdownRequested || guard.snapshot().phase !== 'running') refuse('fixture not running.')
+        const backend = backends.find(item => item.householdId === householdId)
+        if (!backend) refuse('unknown captured fixture child.')
+        return backend.child.kill()
+      },
+      // Explicit fixture-only cleanup after a hold. Never clear supervisor
+      // ownership or a crash marker; no automatic restart or rollback.
+      async closeHeldFixtureForTest() {
+        if (shutdownRequested || guard.snapshot().phase !== 'held') refuse('held fixture required.')
+        shutdownRequested = true
+        await gateway.close()
+        const failures = []
+        for (const backend of [...backends].reverse()) {
+          try {
+            if (backend.child.exitCode !== null || backend.child.signalCode !== null) await backend.closed
+            else await stopCaptured(backend)
+          } catch (error) { failures.push(error) }
+        }
+        central.close()
+        if (failures.length) throw new AggregateError(failures,'Held fixture cleanup requires review.')
+        return Object.freeze({gatewayClosed:true, allCapturedChildrenExited:true,
+          ownerInstanceRetained:true, testDeploymentAuthorized:false})
+      },
       async shutdown() {
         if (shutdownRequested) refuse('reviewed fixture shutdown already requested.')
         shutdownRequested = true

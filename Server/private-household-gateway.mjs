@@ -439,7 +439,20 @@ export async function startPrivateHouseholdGateway({
   trustedPhase1GatewayPort = null,
   // Explicit OFF-by-default first-family control-plane bootstrap (loopback only).
   allowEmptyGatewayBootstrap = false,
+  // Optional trusted supervisor admission; never derived from a request.
+  supervisorAdmissionCheck = null,
 }) {
+  if (supervisorAdmissionCheck !== null &&
+      (!phase1OwnerPilotOnly || typeof supervisorAdmissionCheck !== 'function')) {
+    throw new Error('Supervisor admission is restricted to the trusted Phase 1 runtime.')
+  }
+  function admittedBySupervisor() {
+    if (supervisorAdmissionCheck === null) return true
+    try { return supervisorAdmissionCheck() === true } catch { return false }
+  }
+  function denySupervisorAdmission(response) {
+    return response.set('Cache-Control','no-store').status(503).json({error:'Private calendar service temporarily unavailable.'})
+  }
   if (typeof enforceFamilyMemberPermissions !== 'boolean') {
     throw new Error('Private family permission enforcement must be a trusted boolean setting.')
   }
@@ -647,6 +660,11 @@ export async function startPrivateHouseholdGateway({
   const ownerPasswordStepUp = createOwnerPasswordStepUp()
   const app = express()
   app.disable('x-powered-by')
+  // Must precede login, health, all central writes and household routing.
+  app.use((_request,response,next) => {
+    if (!admittedBySupervisor()) return denySupervisorAdmission(response)
+    next()
+  })
   // Only login and signed-in device-profile selection need parsed JSON.
   // Calendar requests (including multipart uploads) still stream unchanged.
   app.use('/api/auth/login', express.json({ limit: '32kb' }))
@@ -1630,6 +1648,8 @@ export async function startPrivateHouseholdGateway({
       response.set('Cache-Control', 'no-store')
       return response.status(503).json({ error: 'Household service temporarily unavailable.' })
     }
+    // Recheck after awaited binding probes; a child may have failed meanwhile.
+    if (!admittedBySupervisor()) return denySupervisorAdmission(response)
     // Use exactly the same policy decision as the write-ahead journal. A
     // different route regex could let a backend mutation bypass sharing sync.
     if (policy.localAiIntent === true) {
