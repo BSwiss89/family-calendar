@@ -17,6 +17,7 @@ import { createIndependentHouseholdInvitationTables,
 import { provisionEmptyHousehold } from '../Server/household-storage.mjs'
 import { launchDisposableReviewedPhase1Gateway } from '../Server/private-disposable-reviewed-phase1-gateway-runtime.mjs'
 import { inspectReviewedWindowsSupervisorOwnership } from '../Server/private-reviewed-windows-supervisor-ownership.mjs'
+import {assertLocalMaintenanceClear,createLocalBackupStopRequest,readLocalBackupStopRequest,completeLocalBackupStopRequest} from '../Server/private-phase1-local-maintenance-control.mjs'
 
 const serverDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'Server')
 const password = 'Disposable-Primary-Owner-Only-2026!'
@@ -398,8 +399,25 @@ test('real supervisor captures coordinated backup after shutdown and revokes ses
    const event=await request(runtime.base,'/api/events',{method:'POST',cookie,body:{title:'Backup '+username,date:'2027-02-03',time:'13:00'}})
    assert.equal(event.response.status,201)
   }
+  assertLocalMaintenanceClear(options.fixtureRoot)
+  assert.equal(readLocalBackupStopRequest(options.fixtureRoot),null)
+  const requested=createLocalBackupStopRequest(options.fixtureRoot)
+  assert.equal(requested.restartBlocked,true)
+  assert.throws(()=>createLocalBackupStopRequest(options.fixtureRoot))
+  assert.throws(()=>assertLocalMaintenanceClear(options.fixtureRoot))
+  const request=readLocalBackupStopRequest(options.fixtureRoot)
+  assert.equal(request.requestId,requested.requestId)
+  assert.throws(()=>readLocalBackupStopRequest(options.fixtureRoot))
   stopping=true
   const receipt=await runtime.shutdownAndCaptureBackup()
+  completeLocalBackupStopRequest(options.fixtureRoot,request,receipt)
+  const maintenance=JSON.parse(fs.readFileSync(path.join(options.fixtureRoot,'MAINTENANCE-REVIEW','RECEIPT.json'),'utf8'))
+  assert.equal(maintenance.result,'PASS')
+  assert.equal(maintenance.backupName,receipt.backupName)
+  assert.equal(maintenance.requestId,request.requestId)
+  assert.equal(maintenance.restartBlocked,true)
+  assert.throws(()=>assertLocalMaintenanceClear(options.fixtureRoot))
+  assert.throws(()=>completeLocalBackupStopRequest(options.fixtureRoot,request,receipt))
   assert.equal(receipt.households,2)
   assert.equal(receipt.sessionsRevokedInCopy,2)
   for(const flag of ['sourceSessionsUnchanged','sourceFilesUnchanged','coordinatedBackupVerified','supervisorHeldDuringCapture','allChildrenExited','gatewayClosed','ownerInstanceReleased'])assert.equal(receipt[flag],true,flag)
@@ -422,4 +440,22 @@ test('real supervisor captures coordinated backup after shutdown and revokes ses
    try{assert.equal(db.prepare('SELECT title FROM events').get().title,'Backup '+username)}finally{db.close()}
   }
  }finally{if(!stopping)await runtime.shutdown()}
+})
+
+
+test('malformed or stale local maintenance request cannot become a shutdown authorization',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'fc-phase1-maintenance-'))
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true,maxRetries:4,retryDelay:100}))
+ fs.mkdirSync(path.join(root,'supervisor-state'))
+ const lock=path.join(root,'supervisor-state','.family-calendar-reviewed-supervisor-instance.lock')
+ assert.throws(()=>createLocalBackupStopRequest(root))
+ assertLocalMaintenanceClear(root)
+ const instance={schemaVersion:1,type:'reviewed-multifamily-supervisor-instance',nonce:'a'.repeat(64),pid:process.pid}
+ fs.writeFileSync(lock,JSON.stringify(instance))
+ createLocalBackupStopRequest(root)
+ fs.writeFileSync(lock,JSON.stringify({...instance,nonce:'b'.repeat(64)}))
+ assert.throws(()=>readLocalBackupStopRequest(root))
+ assert.throws(()=>assertLocalMaintenanceClear(root))
+ assert.equal(fs.existsSync(path.join(root,'MAINTENANCE-REVIEW','IN-PROGRESS.json')),false)
+ assert.equal(fs.existsSync(path.join(root,'MAINTENANCE-REVIEW','RECEIPT.json')),false)
 })
