@@ -99,7 +99,7 @@ function copyUploads(source,target,expected){
  }
  requireOk(same(uploads(target),expected)&&same(uploads(source),expected))
 }
-function rehearse(args,coordinated,startupProof=null){
+function rehearse(args,coordinated,startupProof=null,inactiveStage=null){
  const verified=verifyOfflineLegacyTestSnapshot(args)
  const parity=inspectSourceShapedLegacyArchive(args)
  requireOk(parity.structuralMatches===27&&parity.exactExplicitIndexDdlMatches===27&&
@@ -110,7 +110,7 @@ function rehearse(args,coordinated,startupProof=null){
  const sourceUploads=path.join(args.snapshotRoot,'uploads'),uploadList=uploads(sourceUploads)
  requireOk(uploadList.length===verified.uploadFiles)
  const temp=fs.realpathSync(os.tmpdir()),work=fs.mkdtempSync(path.join(temp,'fc-phase1-offline-rehearsal-'))
- let result,bootContext,handedOff=false
+ let result,bootContext,stageContext,handedOff=false
  try{
   const dest=path.join(work,'calendar.db')
   fs.copyFileSync(source,dest,fs.constants.COPYFILE_EXCL)
@@ -156,14 +156,20 @@ function rehearse(args,coordinated,startupProof=null){
   }finally{db.close()}
   copyUploads(sourceUploads,path.join(work,'uploads'),uploadList)
   if(coordinated){
-   const converted=rehearseCoordinatedCopy({source,work,uploadList,startupProof})
+   const converted=rehearseCoordinatedCopy({source,work,uploadList,startupProof,prepareInactiveStage:inactiveStage!==null})
    bootContext=converted.bootContext
    delete converted.bootContext
+   stageContext=converted.stageContext
+   delete converted.stageContext
    result={...result,...converted}
   }
   requireOk(digest(source)===sourceHash&&digest(manifest)===manifestHash&&same(uploads(sourceUploads),uploadList))
   requireOk(verifyOfflineLegacyTestSnapshot(args).result==='PASS')
   result.archiveUnchanged=true
+  if(inactiveStage!==null){
+   requireOk(stageContext&&startupProof===null)
+   result={...result,...publishInactiveStage({args,inactiveStage,stageContext,sourceHash,manifestHash})}
+  }
   if(startupProof?.boot===true){
    requireOk(bootContext)
    handedOff=true
@@ -204,7 +210,7 @@ export async function rehearseOfflineCoordinatedPrimaryStartupPlan(args,password
  return rehearse(args,true,proof)
 }
 
-function rehearseCoordinatedCopy({source,work,uploadList,startupProof}){
+function rehearseCoordinatedCopy({source,work,uploadList,startupProof,prepareInactiveStage=false}){
  const serverDirectory=fileURLToPath(new URL('../Server/',import.meta.url))
  const old=new DatabaseSync(source,{readOnly:true})
  let owner,oldSessions
@@ -275,7 +281,7 @@ function rehearseCoordinatedCopy({source,work,uploadList,startupProof}){
  const startup=startupProof?rehearseStartupPlan({work,restored,serverDirectory,boot:startupProof.boot===true}):null
  const bootContext=startup?.bootContext
  if(startup)delete startup.bootContext
- return {...(bootContext?{bootContext}:{}),...(startup?{startupPlanRehearsal:startup}:{}),coordinatedArchiveCopyVerified:true,coordinatedSnapshotFiles:baseline.fileCount,
+ return {...(prepareInactiveStage?{stageContext:{serverDirectory,sourceRoot:baseline.snapshotRoot,attestation:baseline.attestation}}:{}),...(bootContext?{bootContext}:{}),...(startup?{startupPlanRehearsal:startup}:{}),coordinatedArchiveCopyVerified:true,coordinatedSnapshotFiles:baseline.fileCount,
   restoredHouseholds:baseline.householdCount,permanentEventIdentities:events,
   oldSessionsNotImported:oldSessions,centralSessions:0,centralSelections:0,
   restoredOwnerDisabled:true,ownerAccessDenied:true,notificationPreparation:notice,
@@ -421,4 +427,70 @@ export async function rehearseOfflineCoordinatedPrimaryBoot(args,password){
   }
   if(closed||!attempted)fs.rmSync(work,{recursive:true,force:true})
  }
+}
+
+
+// Prepare a NEW inactive TEST migration bundle; the stage is a copy of the
+// verified converted backup, not a running household. This function cannot
+// activate accounts, reconfigure a task or promote the stage. Host callers
+// must separately establish the current maintenance fence and fresh capture.
+// The exact sibling name and exclusive creation avoid touching installed data.
+export function prepareInactivePhase1TestMigrationStage(args,{candidateSha,destinationParent,scope}={}){
+ requireOk(/^[a-f0-9]{40}$/.test(candidateSha??'')&&
+  ['disposable-test-fixture','windows-inactive-stage'].includes(scope)&&
+  typeof destinationParent==='string'&&path.isAbsolute(destinationParent))
+ const parent=fs.realpathSync(destinationParent)
+ requireOk(fs.lstatSync(destinationParent).isDirectory()&&!fs.lstatSync(destinationParent).isSymbolicLink())
+ const temp=fs.realpathSync(os.tmpdir())
+ const beneath=(a,b)=>{const r=path.relative(a,b);return r!==''&&r!=='..'&&!r.startsWith('..'+path.sep)&&!path.isAbsolute(r)}
+ if(scope==='disposable-test-fixture'){
+  requireOk(beneath(temp,parent)&&path.basename(parent).startsWith('fc-phase1-archive-test-'))
+ }else{
+  requireOk(process.platform==='win32'&&parent===fs.realpathSync(path.join(os.homedir(),'Projects')))
+ }
+ const recovery=fs.realpathSync(args.recoveryParent)
+ requireOk(path.dirname(recovery)===parent&&path.basename(recovery)==='family-calendar-phase1-recovery')
+ const destination=path.join(parent,'family-calendar-phase1-test-data')
+ // Refuse any existing destination, even a broken link or incomplete stage.
+ try{fs.lstatSync(destination);throw Error('Stage exists')}catch(e){requireOk(e.code==='ENOENT')}
+ return rehearse(args,true,null,{destination,candidateSha,scope})
+}
+
+function publishInactiveStage({args,inactiveStage,stageContext,sourceHash,manifestHash}){
+ const {destination,candidateSha,scope}=inactiveStage
+ const {serverDirectory,sourceRoot,attestation}=stageContext
+ const dataRoot=path.join(destination,'data')
+ const reviewFile=path.join(destination,'INACTIVE-STAGE-REVIEW.json')
+ const attestationFile=path.join(destination,'COORDINATED-BACKUP-ATTESTATION.json')
+ // Exclusive parent creation. Any later failure deliberately retains it
+ // (with no success receipt) rather than deleting potential recovery data.
+ fs.mkdirSync(destination,{mode:0o700})
+ const writeNew=(filename,value)=>{
+  const fd=fs.openSync(filename,'wx',0o600)
+  try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd)}finally{fs.closeSync(fd)}
+ }
+ writeNew(path.join(destination,'DO-NOT-START.json'),{kind:'phase1-inactive-test-stage-hold-v1',automaticStartupAllowed:false,accountActivationAuthorized:false,testDeploymentAuthorized:false,liveDeploymentAuthorized:false})
+ const copy=copyVerifiedPrivateRestoreSet({serverDirectory,sourceRoot,destinationRoot:dataRoot,approvedAttestation:attestation})
+ requireOk(copy.verified===true&&copy.householdCount===1&&copy.fileCount===attestation.files.length)
+ requireOk(verifyOfflinePrivateRestoreSet({serverDirectory,restoreRoot:dataRoot},attestation).ok)
+ const central=new DatabaseSync(path.join(dataRoot,'central','identity.db'),{readOnly:true})
+ try{
+  check(central)
+  for(const table of ['family_users','household_registry','household_memberships']){
+   requireOk(central.prepare('SELECT COUNT(*) AS n FROM '+table).get().n===1)
+   requireOk(central.prepare('SELECT COUNT(*) AS n FROM '+table+' WHERE disabled=1').get().n===1)
+  }
+  requireOk(central.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n===0&&
+   central.prepare('SELECT COUNT(*) AS n FROM household_session_selections').get().n===0)
+ }finally{central.close()}
+ requireOk(digest(path.join(args.snapshotRoot,'calendar.db'))===sourceHash&&digest(path.join(args.snapshotRoot,'OFFLINE-LEGACY-REVIEW.json'))===manifestHash&&verifyOfflineLegacyTestSnapshot(args).result==='PASS')
+ writeNew(attestationFile,attestation)
+ writeNew(reviewFile,{kind:'phase1-inactive-test-migration-stage-v1',scope,candidateSha,installedTestSha:args.expectedInstalledTestSha,
+  sourceArchiveName:path.basename(args.snapshotRoot),sourceDatabaseSha256:sourceHash,sourceManifestSha256:manifestHash,
+  coordinatedAttestationSha256:attestation.sha256,households:1,files:copy.fileCount,
+  ownerDisabled:true,sessionsImported:0,hostWriterFenceVerified:false,accountActivationAuthorized:false,
+  testDeploymentAuthorized:false,liveDeploymentAuthorized:false})
+ return {inactiveMigrationBundleCreated:true,stageFiles:copy.fileCount,stageOwnerDisabled:true,
+  persistentIdentityCreated:true,hostWriterFenceVerified:false,stageStartupAuthorized:false,
+  persistentAccountActivated:false,testDeploymentAuthorized:false,liveDeploymentAuthorized:false}
 }
