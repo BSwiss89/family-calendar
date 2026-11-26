@@ -16,7 +16,7 @@ import {reviewDisposablePhase1PostWriteRollback} from '../Server/private-phase1-
 import {rehearseOfflineCentralOwner,verifyOfflineCentralOwnerPassword} from './private-phase1-offline-central-owner-rehearsal.mjs'
 import {EventEmitter} from 'node:events'
 import {readHiddenOwnerPassword} from './private-phase1-local-owner-password-proof.mjs'
-import {rehearseOfflineHouseholdCopy,rehearseOfflineCoordinatedPrimaryFamily,rehearseOfflineCoordinatedPrimaryStartupPlan} from './private-phase1-offline-household-copy-rehearsal.mjs'
+import {rehearseOfflineHouseholdCopy,rehearseOfflineCoordinatedPrimaryFamily,rehearseOfflineCoordinatedPrimaryStartupPlan,rehearseOfflineCoordinatedPrimaryBoot} from './private-phase1-offline-household-copy-rehearsal.mjs'
 import {reviewLegacyTableDefinitionDifference as reviewDdl,reviewEventPeopleReferencePlacement} from './private-phase1-legacy-ddl-difference-review.mjs'
 import {compareSourceShapedLegacyMetadata} from './private-phase1-source-shaped-schema-parity.mjs'
 import assert from 'node:assert/strict'
@@ -710,4 +710,24 @@ test('converted source-shaped legacy household boots through the reviewed Phase 
  assert.deepEqual(readFamily(),before)
  assert.equal(hash(f.file),sourceBefore)
  assert.equal(verifyOfflinePrivateRestoreSet({serverDirectory,restoreRoot:baseline.snapshotRoot},baseline.attestation).ok,true)
+})
+
+
+test('verified synthetic cold archive boots through password-gated offline rehearsal and cleans up', {timeout:120000},async t=>{
+ const args=buildVerifiedOfflineFixture(t)
+ const source=path.join(args.snapshotRoot,'calendar.db')
+ const manifest=path.join(args.snapshotRoot,'OFFLINE-LEGACY-REVIEW.json')
+ const before=hash(source),manifestBefore=hash(manifest)
+ await assert.rejects(()=>rehearseOfflineCoordinatedPrimaryBoot(args,'incorrect password'))
+ const r=await rehearseOfflineCoordinatedPrimaryBoot(args,'Synthetic Full Shape Example 123!')
+ for(const flag of ['backendBooted','gatewayBooted','ownerLoginVerified','operatorIsolationVerified','anonymousAccessDenied','directAccessDenied','eventAndNoticeRecordsUnchanged','uploadedFilesUnchanged','allChildrenExited','temporaryCopyRemoved','archiveUnchanged'])assert.equal(r[flag],true,flag)
+ for(const flag of ['persistentAccountActivated','testDeploymentAuthorized','liveDeploymentAuthorized','installedCalendarsAccessed','actualTestMigrationExecuted'])assert.equal(r[flag],false,flag)
+ assert.equal(r.existingEventCount,1)
+ assert.equal(r.existingPeopleCount,1)
+ assert.equal(r.existingListCount,1)
+ assert.equal(hash(source),before)
+ assert.equal(hash(manifest),manifestBefore)
+ assert(!JSON.stringify(r).includes('syntheticowner'))
+ assert(!JSON.stringify(r).includes('scrypt-v1'))
+ assert(!JSON.stringify(r).includes('Synthetic Full Shape Example'))
 })
