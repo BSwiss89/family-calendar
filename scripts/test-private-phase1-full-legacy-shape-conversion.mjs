@@ -438,7 +438,7 @@ for(const scenario of ['clean','pending edit','self edit','missing baseline','un
    const expected=Number(scenario==='pending edit')
    assert.equal(r.eventIdentityAndNoticePreparation.legitimateLegacyIntentsQueued,expected)
    assert.equal(r.eventIdentityAndNoticePreparation.legacyDirtyEventsProcessed,Number(scenario!=='clean'))
-   assert.equal(r.eventIdentityAndNoticePreparation.uidOnlyDirtyEventsProcessed,1)
+   assert.equal(r.eventIdentityAndNoticePreparation.uidDirtyEventsProcessed,1)
    assert.equal(r.eventIdentityAndNoticePreparation.uidOnlyIntentsQueued,0)
    assert.equal(r.eventIdentityAndNoticePreparation.pushTransmitted,false)
    assert.equal(r.actualTestMigrationExecuted,false)
