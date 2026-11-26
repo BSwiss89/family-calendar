@@ -6,6 +6,7 @@
 // Matching the archived aggregate counts does NOT prove exact historical DDL.
 import test from 'node:test'
 import {installPrivateEventIdentity} from '../Server/private-event-identity.mjs'
+import {reconcileNotificationMutations} from '../Server/notification-event-mutation-capture.mjs'
 import {createEventShareTables} from '../Server/event-only-shares.mjs'
 import {createEventShareSyncJournal} from '../Server/event-share-sync-journal.mjs'
 import {captureDisposableCoordinatedHouseholdSnapshot} from '../Server/private-disposable-coordinated-snapshot.mjs'
@@ -344,3 +345,63 @@ test('converted synthetic primary household becomes a coordinated restorable set
  assert.equal(review.restoreAuthorized,false)
  assert.equal(hash(f.file),original)
 })
+
+
+
+// Reconcile legacy pending mutations before UID backfill: UID updates advance
+// the dirty revision even when the material hash is unchanged. Doing this in
+// the opposite order can invalidate a previously exact actor attribution.
+for (const scenario of ['clean','pending change','attributed self change']) {
+ test('UID-only reconciliation preserves historical notices: '+scenario,t=>{
+  const f=buildFixture(t),original=hash(f.file)
+  stageDisposablePhase1PrimaryFamily({serverDirectory:f.serverDirectory,sourceRoot:f.src,destinationRoot:f.out})
+  const db=new DatabaseSync(path.join(f.out,'households','primary-family','data','calendar.db'))
+  try {
+   const outbox=()=>db.prepare('SELECT * FROM assignment_notification_outbox ORDER BY id').all()
+   const acknowledgements=()=>db.prepare('SELECT * FROM test_assignment_acknowledgements ORDER BY notification_id').all()
+   const baselines=()=>db.prepare('SELECT * FROM notification_event_baselines ORDER BY event_id').all()
+   const prior=outbox(),acks=acknowledgements()
+   assert.equal(prior.length,31)
+   assert.equal(acks.length,14)
+   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM notification_dirty_events').get().n,0)
+   if(scenario!=='clean'){
+    db.prepare('UPDATE events SET title=? WHERE id=46').run('Synthetic genuine pending edit')
+    if(scenario==='attributed self change'){
+     const {revision}=db.prepare('SELECT revision FROM notification_dirty_events WHERE event_id=46').get()
+     db.prepare('INSERT INTO notification_dirty_event_attribution(event_id,person_id,revision) VALUES(?,?,?)').run(46,7,revision)
+    }
+   }
+   const expected=Number(scenario==='pending change')
+   assert.deepEqual(reconcileNotificationMutations(db,{at:1000}),{
+    processed:Number(scenario!=='clean'),queued:expected,remaining:0
+   })
+   const reconciled=outbox(),baseline=baselines()
+   assert.deepEqual(reconciled.slice(0,31),prior)
+   assert.deepEqual(acknowledgements(),acks)
+   assert.equal(reconciled.length,31+expected)
+   if(expected){
+    const notice=reconciled[31]
+    assert.equal(notice.event_id,46)
+    assert.equal(notice.person_id,7)
+    assert.equal(notice.kind,'changed')
+    assert.equal(notice.change_mask,1)
+    assert.equal(notice.delivered_at,null)
+   }
+   installPrivateEventIdentity(db)
+   const {event_uid}=db.prepare('SELECT event_uid FROM events WHERE id=46').get()
+   assert.match(event_uid,/^[a-f0-9]{32}$/)
+   assert.equal(db.prepare('SELECT change_mask FROM notification_dirty_event_fields WHERE event_id=46').get().change_mask,0)
+   assert.deepEqual(reconcileNotificationMutations(db,{at:2000}),{processed:1,queued:0,remaining:0})
+   assert.deepEqual(outbox(),reconciled)
+   assert.deepEqual(acknowledgements(),acks)
+   assert.deepEqual(baselines(),baseline)
+   assert.deepEqual(reconcileNotificationMutations(db,{at:3000}),{processed:0,queued:0,remaining:0})
+   for(const table of ['notification_dirty_events','notification_dirty_event_fields','notification_dirty_event_attribution','notification_deleted_event_details']){
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM '+table).get().n,0)
+   }
+   assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok')
+   assert.equal(db.prepare('PRAGMA foreign_key_check').all().length,0)
+  }finally{db.close()}
+  assert.equal(hash(f.file),original)
+ })
+}
