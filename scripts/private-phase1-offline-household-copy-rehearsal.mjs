@@ -4,7 +4,12 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import {createHash} from 'node:crypto'
+import {createHash,randomBytes} from 'node:crypto'
+import {hashFamilyPassword} from '../Server/family-auth.mjs'
+import {verifyOfflineCentralOwnerPassword} from './private-phase1-offline-central-owner-rehearsal.mjs'
+import {createPrivateActivationRecords} from '../Server/private-household-activation-records.mjs'
+import {createIndependentHouseholdInvitationTables} from '../Server/independent-household-invitations.mjs'
+import {planReviewedPrivateTestStartup} from '../Server/private-reviewed-test-startup-plan.mjs'
 import {DatabaseSync} from 'node:sqlite'
 import {fileURLToPath} from 'node:url'
 import {createHouseholdMembershipTables,getSoleActiveHouseholdOwner,listGrantedHouseholdsForSessionUser} from '../Server/household-memberships.mjs'
@@ -93,13 +98,14 @@ function copyUploads(source,target,expected){
  }
  requireOk(same(uploads(target),expected)&&same(uploads(source),expected))
 }
-function rehearse(args,coordinated){
+function rehearse(args,coordinated,startupProof=null){
  const verified=verifyOfflineLegacyTestSnapshot(args)
  const parity=inspectSourceShapedLegacyArchive(args)
  requireOk(parity.structuralMatches===27&&parity.exactExplicitIndexDdlMatches===27&&
   parity.details.every(d=>d.ddlReview.checkExpressionTokensMatch&&['EXACT','LEXICAL_MATCH','DECLARATION_REORDER_ONLY','REVIEWED_REFERENCE_PLACEMENT_ONLY'].includes(d.ddlReview.classification)))
  const manifest=path.join(args.snapshotRoot,'OFFLINE-LEGACY-REVIEW.json'),manifestHash=digest(manifest)
  const source=path.join(args.snapshotRoot,'calendar.db'),sourceHash=digest(source)
+ if(startupProof)requireOk(startupProof.manifestHash===manifestHash&&startupProof.sourceHash===sourceHash)
  const sourceUploads=path.join(args.snapshotRoot,'uploads'),uploadList=uploads(sourceUploads)
  requireOk(uploadList.length===verified.uploadFiles)
  const temp=fs.realpathSync(os.tmpdir()),work=fs.mkdtempSync(path.join(temp,'fc-phase1-offline-rehearsal-'))
@@ -149,7 +155,7 @@ function rehearse(args,coordinated){
   }finally{db.close()}
   copyUploads(sourceUploads,path.join(work,'uploads'),uploadList)
   if(coordinated){
-   result={...result,...rehearseCoordinatedCopy({source,work,uploadList})}
+   result={...result,...rehearseCoordinatedCopy({source,work,uploadList,startupProof})}
   }
   requireOk(digest(source)===sourceHash&&digest(manifest)===manifestHash&&same(uploads(sourceUploads),uploadList))
   requireOk(verifyOfflineLegacyTestSnapshot(args).result==='PASS')
@@ -170,7 +176,22 @@ export function rehearseOfflineHouseholdCopy(args){return rehearse(args,false)}
 export function rehearseOfflineCoordinatedPrimaryFamily(args){return rehearse(args,true)}
 
 
-function rehearseCoordinatedCopy({source,work,uploadList}){
+// A successful password proof must refer to exactly the archive being split.
+// No caller-supplied boolean can activate a copy. Only this local wrapper can
+// request the disposable startup-plan exercise; no backend or listener starts.
+export async function rehearseOfflineCoordinatedPrimaryStartupPlan(args,password){
+ const manifest=path.join(args.snapshotRoot,'OFFLINE-LEGACY-REVIEW.json')
+ const source=path.join(args.snapshotRoot,'calendar.db')
+ verifyOfflineLegacyTestSnapshot(args)
+ const startupProof={manifestHash:digest(manifest),sourceHash:digest(source)}
+ const proof=await verifyOfflineCentralOwnerPassword(args,password)
+ password=undefined
+ requireOk(proof.passwordOwnershipVerified&&proof.archiveUnchanged&&!proof.accountActivationAuthorized&&
+  digest(manifest)===startupProof.manifestHash&&digest(source)===startupProof.sourceHash)
+ return rehearse(args,true,startupProof)
+}
+
+function rehearseCoordinatedCopy({source,work,uploadList,startupProof}){
  const serverDirectory=fileURLToPath(new URL('../Server/',import.meta.url))
  const old=new DatabaseSync(source,{readOnly:true})
  let owner,oldSessions
@@ -238,11 +259,63 @@ function rehearseCoordinatedCopy({source,work,uploadList}){
   requireOk(family.prepare('SELECT COUNT(*) AS n FROM events WHERE event_uid IS NULL').get().n===0)
  }finally{family.close()}
  requireOk(same(uploads(path.join(restoredHome,'uploads')),uploadList))
- return {coordinatedArchiveCopyVerified:true,coordinatedSnapshotFiles:baseline.fileCount,
+ const startup=startupProof?rehearseStartupPlan({work,restored,serverDirectory}):null
+ return {...(startup?{startupPlanRehearsal:startup}:{}),coordinatedArchiveCopyVerified:true,coordinatedSnapshotFiles:baseline.fileCount,
   restoredHouseholds:baseline.householdCount,permanentEventIdentities:events,
   oldSessionsNotImported:oldSessions,centralSessions:0,centralSelections:0,
   restoredOwnerDisabled:true,ownerAccessDenied:true,notificationPreparation:notice,
   identityMigrationExecuted:true,persistentIdentityCreated:false,
   installedCalendarsAccessed:false,backendBooted:false,
   actualTestMigrationExecuted:false,testDeploymentAuthorized:false,liveDeploymentAuthorized:false}
+}
+
+// Only inside the unique work directory allocated by rehearse(). The
+// independently verified inactive backup stays unchanged. This is a
+// temporary planning copy, not persistent account activation.
+function rehearseStartupPlan({work,restored,serverDirectory}){
+ const centralDir=path.join(restored,'central')
+ const identity=path.join(work,'startup-identity.db')
+ const state=path.join(work,'startup-state')
+ fs.copyFileSync(path.join(centralDir,'identity.db'),identity,fs.constants.COPYFILE_EXCL)
+ fs.mkdirSync(state,{mode:0o700})
+ const db=new DatabaseSync(identity)
+ try{
+  db.exec('PRAGMA foreign_keys=ON')
+  createIndependentHouseholdInvitationTables(db)
+  createPrivateActivationRecords(db)
+  const options={identityDatabase:db,serverDirectory,storageRoot:restored,stateDirectory:state,primaryHouseholdId:'primary-family'}
+  let denied=false
+  try{planReviewedPrivateTestStartup(options)}catch{denied=true}
+  requireOk(denied)
+  const owner=db.prepare('SELECT id,username FROM family_users WHERE disabled=1').get()
+  requireOk(owner&&db.prepare('SELECT COUNT(*) AS n FROM family_users').get().n===1)
+  const op='rehearsal-'+randomBytes(10).toString('hex')
+  requireOk(op!==owner.username)
+  db.exec('BEGIN IMMEDIATE')
+  try{
+   db.prepare("INSERT INTO family_users(username,display_name,password_hash,account_kind,disabled) VALUES(?,?,?,'person',0)")
+    .run(op,'Temporary rehearsal operator',hashFamilyPassword(randomBytes(32).toString('hex')))
+   const operator=db.prepare('SELECT id FROM family_users WHERE username=?').get(op)
+   requireOk(operator.id!==owner.id)
+   requireOk(db.prepare('UPDATE family_users SET disabled=0 WHERE id=? AND disabled=1').run(owner.id).changes===1)
+   requireOk(db.prepare("UPDATE household_registry SET disabled=0 WHERE storage_id='primary-family' AND disabled=1").run().changes===1)
+   requireOk(db.prepare("UPDATE household_memberships SET disabled=0 WHERE user_id=? AND role='owner' AND disabled=1").run(owner.id).changes===1)
+   requireOk(getSoleActiveHouseholdOwner(db,'primary-family')===owner.id)
+   requireOk(db.prepare('SELECT COUNT(*) AS n FROM household_memberships WHERE user_id=?').get(operator.id).n===0)
+   check(db)
+   db.exec('COMMIT')
+  }catch(e){db.exec('ROLLBACK');throw e}
+  const plan=planReviewedPrivateTestStartup(options)
+  requireOk(plan.householdCount===1&&same(plan.householdIds,['primary-family'])&&plan.planVerifiedReadOnly&&!plan.deploymentAuthorized)
+  requireOk(db.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n===0&&
+    db.prepare('SELECT COUNT(*) AS n FROM household_session_selections').get().n===0)
+  const original=new DatabaseSync(path.join(centralDir,'identity.db'),{readOnly:true})
+  try{requireOk(original.prepare('SELECT COUNT(*) AS n FROM family_users WHERE disabled=1').get().n===1&&
+    getSoleActiveHouseholdOwner(original,'primary-family')===null)}finally{original.close()}
+  return {archivedOwnerPasswordVerified:true,inactiveStartupDenied:true,
+    disposableOwnerActivationRehearsed:true,separateTemporaryOperator:true,
+    plannedHouseholds:1,centralSessions:0,centralSelections:0,
+    originalRestoredOwnerStillDisabled:true,backendBooted:false,
+    persistentAccountActivated:false,testDeploymentAuthorized:false}
+ }finally{db.close()}
 }
