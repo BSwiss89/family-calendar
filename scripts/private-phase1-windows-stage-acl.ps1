@@ -27,7 +27,7 @@ function AsSid([string]$identity){
 $user=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $system='S-1-5-18'
 $admins='S-1-5-32-544'
-$allowed=@($user,$system,$admins | Select-Object -Unique)
+$allowed=@(@($user,$system,$admins) | Select-Object -Unique)
 $root=[IO.Path]::GetFullPath($Directory).TrimEnd('\')
 $parent=PhysicalFolder ([IO.Path]::GetDirectoryName($root))
 if($Scope -ceq 'windows-inactive-stage'){
@@ -71,7 +71,9 @@ if($allowed -cnotcontains $pa.GetOwner([Security.Principal.SecurityIdentifier]).
 $writeMask=[Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
 foreach($rule in @($pa.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))){
  if($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
-    $allowed -cnotcontains $rule.IdentityReference.Value -and ($rule.FileSystemRights -band $writeMask) -ne 0){Refuse}
+    $allowed -cnotcontains $rule.IdentityReference.Value -and
+    ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and
+    ($rule.FileSystemRights -band $writeMask) -ne 0){Refuse}
 }
 if($Mode -ceq 'Create'){
  if(Test-Path -LiteralPath $root){Refuse}
