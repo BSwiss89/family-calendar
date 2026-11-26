@@ -5,6 +5,7 @@
 // not independently verified historical DDL. No actual archived SQL is loaded.
 // Matching the archived aggregate counts does NOT prove exact historical DDL.
 import test from 'node:test'
+import {rehearseOfflineCentralOwner} from './private-phase1-offline-central-owner-rehearsal.mjs'
 import {rehearseOfflineHouseholdCopy} from './private-phase1-offline-household-copy-rehearsal.mjs'
 import {reviewLegacyTableDefinitionDifference as reviewDdl,reviewEventPeopleReferencePlacement} from './private-phase1-legacy-ddl-difference-review.mjs'
 import {compareSourceShapedLegacyMetadata} from './private-phase1-source-shaped-schema-parity.mjs'
@@ -253,4 +254,26 @@ test('offline rehearsal refuses altered verified archive',t=>{
  const args=buildVerifiedOfflineFixture(t)
  fs.appendFileSync(path.join(args.snapshotRoot,'uploads','people','avatar.bin'),'tampered')
  assert.throws(()=>rehearseOfflineHouseholdCopy(args))
+})
+
+test('verified legacy central Owner stays disabled in memory and no old sessions are imported',t=>{
+ const args=buildVerifiedOfflineFixture(t)
+ const source=path.join(args.snapshotRoot,'calendar.db')
+ const before=hash(source)
+ const r=rehearseOfflineCentralOwner(args)
+ assert.equal(r.stagedDisabledOwners,1)
+ assert.equal(r.stagedDisabledMemberships,1)
+ assert.equal(r.stagedDisabledHouseholds,1)
+ assert.equal(r.archivedSessionsNotImported,1)
+ assert.equal(r.centralSessions,0)
+ assert.equal(r.centralSelections,0)
+ assert.equal(r.ownerAccessDenied,true)
+ assert.equal(r.credentialFormatAndExactTransferVerified,true)
+ assert.equal(r.passwordOwnershipVerified,false)
+ assert.equal(r.persistentIdentityCreated,false)
+ assert.equal(r.archiveUnchanged,true)
+ assert.equal(r.memoryDatabaseClosed,true)
+ assert.equal(hash(source),before)
+ assert(!JSON.stringify(r).includes('syntheticowner'))
+ assert(!JSON.stringify(r).includes('scrypt-v1'))
 })
