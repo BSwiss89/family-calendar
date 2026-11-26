@@ -13,6 +13,7 @@ import {planReviewedPrivateTestStartup} from '../Server/private-reviewed-test-st
 import {launchDisposableReviewedPhase1Gateway} from '../Server/private-disposable-reviewed-phase1-gateway-runtime.mjs'
 import {DatabaseSync} from 'node:sqlite'
 import {fileURLToPath} from 'node:url'
+import {spawnSync} from 'node:child_process'
 import {createHouseholdMembershipTables,getSoleActiveHouseholdOwner,listGrantedHouseholdsForSessionUser} from '../Server/household-memberships.mjs'
 import {createEventShareTables} from '../Server/event-only-shares.mjs'
 import {createEventShareSyncJournal} from '../Server/event-share-sync-journal.mjs'
@@ -456,6 +457,15 @@ export function prepareInactivePhase1TestMigrationStage(args,{candidateSha,desti
  return rehearse(args,true,null,{destination,candidateSha,scope})
 }
 
+function windowsStageAcl(destination,mode){
+ const powershell=path.join(process.env.SystemRoot??'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe')
+ const script=fileURLToPath(new URL('./private-phase1-windows-stage-acl.ps1',import.meta.url))
+ const run=spawnSync(powershell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',script,
+  '-Mode',mode,'-Scope','windows-inactive-stage','-Directory',destination],{
+  encoding:'utf8',windowsHide:true,timeout:120000,maxBuffer:1024*1024,
+ })
+ requireOk(!run.error&&run.status===0&&run.stdout.trim()==='PHASE1_WINDOWS_STAGE_ACL=PASS | PRIVATE_DACL=YES | TASKS_CHANGED=NO | DEPLOYMENT_AUTHORIZED=NO')
+}
 function publishInactiveStage({args,inactiveStage,stageContext,sourceHash,manifestHash}){
  const {destination,candidateSha,scope}=inactiveStage
  const {serverDirectory,sourceRoot,attestation}=stageContext
@@ -464,7 +474,8 @@ function publishInactiveStage({args,inactiveStage,stageContext,sourceHash,manife
  const attestationFile=path.join(destination,'COORDINATED-BACKUP-ATTESTATION.json')
  // Exclusive parent creation. Any later failure deliberately retains it
  // (with no success receipt) rather than deleting potential recovery data.
- fs.mkdirSync(destination,{mode:0o700})
+ if(scope==='windows-inactive-stage')windowsStageAcl(destination,'Create')
+ else fs.mkdirSync(destination,{mode:0o700})
  const writeNew=(filename,value)=>{
   const fd=fs.openSync(filename,'wx',0o600)
   try{fs.writeFileSync(fd,JSON.stringify(value,null,2)+'\n');fs.fsyncSync(fd)}finally{fs.closeSync(fd)}
@@ -490,7 +501,8 @@ function publishInactiveStage({args,inactiveStage,stageContext,sourceHash,manife
   coordinatedAttestationSha256:attestation.sha256,households:1,files:copy.fileCount,
   ownerDisabled:true,sessionsImported:0,hostWriterFenceVerified:false,accountActivationAuthorized:false,
   testDeploymentAuthorized:false,liveDeploymentAuthorized:false})
- return {inactiveMigrationBundleCreated:true,stageFiles:copy.fileCount,stageOwnerDisabled:true,
+ if(scope==='windows-inactive-stage')windowsStageAcl(destination,'Verify')
+ return {inactiveMigrationBundleCreated:true,windowsStageAclVerified:scope==='windows-inactive-stage',stageFiles:copy.fileCount,stageOwnerDisabled:true,
   persistentIdentityCreated:true,hostWriterFenceVerified:false,stageStartupAuthorized:false,
   persistentAccountActivated:false,testDeploymentAuthorized:false,liveDeploymentAuthorized:false}
 }
