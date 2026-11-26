@@ -358,7 +358,10 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
 // deliberately no CLI flag to override either requirement.
 export async function launchReviewedWindowsPhase1TestGateway(){
  if(process.platform!=='win32')refuse('Windows TEST host required.')
- const projects=physicalDirectory(path.join(os.homedir(),'Projects'))
+ // SYSTEM has a different home profile. Use the fixed checkout's physical
+ // sibling layout; the Windows host gate verifies the actual registered user profile.
+ const projects=physicalDirectory(path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..','..'))
+ if(path.basename(projects).toLowerCase()!=='projects')refuse('fixed Projects directory required.')
  const checkout=physicalDirectory(path.join(projects,'family-calendar-phase1-test-code'))
  const server=physicalDirectory(path.join(checkout,'Server'))
  if(server!==physicalDirectory(path.dirname(fileURLToPath(import.meta.url))))refuse('fixed TEST code checkout required.')

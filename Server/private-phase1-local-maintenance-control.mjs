@@ -55,6 +55,7 @@ export function completeLocalBackupStopRequest(root,request,receipt){
  root=physical(root)
  const hold=path.join(root,HOLD)
  need(physical(hold)===hold)
+ need(!present(path.join(hold,'RECEIPT.json'))&&!present(path.join(hold,'RECEIPT.tmp')))
  const raw=read(path.join(hold,'REQUEST.json')),r=JSON.parse(raw)
  const progress=JSON.parse(read(path.join(hold,'IN-PROGRESS.json')))
  need(sha(raw)===request.requestHash&&r.id===request.requestId&&progress.requestId===r.id&&receipt.coordinatedBackupVerified===true&&receipt.allChildrenExited===true&&receipt.gatewayClosed===true&&receipt.ownerInstanceReleased===true&&receipt.restoreAuthorized===false&&receipt.automaticRestartAllowed===false&&/^backup-[0-9]{14}-[a-f0-9]{32}$/.test(receipt.backupName??'')&&Number.isSafeInteger(receipt.households)&&receipt.households>0&&Number.isSafeInteger(receipt.files)&&receipt.files>0)

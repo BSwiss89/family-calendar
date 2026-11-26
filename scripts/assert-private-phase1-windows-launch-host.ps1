@@ -10,8 +10,18 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 function Refuse { throw 'Phase 1 persistent TEST launch host refused.' }
-$projects=Join-Path $env:USERPROFILE 'Projects'
-$code=Join-Path $projects 'family-calendar-phase1-test-code'
+$code=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$projects=[IO.Path]::GetDirectoryName($code)
+if([IO.Path]::GetFileName($code) -cne 'family-calendar-phase1-test-code' -or [IO.Path]::GetFileName($projects) -ine 'Projects'){Refuse}
+$profile=[IO.Path]::GetDirectoryName($projects)
+$profiles=@(Get-CimInstance Win32_UserProfile | Where-Object {-not $_.Special -and [string]::Equals([string]$_.LocalPath,$profile,[StringComparison]::OrdinalIgnoreCase)})
+if($profiles.Count -ne 1){Refuse}
+$caller=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+if(@('S-1-5-18',[string]$profiles[0].SID) -cnotcontains $caller){Refuse}
+if($Mode -ceq 'Launch' -and $caller -cne 'S-1-5-18'){Refuse}
+$git=Join-Path $env:ProgramFiles 'Git\cmd\git.exe'
+$gitItem=Get-Item -LiteralPath $git -Force
+if($gitItem.PSIsContainer -or ($gitItem.Attributes -band [IO.FileAttributes]::ReparsePoint)){Refuse}
 $legacy=Join-Path $projects 'family-calendar-test-security-stage'
 $live=Join-Path $projects 'family-calendar'
 $data=Join-Path $projects 'family-calendar-phase1-test-data'
@@ -22,14 +32,14 @@ function Same([string]$a,[string]$b){return [string]::Equals($a,$b,[StringCompar
 function Pin([string]$dir,[string]$sha){
  $item=Get-Item -LiteralPath $dir -Force
  if(-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)){Refuse}
- $head=((& git -C $dir rev-parse HEAD 2>$null)|Out-String).Trim()
+ $head=((& $git -c ('safe.directory='+$dir.Replace('\','/')) -C $dir rev-parse HEAD 2>$null)|Out-String).Trim()
  if($LASTEXITCODE -ne 0 -or $head -cne $sha){Refuse}
 }
 if(-not (Same ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))) $code)){Refuse}
 Pin $code $ExpectedCandidateSha
 Pin $legacy $ExpectedInstalledTestSha
 Pin $live $ExpectedLiveSha
-$dirty=@(& git -C $code status --porcelain --untracked-files=no)
+$dirty=@(& $git -c ('safe.directory='+$code.Replace('\','/')) -C $code status --porcelain --untracked-files=no)
 if($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0){Refuse}
 foreach($f in @($node,$launcher,(Join-Path $code 'dist\index.html'))){
  $item=Get-Item -LiteralPath $f -Force
@@ -42,6 +52,9 @@ $updater=Get-ScheduledTask -TaskName 'Family Calendar Secure TEST Auto Deploy' -
 $lt=Get-ScheduledTask -TaskName 'Family Calendar Server' -TaskPath '\'
 $expectedTaskState=if($Mode -ceq 'MaintenanceResume'){'Disabled'}else{'Running'}
 if($test.State -cne $expectedTaskState -or $updater.State -cne 'Disabled' -or $lt.State -cne 'Running'){Refuse}
+$principal=[string]$test.Principal.UserId
+if($principal -match '^S-\d-'){$principal=([Security.Principal.SecurityIdentifier]::new($principal)).Value}else{$principal=([Security.Principal.NTAccount]::new($principal)).Translate([Security.Principal.SecurityIdentifier]).Value}
+if($principal -cne 'S-1-5-18'){Refuse}
 $actions=@($test.Actions)
 $expectedArgs='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$launcher+'"'
 if($actions.Count -ne 1 -or -not (Same ([string]$actions[0].Execute) $ps) -or
