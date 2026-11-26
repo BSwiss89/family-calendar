@@ -13,7 +13,7 @@ import {captureDisposableCoordinatedHouseholdSnapshot} from '../Server/private-d
 import {copyVerifiedPrivateRestoreSet} from '../Server/private-offline-restore-rehearsal.mjs'
 import {verifyOfflinePrivateRestoreSet} from '../Server/private-restore-preflight.mjs'
 import {reviewDisposablePhase1PostWriteRollback} from '../Server/private-phase1-post-write-rollback-review.mjs'
-import {rehearseOfflineCentralOwner} from './private-phase1-offline-central-owner-rehearsal.mjs'
+import {rehearseOfflineCentralOwner,verifyOfflineCentralOwnerPassword} from './private-phase1-offline-central-owner-rehearsal.mjs'
 import {rehearseOfflineHouseholdCopy} from './private-phase1-offline-household-copy-rehearsal.mjs'
 import {reviewLegacyTableDefinitionDifference as reviewDdl,reviewEventPeopleReferencePlacement} from './private-phase1-legacy-ddl-difference-review.mjs'
 import {compareSourceShapedLegacyMetadata} from './private-phase1-source-shaped-schema-parity.mjs'
@@ -459,3 +459,35 @@ for(const scenario of ['clean','pending edit','self edit','missing baseline','un
   assert.equal(hash(f.file),before)
  })
 }
+
+
+test('offline Owner password proof verifies transferred credential without activation or session',async t=>{
+ const args=buildVerifiedOfflineFixture(t)
+ const source=path.join(args.snapshotRoot,'calendar.db'),before=hash(source)
+ const password='Synthetic Full Shape Example 123!'
+ const r=await verifyOfflineCentralOwnerPassword(args,password)
+ assert.equal(r.passwordOwnershipVerified,true)
+ assert.equal(r.historicalCredentialOnly,true)
+ assert.equal(r.currentTestCredentialVerified,false)
+ assert.equal(r.ownerAccessDenied,true)
+ assert.equal(r.loginSessionCreated,false)
+ assert.equal(r.centralSessions,0)
+ assert.equal(r.centralSelections,0)
+ assert.equal(r.stagedDisabledOwners,1)
+ assert.equal(r.stagedDisabledMemberships,1)
+ assert.equal(r.stagedDisabledHouseholds,1)
+ assert.equal(r.persistentIdentityCreated,false)
+ assert.equal(r.accountActivationAuthorized,false)
+ assert.equal(r.testDeploymentAuthorized,false)
+ assert.equal(r.liveDeploymentAuthorized,false)
+ assert.equal(r.memoryDatabaseClosed,true)
+ for(const privateValue of [password,'syntheticowner','scrypt-v1']){
+  assert(!JSON.stringify(r).includes(privateValue))
+ }
+ for(const wrong of ['wrong synthetic password','',null,'x'.repeat(201)]){
+  await assert.rejects(()=>verifyOfflineCentralOwnerPassword(args,wrong),/Offline Owner password proof refused/)
+ }
+ assert.equal(hash(source),before)
+ fs.appendFileSync(path.join(args.snapshotRoot,'uploads','people','avatar.bin'),'tampered')
+ await assert.rejects(()=>verifyOfflineCentralOwnerPassword(args,password))
+})
