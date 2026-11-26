@@ -371,13 +371,16 @@ test('unexpected captured backend exit holds all gateway admission, including he
       method:'POST',cookie,body:{title:'Must never be admitted',date:'2027-02-01'}
     })).response.status,503)
     assert.equal(inspectReviewedWindowsSupervisorOwnership(options.stateDirectory).instanceLockPresent,true)
-    await assert.rejects(launchDisposableReviewedPhase1Gateway(options),/persistent crash hold|existing supervisor instance/)
+    await assert.rejects(launchDisposableReviewedPhase1Gateway(options),/gateway writer lock needs manual recovery review/)
   } finally {
     if(held || runtime.snapshot().phase==='held'){
       const result=await runtime.closeHeldFixtureForTest()
       assert.equal(result.ownerInstanceRetained,true)
       assert.equal(inspectReviewedWindowsSupervisorOwnership(options.stateDirectory).instanceLockPresent,true)
       assert.equal(inspectReviewedWindowsSupervisorOwnership(options.stateDirectory).crashHoldPresent,true)
+      // Once the gateway releases its writer lock, the durable crash hold
+      // itself must still block another boot. No lock is removed by this test.
+      await assert.rejects(launchDisposableReviewedPhase1Gateway(options),/durable supervisor crash hold needs manual review/)
     } else await runtime.shutdown()
   }
 })
