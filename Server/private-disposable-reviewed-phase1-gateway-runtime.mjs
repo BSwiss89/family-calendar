@@ -17,6 +17,7 @@ import { planReviewedPrivateTestStartup } from './private-reviewed-test-startup-
 import { createReviewedWindowsSupervisorOwnership } from './private-reviewed-windows-supervisor-ownership.mjs'
 import { startPrivateHouseholdGateway, verifyPrivateBackendBindings } from './private-household-gateway.mjs'
 import { resolvePrivatePhase1GatewayLoopbackPort } from './private-household-gateway.mjs'
+import { captureClosedPhase1SupervisorBackup } from './private-phase1-supervised-backup.mjs'
 
 const PROTECTED = new Set([443, 8443, 3001, 11434, 13001, 13002, 13003, 13004])
 function refuse(message) {
@@ -297,6 +298,20 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
         if (failures.length) throw new AggregateError(failures,'Held fixture cleanup requires review.')
         return Object.freeze({gatewayClosed:true, allCapturedChildrenExited:true,
           ownerInstanceRetained:true, testDeploymentAuthorized:false})
+      },
+      async shutdownAndCaptureBackup() {
+        if (shutdownRequested) refuse('supervised shutdown already requested.')
+        shutdownRequested = true
+        guard.beginGracefulShutdown()
+        await gateway.closeForOfflineBackup(async () => {
+          for (const backend of [...backends].reverse()) await stopCaptured(backend)
+        })
+        central.close()
+        guard.beginDisposableOfflineCapture(plan.householdIds)
+        const receipt = await captureClosedPhase1SupervisorBackup({paths,plan,guard,backends,gatewayPort:gateway.port})
+        guard.completeDisposableOfflineCapture()
+        guard.finishGracefulShutdown()
+        return Object.freeze({...receipt,allChildrenExited:true,gatewayClosed:true,ownerInstanceReleased:true,testDeploymentAuthorized:false})
       },
       async shutdown() {
         if (shutdownRequested) refuse('reviewed fixture shutdown already requested.')

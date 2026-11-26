@@ -384,3 +384,42 @@ test('unexpected captured backend exit holds all gateway admission, including he
     } else await runtime.shutdown()
   }
 })
+
+
+test('real supervisor captures coordinated backup after shutdown and revokes sessions only in copy', {timeout:120000},async t=>{
+ const options=fixture(t,{invited:true})
+ const runtime=await launchDisposableReviewedPhase1Gateway(options)
+ let stopping=false
+ try{
+  for(const username of ['phase1primaryowner','phase1invitedowner']){
+   const login=await request(runtime.base,'/api/auth/login',{method:'POST',body:{username,password,deviceLabel:'Synthetic backup phone'}})
+   assert.equal(login.response.status,200)
+   const cookie=login.response.headers.get('set-cookie').split(';')[0]
+   const event=await request(runtime.base,'/api/events',{method:'POST',cookie,body:{title:'Backup '+username,date:'2027-02-03',time:'13:00'}})
+   assert.equal(event.response.status,201)
+  }
+  stopping=true
+  const receipt=await runtime.shutdownAndCaptureBackup()
+  assert.equal(receipt.households,2)
+  assert.equal(receipt.sessionsRevokedInCopy,2)
+  for(const flag of ['sourceSessionsUnchanged','sourceFilesUnchanged','coordinatedBackupVerified','supervisorHeldDuringCapture','allChildrenExited','gatewayClosed','ownerInstanceReleased'])assert.equal(receipt[flag],true,flag)
+  for(const flag of ['allSystemWritersFenced','restoreAuthorized','automaticRestartAllowed','testDeploymentAuthorized'])assert.equal(receipt[flag],false,flag)
+  const bundle=path.join(options.fixtureRoot,'coordinated-backups',receipt.backupName)
+  assert.equal(fs.existsSync(path.join(bundle,'INCOMPLETE.json')),false)
+  const {verifyOfflinePrivateRestoreSet}=await import('../Server/private-restore-preflight.mjs')
+  const attestation=JSON.parse(fs.readFileSync(path.join(bundle,'ATTESTATION.json'),'utf8'))
+  assert.equal(verifyOfflinePrivateRestoreSet({serverDirectory,restoreRoot:path.join(bundle,'snapshot')},attestation).ok,true)
+  const live=new DatabaseSync(options.identityDatabasePath,{readOnly:true})
+  const copy=new DatabaseSync(path.join(bundle,'snapshot','central','identity.db'),{readOnly:true})
+  try{
+   assert.equal(live.prepare('SELECT COUNT(*) AS n FROM family_sessions WHERE revoked_at IS NULL').get().n,2)
+   assert.equal(copy.prepare('SELECT COUNT(*) AS n FROM family_sessions WHERE revoked_at IS NULL').get().n,0)
+   assert.equal(copy.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n,2)
+  }finally{copy.close();live.close()}
+  assert.equal(inspectReviewedWindowsSupervisorOwnership(options.stateDirectory).instanceLockPresent,false)
+  for(const [id,username] of [[primaryHouseholdId,'phase1primaryowner'],[options.invitedHouseholdId,'phase1invitedowner']]){
+   const db=new DatabaseSync(path.join(bundle,'snapshot','households',id,'data','calendar.db'),{readOnly:true})
+   try{assert.equal(db.prepare('SELECT title FROM events').get().title,'Backup '+username)}finally{db.close()}
+  }
+ }finally{if(!stopping)await runtime.shutdown()}
+})
