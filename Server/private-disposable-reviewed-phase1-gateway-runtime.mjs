@@ -18,6 +18,7 @@ import { createReviewedWindowsSupervisorOwnership } from './private-reviewed-win
 import { startPrivateHouseholdGateway, verifyPrivateBackendBindings } from './private-household-gateway.mjs'
 import { resolvePrivatePhase1GatewayLoopbackPort } from './private-household-gateway.mjs'
 import { captureClosedPhase1SupervisorBackup } from './private-phase1-supervised-backup.mjs'
+import { assertLocalMaintenanceClear } from './private-phase1-local-maintenance-control.mjs'
 
 const PROTECTED = new Set([443, 8443, 3001, 11434, 13001, 13002, 13003, 13004])
 function refuse(message) {
@@ -363,6 +364,7 @@ export async function launchReviewedWindowsPhase1TestGateway(){
  if(server!==physicalDirectory(path.dirname(fileURLToPath(import.meta.url))))refuse('fixed TEST code checkout required.')
  const root=physicalDirectory(path.join(projects,'family-calendar-phase1-test-data'))
  if(path.dirname(root)!==projects||path.dirname(checkout)!==projects)refuse('fixed physical TEST sibling roots required.')
+ assertLocalMaintenanceClear(root)
  const storage=physicalDirectory(path.join(root,'data'))
  const state=physicalDirectory(path.join(root,'supervisor-state'))
  const identity=physicalFile(path.join(storage,'central','identity.db'))
@@ -390,6 +392,7 @@ export async function launchReviewedWindowsPhase1TestGateway(){
  // operator file, not an externally authenticated deployment receipt.
  if(JSON.stringify(JSON.parse(fs.readFileSync(reviewPath,'utf8')))!==JSON.stringify(r)||fs.existsSync(path.join(root,'DO-NOT-START.json'))||
     fs.existsSync(path.join(root,'ACTIVATION-IN-PROGRESS.json')))refuse('activation review changed during host preflight.')
+ assertLocalMaintenanceClear(root)
  return launchReviewedGateway({paths:{root,storage,state,identity,server,checkout},primaryHouseholdId:r.primaryHouseholdId,
    operatorUserIds:[r.operatorUserId],trustedPhase1GatewayPort:13004,disposable:false})
 }
