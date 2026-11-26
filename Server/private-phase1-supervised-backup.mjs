@@ -52,6 +52,9 @@ function inventory(paths,ids){
  }
  return items.sort((a,b)=>a[0].localeCompare(b[0],'en')).map(([name,source])=>({name,source,sha:hash(source)}))
 }
+export function digestClosedPhase1Source(paths,ids){
+ return createHash('sha256').update(JSON.stringify(inventory(paths,[...ids].sort()).map(({name,sha})=>({name,sha})))).digest('hex')
+}
 async function closed(port){
  need(Number.isSafeInteger(port)&&port>=1024&&port<=65535&&![3001,11434,13001,13002,13003].includes(port))
  await new Promise((resolve,reject)=>{
@@ -68,6 +71,7 @@ export async function captureClosedPhase1SupervisorBackup({paths,plan,guard,back
  need(new Set(ports).size===ports.length)
  for(const p of ports)await closed(p)
  const before=inventory(paths,ids)
+ const sourceDigest=createHash('sha256').update(JSON.stringify(before.map(({name,sha})=>({name,sha})))).digest('hex')
  const parent=path.join(paths.root,'coordinated-backups')
  try{fs.mkdirSync(parent,{mode:0o700})}catch(e){if(e.code!=='EEXIST')throw e}
  need(path.dirname(folder(parent))===paths.root)
@@ -106,7 +110,7 @@ export async function captureClosedPhase1SupervisorBackup({paths,plan,guard,back
  for(const p of ports)await closed(p)
  need(guard.snapshot().phase==='capturing'&&guard.snapshot().allCapturedChildrenExited)
  writeNew(path.join(bundle,'ATTESTATION.json'),attestation)
- writeNew(path.join(bundle,'BACKUP-REVIEW.json'),{kind:'phase1-supervised-coordinated-backup-v1',households:ids.length,files:attestation.files.length,attestationSha256:attestation.sha256,sessionsRevokedInCopy:sessionsRevoked,sourceSessionsUnchanged:true,sourceFilesUnchanged:true,restoreAuthorized:false,automaticRestartAllowed:false})
+ writeNew(path.join(bundle,'BACKUP-REVIEW.json'),{kind:'phase1-supervised-coordinated-backup-v1',households:ids.length,files:attestation.files.length,attestationSha256:attestation.sha256,sourceDigest,sessionsRevokedInCopy:sessionsRevoked,sourceSessionsUnchanged:true,sourceFilesUnchanged:true,restoreAuthorized:false,automaticRestartAllowed:false})
  fs.unlinkSync(path.join(bundle,'INCOMPLETE.json'))
- return Object.freeze({backupName:name,households:ids.length,files:attestation.files.length,sessionsRevokedInCopy:sessionsRevoked,sourceSessionsUnchanged:true,sourceFilesUnchanged:true,coordinatedBackupVerified:true,supervisorHeldDuringCapture:true,allSystemWritersFenced:false,restoreAuthorized:false,automaticRestartAllowed:false})
+ return Object.freeze({backupName:name,households:ids.length,files:attestation.files.length,sourceDigest,attestationSha256:attestation.sha256,sessionsRevokedInCopy:sessionsRevoked,sourceSessionsUnchanged:true,sourceFilesUnchanged:true,coordinatedBackupVerified:true,supervisorHeldDuringCapture:true,allSystemWritersFenced:false,restoreAuthorized:false,automaticRestartAllowed:false})
 }
