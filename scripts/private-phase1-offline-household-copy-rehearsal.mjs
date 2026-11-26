@@ -6,6 +6,14 @@ import os from 'node:os'
 import path from 'node:path'
 import {createHash} from 'node:crypto'
 import {DatabaseSync} from 'node:sqlite'
+import {fileURLToPath} from 'node:url'
+import {createHouseholdMembershipTables,getSoleActiveHouseholdOwner,listGrantedHouseholdsForSessionUser} from '../Server/household-memberships.mjs'
+import {createEventShareTables} from '../Server/event-only-shares.mjs'
+import {createEventShareSyncJournal} from '../Server/event-share-sync-journal.mjs'
+import {preparePhase1OfflineArchiveCopyNotices} from '../Server/private-phase1-disposable-primary-conversion.mjs'
+import {captureDisposableCoordinatedHouseholdSnapshot} from '../Server/private-disposable-coordinated-snapshot.mjs'
+import {copyVerifiedPrivateRestoreSet} from '../Server/private-offline-restore-rehearsal.mjs'
+import {verifyOfflinePrivateRestoreSet} from '../Server/private-restore-preflight.mjs'
 import {verifyOfflineLegacyTestSnapshot} from '../Server/private-phase1-legacy-snapshot-verification.mjs'
 import {listPrivatePhase1LegacyDispositionRules} from '../Server/private-phase1-legacy-table-disposition-review.mjs'
 import {comparePrivatePhase1SourceTriggerDefinitions} from '../Server/private-phase1-archive-trigger-source-parity.mjs'
@@ -85,11 +93,12 @@ function copyUploads(source,target,expected){
  }
  requireOk(same(uploads(target),expected)&&same(uploads(source),expected))
 }
-export function rehearseOfflineHouseholdCopy(args){
+function rehearse(args,coordinated){
  const verified=verifyOfflineLegacyTestSnapshot(args)
  const parity=inspectSourceShapedLegacyArchive(args)
  requireOk(parity.structuralMatches===27&&parity.exactExplicitIndexDdlMatches===27&&
   parity.details.every(d=>d.ddlReview.checkExpressionTokensMatch&&['EXACT','LEXICAL_MATCH','DECLARATION_REORDER_ONLY','REVIEWED_REFERENCE_PLACEMENT_ONLY'].includes(d.ddlReview.classification)))
+ const manifest=path.join(args.snapshotRoot,'OFFLINE-LEGACY-REVIEW.json'),manifestHash=digest(manifest)
  const source=path.join(args.snapshotRoot,'calendar.db'),sourceHash=digest(source)
  const sourceUploads=path.join(args.snapshotRoot,'uploads'),uploadList=uploads(sourceUploads)
  requireOk(uploadList.length===verified.uploadFiles)
@@ -109,7 +118,10 @@ export function rehearseOfflineHouseholdCopy(args){
    requireOk(keep.length===22)
    for(const table of keep)requireOk(db.prepare('PRAGMA foreign_key_list('+quote(table)+')').all().every(f=>keep.includes(f.table)))
    const initial=comparePrivatePhase1SourceTriggerDefinitions(triggers(db))
-   requireOk(initial.exactSourceMatches===13&&initial.knownDefinitionDrift===1&&initial.eventInsertDriftClassification==='EXACT_PRE_REUSE_CLEANUP_DEFINITION')
+   const oldTrigger=initial.exactSourceMatches===13&&initial.knownDefinitionDrift===1&&initial.eventInsertDriftClassification==='EXACT_PRE_REUSE_CLEANUP_DEFINITION'
+   const current=initial.exactSourceMatches===14&&initial.knownDefinitionDrift===0&&initial.eventInsertDriftClassification==='EXACT_CURRENT_DEFINITION'
+   requireOk(oldTrigger||(coordinated&&current))
+   requireOk(initial.missingKnownSource===0&&initial.archivedTriggersWithoutCurrentSourceDefinition===0)
    const rows=retainedRows(db),objects=retainedObjects(db),newSql=currentTrigger()
    requireOk(objects.filter(x=>x.type==='trigger'&&x.name==='notify_event_insert').length===1)
    const expected=objects.map(x=>x.type==='trigger'&&x.name==='notify_event_insert'?{...x,sql:newSql}:x)
@@ -117,8 +129,7 @@ export function rehearseOfflineHouseholdCopy(args){
    db.exec('PRAGMA foreign_keys=OFF')
    db.exec('BEGIN IMMEDIATE')
    try{
-    db.exec('DROP TRIGGER notify_event_insert')
-    db.exec(newSql)
+    if(oldTrigger){db.exec('DROP TRIGGER notify_event_insert');db.exec(newSql)}
     for(const table of strip)db.exec('DROP TABLE '+quote(table))
     requireOk(same(names(db),keep)&&same(retainedRows(db),rows)&&same(retainedObjects(db),expected))
     db.exec('COMMIT')
@@ -137,7 +148,10 @@ export function rehearseOfflineHouseholdCopy(args){
     actualTestMigrationExecuted:false,testDeploymentAuthorized:false,liveDeploymentAuthorized:false}
   }finally{db.close()}
   copyUploads(sourceUploads,path.join(work,'uploads'),uploadList)
-  requireOk(digest(source)===sourceHash&&same(uploads(sourceUploads),uploadList))
+  if(coordinated){
+   result={...result,...rehearseCoordinatedCopy({source,work,uploadList})}
+  }
+  requireOk(digest(source)===sourceHash&&digest(manifest)===manifestHash&&same(uploads(sourceUploads),uploadList))
   requireOk(verifyOfflineLegacyTestSnapshot(args).result==='PASS')
   result.archiveUnchanged=true
  }finally{
@@ -146,4 +160,89 @@ export function rehearseOfflineHouseholdCopy(args){
   fs.rmSync(work,{recursive:true,force:true})
  }
  return {...result,temporaryCopyRemoved:!fs.existsSync(work)}
+}
+
+export function rehearseOfflineHouseholdCopy(args){return rehearse(args,false)}
+
+// The ONLY new writable files are descendants of the internally created
+// disposable work root. Both coordinated snapshots and restored copies are
+// removed with that root. No server starts and no credential is returned.
+export function rehearseOfflineCoordinatedPrimaryFamily(args){return rehearse(args,true)}
+
+
+function rehearseCoordinatedCopy({source,work,uploadList}){
+ const serverDirectory=fileURLToPath(new URL('../Server/',import.meta.url))
+ const old=new DatabaseSync(source,{readOnly:true})
+ let owner,oldSessions
+ try{
+  old.exec('PRAGMA query_only=ON')
+  const rows=old.prepare('SELECT id,username,display_name,password_hash,account_kind,disabled FROM family_users').all()
+  requireOk(rows.length===1)
+  owner=rows[0]
+  requireOk(Number.isSafeInteger(owner.id)&&owner.id>0&&typeof owner.username==='string'&&
+   /^[a-z0-9._-]{3,40}$/.test(owner.username)&&typeof owner.display_name==='string'&&
+   owner.display_name.trim().length>0&&owner.display_name.length<=80&&
+   /^scrypt-v1:[a-f0-9]{32}:[a-f0-9]{128}$/.test(owner.password_hash)&&
+   owner.account_kind==='person'&&owner.disabled===0)
+  oldSessions=old.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n
+ }finally{old.close()}
+ const notice=preparePhase1OfflineArchiveCopyNotices(work)
+ const staged=path.join(work,'staged'),home=path.join(staged,'households','primary-family')
+ fs.mkdirSync(path.join(staged,'central'),{recursive:true,mode:0o700})
+ fs.mkdirSync(path.join(home,'data'),{recursive:true,mode:0o700})
+ fs.renameSync(path.join(work,'calendar.db'),path.join(home,'data','calendar.db'))
+ fs.renameSync(path.join(work,'uploads'),path.join(home,'uploads'))
+ fs.writeFileSync(path.join(home,'.family-calendar-household.json'),JSON.stringify({schemaVersion:1,householdId:'primary-family'})+'\n',{flag:'wx',mode:0o600})
+ const centralFile=path.join(staged,'central','identity.db')
+ const central=new DatabaseSync(centralFile)
+ try{
+  central.exec('PRAGMA foreign_keys=ON')
+  createHouseholdMembershipTables(central)
+  createEventShareTables(central)
+  createEventShareSyncJournal(central)
+  central.exec('BEGIN IMMEDIATE')
+  try{
+   central.prepare('INSERT INTO family_users(id,username,display_name,password_hash,account_kind,disabled) VALUES(?,?,?,?,?,1)').run(owner.id,owner.username,owner.display_name,owner.password_hash,'person')
+   central.prepare("INSERT INTO household_registry(storage_id,display_name,disabled) VALUES('primary-family','Inactive rehearsal household',1)").run()
+   const h=central.prepare("SELECT id FROM household_registry WHERE storage_id='primary-family'").get()
+   central.prepare("INSERT INTO household_memberships(user_id,household_id,role,disabled) VALUES(?,?,'owner',1)").run(owner.id,h.id)
+   check(central)
+   central.exec('COMMIT')
+  }catch(e){central.exec('ROLLBACK');throw e}
+ }finally{central.close()}
+ const baseline=captureDisposableCoordinatedHouseholdSnapshot({serverDirectory,sourceRoot:staged,destinationRoot:path.join(work,'snapshot')})
+ const restored=path.join(work,'restored')
+ copyVerifiedPrivateRestoreSet({serverDirectory,sourceRoot:baseline.snapshotRoot,destinationRoot:restored,approvedAttestation:baseline.attestation})
+ requireOk(verifyOfflinePrivateRestoreSet({serverDirectory,restoreRoot:restored},baseline.attestation).ok===true)
+ const restoredCentral=new DatabaseSync(path.join(restored,'central','identity.db'),{readOnly:true})
+ try{
+  check(restoredCentral)
+  const stagedOwner=restoredCentral.prepare('SELECT id,username,display_name,password_hash,account_kind,disabled FROM family_users').all()
+  requireOk(stagedOwner.length===1&&same(stagedOwner[0],{...owner,disabled:1}))
+  requireOk(restoredCentral.prepare('SELECT COUNT(*) AS n FROM household_registry WHERE disabled=1').get().n===1&&
+   restoredCentral.prepare("SELECT COUNT(*) AS n FROM household_memberships WHERE role='owner' AND disabled=1").get().n===1&&
+   restoredCentral.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n===0&&
+   restoredCentral.prepare('SELECT COUNT(*) AS n FROM household_session_selections').get().n===0&&
+   getSoleActiveHouseholdOwner(restoredCentral,'primary-family')===null&&
+   listGrantedHouseholdsForSessionUser(restoredCentral,{serverVerifiedUserId:owner.id}).length===0)
+ }finally{restoredCentral.close();owner=undefined}
+ const restoredHome=path.join(restored,'households','primary-family')
+ const family=new DatabaseSync(path.join(restoredHome,'data','calendar.db'),{readOnly:true})
+ let events
+ try{
+  check(family)
+  const tables=names(family)
+  requireOk(strip.every(table=>!tables.includes(table))&&keep.every(table=>tables.includes(table)))
+  events=family.prepare('SELECT COUNT(*) AS n FROM events').get().n
+  requireOk(family.prepare('SELECT COUNT(*) AS n FROM notification_dirty_events').get().n===0)
+  requireOk(family.prepare('SELECT COUNT(*) AS n FROM events WHERE event_uid IS NULL').get().n===0)
+ }finally{family.close()}
+ requireOk(same(uploads(path.join(restoredHome,'uploads')),uploadList))
+ return {coordinatedArchiveCopyVerified:true,coordinatedSnapshotFiles:baseline.fileCount,
+  restoredHouseholds:baseline.householdCount,permanentEventIdentities:events,
+  oldSessionsNotImported:oldSessions,centralSessions:0,centralSelections:0,
+  restoredOwnerDisabled:true,ownerAccessDenied:true,notificationPreparation:notice,
+  identityMigrationExecuted:true,persistentIdentityCreated:false,
+  installedCalendarsAccessed:false,backendBooted:false,
+  actualTestMigrationExecuted:false,testDeploymentAuthorized:false,liveDeploymentAuthorized:false}
 }
