@@ -42,7 +42,7 @@ if($Scope -ceq 'windows-inactive-stage'){
  if(-not (SamePath $parent $temp) -or [IO.Path]::GetFileName($root) -cnotmatch '^fc-phase1-acl-fixture-[a-f0-9]{32}$'){Refuse}
 }
 function InspectAcl([string]$p,[bool]$isRoot,[bool]$isFolder){
- $acl=Get-Acl -LiteralPath $p
+ $acl=if($isFolder){[IO.Directory]::GetAccessControl($p)}else{[IO.File]::GetAccessControl($p)}
  if($allowed -cnotcontains $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value){Refuse}
  if($isRoot -and -not $acl.AreAccessRulesProtected){Refuse}
  $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
@@ -66,7 +66,7 @@ function InspectAcl([string]$p,[bool]$isRoot,[bool]$isFolder){
 }
 # The direct parent must not grant an untrusted identity delete/modify rights
 # that could replace the protected child. No parent ACL is changed.
-$pa=Get-Acl -LiteralPath $parent
+$pa=[IO.Directory]::GetAccessControl($parent)
 if($allowed -cnotcontains $pa.GetOwner([Security.Principal.SecurityIdentifier]).Value){Refuse}
 $writeMask=[Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
 foreach($rule in @($pa.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))){
