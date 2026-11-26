@@ -775,3 +775,38 @@ test('inactive stage refuses altered archive and a foreign target',t=>{
  assert.throws(()=>prepareInactivePhase1TestMigrationStage(args,options))
  assert.equal(fs.existsSync(path.join(destinationParent,'family-calendar-phase1-test-data')),false)
 })
+
+
+test('inactive startup preflight binds candidate, archive, credential and durable hold without activation',async t=>{
+ const {reviewInactivePhase1TestStage}=await import('../Server/private-phase1-inactive-stage-startup-preflight.mjs')
+ const args=buildVerifiedOfflineFixture(t)
+ const destinationParent=path.dirname(args.recoveryParent)
+ const root=path.join(destinationParent,'family-calendar-phase1-test-data')
+ const candidateSha='a'.repeat(40)
+ const scope='disposable-test-fixture'
+ prepareInactivePhase1TestMigrationStage(args,{destinationParent,candidateSha,scope})
+ const options={serverDirectory:fileURLToPath(new URL('../Server/',import.meta.url)),destinationParent,scope,
+  expectedCandidateSha:candidateSha,expectedInstalledTestSha:args.expectedInstalledTestSha,
+  expectedArchiveName:path.basename(args.snapshotRoot),expectedManifestSha256:hash(path.join(args.snapshotRoot,'OFFLINE-LEGACY-REVIEW.json'))}
+ const hold=path.join(root,'DO-NOT-START.json')
+ const original=fs.readFileSync(hold)
+ const r=reviewInactivePhase1TestStage(options)
+ assert.equal(r.result,'PASS')
+ for(const flag of ['archiveAndStageVerified','ownerCredentialContinuityVerified','ownerDisabled','durableStartupHoldPresent'])assert.equal(r[flag],true,flag)
+ for(const flag of ['windowsAclVerified','hostWriterFenceVerified','stageFreshnessComparedToInstalledTest','accountActivationAuthorized','stageStartupAuthorized','testDeploymentAuthorized','liveDeploymentAuthorized','filesOrServicesModified'])assert.equal(r[flag],false,flag)
+ assert.equal(r.oldSessionsImported,0)
+ assert.throws(()=>reviewInactivePhase1TestStage({...options,expectedCandidateSha:'b'.repeat(40)}))
+ assert.throws(()=>reviewInactivePhase1TestStage({...options,expectedManifestSha256:'c'.repeat(64)}))
+ const changed=JSON.parse(original)
+ changed.automaticStartupAllowed=true
+ fs.writeFileSync(hold,JSON.stringify(changed))
+ assert.throws(()=>reviewInactivePhase1TestStage(options))
+ fs.writeFileSync(hold,original)
+ const dbPath=path.join(root,'data','central','identity.db')
+ const db=new DatabaseSync(dbPath)
+ try{db.exec('UPDATE family_users SET disabled=0')}finally{db.close()}
+ assert.throws(()=>reviewInactivePhase1TestStage(options))
+ assert.deepEqual(fs.readFileSync(hold),original)
+ assert(!JSON.stringify(r).includes('scrypt-v1'))
+ assert(!JSON.stringify(r).includes('syntheticowner'))
+})
