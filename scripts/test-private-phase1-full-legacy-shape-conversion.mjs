@@ -16,7 +16,7 @@ import {reviewDisposablePhase1PostWriteRollback} from '../Server/private-phase1-
 import {rehearseOfflineCentralOwner,verifyOfflineCentralOwnerPassword} from './private-phase1-offline-central-owner-rehearsal.mjs'
 import {EventEmitter} from 'node:events'
 import {readHiddenOwnerPassword} from './private-phase1-local-owner-password-proof.mjs'
-import {rehearseOfflineHouseholdCopy,rehearseOfflineCoordinatedPrimaryFamily,rehearseOfflineCoordinatedPrimaryStartupPlan,rehearseOfflineCoordinatedPrimaryBoot} from './private-phase1-offline-household-copy-rehearsal.mjs'
+import {rehearseOfflineHouseholdCopy,rehearseOfflineCoordinatedPrimaryFamily,rehearseOfflineCoordinatedPrimaryStartupPlan,rehearseOfflineCoordinatedPrimaryBoot,prepareInactivePhase1TestMigrationStage} from './private-phase1-offline-household-copy-rehearsal.mjs'
 import {reviewLegacyTableDefinitionDifference as reviewDdl,reviewEventPeopleReferencePlacement} from './private-phase1-legacy-ddl-difference-review.mjs'
 import {compareSourceShapedLegacyMetadata} from './private-phase1-source-shaped-schema-parity.mjs'
 import assert from 'node:assert/strict'
@@ -730,4 +730,48 @@ test('verified synthetic cold archive boots through password-gated offline rehea
  assert(!JSON.stringify(r).includes('syntheticowner'))
  assert(!JSON.stringify(r).includes('scrypt-v1'))
  assert(!JSON.stringify(r).includes('Synthetic Full Shape Example'))
+})
+
+
+test('inactive migration bundle is exclusive, disabled, independently verifiable and never boot-authorized',t=>{
+ const args=buildVerifiedOfflineFixture(t)
+ const destinationParent=path.dirname(args.recoveryParent)
+ const destination=path.join(destinationParent,'family-calendar-phase1-test-data')
+ const options={destinationParent,candidateSha:'a'.repeat(40),scope:'disposable-test-fixture'}
+ const archiveFile=path.join(args.snapshotRoot,'calendar.db'),before=hash(archiveFile)
+ assert.throws(()=>prepareInactivePhase1TestMigrationStage(args,{...options,candidateSha:'wrong'}))
+ assert.equal(fs.existsSync(destination),false)
+ const r=prepareInactivePhase1TestMigrationStage(args,options)
+ for(const flag of ['inactiveMigrationBundleCreated','stageOwnerDisabled','persistentIdentityCreated','archiveUnchanged','temporaryCopyRemoved'])assert.equal(r[flag],true,flag)
+ for(const flag of ['stageStartupAuthorized','persistentAccountActivated','hostWriterFenceVerified','testDeploymentAuthorized','liveDeploymentAuthorized','actualTestMigrationExecuted','backendBooted'])assert.equal(r[flag],false,flag)
+ const read=name=>JSON.parse(fs.readFileSync(path.join(destination,name),'utf8'))
+ assert.equal(read('DO-NOT-START.json').automaticStartupAllowed,false)
+ const review=read('INACTIVE-STAGE-REVIEW.json')
+ const attestation=read('COORDINATED-BACKUP-ATTESTATION.json')
+ assert.equal(review.candidateSha,options.candidateSha)
+ assert.equal(review.sourceArchiveName,path.basename(args.snapshotRoot))
+ assert.equal(review.sourceDatabaseSha256,before)
+ assert.equal(review.coordinatedAttestationSha256,attestation.sha256)
+ const serverDirectory=fileURLToPath(new URL('../Server/',import.meta.url))
+ assert.equal(verifyOfflinePrivateRestoreSet({serverDirectory,restoreRoot:path.join(destination,'data')},attestation).ok,true)
+ const db=new DatabaseSync(path.join(destination,'data','central','identity.db'),{readOnly:true})
+ try{
+  assert.equal(db.prepare('SELECT disabled FROM family_users').get().disabled,1)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n,0)
+ }finally{db.close()}
+ const reviewHash=hash(path.join(destination,'INACTIVE-STAGE-REVIEW.json'))
+ assert.throws(()=>prepareInactivePhase1TestMigrationStage(args,options))
+ assert.equal(hash(path.join(destination,'INACTIVE-STAGE-REVIEW.json')),reviewHash)
+ assert.equal(hash(archiveFile),before)
+ assert(!JSON.stringify(r).includes('scrypt-v1'))
+ assert(!JSON.stringify(r).includes('syntheticowner'))
+})
+test('inactive stage refuses altered archive and a foreign target',t=>{
+ const args=buildVerifiedOfflineFixture(t)
+ const destinationParent=path.dirname(args.recoveryParent)
+ const options={destinationParent,candidateSha:'b'.repeat(40),scope:'disposable-test-fixture'}
+ assert.throws(()=>prepareInactivePhase1TestMigrationStage(args,{...options,destinationParent:args.recoveryParent}))
+ fs.appendFileSync(path.join(args.snapshotRoot,'uploads','people','avatar.bin'),'changed')
+ assert.throws(()=>prepareInactivePhase1TestMigrationStage(args,options))
+ assert.equal(fs.existsSync(path.join(destinationParent,'family-calendar-phase1-test-data')),false)
 })
