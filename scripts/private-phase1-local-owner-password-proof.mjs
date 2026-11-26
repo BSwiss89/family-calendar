@@ -7,8 +7,8 @@ import {verifyOfflineCentralOwnerPassword} from './private-phase1-offline-centra
 
 const refusal=()=>new Error('Local Owner password input refused')
 
-export function readHiddenOwnerPassword(input,output,{timeoutMs=120000}={}){
- if(input?.isTTY!==true||output?.isTTY!==true||input.isRaw||
+export function readHiddenOwnerPassword(input,output,{timeoutMs=120000,promptKind='owner'}={}){
+ if(!['owner','operator','operator-confirm'].includes(promptKind)||input?.isTTY!==true||output?.isTTY!==true||input.isRaw||
     typeof input.setRawMode!=='function'||!Number.isSafeInteger(timeoutMs)||
     timeoutMs<1||timeoutMs>120000)return Promise.reject(refusal())
  return new Promise((resolve,reject)=>{
@@ -56,7 +56,7 @@ export function readHiddenOwnerPassword(input,output,{timeoutMs=120000}={}){
   }
   try{
    input.setRawMode(true);raw=true
-   output.write('Enter archived TEST Owner password (hidden; Enter submits, Ctrl-C cancels): ')
+   output.write(({owner:'Enter archived TEST Owner password',operator:'Choose separate platform operator password (14+ characters)', 'operator-confirm':'Confirm separate platform operator password'})[promptKind]+' (hidden; Enter submits, Ctrl-C cancels): ')
    input.on('data',onData)
    input.once('error',onEnd)
    input.once('end',onEnd)
