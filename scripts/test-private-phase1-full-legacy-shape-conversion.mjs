@@ -25,7 +25,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomBytes,createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
-import { hashFamilyPassword } from '../Server/family-auth.mjs'
+import { hashFamilyPassword, verifyFamilyPassword } from '../Server/family-auth.mjs'
+import { fileURLToPath } from 'node:url'
+import { createPrivateActivationRecords } from '../Server/private-household-activation-records.mjs'
+import { createIndependentHouseholdInvitationTables } from '../Server/independent-household-invitations.mjs'
+import { launchDisposableReviewedPhase1Gateway } from '../Server/private-disposable-reviewed-phase1-gateway-runtime.mjs'
 import {installSourceShapedSyntheticLegacyBase,installSourceShapedSyntheticLegacyNotifications} from './private-phase1-source-shaped-legacy-schema.mjs'
 import { stageDisposablePhase1PrimaryFamily } from '../Server/private-phase1-disposable-primary-conversion.mjs'
 import { listPrivatePhase1LegacyDispositionRules } from '../Server/private-phase1-legacy-table-disposition-review.mjs'
@@ -606,4 +610,104 @@ test('password-proven archive startup plan activates only a temporary identity c
  assert(!JSON.stringify(r).includes('syntheticowner'))
  assert(!JSON.stringify(r).includes('scrypt-v1'))
  assert(!JSON.stringify(r).includes('Synthetic Full Shape Example'))
+})
+
+
+// CI only: start from the source-shaped synthetic legacy fixture, NOT an
+// installed calendar or an actual recovery archive. No fixed port or routing.
+test('converted source-shaped legacy household boots through the reviewed Phase 1 supervisor', {timeout:120000},async t=>{
+ const f=buildFixture(t),sourceBefore=hash(f.file)
+ const stage=stageDisposablePhase1PrimaryFamily({serverDirectory:f.serverDirectory,sourceRoot:f.src,destinationRoot:f.out,prepareEventIdentityAndNotices:true})
+ assert.equal(stage.eventIdentityAndNoticePreparation.uidOnlyIntentsQueued,0)
+ const central=new DatabaseSync(path.join(f.out,'central','identity.db'))
+ try{
+  createEventShareTables(central)
+  createEventShareSyncJournal(central)
+ }finally{central.close()}
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'fc-phase1-converted-boot-fixture-'))
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true,maxRetries:6,retryDelay:150}))
+ const serverDirectory=fileURLToPath(new URL('../Server/',import.meta.url))
+ const baseline=captureDisposableCoordinatedHouseholdSnapshot({serverDirectory,sourceRoot:f.out,destinationRoot:path.join(root,'snapshot')})
+ const storageRoot=path.join(root,'restored')
+ copyVerifiedPrivateRestoreSet({serverDirectory,sourceRoot:baseline.snapshotRoot,destinationRoot:storageRoot,approvedAttestation:baseline.attestation})
+ assert.equal(verifyOfflinePrivateRestoreSet({serverDirectory,restoreRoot:storageRoot},baseline.attestation).ok,true)
+ const identityDatabasePath=path.join(root,'startup-identity.db')
+ fs.copyFileSync(path.join(storageRoot,'central','identity.db'),identityDatabasePath,fs.constants.COPYFILE_EXCL)
+ const stateDirectory=path.join(root,'state')
+ fs.mkdirSync(stateDirectory)
+ const password='Synthetic Full Shape Example 123!'
+ const operatorPassword=randomBytes(32).toString('hex')
+ let operatorId
+ const db=new DatabaseSync(identityDatabasePath)
+ try{
+  db.exec('PRAGMA foreign_keys=ON')
+  createIndependentHouseholdInvitationTables(db)
+  createPrivateActivationRecords(db)
+  const owner=db.prepare('SELECT * FROM family_users').get()
+  assert.equal(owner.disabled,1)
+  assert.equal(await verifyFamilyPassword(password,owner.password_hash),true)
+  db.exec('BEGIN IMMEDIATE')
+  try{
+   operatorId=Number(db.prepare("INSERT INTO family_users(username,display_name,password_hash,account_kind,disabled) VALUES(?,?,?,'person',0)").run('bootoperator','Disposable Operator',hashFamilyPassword(operatorPassword)).lastInsertRowid)
+   assert.equal(db.prepare('UPDATE family_users SET disabled=0 WHERE id=? AND disabled=1').run(owner.id).changes,1)
+   assert.equal(db.prepare("UPDATE household_registry SET disabled=0 WHERE storage_id='primary-family' AND disabled=1").run().changes,1)
+   assert.equal(db.prepare("UPDATE household_memberships SET disabled=0 WHERE user_id=? AND role='owner' AND disabled=1").run(owner.id).changes,1)
+   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n,0)
+   db.exec('COMMIT')
+  }catch(e){db.exec('ROLLBACK');throw e}
+ }finally{db.close()}
+ const file=path.join(storageRoot,'households','primary-family','data','calendar.db')
+ const readFamily=()=>{
+  const d=new DatabaseSync(file,{readOnly:true})
+  try{
+   assert.equal(d.prepare('PRAGMA integrity_check').get().integrity_check,'ok')
+   assert.equal(d.prepare('PRAGMA foreign_key_check').all().length,0)
+   return {events:d.prepare('SELECT id,event_uid,title FROM events ORDER BY id').all(),
+    notices:d.prepare('SELECT * FROM assignment_notification_outbox ORDER BY id').all(),
+    acks:d.prepare('SELECT * FROM test_assignment_acknowledgements ORDER BY notification_id,person_id').all()}
+  }finally{d.close()}
+ }
+ const before=readFamily()
+ const runtime=await launchDisposableReviewedPhase1Gateway({fixtureRoot:root,storageRoot,stateDirectory,identityDatabasePath,serverDirectory,primaryHouseholdId:'primary-family',operatorUserIds:[operatorId]})
+ let closed=false
+ try{
+  const status=runtime.snapshot()
+  assert.equal(status.supervisorAdmissionOpen,true)
+  assert.equal(status.householdCount,1)
+  assert.equal(status.gatewayLocalhostOnly,true)
+  const request=async(route,{cookie,body}={})=>{
+   const r=await fetch(runtime.base+route,{method:body?'POST':'GET',redirect:'manual',signal:AbortSignal.timeout(7000),headers:{
+    ...(cookie?{Cookie:cookie}:{}),...(body?{'Content-Type':'application/json',Origin:'https://'+new URL(runtime.base).host}:{}),
+   },...(body?{body:JSON.stringify(body)}:{})})
+   const payload=r.headers.get('content-type')?.includes('application/json')?await r.json():await r.text()
+   return {r,payload}
+  }
+  assert.equal((await request('/api/events')).r.status,401)
+  const direct=await fetch('http://127.0.0.1:'+status.childPorts[0]+'/api/events',{signal:AbortSignal.timeout(5000)})
+  assert.equal(direct.status,403)
+  await direct.body?.cancel()
+  async function login(username,password){
+   const {r}=await request('/api/auth/login',{body:{username,password,deviceLabel:'Disposable conversion boot'}})
+   assert.equal(r.status,200)
+   const cookie=r.headers.get('set-cookie')
+   assert.match(cookie,/__Host-fc_gateway_session=/)
+   return cookie.split(';')[0]
+  }
+  const cookie=await login('syntheticowner',password)
+  const operatorCookie=await login('bootoperator',operatorPassword)
+  for(const [route,name] of [['/api/events','Synthetic event'],['/api/people','Synthetic Person'],['/api/lists','Synthetic groceries']]){
+   const {r,payload}=await request(route,{cookie})
+   assert.equal(r.status,200)
+   assert(JSON.stringify(payload).includes(name))
+   assert.equal((await request(route,{cookie:operatorCookie})).r.status,404)
+  }
+  assert.equal((await request('/api/admin/household-overview',{cookie})).r.status,404)
+  assert.equal((await request('/api/admin/household-overview',{cookie:operatorCookie})).r.status,200)
+  assert.equal((await request('/api/recipes',{cookie})).r.status,404)
+  assert.equal((await runtime.shutdown()).allChildrenExited,true)
+  closed=true
+ }finally{if(!closed){try{await runtime.shutdown()}catch{/* retain hold for fixture review */}}}
+ assert.deepEqual(readFamily(),before)
+ assert.equal(hash(f.file),sourceBefore)
+ assert.equal(verifyOfflinePrivateRestoreSet({serverDirectory,restoreRoot:baseline.snapshotRoot},baseline.attestation).ok,true)
 })
