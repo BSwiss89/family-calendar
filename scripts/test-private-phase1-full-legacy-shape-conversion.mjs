@@ -5,6 +5,13 @@
 // not independently verified historical DDL. No actual archived SQL is loaded.
 // Matching the archived aggregate counts does NOT prove exact historical DDL.
 import test from 'node:test'
+import {installPrivateEventIdentity} from '../Server/private-event-identity.mjs'
+import {createEventShareTables} from '../Server/event-only-shares.mjs'
+import {createEventShareSyncJournal} from '../Server/event-share-sync-journal.mjs'
+import {captureDisposableCoordinatedHouseholdSnapshot} from '../Server/private-disposable-coordinated-snapshot.mjs'
+import {copyVerifiedPrivateRestoreSet} from '../Server/private-offline-restore-rehearsal.mjs'
+import {verifyOfflinePrivateRestoreSet} from '../Server/private-restore-preflight.mjs'
+import {reviewDisposablePhase1PostWriteRollback} from '../Server/private-phase1-post-write-rollback-review.mjs'
 import {rehearseOfflineCentralOwner} from './private-phase1-offline-central-owner-rehearsal.mjs'
 import {rehearseOfflineHouseholdCopy} from './private-phase1-offline-household-copy-rehearsal.mjs'
 import {reviewLegacyTableDefinitionDifference as reviewDdl,reviewEventPeopleReferencePlacement} from './private-phase1-legacy-ddl-difference-review.mjs'
@@ -276,4 +283,64 @@ test('verified legacy central Owner stays disabled in memory and no old sessions
  assert.equal(hash(source),before)
  assert(!JSON.stringify(r).includes('syntheticowner'))
  assert(!JSON.stringify(r).includes('scrypt-v1'))
+})
+
+test('converted synthetic primary household becomes a coordinated restorable set without active sessions',t=>{
+ const f=buildFixture(t),original=hash(f.file)
+ stageDisposablePhase1PrimaryFamily({serverDirectory:f.serverDirectory,sourceRoot:f.src,destinationRoot:f.out})
+ const temp=fs.realpathSync(os.tmpdir())
+ const work=fs.mkdtempSync(path.join(temp,'fc-phase1-converted-recovery-'))
+ t.after(()=>fs.rmSync(work,{recursive:true,force:true}))
+ const centralPath=path.join(f.out,'central','identity.db')
+ const familyPath=path.join(f.out,'households','primary-family','data','calendar.db')
+ const central=new DatabaseSync(centralPath)
+ try{
+  createEventShareTables(central)
+  createEventShareSyncJournal(central)
+  assert.equal(central.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n,0)
+  assert.equal(central.prepare('SELECT disabled FROM family_users').get().disabled,1)
+ }finally{central.close()}
+ const db=new DatabaseSync(familyPath)
+ let uid
+ try{
+  const originalEvent=db.prepare('SELECT * FROM events WHERE id=46').get()
+  installPrivateEventIdentity(db)
+  const {event_uid,...remaining}=db.prepare('SELECT * FROM events WHERE id=46').get()
+  uid=event_uid
+  assert.match(uid,/^[a-f0-9]{32}$/)
+  assert.deepEqual(remaining,{...originalEvent})
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM assignment_notification_outbox').get().n,31)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM test_assignment_acknowledgements').get().n,14)
+  // Backfill invokes existing event-update triggers. This is not a silent
+  // notification reconciliation; preserve queued work for a later review.
+  assert(db.prepare('SELECT revision FROM notification_dirty_events WHERE event_id=46').get().revision>0)
+  assert.equal(db.prepare('SELECT change_mask FROM notification_dirty_event_fields WHERE event_id=46').get().change_mask,0)
+ }finally{db.close()}
+ const args={serverDirectory:f.serverDirectory,sourceRoot:f.out}
+ const first=captureDisposableCoordinatedHouseholdSnapshot({...args,destinationRoot:path.join(work,'baseline')})
+ assert.equal(first.householdCount,1)
+ assert.equal(first.sourceWritersVerifiedStopped,false)
+ const restored=path.join(work,'restored')
+ copyVerifiedPrivateRestoreSet({serverDirectory:f.serverDirectory,sourceRoot:first.snapshotRoot,destinationRoot:restored,approvedAttestation:first.attestation})
+ assert.equal(verifyOfflinePrivateRestoreSet({serverDirectory:f.serverDirectory,restoreRoot:restored},first.attestation).ok,true)
+ const restoredFamily=new DatabaseSync(path.join(restored,'households','primary-family','data','calendar.db'),{readOnly:true})
+ try{
+  assert.equal(restoredFamily.prepare('SELECT event_uid FROM events WHERE id=46').get().event_uid,uid)
+  assert.equal(restoredFamily.prepare('SELECT COUNT(*) AS n FROM assignment_notification_outbox').get().n,31)
+  assert.equal(restoredFamily.prepare('SELECT COUNT(*) AS n FROM test_assignment_acknowledgements').get().n,14)
+ }finally{restoredFamily.close()}
+ const restoredCentral=new DatabaseSync(path.join(restored,'central','identity.db'),{readOnly:true})
+ try{
+  assert.equal(restoredCentral.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n,0)
+  assert.equal(restoredCentral.prepare('SELECT disabled FROM family_users').get().disabled,1)
+ }finally{restoredCentral.close()}
+ const laterDb=new DatabaseSync(familyPath)
+ try{laterDb.prepare('INSERT INTO lists(name) VALUES(?)').run('Synthetic new list after backup')}finally{laterDb.close()}
+ const second=captureDisposableCoordinatedHouseholdSnapshot({...args,destinationRoot:path.join(work,'after-write')})
+ const review=reviewDisposablePhase1PostWriteRollback({serverDirectory:f.serverDirectory,baselineSnapshotRoot:first.snapshotRoot,baselineAttestation:first.attestation,laterSnapshotRoot:second.snapshotRoot,laterAttestation:second.attestation})
+ assert.equal(review.changedCategories.database,1)
+ assert.equal(review.possibleNewerDataLoss,true)
+ assert.equal(review.automaticRollbackAllowed,false)
+ assert.equal(review.restoreAuthorized,false)
+ assert.equal(hash(f.file),original)
 })
