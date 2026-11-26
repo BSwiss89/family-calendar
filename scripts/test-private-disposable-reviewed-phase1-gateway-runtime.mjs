@@ -418,6 +418,32 @@ test('real supervisor captures coordinated backup after shutdown and revokes ses
   assert.equal(maintenance.restartBlocked,true)
   assert.throws(()=>assertLocalMaintenanceClear(options.fixtureRoot))
   assert.throws(()=>completeLocalBackupStopRequest(options.fixtureRoot,request,receipt))
+  const {reviewLocalMaintenanceResume,archiveCompletedLocalMaintenanceHold}=await import('../Server/private-phase1-local-maintenance-control.mjs')
+  const resumeOptions={root:options.fixtureRoot,storageRoot:options.storageRoot,identityDatabasePath:options.identityDatabasePath,serverDirectory,primaryHouseholdId,expectedRequestId:request.requestId}
+  const reviewed=reviewLocalMaintenanceResume(resumeOptions)
+  assert.equal(reviewed.verifiedBackup,true)
+  assert.equal(reviewed.originalDataUnchanged,true)
+  assert.equal(reviewed.holdReleased,false)
+  assert.throws(()=>reviewLocalMaintenanceResume({...resumeOptions,expectedRequestId:'0'.repeat(32)}))
+  const unexpected=path.join(options.storageRoot,'households',primaryHouseholdId,'uploads','unexpected-after-stop.txt')
+  fs.writeFileSync(unexpected,'synthetic drift')
+  assert.throws(()=>archiveCompletedLocalMaintenanceHold(resumeOptions))
+  assert.throws(()=>assertLocalMaintenanceClear(options.fixtureRoot))
+  fs.unlinkSync(unexpected)
+  const backupReview=path.join(options.fixtureRoot,'coordinated-backups',receipt.backupName,'BACKUP-REVIEW.json')
+  const originalReview=fs.readFileSync(backupReview,'utf8')
+  fs.writeFileSync(backupReview,JSON.stringify({...JSON.parse(originalReview),sourceDigest:'0'.repeat(64)}))
+  assert.throws(()=>archiveCompletedLocalMaintenanceHold(resumeOptions))
+  assert.throws(()=>assertLocalMaintenanceClear(options.fixtureRoot))
+  fs.writeFileSync(backupReview,originalReview)
+  const released=archiveCompletedLocalMaintenanceHold(resumeOptions)
+  assert.equal(released.holdReleased,true)
+  assert.equal(released.archivePreserved,true)
+  assert.equal(released.taskStarted,false)
+  assert.equal(released.windowsHostVerified,false)
+  assertLocalMaintenanceClear(options.fixtureRoot)
+  assert.equal(fs.existsSync(path.join(options.fixtureRoot,'MAINTENANCE-COMPLETED-'+request.requestId,'RECEIPT.json')),true)
+  assert.throws(()=>archiveCompletedLocalMaintenanceHold(resumeOptions))
   assert.equal(receipt.households,2)
   assert.equal(receipt.sessionsRevokedInCopy,2)
   for(const flag of ['sourceSessionsUnchanged','sourceFilesUnchanged','coordinatedBackupVerified','supervisorHeldDuringCapture','allChildrenExited','gatewayClosed','ownerInstanceReleased'])assert.equal(receipt[flag],true,flag)
@@ -439,6 +465,14 @@ test('real supervisor captures coordinated backup after shutdown and revokes ses
    const db=new DatabaseSync(path.join(bundle,'snapshot','households',id,'data','calendar.db'),{readOnly:true})
    try{assert.equal(db.prepare('SELECT title FROM events').get().title,'Backup '+username)}finally{db.close()}
   }
+  const resumed=await launchDisposableReviewedPhase1Gateway(options)
+  try{
+   assert.equal(resumed.snapshot().phase,'running')
+   const login=await request(resumed.base,'/api/auth/login',{method:'POST',body:{username:'phase1primaryowner',password,deviceLabel:'Synthetic resumed phone'}})
+   assert.equal(login.response.status,200)
+   const events=await request(resumed.base,'/api/events',{method:'GET',cookie:login.response.headers.get('set-cookie').split(';')[0]})
+   assert.equal(events.response.status,200)
+  }finally{await resumed.shutdown()}
  }finally{if(!stopping)await runtime.shutdown()}
 })
 
