@@ -1895,23 +1895,42 @@ export async function startPrivateHouseholdGateway({
     server.close()
     throw new Error('Gateway failed private listener validation.')
   }
+  async function closeGateway(stopBackendsForBackup = null) {
+    if (closing || enrollmentInProgress) {
+      throw new Error('Gateway is closing or household enrollment is in progress.')
+    }
+    closing = true
+    await new Promise((resolve,reject) => server.close(error => error ? reject(error) : resolve()))
+    if (stopBackendsForBackup !== null) {
+      // The supervisor has already closed admission. Confirm every captured
+      // backend has stopped BEFORE replaying the final durable source outbox.
+      // A successful POST create may leave an outbox row even when no
+      // existing-event share mutation is in flight. Never discard that row.
+      await stopBackendsForBackup()
+      if (activeEventMutations.size !== 0 || activeLocalAi.size !== 0) {
+        throw new Error('Unresolved gateway mutations prevent offline backup.')
+      }
+      reconcilePendingShares()
+      if (countPendingEventShareSync(identityDatabase) !== 0) {
+        throw new Error('Unresolved central journal prevents offline backup.')
+      }
+    }
+    // On any failed shutdown/reconciliation retain the writer lock for review.
+    writerLock.release()
+  }
   return {
     base: 'http://127.0.0.1:' + address.port,
     port: address.port,
     enrollHouseholdBackend,
-    close: () => new Promise((resolve, reject) => {
-      if (closing || enrollmentInProgress) {
-        return reject(new Error('Gateway is closing or household enrollment is in progress.'))
-      }
-      closing = true
-      server.close(error => {
-        if (error) return reject(error)
-        try {
-          writerLock.release()
-          resolve()
-        } catch (releaseError) { reject(releaseError) }
-      })
-    }),
+    close: () => closeGateway(),
+    ...(phase1OwnerPilotOnly && supervisorAdmissionCheck !== null ? {
+      closeForOfflineBackup: async stopBackends => {
+        if (typeof stopBackends !== 'function' || admittedBySupervisor()) {
+          throw new Error('Closed supervisor admission and captured-child shutdown are required.')
+        }
+        await closeGateway(stopBackends)
+      },
+    } : {}),
   }
   } catch (error) {
     // Startup failure cannot strand a healthy writer lock. If ownership
