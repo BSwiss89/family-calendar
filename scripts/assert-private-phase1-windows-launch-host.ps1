@@ -4,7 +4,8 @@
 param(
  [Parameter(Mandatory=$true)][ValidatePattern('^[a-f0-9]{40}$')][string]$ExpectedCandidateSha,
  [Parameter(Mandatory=$true)][ValidatePattern('^[a-f0-9]{40}$')][string]$ExpectedInstalledTestSha,
- [Parameter(Mandatory=$true)][ValidatePattern('^[a-f0-9]{40}$')][string]$ExpectedLiveSha
+ [Parameter(Mandatory=$true)][ValidatePattern('^[a-f0-9]{40}$')][string]$ExpectedLiveSha,
+ [ValidateSet('Launch','MaintenanceResume')][string]$Mode='Launch'
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -39,7 +40,8 @@ if($LASTEXITCODE -ne 0 -or ($acl -join '') -cne 'PHASE1_WINDOWS_STAGE_ACL=PASS |
 $test=Get-ScheduledTask -TaskName 'Family Calendar Secure TEST' -TaskPath '\'
 $updater=Get-ScheduledTask -TaskName 'Family Calendar Secure TEST Auto Deploy' -TaskPath '\'
 $lt=Get-ScheduledTask -TaskName 'Family Calendar Server' -TaskPath '\'
-if($test.State -cne 'Running' -or $updater.State -cne 'Disabled' -or $lt.State -cne 'Running'){Refuse}
+$expectedTaskState=if($Mode -ceq 'MaintenanceResume'){'Disabled'}else{'Running'}
+if($test.State -cne $expectedTaskState -or $updater.State -cne 'Disabled' -or $lt.State -cne 'Running'){Refuse}
 $actions=@($test.Actions)
 $expectedArgs='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$launcher+'"'
 if($actions.Count -ne 1 -or -not (Same ([string]$actions[0].Execute) $ps) -or
@@ -69,7 +71,8 @@ if($LASTEXITCODE -ne 0){Refuse}
 $show=@(& netsh interface portproxy show all)
 if($LASTEXITCODE -ne 0){Refuse}
 $matched=0
-foreach($phase in @('legacy-fenced','candidate-review')){
+$phases=if($Mode -ceq 'MaintenanceResume'){@('candidate-review')}else{@('legacy-fenced','candidate-review')}
+foreach($phase in $phases){
  $inputJson=@{dump=($dump -join "`n");showAll=($show -join "`n");installedTestSha=$ExpectedInstalledTestSha;legacyTestAddress='100.124.58.19';phase=$phase}|ConvertTo-Json -Compress
  $out=@($inputJson | & $node (Join-Path $PSScriptRoot 'review-private-phase1-portproxy-all-families.mjs') 2>$null)
  if($LASTEXITCODE -eq 0){$matched++}
@@ -79,4 +82,4 @@ $repeat=@(& netsh interface portproxy show all)
 if($LASTEXITCODE -ne 0 -or ($repeat -join "`n") -cne ($show -join "`n")){Refuse}
 $health=Invoke-WebRequest -Uri 'http://127.0.0.1:3001/api/health' -UseBasicParsing -TimeoutSec 5
 if($health.StatusCode -ne 200 -or (ConvertFrom-Json $health.Content).status -cne 'ok'){Refuse}
-Write-Output 'PHASE1_WINDOWS_LAUNCH_HOST=PASS | TEST_ONLY=YES'
+if($Mode -ceq 'MaintenanceResume'){Write-Output 'PHASE1_WINDOWS_RESUME_HOST=PASS | TEST_ONLY=YES'}else{Write-Output 'PHASE1_WINDOWS_LAUNCH_HOST=PASS | TEST_ONLY=YES'}
