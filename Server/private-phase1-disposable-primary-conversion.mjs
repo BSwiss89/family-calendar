@@ -11,6 +11,8 @@ import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { comparePrivatePhase1SourceTriggerDefinitions } from './private-phase1-archive-trigger-source-parity.mjs'
 import { createHouseholdMembershipTables } from './household-memberships.mjs'
+import { installPrivateEventIdentity } from './private-event-identity.mjs'
+import { reconcileNotificationMutations } from './notification-event-mutation-capture.mjs'
 import { listPrivatePhase1LegacyDispositionRules } from './private-phase1-legacy-table-disposition-review.mjs'
 
 const MARKER='.phase1-disposable-legacy-fixture.json'
@@ -373,6 +375,80 @@ function scrubHousehold(file,originals,originalSchemaObjects,originalHistoricalN
       preservedRows:[...originals.values()].reduce((n,x)=>n+x.rows,0)}
   } finally {db.close()}
 }
+// Runs only inside the guarded fresh disposable output, after the exact
+// legacy split has been verified. Any failure discards that entire output.
+function prepareDisposableEventIdentityAndNotices(file) {
+  const db=new DatabaseSync(file)
+  try {
+    db.exec('PRAGMA foreign_keys=ON')
+    const count=table=>db.prepare('SELECT COUNT(*) AS n FROM '+q(table)).get().n
+    const transient=['notification_dirty_event_fields','notification_dirty_event_attribution','notification_deleted_event_details']
+    function requireLinkedTransientRows() {
+      for(const table of transient) {
+        if(db.prepare('SELECT 1 FROM '+q(table)+' t WHERE NOT EXISTS (SELECT 1 FROM notification_dirty_events d WHERE d.event_id=t.event_id) LIMIT 1').get()) {
+          refuse('unlinked notification transient state needs review.')
+        }
+      }
+    }
+    function drain(at) {
+      const initial=count('notification_dirty_events')
+      if(initial>MAX_RECORDS)refuse('notification work exceeds disposable limit.')
+      let processed=0,queued=0
+      while(processed<initial) {
+        const r=reconcileNotificationMutations(db,{limit:1000,at})
+        if(r.processed<1||processed+r.processed>initial||
+           r.remaining!==initial-processed-r.processed)refuse('unexpected notification queue drift.')
+        processed+=r.processed
+        queued+=r.queued
+        if(queued>MAX_RECORDS)refuse('notification intent count exceeds disposable limit.')
+      }
+      if(count('notification_dirty_events')!==0||transient.some(table=>count(table)!==0)) {
+        refuse('notification reconciliation left transient rows.')
+      }
+      return {processed,queued}
+    }
+    function outboxPrefix(maxId) {
+      const sha=createHash('sha256')
+      for(const row of db.prepare('SELECT * FROM assignment_notification_outbox WHERE id<=? ORDER BY id').iterate(maxId)) {
+        sha.update(JSON.stringify(row)+'\n')
+      }
+      return sha.digest('hex')
+    }
+    requireLinkedTransientRows()
+    const originalCount=count('assignment_notification_outbox')
+    const maxId=db.prepare('SELECT COALESCE(MAX(id),0) AS n FROM assignment_notification_outbox').get().n
+    const originalHistory=outboxPrefix(maxId)
+    const acks=JSON.stringify(snapshot(db,'test_assignment_acknowledgements'))
+    const at=Date.now()
+    // Preserve exact actor attribution before a UID-only SQL UPDATE advances
+    // the dirty revision. No push transport or browser access is involved.
+    const prior=drain(at)
+    if(count('assignment_notification_outbox')!==originalCount+prior.queued||
+       outboxPrefix(maxId)!==originalHistory||
+       JSON.stringify(snapshot(db,'test_assignment_acknowledgements'))!==acks) {
+      refuse('historical notification or acknowledgement changed.')
+    }
+    const baseline=JSON.stringify(snapshot(db,'notification_event_baselines'))
+    const allNotices=JSON.stringify(snapshot(db,'assignment_notification_outbox'))
+    installPrivateEventIdentity(db)
+    const uidOnly=drain(at)
+    if(uidOnly.queued!==0||
+       JSON.stringify(snapshot(db,'assignment_notification_outbox'))!==allNotices||
+       JSON.stringify(snapshot(db,'notification_event_baselines'))!==baseline||
+       JSON.stringify(snapshot(db,'test_assignment_acknowledgements'))!==acks) {
+      refuse('UID-only backfill changed notification history or material baselines.')
+    }
+    if(db.prepare('SELECT 1 FROM events WHERE event_uid IS NULL LIMIT 1').get()) {
+      refuse('event identity backfill incomplete.')
+    }
+    check(db)
+    return Object.freeze({legacyDirtyEventsProcessed:prior.processed,
+      legitimateLegacyIntentsQueued:prior.queued,uidDirtyEventsProcessed:uidOnly.processed,
+      uidOnlyIntentsQueued:0,historyAndAcknowledgementsPreserved:true,
+      pendingMutationQueueDrained:true,pushTransmitted:false})
+  }finally{db.close()}
+}
+
 /**
  * Does NOT accept the real cold backup path. The destination is an isolated
  * OS-temp rehearsal, not a service data root. Neither output is bootable.
@@ -380,9 +456,12 @@ function scrubHousehold(file,originals,originalSchemaObjects,originalHistoricalN
  * disposable source; disabled central Owner is not authorized to log in.
  */
 export function stageDisposablePhase1PrimaryFamily({
-  serverDirectory,sourceRoot,destinationRoot,
+  serverDirectory,sourceRoot,destinationRoot,prepareEventIdentityAndNotices=false,
 }={}) {
   const {src,out,dbFile,sourceGenerated}=paths(sourceRoot,destinationRoot,serverDirectory)
+  if(typeof prepareEventIdentityAndNotices!=='boolean'||(prepareEventIdentityAndNotices&&!sourceGenerated)) {
+    refuse('event identity preparation requires explicit source-shaped synthetic fixture.')
+  }
   const sourceBefore=digest(dbFile)
   const uploadsBefore=scanUploads(path.join(src,'uploads'))
   const original=new DatabaseSync(dbFile,{readOnly:true})
@@ -420,6 +499,7 @@ export function stageDisposablePhase1PrimaryFamily({
     const destDb=path.join(familyData,'calendar.db')
     fs.copyFileSync(dbFile,destDb,fs.constants.COPYFILE_EXCL)
     const split=scrubHousehold(destDb,preserved,originalSchemaObjects,originalHistoricalNotices,sourceGenerated)
+    const noticePreparation=prepareEventIdentityAndNotices?prepareDisposableEventIdentityAndNotices(destDb):null
     const centralDb=path.join(centralDir,'identity.db')
     centralIdentity(centralDb,owner)
     copyUploads(path.join(src,'uploads'),path.join(home,'uploads'),uploadsBefore)
@@ -438,6 +518,7 @@ export function stageDisposablePhase1PrimaryFamily({
       preservedHouseholdAndNoticeTables:split.preservedTables,
       preservedHouseholdAndNoticeRows:retainedRows,
       copiedUploadFiles:uploadsBefore.length,
+      eventIdentityAndNoticePreparation:noticePreparation,
       historicalOutboxRowsPreserved:originalHistoricalNotices.outboxRows,
       orphanedEventNoticeReferencesPreserved:originalHistoricalNotices.unmatchedEventReferences,
       orphanedPersonNoticeReferencesPreserved:originalHistoricalNotices.unmatchedPersonReferences,
