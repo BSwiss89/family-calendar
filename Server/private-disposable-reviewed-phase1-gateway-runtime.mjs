@@ -210,6 +210,10 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
   const backends = []
   let gateway = null
   try {
+    if(!disposable){
+      const operator=central.prepare("SELECT id FROM family_users WHERE id=? AND disabled=0 AND account_kind='person'").get(operatorUserIds[0])
+      if(!operator||central.prepare('SELECT COUNT(*) AS n FROM household_memberships WHERE user_id=?').get(operator.id).n!==0)refuse('active separate operator required.')
+    }
     const plan = planReviewedPrivateTestStartup({
       identityDatabase: central,
       serverDirectory: paths.server, storageRoot: paths.storage,
