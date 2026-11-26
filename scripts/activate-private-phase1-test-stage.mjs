@@ -42,13 +42,13 @@ function hostFence(options){
  const code=physical(path.join(destinationParent,'family-calendar-phase1-test-code'))
  need(code===physical(codeDirectory))
  const legacy=physical(path.join(destinationParent,'family-calendar-test-security-stage'))
- const live=physical(path.join(destinationParent,'family-calendar'))
+ const live=physical(path.join(destinationParent,'family-calendar-live-auth-candidate'))
  for(const [dir,pin] of [[code,expectedCandidateSha],[legacy,expectedInstalledTestSha],[live,expectedLiveSha]])need(run('git',['-C',dir,'rev-parse','HEAD'])===pin)
  need(run('git',['-C',code,'status','--porcelain','--untracked-files=no'])==='')
  const ps=path.join(process.env.SystemRoot??'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe')
  const result=run(ps,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(code,'scripts','capture-private-phase1-offline-legacy-test.ps1'),'-ExpectedInstalledTestSha',expectedInstalledTestSha])
  need(result.includes('TASKS=test=Disabled updater=Disabled')&&result.includes('LEGACY_LISTENERS=0 | PRIVATE_LISTENERS=0'))
- const inspect="$ErrorActionPreference='Stop'; $u=[Security.Principal.WindowsIdentity]::GetCurrent(); if(-not ([Security.Principal.WindowsPrincipal]$u).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -or $u.User.Value -eq 'S-1-5-18'){exit 1}; foreach($n in @('Family Calendar Auto Deploy','Family Calendar Auto Preview','Family Calendar Secure LIVE Auto Deploy')){if((Get-ScheduledTask -TaskName $n).State -cne 'Disabled'){exit 1}}; if(@(Get-NetTCPConnection -State Listen | Where-Object {$_.LocalPort -in @(13002,13004,13005,13006)}).Count){exit 1}; foreach($p in @(Get-CimInstance Win32_Process | Where-Object {$_.ProcessId -ne $PID -and $_.Name -in @('node.exe','powershell.exe','pwsh.exe')})){if([string]::IsNullOrWhiteSpace($p.CommandLine) -or $p.CommandLine -match '(?i)family-calendar-test-security-stage|start-secure-test-patched\\.ps1|secure-test-auto-deploy\\.ps1'){exit 1}}; if((Invoke-WebRequest -Uri 'http://127.0.0.1:3001/api/health' -UseBasicParsing -TimeoutSec 5).StatusCode -ne 200){exit 1}; Write-Output 'FENCED'"
+ const inspect="$ErrorActionPreference='Stop'; $u=[Security.Principal.WindowsIdentity]::GetCurrent(); if(-not ([Security.Principal.WindowsPrincipal]$u).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -or $u.User.Value -eq 'S-1-5-18'){exit 1}; foreach($n in @('Family Calendar Auto Deploy','Family Calendar Auto Preview','Family Calendar Secure LIVE Auto Deploy')){if((Get-ScheduledTask -TaskName $n).State -cne 'Disabled'){exit 1}}; if(@(Get-NetTCPConnection -State Listen | Where-Object {$_.LocalPort -in @(13002,13004,13005,13006)}).Count){exit 1}; foreach($p in @(Get-CimInstance Win32_Process | Where-Object {$_.ProcessId -ne $PID -and $_.Name -in @('node.exe','powershell.exe','pwsh.exe')})){if([string]::IsNullOrWhiteSpace($p.CommandLine) -or $p.CommandLine -match '(?i)family-calendar-test-security-stage|start-secure-test-patched\\.ps1|secure-test-auto-deploy\\.ps1'){exit 1}}; $listeners=@(Get-NetTCPConnection -State Listen -LocalPort 3001); if($listeners.Count -ne 1 -or $listeners[0].LocalAddress -cne '127.0.0.1'){exit 1}; $lp=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$listeners[0].OwningProcess); $liveEntry=Join-Path $env:USERPROFILE 'Projects\\family-calendar-live-auth-candidate\\Server\\index.mjs'; if($lp.Name -cne 'node.exe' -or [string]$lp.CommandLine -notlike ('*'+$liveEntry+'*')){exit 1}; if((Invoke-WebRequest -Uri 'http://127.0.0.1:3001/api/health' -UseBasicParsing -TimeoutSec 5).StatusCode -ne 200){exit 1}; Write-Output 'FENCED'"
  need(run(ps,['-NoProfile','-NonInteractive','-Command',inspect])==='FENCED')
  assessPrivatePhase1AllFamilyPortproxyDump({dump:run('netsh',['interface','portproxy','dump']),showAll:run('netsh',['interface','portproxy','show','all']),installedTestSha:expectedInstalledTestSha,legacyTestAddress:'100.124.58.19',phase:'legacy-fenced'})
  const recoveryParent=physical(path.join(destinationParent,'family-calendar-phase1-recovery'))
@@ -135,6 +135,7 @@ export async function activateInactivePhase1TestStage(options,{ownerPassword,ope
  fs.renameSync(progress,path.join(root,'ACTIVATION-COMPLETED.json'))
  return {result:'PASS',ownerActivated:true,separateOperator:true,oldSessionsImported:0,households:1,testStartupApproved:windows,taskStarted:false,routeChanged:false,liveDeploymentAuthorized:false}
 }
+let phase='arguments'
 async function main(){
  const [approval,expectedCandidateSha,expectedInstalledTestSha,expectedLiveSha,expectedArchiveName,operatorUsername]=process.argv.slice(2)
  need(process.argv.length===8&&approval==='APPROVE-EXISTING-TEST-ONLY'&&[expectedCandidateSha,expectedInstalledTestSha,expectedLiveSha].every(x=>sha.test(x??''))&&snapshotPattern.test(expectedArchiveName??'')&&/^[a-z0-9._-]{3,40}$/.test(operatorUsername??'')&&process.stdin.isTTY&&process.stdout.isTTY&&process.platform==='win32')
@@ -143,20 +144,26 @@ async function main(){
  need(path.dirname(snapshotRoot)===recoveryParent)
  const expectedManifestSha256=digest(path.join(snapshotRoot,'OFFLINE-LEGACY-REVIEW.json'))
  const options={serverDirectory,destinationParent,scope:'windows-inactive-stage',expectedCandidateSha,expectedInstalledTestSha,expectedLiveSha,expectedArchiveName,expectedManifestSha256}
+ phase='host-fence'
  const args=hostFence(options)
+ phase='credential-input'
  let ownerPassword=await readHiddenOwnerPassword(process.stdin,process.stdout)
  let operatorPassword=await readHiddenOwnerPassword(process.stdin,process.stdout,{promptKind:'operator'})
  let confirmation=await readHiddenOwnerPassword(process.stdin,process.stdout,{promptKind:'operator-confirm'})
  try{
   need(operatorPassword===confirmation&&operatorPassword.length>=14&&operatorPassword!==ownerPassword)
   confirmation=undefined
+  phase='owner-proof'
   await (async()=>{const {verifyOfflineCentralOwnerPassword}=await import('./private-phase1-offline-central-owner-rehearsal.mjs');need((await verifyOfflineCentralOwnerPassword(args,ownerPassword)).passwordOwnershipVerified)})()
+  phase='pre-stage-fence'
   hostFence(options)
+  phase='inactive-stage'
   prepareInactivePhase1TestMigrationStage(args,{candidateSha:expectedCandidateSha,destinationParent,scope:options.scope})
+  phase='activation'
   const receipt=await activateInactivePhase1TestStage(options,{ownerPassword,operatorUsername,operatorPassword})
   console.log(JSON.stringify(receipt))
  }finally{ownerPassword=undefined;operatorPassword=undefined;confirmation=undefined}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
- try{await main()}catch{console.error('PHASE1_TEST_ACTIVATION=REFUSED | DO_NOT_START_OR_CLEAR_HOLDS | LIVE_CHANGED=NO');process.exitCode=1}
+ try{await main()}catch{console.error('PHASE1_TEST_ACTIVATION=REFUSED | PHASE='+phase+' | DO_NOT_START_OR_CLEAR_HOLDS | LIVE_CHANGED=NO');process.exitCode=1}
 }

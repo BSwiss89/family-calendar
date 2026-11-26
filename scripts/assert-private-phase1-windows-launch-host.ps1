@@ -23,7 +23,7 @@ $git=Join-Path $env:ProgramFiles 'Git\cmd\git.exe'
 $gitItem=Get-Item -LiteralPath $git -Force
 if($gitItem.PSIsContainer -or ($gitItem.Attributes -band [IO.FileAttributes]::ReparsePoint)){Refuse}
 $legacy=Join-Path $projects 'family-calendar-test-security-stage'
-$live=Join-Path $projects 'family-calendar'
+$live=Join-Path $projects 'family-calendar-live-auth-candidate'
 $data=Join-Path $projects 'family-calendar-phase1-test-data'
 $node='C:\ProgramData\FamilyCalendar\Runtime\node-v24.22.1\node.exe'
 $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
