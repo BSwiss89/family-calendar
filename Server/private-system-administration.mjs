@@ -18,7 +18,10 @@ function ownerMetadata(db, householdId) {
     "AND u.disabled = 0 AND u.account_kind = 'person' THEN u.id END) AS ownerCount,",
     "MAX(CASE WHEN m.role = 'owner' AND m.disabled = 0",
     "AND u.disabled = 0 AND u.account_kind = 'person'",
-    'THEN u.display_name END) AS ownerDisplayName',
+    'THEN u.display_name END) AS ownerDisplayName,',
+    "MAX(CASE WHEN m.role = 'owner' AND m.disabled = 0",
+    "AND u.disabled = 0 AND u.account_kind = 'person'",
+    'THEN u.username END) AS ownerUsername',
     'FROM household_registry h',
     'LEFT JOIN household_memberships m ON m.household_id = h.id',
     'LEFT JOIN family_users u ON u.id = m.user_id',
@@ -28,6 +31,7 @@ function ownerMetadata(db, householdId) {
     memberCount: Number(result?.memberCount || 0),
     ownerCount: Number(result?.ownerCount || 0),
     ownerDisplayName: result?.ownerDisplayName || null,
+    ownerUsername: Number(result?.ownerCount)===1 ? result.ownerUsername : null,
   }
 }
 

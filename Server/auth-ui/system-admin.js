@@ -83,7 +83,7 @@ function householdEntry(household) {
   const row = element('div', { className: 'entry' })
   const info = element('div', { className: 'entry-info' })
   appendText(info, 'strong', household.displayName)
-  appendText(info, 'span', 'Owner: ' + (household.ownerDisplayName || 'Unassigned'))
+  appendText(info, 'span', 'Owner: ' + (household.ownerDisplayName || 'Unassigned') + (household.ownerUsername ? ' (@'+household.ownerUsername+')' : ''))
   appendText(info, 'span', household.memberCount + ' enrolled account' +
     (household.memberCount === 1 ? '' : 's'))
   const check = activationChecks.get(household.householdId)
@@ -148,6 +148,29 @@ function recoveryEntry(item) {
   row.append(info, controls)
   return row
 }
+function historyEntry(item) {
+  const row=element('div',{className:'entry'})
+  const info=element('div',{className:'entry-info'})
+  const labels={issued:'Link issued',revoked:'Revoked',redeemed:'Completed',denied:'Denied',expired:'Expired',pending:'Unavailable pending request'}
+  appendText(info,'strong',item.displayName+' (@'+item.username+')')
+  appendText(info,'span',labels[item.status]+' · Request #'+item.id)
+  appendText(info,'span','Requested '+formattedTime(item.createdAt))
+  if(item.decidedAt!==null)appendText(info,'span','Last decision '+formattedTime(item.decidedAt))
+  if(item.linkExpiresAt!==null)appendText(info,'span','Link expiration '+formattedTime(item.linkExpiresAt))
+  if(item.redeemedAt!==null)appendText(info,'span','Completed '+formattedTime(item.redeemedAt))
+  row.append(info)
+  const controls=element('div',{className:'entry-actions'})
+  for(const [action,label,allowed] of [['reissue','Reissue reset link',item.canReissue],['revoke','Revoke link',item.canRevoke]]){
+    if(!allowed)continue
+    const button=element('button',{text:label,className:action==='revoke'?'danger':undefined})
+    button.type='button'
+    button.dataset.adminAction=action
+    button.addEventListener('click',()=>void reviewRecovery(item.id,action))
+    controls.append(button)
+  }
+  if(controls.childElementCount)row.append(controls)
+  return row
+}
 function renderChildren(targetId, items, renderer, emptyText) {
   const target = $(targetId)
   target.replaceChildren(...(items.length
@@ -160,6 +183,7 @@ function validateOverview(value) {
       typeof h.displayName === 'string' &&
       typeof h.memberCount === 'number' &&
       (h.ownerDisplayName === null || typeof h.ownerDisplayName === 'string') &&
+      (h.ownerUsername === null || typeof h.ownerUsername === 'string') &&
       ['pending-activation', 'configured-route', 'approved-unrouted'].includes(h.state)) &&
     value.invitations.every(x =>
       x && Number.isSafeInteger(x.id) && typeof x.expiresAt === 'number')
@@ -168,7 +192,13 @@ function validateRecovery(value) {
   return value && Array.isArray(value.requests) &&
     value.requests.every(r => r && Number.isSafeInteger(r.id) &&
       typeof r.displayName === 'string' && typeof r.username === 'string' &&
-      typeof r.createdAt === 'number' && typeof r.expiresAt === 'number')
+      typeof r.createdAt === 'number' && typeof r.expiresAt === 'number') &&
+    Array.isArray(value.history) && value.history.every(r=>r && Number.isSafeInteger(r.id) &&
+      typeof r.displayName==='string' && typeof r.username==='string' &&
+      Number.isFinite(r.createdAt) && Number.isFinite(r.expiresAt) &&
+      [r.decidedAt,r.linkExpiresAt,r.redeemedAt].every(x=>x===null||Number.isFinite(x)) &&
+      ['issued','revoked','redeemed','denied','expired','pending'].includes(r.status) &&
+      typeof r.canReissue==='boolean' && typeof r.canRevoke==='boolean')
 }
 
 async function refresh() {
@@ -201,8 +231,12 @@ async function refresh() {
     'No pending household invitations.')
   if (validateRecovery(pending)) {
     renderChildren('recovery-list', pending.requests, recoveryEntry, 'No pending password recovery requests.')
+    renderChildren('issued-recovery-list',pending.history.filter(x=>x.canReissue||x.canRevoke),historyEntry,'No issued reset links.')
+    renderChildren('recovery-history-list',pending.history.filter(x=>!x.canReissue&&!x.canRevoke),historyEntry,'No completed or expired recovery requests.')
   } else {
     renderChildren('recovery-list', [], recoveryEntry, 'Password recovery could not be loaded. Refresh to retry.')
+    renderChildren('issued-recovery-list',[],historyEntry,'Unavailable. Refresh to retry.')
+    renderChildren('recovery-history-list',[],historyEntry,'Unavailable. Refresh to retry.')
   }
 }
 
@@ -213,15 +247,18 @@ async function reviewRecovery(id, action) {
     setStatus('Enter your own system-administrator password.', true)
     return
   }
-  if (action === 'issue' && !$('verified-identity').checked) {
+  const issuing=action==='issue'||action==='reissue'
+  if (issuing && !$('verified-identity').checked) {
     setStatus('Verify this account holder through a trusted contact method first.', true)
     return
   }
   if (action === 'deny' && !confirm('Deny this recovery request?')) return
+  if (action === 'reissue' && !confirm('Issue a new reset link? All previous reset links for this account will stop working.')) return
+  if (action === 'revoke' && !confirm('Revoke this reset link? It will stop working.')) return
   await operation(async () => {
     $('recovery-link-box').hidden = true
     $('recovery-link').value = ''
-    const body = action === 'issue'
+    const body = issuing
       ? { ownerPassword: password, verifiedOutOfBand: true }
       : { ownerPassword: password }
     const response = await requestJson(
@@ -229,15 +266,15 @@ async function reviewRecovery(id, action) {
       '/' + action, body)
     $('operator-password').value = ''
     $('verified-identity').checked = false
-    if (action === 'issue') {
+    if (issuing) {
       if (!validOneTimeUrl(response?.resetUrl, resetPrefix)) {
         throw new Error('The recovery service returned an invalid reset link.')
       }
       $('recovery-link').value = response.resetUrl
       $('recovery-link-box').hidden = false
-      setStatus('One-time reset link issued. Copy it before leaving the page.')
+      setStatus('One-time reset link '+(action==='reissue'?'reissued':'issued')+'. Copy it before leaving the page.')
     } else {
-      setStatus('Recovery request denied.')
+      setStatus(action==='revoke'?'Recovery link revoked.':'Recovery request denied.')
     }
     await refresh()
   })

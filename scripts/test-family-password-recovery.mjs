@@ -7,6 +7,7 @@ import {
   RECOVERY_LINK_TTL_MS, createFamilyPasswordRecoveryTables,
   requestFamilyPasswordRecovery, listPendingFamilyPasswordRecovery,
   issueFamilyPasswordResetLink, denyFamilyPasswordRecovery,
+  listFamilyPasswordRecoveryHistory,reissueFamilyPasswordResetLink,revokeFamilyPasswordResetLink,
   completeFamilyPasswordReset, readOptionalRecoveryContact,
   saveUnverifiedRecoveryContact,
 } from '../Server/family-password-recovery.mjs'
@@ -129,6 +130,46 @@ test('expired or revoked links never change passwords, and operator denial is fi
   }), /Invalid or expired/)
   const password = db.prepare('SELECT password_hash FROM family_users WHERE id=?').get(owner).password_hash
   assert.equal(await verifyFamilyPassword(initialPassword, password), true)
+})
+
+test('operator reissues lost link without public cooldown bypass, preserves history and revokes old links', async t=>{
+  const {db,admin,owner}=fixture(t)
+  request(db,'familyowner')
+  const first=issue(db,admin,pending(db,admin)[0].id)
+  const options={serverVerifiedAdministratorUserId:admin,trustedAdministratorUserIds:[admin],now:now+1000}
+  const history=()=>listFamilyPasswordRecoveryHistory(db,options)
+  assert.equal(history()[0].canReissue,true)
+  assert.equal(history()[0].state,'issued')
+  assert(!JSON.stringify(history()).includes(first.token))
+  assert(!Object.hasOwn(history()[0],'token_hash'))
+  assert.throws(()=>listFamilyPasswordRecoveryHistory(db,{...options,serverVerifiedAdministratorUserId:owner}),/administrator/)
+  request(db,'familyowner',now+1000)
+  assert.equal(pending(db,admin,now+1000).length,0)
+  const args={...options,recoveryRequestId:first.requestId,verifiedOutOfBand:true}
+  assert.throws(()=>reissueFamilyPasswordResetLink(db,{...args,verifiedOutOfBand:false}),/identity/)
+  assert.throws(()=>reissueFamilyPasswordResetLink(db,{...args,serverVerifiedAdministratorUserId:owner}),/administrator/)
+  const rotated=reissueFamilyPasswordResetLink(db,args)
+  assert.notEqual(rotated.token,first.token)
+  assert.equal(history().find(x=>x.id===first.requestId).state,'revoked')
+  assert.throws(()=>completeFamilyPasswordReset(db,{token:first.token,newPassword:replacement}),/Invalid or expired/)
+  assert.throws(()=>reissueFamilyPasswordResetLink(db,args),/no longer eligible/)
+  assert.throws(()=>revokeFamilyPasswordResetLink(db,{...options,serverVerifiedAdministratorUserId:owner,recoveryRequestId:rotated.requestId}),/administrator/)
+  assert.equal(revokeFamilyPasswordResetLink(db,{...options,recoveryRequestId:rotated.requestId}),true)
+  assert.throws(()=>completeFamilyPasswordReset(db,{token:rotated.token,newPassword:replacement}),/Invalid or expired/)
+  assert.equal(revokeFamilyPasswordResetLink(db,{...options,recoveryRequestId:rotated.requestId}),false)
+  assert.equal(await verifyFamilyPassword(initialPassword,db.prepare('SELECT password_hash FROM family_users WHERE id=?').get(owner).password_hash),true)
+})
+
+test('expired issued link may be reissued only within original request window',t=>{
+  const {db,admin}=fixture(t)
+  const old=now-3600000
+  request(db,'familyowner',old)
+  const first=issue(db,admin,pending(db,admin,old)[0].id,old)
+  const options={serverVerifiedAdministratorUserId:admin,trustedAdministratorUserIds:[admin],now}
+  assert.equal(listFamilyPasswordRecoveryHistory(db,options)[0].status,'expired')
+  const rotated=reissueFamilyPasswordResetLink(db,{...options,recoveryRequestId:first.requestId,verifiedOutOfBand:true})
+  assert.deepEqual(completeFamilyPasswordReset(db,{token:rotated.token,newPassword:replacement}),{reset:true})
+  assert.equal(listFamilyPasswordRecoveryHistory(db,options)[0].status,'redeemed')
 })
 
 test('optional recovery email is never verified or usable for password reset', t => {

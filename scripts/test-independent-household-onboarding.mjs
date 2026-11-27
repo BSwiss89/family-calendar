@@ -136,7 +136,7 @@ test('eight-character household registration and operator-assisted recovery', as
     assert.equal(completeFamilyPasswordReset(f.db,{token,newPassword:'Reset888'}).reset,true)
     assert.equal(await verifyFamilyPassword('Reset888',f.db.prepare('SELECT password_hash FROM family_users WHERE username=?').get(username).password_hash),true)
   }
-  for (const [method, route] of [['GET','/api/admin/recovery/requests'],['POST','/api/admin/recovery/requests/1/issue'],['POST','/api/admin/recovery/requests/1/deny']]) {
+  for (const [method, route] of [['GET','/api/admin/recovery/requests'],['POST','/api/admin/recovery/requests/1/issue'],['POST','/api/admin/recovery/requests/1/deny'],['POST','/api/admin/recovery/requests/1/reissue'],['POST','/api/admin/recovery/requests/1/revoke']]) {
     assert.equal(classifyPrivatePhase1PilotRoute(method,route,'operator'),'allowed')
     assert.equal(classifyPrivatePhase1PilotRoute(method,route,'owner'),'denied')
   }

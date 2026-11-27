@@ -61,9 +61,15 @@
             <span>I independently verified the intended account holder.</span>
           </label>
         </div>
+        <h3>Pending requests</h3>
         <div id="recovery-list" class="stack" aria-live="polite"><p>Loading recovery requests…</p></div>
+        <h3>Issued links</h3>
+        <div id="issued-recovery-list" class="stack" aria-live="polite"><p>Loading issued links…</p></div>
+        <h3>Recovery history</h3>
+        <p>Most recent 100 non-pending records, with actionable links shown first. Expired links may be reissued within the original request's authorization window.</p>
+        <div id="recovery-history-list" class="stack" aria-live="polite"><p>Loading history…</p></div>
         <div id="recovery-link-box" class="secret-panel" hidden>
-          <label for="recovery-link">One-time password reset link (30 minutes)</label>
+          <label for="recovery-link">One-time password reset link (up to 30 minutes)</label>
           <input type="text" readonly id="recovery-link">
           <button type="button" class="quiet-button" id="copy-recovery-link">Copy reset link</button>
           <p>Send the link using the verified contact channel. No automatic recovery emails are sent.</p>
