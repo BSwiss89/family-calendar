@@ -35,6 +35,11 @@
           <div><h2>Independent households</h2><p>Only households registered through your authorized invitations. A passed storage preflight is read-only and does not activate anything. Backend identity, isolated backups, guarded rollout and actual Owner acceptance must be verified separately. Configured does not mean online or healthy.</p></div>
           <button type="button" id="refresh-button" class="quiet-button">Refresh</button>
         </div>
+        <div id="activation-verification" class="verification" hidden>
+          <label for="activation-password">System-administrator password for activation</label>
+          <input type="password" id="activation-password" autocomplete="current-password" maxlength="200" placeholder="Required to approve a household">
+          <p>Approval verifies the new household's empty storage, backs it up, and starts its private backend. TEST may be briefly unavailable during activation.</p>
+        </div>
         <div id="household-list" class="stack" aria-live="polite"><p>Loading households…</p></div>
       </section>
       <section id="invitations" class="panel">

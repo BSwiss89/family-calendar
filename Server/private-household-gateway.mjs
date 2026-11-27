@@ -441,11 +441,13 @@ export async function startPrivateHouseholdGateway({
   allowEmptyGatewayBootstrap = false,
   // Optional trusted supervisor admission; never derived from a request.
   supervisorAdmissionCheck = null,
+  activateReviewedHousehold = null,
 }) {
   if (supervisorAdmissionCheck !== null &&
       (!phase1OwnerPilotOnly || typeof supervisorAdmissionCheck !== 'function')) {
     throw new Error('Supervisor admission is restricted to the trusted Phase 1 runtime.')
   }
+  if (activateReviewedHousehold !== null && (!phase1OwnerPilotOnly || supervisorAdmissionCheck === null || typeof activateReviewedHousehold !== 'function')) throw Error('Browser activation requires the reviewed supervisor.')
   function admittedBySupervisor() {
     if (supervisorAdmissionCheck === null) return true
     try { return supervisorAdmissionCheck() === true } catch { return false }
@@ -741,6 +743,7 @@ export async function startPrivateHouseholdGateway({
   installPrivateSystemAdministrator(app, {
     identityDatabase, serverDirectory, storageRoot,
     trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+    activateReviewedHousehold, passwordStepUp: ownerPasswordStepUp,
     // Enrollment can add a verified private backend after initial boot.
     // Always derive operator status from the current trusted route map.
     getRoutedHouseholdIds: () => [...portByHousehold.keys()],

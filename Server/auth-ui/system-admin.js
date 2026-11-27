@@ -4,6 +4,7 @@
 const $ = id => document.getElementById(id)
 let busy = false
 let activationChecks = new Map()
+let canActivate = false
 const linkPrefix = location.origin + '/start-family#token='
 const resetPrefix = location.origin + '/reset-password#token='
 
@@ -28,7 +29,7 @@ function validOneTimeUrl(value, prefix) {
   return typeof value === 'string' && value.startsWith(prefix) &&
     /^[a-f0-9]{64}$/.test(value.slice(prefix.length))
 }
-async function requestJson(url, body = undefined) {
+async function requestJson(url, body = undefined, timeout = 15000) {
   const response = await fetch(url, {
     method: body === undefined ? 'GET' : 'POST',
     credentials: 'same-origin',
@@ -36,7 +37,7 @@ async function requestJson(url, body = undefined) {
     headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
     redirect: 'manual',
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(timeout),
   })
   const result = await response.json().catch(() => null)
   if (!response.ok) {
@@ -104,7 +105,16 @@ function householdEntry(household) {
       : household.state === 'approved-unrouted'
         ? 'Approved, not routed' : 'Activation pending',
   })
-  row.append(info, state)
+  const controls=element('div',{className:'entry-actions'})
+  controls.append(state)
+  if(canActivate&&household.state==='pending-activation'&&check?.stage==='storage-reviewed-awaiting-backend-proof'){
+    const approve=element('button',{text:'Approve & activate'})
+    approve.type='button'
+    approve.dataset.adminAction='activate'
+    approve.addEventListener('click',()=>void approveHousehold(household))
+    controls.append(approve)
+  }
+  row.append(info, controls)
   return row
 }
 function inviteEntry(invitation) {
@@ -213,13 +223,15 @@ async function refresh() {
     throw new Error('Unexpected response from administrator service.')
   }
   activationChecks = readiness?.kind === 'read-only-private-activation-preflight-v1' &&
-    readiness.canActivateFromBrowser === false && Array.isArray(readiness.checks)
+    typeof readiness.canActivateFromBrowser === 'boolean' && Array.isArray(readiness.checks)
       ? new Map(readiness.checks.filter(check => check &&
           typeof check.householdId === 'string' &&
           ['blocked-review', 'storage-reviewed-awaiting-backend-proof',
             'approved-awaiting-route', 'approved-route-configured'].includes(check.stage))
         .map(check => [check.householdId, check]))
       : new Map()
+  canActivate=readiness?.kind==='read-only-private-activation-preflight-v1'&&readiness.canActivateFromBrowser===true
+  $('activation-verification').hidden=!(canActivate&&overview.households.some(h=>h.state==='pending-activation'&&activationChecks.get(h.householdId)?.stage==='storage-reviewed-awaiting-backend-proof'))
   $('household-count').textContent = overview.households.length
   $('configured-count').textContent = overview.households
     .filter(x => x.state === 'configured-route').length
@@ -240,6 +252,20 @@ async function refresh() {
   }
 }
 
+async function approveHousehold(household){
+  if(busy)return
+  const password=$('activation-password').value
+  if(!password){setStatus('Enter your system-administrator password in the household section.',true);return}
+  if(!confirm('Approve and activate '+household.displayName+'? This starts its own isolated TEST calendar backend.'))return
+  await operation(async()=>{
+    $('activation-password').value=''
+    setStatus('Verifying and activating '+household.displayName+'…')
+    const result=await requestJson('/api/admin/households/'+encodeURIComponent(household.householdId)+'/activate',{ownerPassword:password,confirmActivation:true},120000)
+    if(result?.activation!=='active'||result.householdId!==household.householdId)throw Error('Activation was not confirmed. Refresh to check status.')
+    await refresh()
+    setStatus(household.displayName+' activated. Its Owner can now open their calendar.')
+  })
+}
 async function reviewRecovery(id, action) {
   if (busy) return
   const password = $('operator-password').value

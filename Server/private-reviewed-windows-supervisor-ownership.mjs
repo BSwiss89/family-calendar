@@ -64,7 +64,7 @@ function isExited(child) {
  * writers. Real Windows Task Scheduler installation requires separate review.
  */
 export function createReviewedWindowsSupervisorOwnership({ plan, stateDirectory }) {
-  const ids = approvedPlan(plan)
+  const ids = [...approvedPlan(plan)]
   const root = checkStateDirectory(stateDirectory)
   const marker = path.join(root, HOLD)
   const instance = path.join(root, INSTANCE)
@@ -89,6 +89,7 @@ export function createReviewedWindowsSupervisorOwnership({ plan, stateDirectory 
 
   let phase = 'starting'
   let failureReason = null
+  let enrollmentId = null
   const captured = new Map()
 
   function checkOwnership() {
@@ -117,7 +118,7 @@ export function createReviewedWindowsSupervisorOwnership({ plan, stateDirectory 
   }
 
   function captureBackend({ householdId, child }) {
-    if (phase !== 'starting' || !ids.includes(householdId) ||
+    if (!(phase === 'starting' || (phase === 'enrolling' && householdId === enrollmentId)) || !ids.includes(householdId) ||
         captured.has(householdId) || !(child instanceof ChildProcess) ||
         !Number.isSafeInteger(child.pid) || child.pid <= 0 ||
         isExited(child) || child.connected !== true ||
@@ -153,6 +154,35 @@ export function createReviewedWindowsSupervisorOwnership({ plan, stateDirectory 
     // The caller must independently confirm each upstream health/binding.
     // This transition only attests to process handles, never HTTP health.
     phase = 'running'
+  }
+
+  // Only the trusted runtime may reserve a new, separately verified invited
+  // household. Close admission during enrollment, retain the original
+  // instance lock, and fence all captured children if enrollment fails.
+  function beginEnrollment(householdId) {
+    if (phase !== 'running' || enrollmentId !== null || typeof householdId !== 'string' ||
+        !FRIEND_ID.test(householdId) || ids.includes(householdId) || ids.length>=1000 ||
+        fs.existsSync(marker)) refuse('new invited household enrollment requires a healthy supervisor.')
+    checkOwnership()
+    ids.push(householdId)
+    ids.splice(1, ids.length-1, ...ids.slice(1).sort())
+    enrollmentId=householdId
+    phase='enrolling'
+  }
+  function finishEnrollment(householdId) {
+    if(phase!=='enrolling'||householdId!==enrollmentId||fs.existsSync(marker)||
+       captured.size!==ids.length||ids.some(id=>{
+         const item=captured.get(id)
+         return !item||item.exited||isExited(item.child)||item.child.connected!==true
+       }))refuse('enrollment requires every supervised child to remain connected.')
+    checkOwnership()
+    enrollmentId=null
+    phase='running'
+  }
+  function failEnrollment(householdId) {
+    if(phase==='held')return
+    if(phase!=='enrolling'||householdId!==enrollmentId)refuse('no matching enrollment to hold.')
+    hold('household-enrollment-failed',householdId)
   }
 
   function beginGracefulShutdown() {
@@ -230,7 +260,7 @@ export function createReviewedWindowsSupervisorOwnership({ plan, stateDirectory 
     })
   }
   return Object.freeze({
-    captureBackend, markHealthy, beginGracefulShutdown,
+    captureBackend, markHealthy, beginEnrollment, finishEnrollment, failEnrollment, beginGracefulShutdown,
     beginDisposableOfflineCapture, completeDisposableOfflineCapture,
     finishGracefulShutdown, snapshot,
   })

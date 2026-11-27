@@ -19,6 +19,7 @@ import { startPrivateHouseholdGateway, verifyPrivateBackendBindings } from './pr
 import { resolvePrivatePhase1GatewayLoopbackPort } from './private-household-gateway.mjs'
 import { captureClosedPhase1SupervisorBackup } from './private-phase1-supervised-backup.mjs'
 import { assertLocalMaintenanceClear } from './private-phase1-local-maintenance-control.mjs'
+import { capturePendingActivationBackup } from './private-phase1-pending-activation-backup.mjs'
 
 const PROTECTED = new Set([443, 8443, 3001, 11434, 13001, 13002, 13003, 13004])
 function refuse(message) {
@@ -216,7 +217,7 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
       const operator=central.prepare("SELECT id FROM family_users WHERE id=? AND disabled=0 AND account_kind='person'").get(operatorUserIds[0])
       if(!operator||central.prepare('SELECT COUNT(*) AS n FROM household_memberships WHERE user_id=?').get(operator.id).n!==0)refuse('active separate operator required.')
     }
-    const plan = planReviewedPrivateTestStartup({
+    let plan = planReviewedPrivateTestStartup({
       identityDatabase: central,
       serverDirectory: paths.server, storageRoot: paths.storage,
       stateDirectory: paths.state, primaryHouseholdId,
@@ -245,6 +246,47 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
       new Map(Object.entries(backendPorts)),
       new Map(Object.entries(backendTokens)),
     )
+    let shutdownRequested = false
+    let activationInProgress = false
+    // The HTTP layer can request only an issuer-scoped, password-reverified
+    // household ID. Ports, upstream secrets, paths and child ownership are
+    // chosen exclusively here, inside the already reviewed TEST supervisor.
+    async function activateHousehold(householdId) {
+      if(shutdownRequested||activationInProgress||guard.snapshot().phase!=='running'||
+         backends.some(({child})=>child.exitCode!==null||child.signalCode!==null||!child.connected))
+        throw Error('Private household supervisor is busy or held.')
+      assertLocalMaintenanceClear(paths.root)
+      if(plan.householdIds.includes(householdId))throw Error('Household already active.')
+      activationInProgress=true
+      let reserved=false
+      try{
+        // Synchronous preflight/backup: the pending household is unrouted,
+        // has no writer lock, no journals and exactly its empty seed schema.
+        capturePendingActivationBackup({paths,identityDatabase:central,householdId})
+        guard.beginEnrollment(householdId)
+        reserved=true
+        const port=await choosePort(used)
+        const token=randomBytes(32).toString('hex')
+        const backend=await spawnBackend(paths,householdId,port,token,guard).catch(error=>{
+          if(error.capturedBackend)backends.push(error.capturedBackend)
+          throw error
+        })
+        backends.push(backend)
+        if(guard.snapshot().phase!=='enrolling')throw Error('Supervisor held during activation.')
+        await gateway.enrollHouseholdBackend({householdId,port,upstreamToken:token})
+        backendPorts[householdId]=port
+        backendTokens[householdId]=token
+        const householdIds=Object.freeze([primaryHouseholdId,...[...plan.householdIds.slice(1),householdId].sort()])
+        plan=Object.freeze({...plan,householdIds,householdCount:householdIds.length})
+        guard.finishEnrollment(householdId)
+        return {activation:'active',householdId}
+      }catch(error){
+        // Once a child was reserved, never silently restart or discard its
+        // possibly initialized storage. Keep a durable hold for local review.
+        if(reserved)guard.failEnrollment(householdId)
+        throw error
+      }finally{activationInProgress=false}
+    }
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory: paths.server,
       storageRoot: paths.storage, backendPorts, backendTokens,
@@ -252,15 +294,16 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
       enforceFamilyMemberPermissions: true,
       phase1OwnerPilotOnly: true,
       trustedPhase1GatewayPort,
+      activateReviewedHousehold: activateHousehold,
       supervisorAdmissionCheck: () => guard.snapshot().phase === 'running' &&
         backends.every(({child}) => child.exitCode === null && child.signalCode === null && child.connected === true),
     })
     guard.markHealthy()
-    let shutdownRequested = false
     return Object.freeze({
       base: gateway.base,
       snapshot: () => Object.freeze({
         ...guard.snapshot(),
+        activationInProgress,
         householdIds: Object.freeze([...plan.householdIds]),
         gatewayLocalhostOnly: new URL(gateway.base).hostname === '127.0.0.1',
         gatewayPort: gateway.port,
@@ -301,7 +344,7 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
           ownerInstanceRetained:true, testDeploymentAuthorized:false})
       },
       async shutdownAndCaptureBackup() {
-        if (shutdownRequested) refuse('supervised shutdown already requested.')
+        if (shutdownRequested || activationInProgress) refuse('supervised shutdown already requested or activation in progress.')
         shutdownRequested = true
         guard.beginGracefulShutdown()
         await gateway.closeForOfflineBackup(async () => {
@@ -315,7 +358,7 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
         return Object.freeze({...receipt,allChildrenExited:true,gatewayClosed:true,ownerInstanceReleased:true,testDeploymentAuthorized:false})
       },
       async shutdown() {
-        if (shutdownRequested) refuse('reviewed fixture shutdown already requested.')
+        if (shutdownRequested || activationInProgress) refuse('reviewed fixture shutdown already requested or activation in progress.')
         shutdownRequested = true
         guard.beginGracefulShutdown()
         await gateway.close()

@@ -63,6 +63,7 @@ export function classifyPrivatePhase1PilotRoute(method, originalUrl, role) {
   }
   if (role === 'operator') {
     if (method === 'POST' && OPERATOR_POST.has(pathname)) return 'allowed'
+    if (method === 'POST' && /^\/api\/admin\/households\/family-[a-f0-9]{24}\/activate$/.test(pathname)) return 'allowed'
     if (method === 'POST' && /^\/api\/admin\/recovery\/requests\/[1-9][0-9]*\/(?:issue|deny|reissue|revoke)$/.test(pathname)) return 'allowed'
     if (method === 'POST' &&
         /^\/api\/households\/independent-invitations\/[1-9][0-9]*\/revoke$/.test(pathname)) {

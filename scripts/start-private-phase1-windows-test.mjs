@@ -29,6 +29,7 @@ try{
  timer=setInterval(()=>{
   if(closing)return
   const state=runtime.snapshot()
+  if(state.activationInProgress)return
   if(state.phase==='held'||!state.supervisorAdmissionOpen){void close(true);return}
   if(maintenanceRefused)return
   try{

@@ -85,9 +85,9 @@ function fixture(t, { invited = false } = {}) {
     db.close()
   }
 }
-async function request(base, route, { method = 'GET', cookie, body, headers = {} } = {}) {
+async function request(base, route, { method = 'GET', cookie, body, headers = {}, timeout = 7000 } = {}) {
   const response = await fetch(base + route, {
-    method, redirect: 'manual', signal: AbortSignal.timeout(7000),
+    method, redirect: 'manual', signal: AbortSignal.timeout(timeout),
     headers: {
       ...(cookie ? { Cookie: cookie } : {}),
       ...(method !== 'GET' ? { Origin: 'https://' + new URL(base).host } : {}),
@@ -576,4 +576,78 @@ test('malformed or stale local maintenance request cannot become a shutdown auth
  assert.throws(()=>assertLocalMaintenanceClear(root))
  assert.equal(fs.existsSync(path.join(root,'MAINTENANCE-REVIEW','IN-PROGRESS.json')),false)
  assert.equal(fs.existsSync(path.join(root,'MAINTENANCE-REVIEW','RECEIPT.json')),false)
+})
+
+test('operator browser approval adds a supervised isolated household and survives coordinated backup and restart',{timeout:180000},async t=>{
+ const options=fixture(t)
+ let runtime=await launchDisposableReviewedPhase1Gateway(options),stopped=false
+ const get=(route,cookie)=>request(runtime.base,route,{cookie})
+ const post=(route,body,cookie,timeout)=>request(runtime.base,route,{method:'POST',body,cookie,timeout})
+ async function login(username,pw=password){
+  const result=await post('/api/auth/login',{username,password:pw})
+  assert.equal(result.response.status,200)
+  return result.response.headers.get('set-cookie').split(';')[0]
+ }
+ try{
+  const operator=await login('phase1systemoperator'),primary=await login('phase1primaryowner')
+  const invite=await post('/api/households/independent-invitations',{},operator)
+  assert.equal(invite.response.status,201)
+  const token=new URLSearchParams(new URL(invite.content.startUrl).hash.slice(1)).get('token')
+  const signup=await post('/api/households/create-from-invitation',{token,username:'activatedowner',displayName:'Activated Owner',password:'Eight888',householdName:'Browser approved family'})
+  assert.equal(signup.response.status,201)
+  const owner=await login('activatedowner','Eight888')
+  const overview=await get('/api/admin/household-overview',operator)
+  const id=overview.content.households.find(h=>h.ownerUsername==='activatedowner').householdId
+  const route='/api/admin/households/'+id+'/activate'
+  const body={ownerPassword:password,confirmActivation:true}
+  const readiness=await get('/api/admin/activation-readiness',operator)
+  assert.equal(readiness.content.canActivateFromBrowser,true)
+  assert.equal(runtime.snapshot().capturedCount,1)
+  assert.notEqual((await get('/api/events',owner)).response.status,200)
+  assert.equal((await post(route,body,owner)).response.status,404)
+  assert.equal((await post(route,{...body,confirmActivation:false},operator)).response.status,400)
+  assert.equal((await post(route,{...body,ownerPassword:'wrong-password'},operator)).response.status,403)
+  assert.equal((await post('/api/events',{title:'Primary secret appointment',date:'2027-02-03',time:'13:00'},primary)).response.status,201)
+  const approved=await post(route,body,operator,120000)
+  assert.equal(approved.response.status,200,JSON.stringify(approved.content))
+  assert.equal(approved.content.activation,'active')
+  assert.equal(runtime.snapshot().phase,'running')
+  assert.deepEqual(runtime.snapshot().householdIds,[primaryHouseholdId,id])
+  assert.equal(runtime.snapshot().capturedCount,2)
+  assert.equal(runtime.snapshot().childPorts.length,2)
+  assert.equal((await post(route,body,operator)).response.status,409)
+  const backups=path.join(options.fixtureRoot,'pending-activation-backups')
+  const files=fs.readdirSync(backups)
+  assert.equal(files.length,1)
+  assert.equal(JSON.parse(fs.readFileSync(path.join(backups,files[0],'BACKUP-REVIEW.json'),'utf8')).sourceUnchanged,true)
+  assert.equal((await get('/api/events',operator)).response.status,404)
+  assert.equal((await get('/api/events',owner)).response.status,200)
+  assert.doesNotMatch(JSON.stringify((await get('/api/events',owner)).content),/Primary secret appointment/)
+  assert.equal((await post('/api/events',{title:'New household appointment',date:'2027-02-04',time:'13:00'},owner)).response.status,201)
+  assert.doesNotMatch(JSON.stringify((await get('/api/events',primary)).content),/New household appointment/)
+  for(const [cookie,name] of [[primary,'Primary isolated list'],[owner,'New isolated list']])assert.equal((await post('/api/lists',{name},cookie)).response.status,201)
+  assert.doesNotMatch(JSON.stringify((await get('/api/lists',primary)).content),/New isolated list/)
+  assert.doesNotMatch(JSON.stringify((await get('/api/lists',owner)).content),/Primary isolated list/)
+  const requested=createLocalBackupStopRequest(options.fixtureRoot)
+  const maintenance=readLocalBackupStopRequest(options.fixtureRoot)
+  const receipt=await runtime.shutdownAndCaptureBackup()
+  stopped=true
+  assert.equal(receipt.households,2)
+  completeLocalBackupStopRequest(options.fixtureRoot,maintenance,receipt)
+  const {archiveCompletedLocalMaintenanceHold}=await import('../Server/private-phase1-local-maintenance-control.mjs')
+  assert.equal(archiveCompletedLocalMaintenanceHold({root:options.fixtureRoot,storageRoot:options.storageRoot,identityDatabasePath:options.identityDatabasePath,serverDirectory,primaryHouseholdId,expectedRequestId:requested.requestId}).holdReleased,true)
+  runtime=await launchDisposableReviewedPhase1Gateway(options)
+  stopped=false
+  assert.equal(runtime.snapshot().capturedCount,2)
+  const relogin=await login('activatedowner','Eight888')
+  const events=await get('/api/events',relogin)
+  assert.equal(events.response.status,200)
+  assert.match(JSON.stringify(events.content),/New household appointment/)
+  assert.doesNotMatch(JSON.stringify(events.content),/Primary secret appointment/)
+ }finally{
+  if(!stopped){
+   if(runtime.snapshot().phase==='held')await runtime.closeHeldFixtureForTest()
+   else await runtime.shutdown()
+  }
+ }
 })
