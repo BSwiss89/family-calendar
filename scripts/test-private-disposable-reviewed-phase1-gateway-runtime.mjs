@@ -477,6 +477,49 @@ test('real supervisor captures coordinated backup after shutdown and revokes ses
 })
 
 
+test('real pending signup survives coordinated backup and restart, and recovery HTTP works', {timeout:120000}, async t=>{
+ const options=fixture(t)
+ let runtime=await launchDisposableReviewedPhase1Gateway(options), stopped=false
+ try{
+  const post=(route,body,cookie)=>request(runtime.base,route,{method:'POST',body,cookie})
+  const login=await post('/api/auth/login',{username:'phase1systemoperator',password})
+  assert.equal(login.response.status,200)
+  const operatorCookie=login.response.headers.get('set-cookie').split(';')[0]
+  const invite=await post('/api/households/independent-invitations',{},operatorCookie)
+  assert.equal(invite.response.status,201)
+  const token=new URLSearchParams(new URL(invite.content.startUrl).hash.slice(1)).get('token')
+  const signup=await post('/api/households/create-from-invitation',{token,username:'pendingowner',displayName:'Pending Owner',password:'Eight888',householdName:'Pending household'})
+  assert.equal(signup.response.status,201)
+  const pendingLogin=await post('/api/auth/login',{username:'pendingowner',password:'Eight888'})
+  assert.equal(pendingLogin.response.status,200)
+  const pendingCookie=pendingLogin.response.headers.get('set-cookie').split(';')[0]
+  assert.notEqual((await request(runtime.base,'/api/events',{cookie:pendingCookie})).response.status,200)
+  assert.equal((await post('/api/auth/recovery/request',{username:'pendingowner'})).response.status,202)
+  const requests=await request(runtime.base,'/api/admin/recovery/requests',{cookie:operatorCookie})
+  assert.equal(requests.response.status,200)
+  const item=requests.content.requests.find(x=>x.username==='pendingowner')
+  assert.ok(item)
+  assert.equal((await request(runtime.base,'/api/admin/recovery/requests',{cookie:pendingCookie})).response.status,404)
+  const issued=await post('/api/admin/recovery/requests/'+item.id+'/issue',{ownerPassword:password,verifiedOutOfBand:true},operatorCookie)
+  assert.equal(issued.response.status,200)
+  const resetToken=new URLSearchParams(new URL(issued.content.resetUrl).hash.slice(1)).get('token')
+  assert.equal((await post('/api/auth/recovery/complete',{token:resetToken,newPassword:'Reset888'})).response.status,200)
+  assert.equal((await post('/api/auth/login',{username:'pendingowner',password:'Reset888'})).response.status,200)
+  const requested=createLocalBackupStopRequest(options.fixtureRoot)
+  const maintenance=readLocalBackupStopRequest(options.fixtureRoot)
+  const receipt=await runtime.shutdownAndCaptureBackup()
+  stopped=true
+  assert.equal(receipt.households,2)
+  completeLocalBackupStopRequest(options.fixtureRoot,maintenance,receipt)
+  const {archiveCompletedLocalMaintenanceHold}=await import('../Server/private-phase1-local-maintenance-control.mjs')
+  assert.equal(archiveCompletedLocalMaintenanceHold({root:options.fixtureRoot,storageRoot:options.storageRoot,identityDatabasePath:options.identityDatabasePath,serverDirectory,primaryHouseholdId,expectedRequestId:requested.requestId}).holdReleased,true)
+  runtime=await launchDisposableReviewedPhase1Gateway(options)
+  stopped=false
+  assert.equal(runtime.snapshot().householdCount,1)
+  assert.equal((await post('/api/auth/login',{username:'pendingowner',password:'Reset888'})).response.status,200)
+ }finally{if(!stopped)await runtime.shutdown()}
+})
+
 test('malformed or stale local maintenance request cannot become a shutdown authorization',t=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'fc-phase1-maintenance-'))
  t.after(()=>fs.rmSync(root,{recursive:true,force:true,maxRetries:4,retryDelay:100}))

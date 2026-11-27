@@ -97,7 +97,7 @@ test('approved invited family is included with separate SQLite and explicit owne
   assert.notEqual(f.home.databasePath, f.friendStorage.databasePath)
 })
 
-test('a new household registry entry without activation blocks startup', t => {
+test('an arbitrary registry entry without verified invitation still blocks startup', t => {
   const f = fixture(t)
   registerHousehold(f.args.identityDatabase, {
     householdId: friend, displayName: 'Unapproved new family',
@@ -106,6 +106,20 @@ test('a new household registry entry without activation blocks startup', t => {
     storageRoot: f.args.storageRoot, householdId: friend })
   assert.throws(() => planReviewedPrivateTestStartup(f.args),
     /exactly one active Person Owner|explicit trusted activation/)
+})
+
+test('verified pending household is preserved but not routed or booted', t => {
+  const f=fixture(t,{addFriend:true})
+  const db=f.args.identityDatabase
+  db.exec('DELETE FROM private_activated_households')
+  const before=sha(f.friendStorage.databasePath)
+  const plan=planReviewedPrivateTestStartup(f.args)
+  assert.deepEqual(plan.householdIds,[primary])
+  assert.deepEqual(plan.pendingHouseholdIds,[friend])
+  assert.deepEqual(plan.registeredHouseholdIds,[primary,friend])
+  assert.equal(sha(f.friendStorage.databasePath),before)
+  db.exec("UPDATE independent_household_invitations SET revoked_at=3")
+  assert.throws(()=>planReviewedPrivateTestStartup(f.args),/explicit trusted activation/)
 })
 
 test('disabled invited owners and revoked approvals refuse restart for all', t => {

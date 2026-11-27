@@ -98,9 +98,9 @@ export function reviewLocalMaintenanceResume({root,storageRoot,identityDatabaseP
  let plan
  try{plan=planReviewedPrivateTestStartup({identityDatabase:central,serverDirectory,storageRoot,stateDirectory:state,primaryHouseholdId})}
  finally{central.close()}
- need(JSON.stringify([...plan.householdIds].sort())===JSON.stringify(attestation.households))
+ need(JSON.stringify([...plan.registeredHouseholdIds].sort())===JSON.stringify(attestation.households))
  const paths={root,storage:storageRoot,identity:identityDatabasePath}
- need(digestClosedPhase1Source(paths,plan.householdIds)===receipt.sourceDigest)
+ need(digestClosedPhase1Source(paths,plan.registeredHouseholdIds)===receipt.sourceDigest)
  return Object.freeze({kind:'phase1-local-maintenance-resume-review-v1',requestId:request.id,backupName:receipt.backupName,verifiedBackup:true,originalDataUnchanged:true,writerLocksClear:true,households:checked.households,files:checked.files,windowsHostVerified:false,holdReleased:false,automaticRestartAllowed:false,testDeploymentAuthorized:false})
 }
 

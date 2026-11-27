@@ -7,6 +7,7 @@ import path from 'node:path'
 import net from 'node:net'
 import {createHash,randomBytes} from 'node:crypto'
 import {DatabaseSync} from 'node:sqlite'
+import {hasVerifiedInvitedOwner,listApprovedPrivateHouseholds} from './private-household-activation-records.mjs'
 import {attestOfflinePrivateRestoreSet,verifyOfflinePrivateRestoreSet} from './private-restore-preflight.mjs'
 
 const refuse=()=>{throw Error('Phase 1 supervised backup refused; manual review required.')}
@@ -66,7 +67,16 @@ async function closed(port){
 function writeNew(p,v){const fd=fs.openSync(p,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(v,null,2)+'\n');fs.fsyncSync(fd)}finally{fs.closeSync(fd)}}
 export async function captureClosedPhase1SupervisorBackup({paths,plan,guard,backends,gatewayPort}){
  need(guard.snapshot().phase==='capturing'&&guard.snapshot().allCapturedChildrenExited&&backends.length===plan.householdCount&&backends.every(x=>x.child.exitCode===0))
- const ids=[...plan.householdIds].sort()
+ // Re-read the closed central registry: invitations can be redeemed after boot.
+ const db=new DatabaseSync(paths.identity,{readOnly:true})
+ let ids
+ try{
+  const rows=db.prepare('SELECT storage_id AS id,disabled FROM household_registry ORDER BY storage_id').all()
+  ids=rows.map(r=>r.id)
+  const approved=listApprovedPrivateHouseholds(db)
+  need(rows.every(r=>r.disabled===0)&&JSON.stringify([plan.primaryHouseholdId,...approved].sort())===JSON.stringify([...plan.householdIds].sort()))
+  need(ids.includes(plan.primaryHouseholdId)&&ids.every(id=>id===plan.primaryHouseholdId||hasVerifiedInvitedOwner(db,id)))
+ }finally{db.close()}
  const ports=[gatewayPort,...backends.map(x=>x.port)]
  need(new Set(ports).size===ports.length)
  for(const p of ports)await closed(p)

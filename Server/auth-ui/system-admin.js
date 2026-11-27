@@ -36,6 +36,7 @@ async function requestJson(url, body = undefined) {
     headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
     redirect: 'manual',
+    signal: AbortSignal.timeout(15000),
   })
   const result = await response.json().catch(() => null)
   if (!response.ok) {
@@ -173,12 +174,12 @@ function validateRecovery(value) {
 async function refresh() {
   const [overview, pending, readiness] = await Promise.all([
     requestJson('/api/admin/household-overview'),
-    requestJson('/api/admin/recovery/requests'),
+    requestJson('/api/admin/recovery/requests').catch(() => null),
     // The optional preflight does not control registration/activation. If it
     // is unavailable, the existing household overview remains usable.
     requestJson('/api/admin/activation-readiness').catch(() => null),
   ])
-  if (!validateOverview(overview) || !validateRecovery(pending)) {
+  if (!validateOverview(overview)) {
     throw new Error('Unexpected response from administrator service.')
   }
   activationChecks = readiness?.kind === 'read-only-private-activation-preflight-v1' &&
@@ -193,13 +194,16 @@ async function refresh() {
   $('configured-count').textContent = overview.households
     .filter(x => x.state === 'configured-route').length
   $('pending-invites-count').textContent = overview.invitations.length
-  $('pending-recovery-count').textContent = pending.requests.length
+  $('pending-recovery-count').textContent = validateRecovery(pending) ? pending.requests.length : 'Unavailable'
   renderChildren('household-list', overview.households, householdEntry,
     'No independent households have been registered through your invitations.')
   renderChildren('invitation-list', overview.invitations, inviteEntry,
     'No pending household invitations.')
-  renderChildren('recovery-list', pending.requests, recoveryEntry,
-    'No pending password recovery requests.')
+  if (validateRecovery(pending)) {
+    renderChildren('recovery-list', pending.requests, recoveryEntry, 'No pending password recovery requests.')
+  } else {
+    renderChildren('recovery-list', [], recoveryEntry, 'Password recovery could not be loaded. Refresh to retry.')
+  }
 }
 
 async function reviewRecovery(id, action) {
