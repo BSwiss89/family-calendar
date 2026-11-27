@@ -151,7 +151,7 @@ async function main(){
  let operatorPassword=await readHiddenOwnerPassword(process.stdin,process.stdout,{promptKind:'operator'})
  let confirmation=await readHiddenOwnerPassword(process.stdin,process.stdout,{promptKind:'operator-confirm'})
  try{
-  need(operatorPassword===confirmation&&operatorPassword.length>=14&&operatorPassword!==ownerPassword)
+  need(operatorPassword===confirmation&&operatorPassword.length>=8&&operatorPassword!==ownerPassword)
   confirmation=undefined
   phase='owner-proof'
   await (async()=>{const {verifyOfflineCentralOwnerPassword}=await import('./private-phase1-offline-central-owner-rehearsal.mjs');need((await verifyOfflineCentralOwnerPassword(args,ownerPassword)).passwordOwnershipVerified)})()

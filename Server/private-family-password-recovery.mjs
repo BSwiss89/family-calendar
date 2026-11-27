@@ -114,7 +114,7 @@ export function installPrivateRecoveryPublic(app, {
     if (!exactObject(req.body, ['token', 'newPassword']) ||
         typeof req.body.token !== 'string' || req.body.token.length !== 64 ||
         typeof req.body.newPassword !== 'string' ||
-        req.body.newPassword.length < 14 || req.body.newPassword.length > 200) {
+        req.body.newPassword.length < 8 || req.body.newPassword.length > 200) {
       return res.status(400).json({ error: TOKEN_ERROR })
     }
     try {

@@ -21,8 +21,8 @@ form.addEventListener('submit', async (event) => {
     message.textContent = 'Passwords do not match.'
     return
   }
-  if (newPassword.length < 14 || newPassword.length > 200) {
-    message.textContent = 'Use a password between 14 and 200 characters.'
+  if (newPassword.length < 8 || newPassword.length > 200) {
+    message.textContent = 'Use a password between 8 and 200 characters.'
     return
   }
   button.disabled = true

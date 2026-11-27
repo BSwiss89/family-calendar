@@ -56,7 +56,7 @@ export function readHiddenOwnerPassword(input,output,{timeoutMs=120000,promptKin
   }
   try{
    input.setRawMode(true);raw=true
-   output.write(({owner:'Enter archived TEST Owner password',operator:'Choose separate platform operator password (14+ characters)', 'operator-confirm':'Confirm separate platform operator password'})[promptKind]+' (hidden; Enter submits, Ctrl-C cancels): ')
+   output.write(({owner:'Enter archived TEST Owner password',operator:'Choose separate platform operator password (8+ characters)', 'operator-confirm':'Confirm separate platform operator password'})[promptKind]+' (hidden; Enter submits, Ctrl-C cancels): ')
    input.on('data',onData)
    input.once('error',onEnd)
    input.once('end',onEnd)

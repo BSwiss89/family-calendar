@@ -13,6 +13,7 @@ const OPERATOR_GET = new Set([
   '/api/health', '/api/admin/household-overview',
   '/api/admin/activation-readiness',
   '/api/households/independent-administration',
+  '/api/admin/recovery/requests',
   '/api/auth/landing',
 ])
 const OWNER_POST = new Set([
@@ -62,6 +63,7 @@ export function classifyPrivatePhase1PilotRoute(method, originalUrl, role) {
   }
   if (role === 'operator') {
     if (method === 'POST' && OPERATOR_POST.has(pathname)) return 'allowed'
+    if (method === 'POST' && /^\/api\/admin\/recovery\/requests\/[1-9][0-9]*\/(?:issue|deny)$/.test(pathname)) return 'allowed'
     if (method === 'POST' &&
         /^\/api\/households\/independent-invitations\/[1-9][0-9]*\/revoke$/.test(pathname)) {
       return 'allowed'
