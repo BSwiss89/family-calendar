@@ -84,7 +84,24 @@ if($LASTEXITCODE -ne 0){Refuse}
 $show=@(& netsh interface portproxy show all)
 if($LASTEXITCODE -ne 0){Refuse}
 $matched=0
-$phases=if($Mode -ceq 'MaintenanceResume'){@('candidate-review')}else{@('legacy-fenced','candidate-review')}
+# Select the possible phase from the captured row; the full decoder still
+# verifies every line of both exports and refuses any unexpected rule.
+# Windows PowerShell 5.1 with ErrorActionPreference=Stop treats native
+# stderr as terminating even when redirected. Never probe a known-wrong phase.
+$hasCandidateRow=@($show | Where-Object {$_ -match '^\s*127\.0\.0\.1\s+13003\s+127\.0\.0\.1\s+13004\s*
+foreach($phase in $phases){
+ $inputJson=@{dump=($dump -join "`n");showAll=($show -join "`n");installedTestSha=$ExpectedInstalledTestSha;legacyTestAddress='100.124.58.19';phase=$phase}|ConvertTo-Json -Compress
+ $out=@($inputJson | & $node (Join-Path $PSScriptRoot 'review-private-phase1-portproxy-all-families.mjs') 2>$null)
+ if($LASTEXITCODE -eq 0){$matched++}
+}
+if($matched -ne 1){Refuse}
+$repeat=@(& netsh interface portproxy show all)
+if($LASTEXITCODE -ne 0 -or ($repeat -join "`n") -cne ($show -join "`n")){Refuse}
+$health=Invoke-WebRequest -Uri 'http://127.0.0.1:3001/api/health' -UseBasicParsing -TimeoutSec 5
+if($health.StatusCode -ne 200 -or (ConvertFrom-Json $health.Content).status -cne 'ok'){Refuse}
+if($Mode -ceq 'MaintenanceResume'){Write-Output 'PHASE1_WINDOWS_RESUME_HOST=PASS | TEST_ONLY=YES'}else{Write-Output 'PHASE1_WINDOWS_LAUNCH_HOST=PASS | TEST_ONLY=YES'}
+}).Count -eq 1
+$phases=if($Mode -ceq 'MaintenanceResume' -or $hasCandidateRow){@('candidate-review')}else{@('legacy-fenced')}
 foreach($phase in $phases){
  $inputJson=@{dump=($dump -join "`n");showAll=($show -join "`n");installedTestSha=$ExpectedInstalledTestSha;legacyTestAddress='100.124.58.19';phase=$phase}|ConvertTo-Json -Compress
  $out=@($inputJson | & $node (Join-Path $PSScriptRoot 'review-private-phase1-portproxy-all-families.mjs') 2>$null)
