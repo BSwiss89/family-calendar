@@ -254,13 +254,10 @@ async function refresh() {
 
 async function approveHousehold(household){
   if(busy)return
-  const password=$('activation-password').value
-  if(!password){setStatus('Enter your system-administrator password in the household section.',true);return}
   if(!confirm('Approve and activate '+household.displayName+'? This starts its own isolated TEST calendar backend.'))return
   await operation(async()=>{
-    $('activation-password').value=''
     setStatus('Verifying and activating '+household.displayName+'…')
-    const result=await requestJson('/api/admin/households/'+encodeURIComponent(household.householdId)+'/activate',{ownerPassword:password,confirmActivation:true},120000)
+    const result=await requestJson('/api/admin/households/'+encodeURIComponent(household.householdId)+'/activate',{confirmActivation:true},120000)
     if(result?.activation!=='active'||result.householdId!==household.householdId)throw Error('Activation was not confirmed. Refresh to check status.')
     await refresh()
     setStatus(household.displayName+' activated. Its Owner can now open their calendar.')
@@ -268,11 +265,6 @@ async function approveHousehold(household){
 }
 async function reviewRecovery(id, action) {
   if (busy) return
-  const password = $('operator-password').value
-  if (!password) {
-    setStatus('Enter your own system-administrator password.', true)
-    return
-  }
   const issuing=action==='issue'||action==='reissue'
   if (issuing && !$('verified-identity').checked) {
     setStatus('Verify this account holder through a trusted contact method first.', true)
@@ -285,12 +277,11 @@ async function reviewRecovery(id, action) {
     $('recovery-link-box').hidden = true
     $('recovery-link').value = ''
     const body = issuing
-      ? { ownerPassword: password, verifiedOutOfBand: true }
-      : { ownerPassword: password }
+      ? { verifiedOutOfBand: true }
+      : { confirmAction: true }
     const response = await requestJson(
       '/api/admin/recovery/requests/' + encodeURIComponent(String(id)) +
       '/' + action, body)
-    $('operator-password').value = ''
     $('verified-identity').checked = false
     if (issuing) {
       if (!validOneTimeUrl(response?.resetUrl, resetPrefix)) {

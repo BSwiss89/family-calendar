@@ -500,7 +500,12 @@ test('real pending signup survives coordinated backup and restart, and recovery 
   const item=requests.content.requests.find(x=>x.username==='pendingowner')
   assert.ok(item)
   assert.equal((await request(runtime.base,'/api/admin/recovery/requests',{cookie:pendingCookie})).response.status,404)
-  const issued=await post('/api/admin/recovery/requests/'+item.id+'/issue',{ownerPassword:password,verifiedOutOfBand:true},operatorCookie)
+  const issueRoute='/api/admin/recovery/requests/'+item.id+'/issue'
+  assert.equal((await post(issueRoute,{verifiedOutOfBand:true})).response.status,401)
+  assert.equal((await post(issueRoute,{verifiedOutOfBand:true},pendingCookie)).response.status,404)
+  assert.equal((await post(issueRoute,{verifiedOutOfBand:false},operatorCookie)).response.status,400)
+  assert.equal((await request(runtime.base,issueRoute,{method:'POST',body:{verifiedOutOfBand:true},cookie:operatorCookie,headers:{Origin:'https://untrusted.example'}})).response.status,403)
+  const issued=await post('/api/admin/recovery/requests/'+item.id+'/issue',{verifiedOutOfBand:true},operatorCookie)
   assert.equal(issued.response.status,200)
   const lostToken=new URLSearchParams(new URL(issued.content.resetUrl).hash.slice(1)).get('token')
   const overview=await request(runtime.base,'/api/admin/household-overview',{cookie:operatorCookie})
@@ -509,9 +514,9 @@ test('real pending signup survives coordinated backup and restart, and recovery 
   assert.equal(history.content.history.find(x=>x.id===item.id).canReissue,true)
   assert.equal(history.content.requests.length,0)
   const reissueRoute='/api/admin/recovery/requests/'+item.id+'/reissue'
-  assert.equal((await post(reissueRoute,{ownerPassword:password,verifiedOutOfBand:true},pendingCookie)).response.status,404)
-  assert.equal((await post(reissueRoute,{ownerPassword:password,verifiedOutOfBand:false},operatorCookie)).response.status,400)
-  const rotated=await post(reissueRoute,{ownerPassword:password,verifiedOutOfBand:true},operatorCookie)
+  assert.equal((await post(reissueRoute,{verifiedOutOfBand:true},pendingCookie)).response.status,404)
+  assert.equal((await post(reissueRoute,{verifiedOutOfBand:false},operatorCookie)).response.status,400)
+  const rotated=await post(reissueRoute,{verifiedOutOfBand:true},operatorCookie)
   assert.equal(rotated.response.status,200)
   assert.equal((await post('/api/auth/recovery/complete',{token:lostToken,newPassword:'Reset888'})).response.status,400)
   const resetToken=new URLSearchParams(new URL(rotated.content.resetUrl).hash.slice(1)).get('token')
@@ -599,14 +604,16 @@ test('operator browser approval adds a supervised isolated household and survive
   const overview=await get('/api/admin/household-overview',operator)
   const id=overview.content.households.find(h=>h.ownerUsername==='activatedowner').householdId
   const route='/api/admin/households/'+id+'/activate'
-  const body={ownerPassword:password,confirmActivation:true}
+  const body={confirmActivation:true}
   const readiness=await get('/api/admin/activation-readiness',operator)
   assert.equal(readiness.content.canActivateFromBrowser,true)
   assert.equal(runtime.snapshot().capturedCount,1)
   assert.notEqual((await get('/api/events',owner)).response.status,200)
   assert.equal((await post(route,body,owner)).response.status,404)
   assert.equal((await post(route,{...body,confirmActivation:false},operator)).response.status,400)
-  assert.equal((await post(route,{...body,ownerPassword:'wrong-password'},operator)).response.status,403)
+  assert.equal((await post(route,{...body,ownerPassword:'unexpected-password'},operator)).response.status,400)
+  assert.equal((await post(route,body,undefined)).response.status,401)
+  assert.equal((await request(runtime.base,route,{method:'POST',body,cookie:operator,headers:{Origin:'https://untrusted.example'}})).response.status,403)
   assert.equal((await post('/api/events',{title:'Primary secret appointment',date:'2027-02-03',time:'13:00'},primary)).response.status,201)
   const approved=await post(route,body,operator,120000)
   assert.equal(approved.response.status,200,JSON.stringify(approved.content))

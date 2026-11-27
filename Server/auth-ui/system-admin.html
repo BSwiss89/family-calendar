@@ -36,8 +36,6 @@
           <button type="button" id="refresh-button" class="quiet-button">Refresh</button>
         </div>
         <div id="activation-verification" class="verification" hidden>
-          <label for="activation-password">System-administrator password for activation</label>
-          <input type="password" id="activation-password" autocomplete="current-password" maxlength="200" placeholder="Required to approve a household">
           <p>Approval verifies the new household's empty storage, backs it up, and starts its private backend. TEST may be briefly unavailable during activation.</p>
         </div>
         <div id="household-list" class="stack" aria-live="polite"><p>Loading households…</p></div>
@@ -59,8 +57,6 @@
         <h2>Administrator-assisted password recovery</h2>
         <p>People can request a password reset from the sign-in page. Confirm their identity through an existing trusted contact method before issuing a one-use link. You never see their password.</p>
         <div class="verification">
-          <label for="operator-password">Your current system-administrator password</label>
-          <input type="password" id="operator-password" autocomplete="current-password" maxlength="200" placeholder="Required for every decision">
           <label class="checkbox-row" for="verified-identity">
             <input type="checkbox" id="verified-identity">
             <span>I independently verified the intended account holder.</span>

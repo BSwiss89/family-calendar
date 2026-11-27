@@ -166,35 +166,16 @@ export function installPrivateRecoveryOperator(app, {
     } catch { res.status(503).json({error:'System recovery administration unavailable.'}) }
   })
 
-  async function verifiedAdminAction(req, res, handler, needsIdentityCheck = true) {
+  function verifiedAdminAction(req, res, handler, needsIdentityCheck = true) {
+    if (!sameSecureOrigin(req)) {
+      return res.status(403).json({ error: 'Secure same-origin recovery action required.' })
+    }
     const requests = pending(req, res)
     if (requests === null) return
-    const expected = needsIdentityCheck
-      ? ['ownerPassword', 'verifiedOutOfBand'] : ['ownerPassword']
+    const expected = needsIdentityCheck ? ['verifiedOutOfBand'] : ['confirmAction']
     if (!exactObject(req.body, expected) ||
-        typeof req.body.ownerPassword !== 'string' ||
-        (needsIdentityCheck && req.body.verifiedOutOfBand !== true)) {
-      return res.status(400).json({ error: 'Confirm your administrator password and required identity checks.' })
-    }
-    let status
-    try {
-      status = await passwordStepUp.verify(identityDatabase, {
-        serverVerifiedUserId: req.familyAccount.user_id,
-        password: req.body.ownerPassword,
-      })
-    } catch {
-      return res.status(503).json({ error: 'Administrator verification unavailable.' })
-    }
-    if (status.status === 'limited') {
-      res.set('Retry-After', String(status.retryAfter))
-      return res.status(429).json({ error: 'Too many password attempts. Try later.' })
-    }
-    if (status.status === 'busy') {
-      res.set('Retry-After', '1')
-      return res.status(503).json({ error: 'Administrator verification busy.' })
-    }
-    if (status.status !== 'verified') {
-      return res.status(403).json({ error: 'Administrator password verification failed.' })
+        (needsIdentityCheck ? req.body.verifiedOutOfBand !== true : req.body.confirmAction !== true)) {
+      return res.status(400).json({ error: 'Confirm the required identity check or recovery action.' })
     }
     return handler()
   }

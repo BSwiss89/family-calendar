@@ -743,7 +743,7 @@ export async function startPrivateHouseholdGateway({
   installPrivateSystemAdministrator(app, {
     identityDatabase, serverDirectory, storageRoot,
     trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
-    activateReviewedHousehold, passwordStepUp: ownerPasswordStepUp,
+    activateReviewedHousehold,
     // Enrollment can add a verified private backend after initial boot.
     // Always derive operator status from the current trusted route map.
     getRoutedHouseholdIds: () => [...portByHousehold.keys()],

@@ -78,7 +78,6 @@ export function installPrivateSystemAdministrator(app, {
   getRoutedHouseholdIds = () => routedHouseholdIds,
   storageRoot = null,
   activateReviewedHousehold = null,
-  passwordStepUp = null,
 }) {
   if (!app || !identityDatabase ||
       typeof serverDirectory !== 'string' || !path.isAbsolute(serverDirectory) ||
@@ -89,7 +88,7 @@ export function installPrivateSystemAdministrator(app, {
     throw new Error('System dashboard needs private authenticated gateway configuration.')
   }
 
-  if (activateReviewedHousehold !== null && (typeof activateReviewedHousehold !== 'function' || !passwordStepUp?.verify || storageRoot===null)) throw Error('Reviewed supervisor activation configuration required.')
+  if (activateReviewedHousehold !== null && (typeof activateReviewedHousehold !== 'function' || storageRoot===null)) throw Error('Reviewed supervisor activation configuration required.')
   // Register after installFamilyAuth's required session middleware.
   // Even assets are withheld from all ordinary Owners, Adults and Children.
   function operatorOnly(request, response, next) {
@@ -174,8 +173,8 @@ export function installPrivateSystemAdministrator(app, {
       if(!origin||origin.protocol!=='https:'||origin.host.toLowerCase()!==(request.get('host')||'').toLowerCase()||origin.pathname!=='/'||origin.search||origin.hash||origin.username||origin.password)
         return response.status(403).json({error:'Secure activation request required.'})
       const id=request.params.id,body=request.body,userId=request.familyAccount.user_id
-      if(!/^family-[a-f0-9]{24}$/.test(id)||!body||Array.isArray(body)||Object.keys(body).length!==2||typeof body.ownerPassword!=='string'||body.confirmActivation!==true)
-        return response.status(400).json({error:'Confirm household activation and enter your system-administrator password.'})
+      if(!/^family-[a-f0-9]{24}$/.test(id)||!body||Array.isArray(body)||Object.keys(body).length!==1||body.confirmActivation!==true)
+        return response.status(400).json({error:'Confirm household activation.'})
       if(inProgress)return response.status(409).json({error:'Another activation is in progress.'})
       const eligible=()=>listPrivateOperatorHouseholdOverview(identityDatabase,{
         serverVerifiedAdministratorUserId:userId,trustedAdministratorUserIds,routedHouseholdIds:getRoutedHouseholdIds(),
@@ -183,11 +182,6 @@ export function installPrivateSystemAdministrator(app, {
       inProgress=true
       try{
         if(!eligible())return response.status(409).json({error:'Household is not eligible for activation.'})
-        const checked=await passwordStepUp.verify(identityDatabase,{serverVerifiedUserId:userId,password:body.ownerPassword})
-        if(checked.status==='limited'){response.set('Retry-After',String(checked.retryAfter));return response.status(429).json({error:'Too many password attempts. Try later.'})}
-        if(checked.status==='busy')return response.status(503).json({error:'Administrator verification busy.'})
-        if(checked.status!=='verified')return response.status(403).json({error:'Administrator password verification failed.'})
-        if(!eligible())return response.status(409).json({error:'Household eligibility changed. Refresh to retry.'})
         const result=await activateReviewedHousehold(id)
         if(result?.activation!=='active'||result.householdId!==id||!getRoutedHouseholdIds().includes(id))throw Error('Activation not confirmed.')
         return response.json({householdId:id,activation:'active'})
