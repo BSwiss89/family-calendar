@@ -517,6 +517,32 @@ test('real pending signup survives coordinated backup and restart, and recovery 
   stopped=false
   assert.equal(runtime.snapshot().householdCount,1)
   assert.equal((await post('/api/auth/login',{username:'pendingowner',password:'Reset888'})).response.status,200)
+  // Simulate the legacy shutdown's exact abandoned instance/request state
+  // after all real disposable children exited. Never use installed TEST data.
+  const transitionRequest=createLocalBackupStopRequest(options.fixtureRoot)
+  readLocalBackupStopRequest(options.fixtureRoot)
+  const instanceFile=path.join(options.stateDirectory,'.family-calendar-reviewed-supervisor-instance.lock')
+  const instanceRaw=fs.readFileSync(instanceFile,'utf8')
+  await runtime.shutdown()
+  stopped=true
+  fs.writeFileSync(instanceFile,instanceRaw,{flag:'wx'})
+  const {completeLegacyPendingHouseholdTransition}=await import('../Server/private-phase1-pending-transition.mjs')
+  const args={root:options.fixtureRoot,storageRoot:options.storageRoot,identityDatabasePath:options.identityDatabasePath,serverDirectory,primaryHouseholdId,expectedRequestId:transitionRequest.requestId,gatewayPort:runtime.snapshot().gatewayPort}
+  await assert.rejects(completeLegacyPendingHouseholdTransition({...args,checkHost:()=>{throw Error('Synthetic host not fenced')}}),/Synthetic host not fenced/)
+  assert.equal(fs.existsSync(instanceFile),true)
+  const bridged=await completeLegacyPendingHouseholdTransition({...args,checkHost:pid=>assert.equal(pid,process.pid)})
+  assert.equal(bridged.households,2)
+  assert.equal(bridged.pendingHouseholds,1)
+  assert.equal(bridged.originalEvidenceArchived,true)
+  assert.equal(bridged.originalSourceUnchanged,true)
+  assert.equal(fs.existsSync(instanceFile),false)
+  assertLocalMaintenanceClear(options.fixtureRoot)
+  const evidence=path.join(options.fixtureRoot,'LEGACY-PENDING-TRANSITION-'+transitionRequest.requestId)
+  assert.equal(fs.readFileSync(path.join(evidence,'LEGACY-SUPERVISOR-INSTANCE.json'),'utf8'),instanceRaw)
+  assert.equal(JSON.parse(fs.readFileSync(path.join(evidence,'TRANSITION.json'),'utf8')).originalMaintenanceCompleted,false)
+  runtime=await launchDisposableReviewedPhase1Gateway(options)
+  stopped=false
+  assert.equal((await post('/api/auth/login',{username:'pendingowner',password:'Reset888'})).response.status,200)
  }finally{if(!stopped)await runtime.shutdown()}
 })
 
