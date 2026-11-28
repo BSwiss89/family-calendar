@@ -39,7 +39,7 @@ function canonicalRoute(method, originalUrl) {
   // Permit that spelling ONLY under the static /assets/ namespace, never
   // on API or uploaded-media paths (Express may otherwise normalize aliases).
   const staticAsset = /^\/assets\/[A-Za-z0-9._/-]+$/.test(pathname)
-  const imageAsset = /^\/uploads\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$/i.test(pathname)
+  const imageAsset = pathname.startsWith('/uploads/') && /^\/uploads\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$/i.test(pathname)
   if ((pathname !== '/' && !PATH_RE.test(pathname) && !staticAsset && !imageAsset) ||
       pathname.includes('%') ||
       pathname.split('/').some(segment => segment === '.' || segment === '..') ||

@@ -686,3 +686,20 @@ test('legacy Arney confirmation always follows the verified Adult/Child grants, 
   assert.equal(allowed(childId, preview), false)
   assert.equal(allowed(childId, cancel), false)
 })
+
+test('restored Owner dashboard permits only canonical private media and approved feature routes',()=>{
+  const dashboard={ownerDashboard:true}
+  for(const route of ['/uploads/avatar-123.webp','/uploads/Photo-123.PNG']){
+    assert.equal(classifyPrivatePhase1PilotRoute('GET',route,'owner',dashboard),'allowed')
+    assert.equal(classifyPrivatePhase1PilotRoute('GET',route,'owner'),'denied')
+    assert.equal(classifyPrivatePhase1PilotRoute('GET',route,'operator',dashboard),'denied')
+    assert.equal(classifyPrivatePhase1PilotRoute('GET',route,'child',dashboard),'denied')
+  }
+  for(const route of ['/UPLOADS/avatar-123.webp','/Uploads/Photo.PNG','/uploads/../private.png','/uploads/%61vatar.png','/uploads/nested/photo.png','/uploads/photo.svg','/API/recipes']){
+    assert.equal(classifyPrivatePhase1PilotRoute('GET',route,'owner',dashboard),'denied',route)
+  }
+  for(const route of ['/api/recipes','/api/meal-plans','/api/emoji-markers']){
+    assert.equal(classifyPrivatePhase1PilotRoute('GET',route,'owner',dashboard),'allowed')
+    assert.equal(classifyPrivatePhase1PilotRoute('GET',route,'operator',dashboard),'denied')
+  }
+})
