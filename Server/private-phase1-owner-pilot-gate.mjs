@@ -16,6 +16,11 @@ const OPERATOR_GET = new Set([
   '/api/admin/recovery/requests',
   '/api/auth/landing',
 ])
+// Reviewed ordinary Owner features; no AI, device enrollment, notification,
+// sharing or membership management expansion. Separate from the pilot default.
+const DASHBOARD_GET=new Set(['/api/recipes','/api/meal-plans','/api/meal-plan-items','/api/emoji-markers','/api/family-daily-note'])
+const DASHBOARD_POST=new Set(['/api/people','/api/recipes','/api/shopping-stores','/api/emoji-markers'])
+const DASHBOARD_ASSETS=new Set(['/favicon.svg','/manifest.webmanifest','/apple-touch-icon.png','/calendar-icon-192.png','/calendar-icon-512.png','/calendar-icon.svg'])
 const OWNER_POST = new Set([
   '/api/events', '/api/lists',
 ])
@@ -34,7 +39,8 @@ function canonicalRoute(method, originalUrl) {
   // Permit that spelling ONLY under the static /assets/ namespace, never
   // on API or uploaded-media paths (Express may otherwise normalize aliases).
   const staticAsset = /^\/assets\/[A-Za-z0-9._/-]+$/.test(pathname)
-  if ((pathname !== '/' && !PATH_RE.test(pathname) && !staticAsset) ||
+  const imageAsset = /^\/uploads\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$/i.test(pathname)
+  if ((pathname !== '/' && !PATH_RE.test(pathname) && !staticAsset && !imageAsset) ||
       pathname.includes('%') ||
       pathname.split('/').some(segment => segment === '.' || segment === '..') ||
       (pathname !== '/' && pathname.endsWith('/')) ||
@@ -47,7 +53,7 @@ function canonicalRoute(method, originalUrl) {
  * safe: uploaded images, AI/image proxies and household settings can disclose
  * content and must be individually reviewed.
  */
-export function classifyPrivatePhase1PilotRoute(method, originalUrl, role) {
+export function classifyPrivatePhase1PilotRoute(method, originalUrl, role, {ownerDashboard=false}={}) {
   const pathname = canonicalRoute(method, originalUrl)
   if (!pathname || !['owner', 'operator'].includes(role)) return 'denied'
   // Browser shell/static JS is public presentation only. The route must
@@ -55,6 +61,13 @@ export function classifyPrivatePhase1PilotRoute(method, originalUrl, role) {
   if (method === 'GET' || method === 'HEAD') {
     if (role === 'operator' && OPERATOR_GET.has(pathname)) return 'allowed'
     if (role === 'owner' && OWNER_GET.has(pathname)) return 'allowed'
+    if(role==='owner'&&ownerDashboard){
+      if(DASHBOARD_GET.has(pathname)||/^\/api\/daily-notes\/[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(pathname))return 'allowed'
+      if(/^\/uploads\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$/i.test(pathname)&&pathname.startsWith('/uploads/'))return 'allowed'
+      if(pathname==='/'||DASHBOARD_ASSETS.has(pathname)||/^\/assets\/[A-Za-z0-9._-]+\.(?:js|css|png|jpg|jpeg|webp|svg|woff2?)$/.test(pathname))return 'presentation-only'
+      if(['/my-household','/auth/my-household.js','/phase1','/auth/phase1-pilot.js','/auth/phase1-pilot.css','/system-admin','/system-admin/app.js','/system-admin/styles.css'].includes(pathname))return 'presentation-only'
+      return 'denied'
+    }
     if (pathname.startsWith('/api/') || pathname === '/api' ||
         MEDIA_PATH_RE.test(pathname)) return 'denied'
     // Login and operator pages/assets retain their own server role checks.
@@ -72,6 +85,11 @@ export function classifyPrivatePhase1PilotRoute(method, originalUrl, role) {
     return 'denied'
   }
   if (role !== 'owner') return 'denied'
+  if(ownerDashboard){
+    if(method==='POST'&&(DASHBOARD_POST.has(pathname)||/^\/api\/lists\/[1-9][0-9]*\/organize$/.test(pathname)||/^\/api\/emoji-markers\/[1-9][0-9]*\/(exceptions|change-occurrence|truncate)$/.test(pathname)))return 'allowed'
+    if(method==='PUT'&&(/^\/api\/(?:people|recipes|shopping-stores|emoji-markers)\/[1-9][0-9]*$/.test(pathname)||pathname==='/api/people/reorder'||pathname==='/api/family-daily-note'||/^\/api\/daily-notes\/[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(pathname)||/^\/api\/lists\/[1-9][0-9]*\/(?:reorder|icon|store-sorting)$/.test(pathname)||/^\/api\/meal-plans\/[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(pathname)||/^\/api\/meal-plan-items\/[0-9]{4}-[0-9]{2}-[0-9]{2}\/[a-z]+$/.test(pathname)))return 'allowed'
+    if(method==='DELETE'&&(/^\/api\/(?:people|recipes|emoji-markers)\/[1-9][0-9]*$/.test(pathname)||/^\/api\/lists\/[1-9][0-9]*\/completed$/.test(pathname)||/^\/api\/meal-plans\/[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(pathname)||/^\/api\/meal-plan-items\/[0-9]{4}-[0-9]{2}-[0-9]{2}\/[a-z]+$/.test(pathname)))return 'allowed'
+  }
   if (method === 'POST') {
     if (OWNER_POST.has(pathname) ||
         /^\/api\/lists\/[1-9][0-9]*\/items$/.test(pathname)) return 'allowed'
@@ -95,7 +113,7 @@ export function classifyPrivatePhase1PilotRoute(method, originalUrl, role) {
  * Call only from a trusted, explicitly opted-in private-gateway startup.
  */
 export function installPrivatePhase1OwnerPilotGate(app, {
-  identityDatabase, trustedAdministratorUserIds,
+  identityDatabase, trustedAdministratorUserIds, ownerDashboard=false,
 }) {
   if (!identityDatabase?.prepare || !Array.isArray(trustedAdministratorUserIds) ||
       !trustedAdministratorUserIds.length ||
@@ -133,7 +151,7 @@ export function installPrivatePhase1OwnerPilotGate(app, {
       }
     }
     const decision = classifyPrivatePhase1PilotRoute(
-      request.method, request.originalUrl, role,
+      request.method, request.originalUrl, role, {ownerDashboard},
     )
     if (decision === 'allowed' || decision === 'presentation-only') return next()
     response.set('Cache-Control', 'no-store')

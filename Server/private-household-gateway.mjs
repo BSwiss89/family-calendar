@@ -434,6 +434,8 @@ export async function startPrivateHouseholdGateway({
   // Source-only, trusted startup switch for an intentionally NARROW first TEST
   // pilot. It cannot be toggled by login, URL or owner settings.
   phase1OwnerPilotOnly = false,
+  // Restore the original SPA for Owners while retaining the strict pilot gate.
+  ownerDashboard = false,
   // Trusted, opt-in fixed localhost port for future guarded TEST portproxy only.
   // Does not modify routes or allow public listening; default 0 stays ephemeral.
   trustedPhase1GatewayPort = null,
@@ -443,6 +445,7 @@ export async function startPrivateHouseholdGateway({
   supervisorAdmissionCheck = null,
   activateReviewedHousehold = null,
 }) {
+  if(typeof ownerDashboard!=='boolean'||(ownerDashboard&&(!phase1OwnerPilotOnly||supervisorAdmissionCheck===null)))throw Error('Original Owner dashboard requires the reviewed supervisor.')
   if (supervisorAdmissionCheck !== null &&
       (!phase1OwnerPilotOnly || typeof supervisorAdmissionCheck !== 'function')) {
     throw new Error('Supervisor admission is restricted to the trusted Phase 1 runtime.')
@@ -710,6 +713,7 @@ export async function startPrivateHouseholdGateway({
     installPrivatePhase1OwnerPilotGate(app, {
       identityDatabase,
       trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+      ownerDashboard,
     })
     // Only after the strict phase gate: give configured invited Owners a
     // usable narrow page instead of the full calendar SPA's disabled APIs.
@@ -717,6 +721,7 @@ export async function startPrivateHouseholdGateway({
       identityDatabase,
       trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
       getRoutedHouseholdIds: () => [...portByHousehold.keys()],
+      redirectToPilot: !ownerDashboard,
     })
   }
   // Register the dedicated PIN enrollment/challenge routes BEFORE the Home

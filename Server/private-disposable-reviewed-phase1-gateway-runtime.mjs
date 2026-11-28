@@ -190,21 +190,24 @@ export async function launchDisposableReviewedPhase1Gateway({
   fixtureRoot, storageRoot, stateDirectory, identityDatabasePath,
   serverDirectory, primaryHouseholdId, operatorUserIds,
   trustedPhase1GatewayPort = null,
+  ownerDashboard = false,
 }) {
   const paths = verifiedPaths({
     fixtureRoot, storageRoot, stateDirectory, identityDatabasePath,
     serverDirectory,
   })
-  return launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,trustedPhase1GatewayPort,disposable:true})
+  return launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,trustedPhase1GatewayPort,disposable:true,ownerDashboard})
 }
 
 // No public path override or fixture bypass: the persistent wrapper below
 // derives every path from the fixed TEST installation and checks the host.
-async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,trustedPhase1GatewayPort,disposable}) {
+async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,trustedPhase1GatewayPort,disposable,ownerDashboard=false}) {
   if (!Array.isArray(operatorUserIds) || operatorUserIds.length !== 1 ||
       !Number.isSafeInteger(operatorUserIds[0]) || operatorUserIds[0] < 1) {
     refuse('one independently trusted operator ID must be supplied.')
   }
+  if(typeof ownerDashboard!=='boolean')refuse('Invalid Owner dashboard configuration.')
+  if(ownerDashboard&&!fs.existsSync(path.join(paths.checkout,'dist','index.html')))refuse('Original calendar dashboard must be built before startup.')
   const gatewayPort = resolvePrivatePhase1GatewayLoopbackPort({
     port: trustedPhase1GatewayPort, phase1OwnerPilotOnly: true,
   })
@@ -293,6 +296,7 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
       independentHouseholdAdministratorUserIds: operatorUserIds,
       enforceFamilyMemberPermissions: true,
       phase1OwnerPilotOnly: true,
+      ownerDashboard,
       trustedPhase1GatewayPort,
       activateReviewedHousehold: activateHousehold,
       supervisorAdmissionCheck: () => guard.snapshot().phase === 'running' &&
@@ -440,5 +444,5 @@ export async function launchReviewedWindowsPhase1TestGateway(){
     fs.existsSync(path.join(root,'ACTIVATION-IN-PROGRESS.json')))refuse('activation review changed during host preflight.')
  assertLocalMaintenanceClear(root)
  return launchReviewedGateway({paths:{root,storage,state,identity,server,checkout},primaryHouseholdId:r.primaryHouseholdId,
-   operatorUserIds:[r.operatorUserId],trustedPhase1GatewayPort:13004,disposable:false})
+   operatorUserIds:[r.operatorUserId],trustedPhase1GatewayPort:13004,disposable:false,ownerDashboard:true})
 }

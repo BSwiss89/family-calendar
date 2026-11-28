@@ -658,3 +658,62 @@ test('operator browser approval adds a supervised isolated household and survive
   }
  }
 })
+
+test('original Owner dashboard is served on the existing supervised gateway with isolated core features',{timeout:120000},async t=>{
+ const options={...fixture(t,{invited:true}),ownerDashboard:true}
+ const runtime=await launchDisposableReviewedPhase1Gateway(options)
+ const get=(route,cookie)=>request(runtime.base,route,{cookie})
+ const post=(route,body,cookie)=>request(runtime.base,route,{method:'POST',body,cookie})
+ async function login(username){
+  const result=await post('/api/auth/login',{username,password})
+  assert.equal(result.response.status,200)
+  return result.response.headers.get('set-cookie').split(';')[0]
+ }
+ try{
+  const a=await login('phase1primaryowner'),b=await login('phase1invitedowner'),operator=await login('phase1systemoperator')
+  assert.equal((await get('/')).response.status,303)
+  assert.equal((await get('/',operator)).response.headers.get('location'),'/system-admin')
+  for(const cookie of [a,b]){
+   const page=await get('/',cookie)
+   assert.equal(page.response.status,200)
+   assert.match(page.content,/<div id="root"><\/div>/)
+   assert.doesNotMatch(page.content,/Phase 1: household account isolation/)
+   assert.equal(page.response.headers.get('cache-control'),'no-store')
+   const script=page.content.match(/src="(\/assets\/[^"]+\.js)"/)?.[1]
+   assert.ok(script,'built original Vite module must be referenced')
+   assert.equal((await get(script,cookie)).response.status,200)
+   for(const route of ['/api/events','/api/people','/api/lists','/api/shopping-stores','/api/recipes','/api/meal-plans','/api/meal-plan-items','/api/emoji-markers']){
+    const result=await get(route,cookie)
+    assert.equal(result.response.status,200,route)
+    assert.ok(Array.isArray(result.content),route)
+   }
+   assert.equal((await get('/api/admin/household-overview',cookie)).response.status,404)
+   assert.equal((await post('/api/ai/intent',{text:'test'},cookie)).response.status,404)
+   assert.equal((await get('/api/test-notification-pilot',cookie)).response.status,404)
+   assert.equal((await get('/api/households/members',cookie)).response.status,404)
+   assert.equal((await get('/api/internal/household-binding',cookie)).response.status,404)
+   assert.equal((await get('/family-push-sw.js',cookie)).response.status,404)
+  }
+  for(const [cookie,name,color] of [[a,'Primary private profile','#123456'],[b,'Invited private profile','#654321']]){
+   const form=new FormData()
+   form.set('name',name);form.set('color',color)
+   const sharp=(await import('sharp')).default
+   const bytes=await sharp({create:{width:4,height:4,channels:3,background:color}}).png().toBuffer()
+   form.set('image',new Blob([bytes],{type:'image/png'}),'avatar.png')
+   const result=await fetch(runtime.base+'/api/people',{method:'POST',headers:{Cookie:cookie,Origin:'https://'+new URL(runtime.base).host},body:form})
+   const created=await result.json()
+   assert.equal(result.status,201,JSON.stringify(created))
+   assert.match(created.image,/^avatar-[0-9-]+\.webp$/)
+   const own=await fetch(runtime.base+'/uploads/'+created.image,{headers:{Cookie:cookie}})
+   assert.equal(own.status,200)
+   assert.equal(own.headers.get('cache-control'),'no-store')
+   const other=await fetch(runtime.base+'/uploads/'+created.image,{headers:{Cookie:cookie===a?b:a}})
+   assert.equal(other.status,404)
+  }
+  assert.doesNotMatch(JSON.stringify((await get('/api/people',a)).content),/Invited private profile/)
+  assert.doesNotMatch(JSON.stringify((await get('/api/people',b)).content),/Primary private profile/)
+  assert.equal((await get('/api/people',operator)).response.status,404)
+  assert.equal((await get('/api/people')).response.status,401)
+  assert.equal((await get('/phase1',a)).response.status,200)
+ }finally{await runtime.shutdown()}
+})

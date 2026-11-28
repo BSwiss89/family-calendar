@@ -34,6 +34,7 @@ export function getReadyPrivatePhase1Owner(identityDatabase, {
 
 export function installPrivatePhase1OwnerPilotUi(app, {
   identityDatabase, trustedAdministratorUserIds, getRoutedHouseholdIds,
+  redirectToPilot = true,
 }) {
   if (typeof app?.get !== 'function' || !identityDatabase?.prepare ||
       !Array.isArray(trustedAdministratorUserIds) ||
@@ -60,7 +61,7 @@ export function installPrivatePhase1OwnerPilotUi(app, {
   // instead of the full SPA that assumes Phase 2/3/4 APIs are active.
   // Pending invited Owners and the operator retain their existing landing.
   app.get('/', (request, response, next) => {
-    if (request.originalUrl !== '/') return next()
+    if (!redirectToPilot || request.originalUrl !== '/') return next()
     if (!ready(request)) return next()
     secureHeaders(response)
     return response.redirect(303, ROUTE)

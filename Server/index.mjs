@@ -7263,6 +7263,9 @@ app.delete('/api/list-items/:id', (request, response) => {
   })
 })
 app.use('/uploads', express.static(uploadFolder))
+// Private media misses must not return the SPA as an apparent successful
+// photo response. Never fall back to another household's directory.
+if (householdStorage.mode === 'household') app.use('/uploads', (_request,response)=>response.status(404).end())
 app.use(express.static(distFolder))
 
 app.get(/.*/, (request, response) => {
