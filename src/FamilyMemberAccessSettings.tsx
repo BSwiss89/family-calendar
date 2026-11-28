@@ -83,7 +83,8 @@ type PermissionDraft = { action: string; enabled: boolean }
  * This page NEVER grants authority itself; the server checks the identity,
  * household membership, Owner password and requested action on each write.
  */
-export default function FamilyMemberAccessSettings() {
+export default function FamilyMemberAccessSettings({settingsToken,onPeopleChanged}: {settingsToken?:string;onPeopleChanged?:()=>void} = {}) {
+  const settingsHeaders=useCallback(() => settingsToken ? {'x-family-settings-visit':settingsToken} : undefined,[settingsToken])
   const [state, setState] = useState<'loading' | 'ready' | 'hidden' | 'error'>('loading')
   const [data, setData] = useState<AccessResponse | null>(null)
   const [ownerPassword, setOwnerPassword] = useState('')
@@ -96,7 +97,7 @@ export default function FamilyMemberAccessSettings() {
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const result = await requestJson('/api/households/member-access', { signal })
+      const result = await requestJson('/api/households/member-access', { signal,headers:settingsHeaders() })
       if (signal?.aborted) return
       if (!validResponse(result)) throw new Error('The household member response was invalid.')
       setData(result)
@@ -120,7 +121,7 @@ export default function FamilyMemberAccessSettings() {
         setError(problem instanceof Error ? problem.message : 'Member access is unavailable.')
       }
     }
-  }, [])
+  }, [settingsHeaders])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -130,11 +131,11 @@ export default function FamilyMemberAccessSettings() {
 
   async function save(member: AccessMember, kind: 'type' | 'person' | 'permission') {
     if (busyId !== null) return
-    if (!ownerPassword) {
+    if (!settingsToken && !ownerPassword) {
       setError('Enter your Owner account password before saving changes.')
       return
     }
-    let body: Record<string, unknown> = { ownerPassword }
+    let body: Record<string, unknown> = settingsToken ? {} : { ownerPassword }
     if (kind === 'type') {
       const memberType = roleDrafts[member.userId]
       if (memberType !== 'adult' && memberType !== 'child') return
@@ -152,7 +153,7 @@ export default function FamilyMemberAccessSettings() {
     setNotice('')
     try {
       await requestJson('/api/households/members/' + encodeURIComponent(String(member.userId)) +
-        '/' + kind, { method: 'POST', body: JSON.stringify(body) })
+        '/' + kind, { method: 'POST', body: JSON.stringify(body),headers:settingsHeaders() })
       setOwnerPassword('')
       await load()
       setNotice('Account setting saved for ' + member.displayName + '.')
@@ -161,6 +162,26 @@ export default function FamilyMemberAccessSettings() {
     } finally {
       setBusyId(null)
     }
+  }
+
+  async function createLinkedPerson(member: AccessMember) {
+    if(!settingsToken||busyId!==null||member.memberType===null||member.linkedPersonId!==null)return
+    if(!window.confirm('Create a People profile for '+member.displayName+' and link it to this account?'))return
+    setBusyId(member.userId);setError('');setNotice('')
+    let created=false
+    try{
+      const form=new FormData();form.set('name',member.displayName);form.set('color','#64748b')
+      const response=await fetch('/api/people',{method:'POST',credentials:'same-origin',cache:'no-store',body:form})
+      const person=await response.json()
+      if(!response.ok||!Number.isSafeInteger(person.id))throw new Error(person.error||'Could not create the profile. Choose an existing Person if one already exists.')
+      created=true
+      onPeopleChanged?.()
+      await requestJson('/api/households/members/'+member.userId+'/person',{method:'POST',headers:settingsHeaders(),body:JSON.stringify({personId:person.id})})
+      await load();setNotice('Profile created and linked. It will appear in the calendar People slider.')
+    }catch(problem){
+      if(created)await load()
+      setError(created?'The profile was created, but linking failed. Select the new Person and save the link.':problem instanceof Error?problem.message:'Could not create profile.')
+    }finally{setBusyId(null)}
   }
 
   if (state === 'hidden' || state === 'loading') return null
@@ -177,16 +198,15 @@ export default function FamilyMemberAccessSettings() {
   return (
     <div className="household-settings-card family-member-access" aria-label="Family member account permissions">
       <h2>Account roles and People links</h2>
-      <p>Only your Owner account can change these settings. Your password is checked for each
-        saved change. Personal phones do not need a four-digit Calendar PIN.</p>
-      <label className="family-member-access-password">
+      <p>{settingsToken?'Owner settings are unlocked for this visit.':'Only your Owner account can change these settings. Your password is checked for each saved change.'} Personal phones do not need a four-digit Calendar PIN.</p>
+      {!settingsToken && <label className="family-member-access-password">
         Owner account password
         <input type="password" autoComplete="current-password" value={ownerPassword}
           onChange={event => setOwnerPassword(event.target.value)}
           placeholder="Required to save changes" maxLength={200} />
-      </label>
-      <SharedHomePinSettings ownerPassword={ownerPassword}
-        clearOwnerPassword={() => setOwnerPassword('')} />
+      </label>}
+      {!settingsToken && <SharedHomePinSettings ownerPassword={ownerPassword}
+        clearOwnerPassword={() => setOwnerPassword('')} />}
       {data.members.map(member => {
         const kind = member.memberType
         const chosen = permissionDrafts[member.userId]
@@ -237,6 +257,7 @@ export default function FamilyMemberAccessSettings() {
                   person === (member.linkedPersonId === null ? '' : String(member.linkedPersonId))}
                 onClick={() => void save(member, 'person')}>Save Person</button>
             </div>
+            {settingsToken && kind!==null && member.linkedPersonId===null && <p>Link an existing Person to show this account in the calendar's People slider. If there is no matching profile, <button type="button" disabled={isBusy} onClick={()=>void createLinkedPerson(member)}>Create linked profile</button>.</p>}
             {(kind === 'adult' || kind === 'child') && chosen && (
               <div className="family-member-access-field">
                 <label htmlFor={'family-member-action-' + member.userId}>Permission</label>

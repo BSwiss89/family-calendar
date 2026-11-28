@@ -4,7 +4,7 @@ import './index.css'
 import App, { type PersonalMemberAccess } from './App.tsx'
 import ArneySettingsEntry from './ArneySettingsEntry'
 
-type Entry = { kind: 'loading' | 'pending' | 'error' | 'owner' } | { kind: 'member'; access: PersonalMemberAccess }
+type Entry = { kind: 'loading' | 'pending' | 'error' | 'owner' | 'protected-owner' } | { kind: 'member'; access: PersonalMemberAccess }
 
 function CalendarEntry() {
   const [entry, setEntry] = useState<Entry>({kind:'loading'})
@@ -19,7 +19,7 @@ function CalendarEntry() {
       if(result.status===404||(result.ok&&!result.headers.get('content-type')?.includes('application/json'))){setEntry({kind:'owner'});return}
       if(!result.ok)throw new Error('Member access unavailable')
       const access=await result.json()
-      if(access.memberType==='owner'){setEntry({kind:'owner'});return}
+      if(access.memberType==='owner'){setEntry({kind:'protected-owner'});return}
       if(!['adult','child'].includes(access.memberType)||!Array.isArray(access.allowedActions)||
         !access.allowedActions.every((action:unknown)=>typeof action==='string')||
         (access.linkedPersonId!==null&&(!Number.isSafeInteger(access.linkedPersonId)||access.linkedPersonId<1)))throw new Error('Invalid member access')
@@ -32,7 +32,7 @@ function CalendarEntry() {
     void load().catch(()=>{if(!controller.signal.aborted)setEntry({kind:'error'})})
     return ()=>controller.abort()
   },[])
-  if(entry.kind==='owner')return <><App/><ArneySettingsEntry/></>
+  if(entry.kind==='owner'||entry.kind==='protected-owner')return <><App protectOwnerSettings={entry.kind==='protected-owner'}/><ArneySettingsEntry/></>
   if(entry.kind==='member')return <App personalMember={entry.access}/>
   return <main style={{maxWidth:440,margin:'12vh auto',padding:24}}>
     <h1>Family Calendar</h1>

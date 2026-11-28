@@ -95,7 +95,8 @@ function dateLabel(time: number) {
   })
 }
 
-export default function HouseholdMembersSettings() {
+export default function HouseholdMembersSettings({settingsToken, onPeopleChanged}: {settingsToken?:string;onPeopleChanged?:()=>void} = {}) {
+  const settingsHeaders=useCallback(() => settingsToken ? {'x-family-settings-visit':settingsToken} : undefined,[settingsToken])
   const [household, setHousehold] = useState<Household | null>(null)
   const [members, setMembers] = useState<Member[]>([])
   const [invitations, setInvitations] = useState<PendingInvite[]>([])
@@ -119,8 +120,8 @@ export default function HouseholdMembersSettings() {
     const selected = info.households[0]
     if (selected.role === 'owner') {
       const [memberData, inviteData] = await Promise.all([
-        getJson<unknown>('/api/households/members', { signal }),
-        getJson<unknown>('/api/households/member-invitations', { signal }),
+        getJson<unknown>('/api/households/members', { signal,headers:settingsHeaders() }),
+        getJson<unknown>('/api/households/member-invitations', { signal,headers:settingsHeaders() }),
       ])
       if (!validMemberList(memberData) || !validInvites(inviteData)) {
         throw new Error('Unexpected household response.')
@@ -149,7 +150,7 @@ export default function HouseholdMembersSettings() {
       setConnectionsAvailable(false)
     }
     setHousehold(selected)
-  }, [])
+  }, [settingsHeaders])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -177,7 +178,7 @@ export default function HouseholdMembersSettings() {
     setGeneratedLink('')
     try {
       const invite = await getJson<{ token: string }>(
-        '/api/households/member-invitations', { method: 'POST' })
+        '/api/households/member-invitations', { method: 'POST',headers:settingsHeaders() })
       if (!/^[a-f0-9]{64}$/.test(invite.token)) throw new Error('Bad invite format.')
       // Build from the current trusted HTTPS origin, never a forwarded Host
       // supplied by a browser, and put the bearer secret only in the fragment.
@@ -211,7 +212,7 @@ export default function HouseholdMembersSettings() {
     setNotice('')
     try {
       await getJson('/api/households/member-invitations/' +
-        encodeURIComponent(String(invitationId)) + '/revoke', { method: 'POST' })
+        encodeURIComponent(String(invitationId)) + '/revoke', { method: 'POST',headers:settingsHeaders() })
       setGeneratedLink('')
       await refresh()
       setNotice('Invitation revoked.')
@@ -231,7 +232,7 @@ export default function HouseholdMembersSettings() {
     setNotice('')
     try {
       await getJson('/api/households/members/' +
-        encodeURIComponent(String(member.userId)) + '/remove', { method: 'POST' })
+        encodeURIComponent(String(member.userId)) + '/remove', { method: 'POST',headers:settingsHeaders() })
       await refresh()
       setNotice('Member access removed.')
     } catch (reason) {
@@ -327,7 +328,7 @@ export default function HouseholdMembersSettings() {
                 </div>
               </div>
 
-              <FamilyMemberAccessSettings />
+              <FamilyMemberAccessSettings settingsToken={settingsToken} onPeopleChanged={onPeopleChanged} />
 
               <div className="household-settings-card">
                 <h2>Invite a household member</h2>

@@ -896,9 +896,62 @@ export async function startPrivateHouseholdGateway({
 
   // Private-only owner invitation endpoints. Tenant identity comes strictly
   // from the verified central session, never client-supplied fields.
+  // An unlock is an in-memory capability for one settings visit, bound to
+  // the authenticated session and household. Never persist the password or
+  // accept a token from a URL or browser storage.
+  const settingsVisits = new Map()
+  const settingsIdleMs = 30 * 60 * 1000
+  function settingsVisit(request, householdId, touch=true) {
+    const token=request.get('x-family-settings-visit')
+    const visit=typeof token==='string'&&/^[a-f0-9]{64}$/.test(token)?settingsVisits.get(token):null
+    if(!visit)return false
+    if(visit.expiresAt<=Date.now()){settingsVisits.delete(token);return false}
+    if(visit.sessionId!==request.familyAccount?.id||visit.userId!==request.familyAccount?.user_id||visit.householdId!==householdId)return false
+    const actor=getFamilyMemberAuthorization(identityDatabase,{householdId,serverVerifiedUserId:visit.userId})
+    if(actor?.role!=='owner')return false
+    if(touch)visit.expiresAt=Date.now()+settingsIdleMs
+    return true
+  }
+  function requireSettingsVisit(request,response,householdId){
+    if(!ownerDashboard||settingsVisit(request,householdId))return true
+    response.set('Cache-Control','no-store')
+    response.status(403).json({error:'Unlock Owner settings to continue.',code:'SETTINGS_LOCKED'})
+    return false
+  }
+  app.post('/api/households/settings-unlock',express.json({limit:'4kb',strict:true}),async(request,response)=>{
+    response.set('Cache-Control','no-store')
+    if(!ownerDashboard)return response.status(404).end()
+    const home=trustedHousehold(request,response)
+    if(!home)return
+    const userId=request.familyAccount.user_id,sessionId=request.familyAccount.id
+    const owner=()=>getFamilyMemberAuthorization(identityDatabase,{householdId:home.householdId,serverVerifiedUserId:userId})?.role==='owner'
+    if(!owner())return response.status(403).json({error:'Household Owner required.'})
+    if(typeof request.body?.password!=='string'||request.body.password.length>200)return response.status(400).json({error:'Enter your Owner password.'})
+    let checked
+    try{checked=await ownerPasswordStepUp.verify(identityDatabase,{serverVerifiedUserId:userId,password:request.body.password})}
+    catch{return response.status(503).json({error:'Owner verification unavailable.'})}
+    if(checked.status==='limited'){response.set('Retry-After',String(checked.retryAfter));return response.status(429).json({error:'Too many password attempts. Try later.'})}
+    if(checked.status==='busy')return response.status(503).json({error:'Owner verification is busy.'})
+    if(checked.status!=='verified'||!owner()||!identityDatabase.prepare('SELECT 1 FROM family_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL AND expires_at>?').get(sessionId,userId,Date.now()))return response.status(403).json({error:'Owner password verification failed.'})
+    for(const [key,visit] of settingsVisits)if(visit.expiresAt<=Date.now()||visit.sessionId===sessionId)settingsVisits.delete(key)
+    if(settingsVisits.size>=512)return response.status(503).json({error:'Settings access temporarily unavailable.'})
+    const token=randomBytes(32).toString('hex')
+    settingsVisits.set(token,{sessionId,userId,householdId:home.householdId,expiresAt:Date.now()+settingsIdleMs})
+    return response.json({token,idleMinutes:30})
+  })
+  app.post('/api/households/settings-lock',(request,response)=>{
+    response.set('Cache-Control','no-store')
+    if(!ownerDashboard)return response.status(404).end()
+    const home=trustedHousehold(request,response)
+    if(!home)return
+    if(settingsVisit(request,home.householdId,false))settingsVisits.delete(request.get('x-family-settings-visit'))
+    return response.json({ok:true})
+  })
+
   function ownerOnlyMembershipAction(request, response, action) {
     const selected = trustedHousehold(request, response)
     if (!selected) return
+    if (!requireSettingsVisit(request,response,selected.householdId)) return
     try {
       return action(selected.householdId)
     } catch (error) {
@@ -1076,6 +1129,8 @@ export async function startPrivateHouseholdGateway({
     if (!memberUserId) {
       return response.status(400).json({ error: 'Invalid family member.' })
     }
+    if(!requireSettingsVisit(request,response,household.householdId))return
+    if(!ownerDashboard){
     let reverified
     try {
       reverified = await ownerPasswordStepUp.verify(identityDatabase, {
@@ -1096,6 +1151,7 @@ export async function startPrivateHouseholdGateway({
     }
     if (reverified.status !== 'verified') {
       return response.status(403).json({ error: 'Owner password verification failed.' })
+    }
     }
     // Membership and Owner role are checked AGAIN in the transactional
     // setter after awaiting scrypt; stale/revoked sessions cannot mutate.

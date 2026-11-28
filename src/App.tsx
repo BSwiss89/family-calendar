@@ -1797,7 +1797,7 @@ async function prepareCaptureImage(
 
 export type PersonalMemberAccess = {memberType:'adult'|'child';allowedActions:string[];linkedPersonId:number|null;displayName:string}
 
-function App({personalMember}: {personalMember?:PersonalMemberAccess} = {}) {
+function App({personalMember,protectOwnerSettings=false}: {personalMember?:PersonalMemberAccess;protectOwnerSettings?:boolean} = {}) {
   const can = (action:string) => !personalMember || personalMember.allowedActions.includes(action)
   const canAdd = can('events.create') || can('lists.edit') || can('recipes.edit')
 
@@ -1816,12 +1816,54 @@ const [page, setPageState] =
   >('home')
 function setPage(next:typeof page){
   if(personalMember&&((next==='calendar'&&!can('calendar.view'))||(next==='meals'&&!can('recipes.view'))||(next==='lists'&&!can('lists.view'))||(next==='people'&&!can('settings.manage'))||next==='invitations'))return
+  if(protectOwnerSettings && next!==page && !mobileSettingsOpen) lockOwnerSettings()
   setPageState(next)
 }
 
 const [isEditingHome, setIsEditingHome] =
   useState(false)
 const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
+const [settingsToken,setSettingsToken]=useState('')
+const settingsTokenRef=useRef('')
+const settingsAttempt=useRef(0)
+const [settingsPassword,setSettingsPassword]=useState('')
+const [settingsError,setSettingsError]=useState('')
+const [settingsBusy,setSettingsBusy]=useState(false)
+const lockOwnerSettings=useCallback(()=>{
+  settingsAttempt.current++
+  const token=settingsTokenRef.current
+  settingsTokenRef.current=''
+  setSettingsToken('');setSettingsPassword('');setSettingsError('');setSettingsBusy(false)
+  if(token)void fetch('/api/households/settings-lock',{method:'POST',credentials:'same-origin',cache:'no-store',keepalive:true,headers:{'x-family-settings-visit':token}}).catch(()=>{})
+},[])
+async function unlockOwnerSettings(event:FormEvent<HTMLFormElement>){
+  event.preventDefault()
+  if(settingsBusy||!settingsPassword)return
+  const attempt=++settingsAttempt.current
+  setSettingsBusy(true);setSettingsError('')
+  try{
+    const result=await fetch('/api/households/settings-unlock',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:settingsPassword})})
+    const data=await result.json()
+    if(!result.ok||typeof data.token!=='string'||! /^[a-f0-9]{64}$/.test(data.token))throw new Error(data.error||'Could not unlock settings.')
+    if(attempt!==settingsAttempt.current){
+      void fetch('/api/households/settings-lock',{method:'POST',credentials:'same-origin',keepalive:true,headers:{'x-family-settings-visit':data.token}}).catch(()=>{})
+      return
+    }
+    settingsTokenRef.current=data.token;setSettingsToken(data.token)
+  }catch(error){if(attempt===settingsAttempt.current)setSettingsError(error instanceof Error?error.message:'Could not unlock settings.')}
+  finally{if(attempt===settingsAttempt.current){setSettingsBusy(false);setSettingsPassword('')}}
+}
+useEffect(()=>{
+  if(!protectOwnerSettings)return
+  function onPageHide(){
+    lockOwnerSettings()
+    setMobileSettingsOpen(false)
+    setPageState('home')
+  }
+  window.addEventListener('pagehide',onPageHide)
+  return()=>window.removeEventListener('pagehide',onPageHide)
+},[protectOwnerSettings,lockOwnerSettings])
+
 const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
 const [profileSwitchRequest, setProfileSwitchRequest] = useState(0)
 const [profilePeopleRevision, setProfilePeopleRevision] = useState(0)
@@ -2119,11 +2161,11 @@ const mobileNavActiveId: MobileNavId =
             ? 'lists'
             : 'today'
 
-const mobileNavActiveIndex =
+const mobileNavActiveIndex = Math.max(0,
   mobileNavItems.findIndex(
     (item) =>
       item.id === mobileNavActiveId
-  )
+  ))
 
 const mobileNavPreviousIndex =
   (
@@ -3480,6 +3522,9 @@ const [lists, setLists] = useState<CalendarList[]>([])
 const [shoppingStores, setShoppingStores] = useState<ShoppingStore[]>([])
 const [storeFilter, setStoreFilter] = useState('all')
 const [shoppingStoreSettingsOpen, setShoppingStoreSettingsOpen] = useState(false)
+useEffect(()=>{
+  if(protectOwnerSettings&&!mobileSettingsOpen&&page!=='householdMembers'&&page!=='people'&&!shoppingStoreSettingsOpen&&!isEditingHome)lockOwnerSettings()
+},[protectOwnerSettings,mobileSettingsOpen,page,shoppingStoreSettingsOpen,isEditingHome,lockOwnerSettings])
 const [newShoppingStoreName, setNewShoppingStoreName] = useState('')
 const [storeSortBusy, setStoreSortBusy] = useState(false)
 const [listItemAddOpen, setListItemAddOpen] = useState(false)
@@ -5582,6 +5627,12 @@ useEffect(() => {
   if(can('calendar.view')){loadEvents();loadPeople()}
   if(can('lists.view')){loadLists();void loadShoppingStores()}
   if(can('recipes.view')){loadMealPlans();loadMealPlanItems();loadRecipes()}
+  // A linked profile can be added from another device while this member's
+  // calendar remains open. Refresh the household People slider on return.
+  const refreshPeople=()=>{if(document.visibilityState==='visible'&&can('calendar.view'))void loadPeople()}
+  window.addEventListener('focus',refreshPeople)
+  document.addEventListener('visibilitychange',refreshPeople)
+  return()=>{window.removeEventListener('focus',refreshPeople);document.removeEventListener('visibilitychange',refreshPeople)}
 }, [])
 
 
@@ -16140,7 +16191,7 @@ createPortal(
 {mobileSettingsOpen && createPortal(
   <div
     className="mobile-settings-overlay"
-    onClick={() => setMobileSettingsOpen(false)}
+    onClick={() => {setMobileSettingsOpen(false);if(protectOwnerSettings&&page!=='householdMembers')lockOwnerSettings()}}
   >
     <section
       className="mobile-settings-panel"
@@ -16155,11 +16206,17 @@ createPortal(
           className="mobile-settings-close"
           type="button"
           aria-label="Close settings"
-          onClick={() => setMobileSettingsOpen(false)}
+          onClick={() => {setMobileSettingsOpen(false);if(protectOwnerSettings&&page!=='householdMembers')lockOwnerSettings()}}
         >
           ×
         </button>
       </div>
+      {protectOwnerSettings&&!settingsToken ? <form onSubmit={unlockOwnerSettings} className="family-member-access-password">
+        <p>Enter your Owner password to unlock settings for this visit.</p>
+        <label>Owner password <input type="password" autoComplete="current-password" value={settingsPassword} onChange={event=>setSettingsPassword(event.target.value)} maxLength={200} required /></label>
+        <button type="submit" className="mobile-settings-option" disabled={settingsBusy||!settingsPassword}>{settingsBusy?'Unlocking…':'Unlock settings'}</button>
+        {settingsError&&<p role="alert">{settingsError}</p>}
+      </form> : <>
       <p>Manage your family calendar preferences.</p>
       {familyAuthEnabled && !personalMember && (
         <button
@@ -16252,12 +16309,14 @@ createPortal(
         Customize Home
         <span aria-hidden="true">›</span>
       </button>
+      </>}
     </section>
   </div>,
   document.body
 )}
 
-      {page === 'householdMembers' && <HouseholdMembersSettings />}
+      {page === 'householdMembers' && <HouseholdMembersSettings settingsToken={settingsToken||undefined} onPeopleChanged={()=>{void loadPeople()}} />}
+      {page === 'householdMembers' && protectOwnerSettings && <div className="household-settings-heading"><button type="button" onClick={()=>{setPageState('home');setMobileSettingsOpen(true)}}>← Back to Settings</button> <button type="button" onClick={()=>{lockOwnerSettings();setPageState('home');setMobileSettingsOpen(false)}}>Close Settings</button></div>}
       {page === 'invitations' && (
         <div className="mobile-invitation-back">
           <button type="button" onClick={() => setPage('home')}>
