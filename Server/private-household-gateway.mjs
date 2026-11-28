@@ -45,7 +45,7 @@ import { createIndependentHouseholdInvitationTables, issueIndependentHouseholdIn
 } from './independent-household-invitations.mjs'
 import { listHouseholdMembers } from './household-member-directory.mjs'
 import { createFamilyMemberAccessTables, getFamilyMemberAuthorization, getVerifiedFamilyMemberAuthorization,
-  setFamilyMemberType, setFamilyMemberPersonLink, setFamilyMemberPermission, FAMILY_ACTIONS,
+  setFamilyMemberType, setFamilyMemberPersonLink, setFamilyMemberPermission, FAMILY_ACTIONS, canFamilyMemberAct,
 } from './family-member-access.mjs'
 import { createOwnerPasswordStepUp } from './family-owner-step-up.mjs'
 import { createFamilyPasswordRecoveryTables } from './family-password-recovery.mjs'
@@ -1634,6 +1634,23 @@ export async function startPrivateHouseholdGateway({
     // installFamilyAuth has already validated the central session and CSRF.
     const household = trustedHousehold(request, response)
     if (!household) return
+    // Media is not covered by the API permission classifier. Non-Owners may
+    // retrieve only an image referenced by an allowed household view, not an
+    // arbitrary old upload, capture photo or another household's filename.
+    if(ownerDashboard&&request.path.startsWith('/uploads/')){
+      const actor=getFamilyMemberAuthorization(identityDatabase,{householdId:household.householdId,serverVerifiedUserId:request.familyAccount.user_id})
+      if(actor?.role!=='owner'){
+        const filename=request.path.slice('/uploads/'.length)
+        const storage=resolveHouseholdStorage({serverDirectory,storageRoot,householdId:household.householdId})
+        const db=new DatabaseSync(storage.databasePath,{readOnly:true})
+        let permitted=false
+        try{
+          permitted=(canFamilyMemberAct(actor,'calendar.view')&&Boolean(db.prepare('SELECT 1 FROM people WHERE image=? LIMIT 1').get(filename)))||
+            (canFamilyMemberAct(actor,'recipes.view')&&Boolean(db.prepare('SELECT 1 FROM recipes WHERE image=? LIMIT 1').get(filename)))
+        }finally{db.close()}
+        if(!permitted)return response.status(404).end()
+      }
+    }
     const policy = inspectPrivateGatewayMutation(
       request.method, request.originalUrl,
     )

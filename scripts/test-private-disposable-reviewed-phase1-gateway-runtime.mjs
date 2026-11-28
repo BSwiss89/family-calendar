@@ -690,7 +690,7 @@ test('original Owner dashboard is served on the existing supervised gateway with
    assert.equal((await get('/api/admin/household-overview',cookie)).response.status,404)
    assert.equal((await post('/api/ai/intent',{text:'test'},cookie)).response.status,404)
    assert.equal((await get('/api/test-notification-pilot',cookie)).response.status,404)
-   assert.equal((await get('/api/households/members',cookie)).response.status,404)
+   assert.equal((await get('/api/households/members',cookie)).response.status,200)
    assert.equal((await get('/api/internal/household-binding',cookie)).response.status,404)
    assert.equal((await get('/family-push-sw.js',cookie)).response.status,404)
   }
@@ -715,5 +715,62 @@ test('original Owner dashboard is served on the existing supervised gateway with
   assert.equal((await get('/api/people',operator)).response.status,404)
   assert.equal((await get('/api/people')).response.status,401)
   assert.equal((await get('/phase1',a)).response.status,200)
+ }finally{await runtime.shutdown()}
+})
+
+test('restored household dashboard enrolls personal Adult and Child accounts with server-enforced grants',{timeout:120000},async t=>{
+ const runtime=await launchDisposableReviewedPhase1Gateway({...fixture(t,{invited:true}),ownerDashboard:true})
+ const get=(route,cookie)=>request(runtime.base,route,{cookie})
+ const post=(route,body,cookie)=>request(runtime.base,route,{method:'POST',body,cookie})
+ async function login(username,pw=password){
+  const result=await post('/api/auth/login',{username,password:pw})
+  assert.equal(result.response.status,200)
+  return result.response.headers.get('set-cookie').split(';')[0]
+ }
+ try{
+  const owner=await login('phase1invitedowner'),other=await login('phase1primaryowner'),operator=await login('phase1systemoperator')
+  const form=new FormData();form.set('name','Linked child');form.set('color','#123456')
+  const created=await fetch(runtime.base+'/api/people',{method:'POST',headers:{Cookie:owner,Origin:'https://'+new URL(runtime.base).host},body:form})
+  assert.equal(created.status,201);const person=await created.json()
+  async function invite(username){
+   const link=await post('/api/households/member-invitations',{},owner)
+   assert.equal(link.response.status,201)
+   const result=await post('/api/households/join',{token:link.content.token,username,displayName:username,password})
+   assert.equal(result.response.status,201)
+   const cookie=await login(username)
+   const directory=await get('/api/households/member-access',owner)
+   assert.equal(directory.response.status,200)
+   const member=directory.content.members.find(m=>m.username===username)
+   assert.ok(member);assert.equal(member.memberType,null)
+   assert.equal((await get('/api/households/my-member-access',cookie)).response.status,403)
+   assert.equal((await get('/api/events',cookie)).response.status,403)
+   return {cookie,id:member.userId}
+  }
+  const child=await invite('disposablechild'),adult=await invite('disposableadult')
+  const change=(member,kind,body,cookie=owner)=>post('/api/households/members/'+member.id+'/'+kind,{ownerPassword:password,...body},cookie)
+  assert.equal((await change(child,'type',{memberType:'child'},other)).response.status,403)
+  assert.equal((await change(child,'type',{memberType:'child'},child.cookie)).response.status,404)
+  assert.equal((await change(child,'type',{memberType:'child'})).response.status,200)
+  assert.equal((await change(adult,'type',{memberType:'adult'})).response.status,200)
+  assert.equal((await change(child,'person',{personId:person.id})).response.status,200)
+  const access=await get('/api/households/my-member-access',child.cookie)
+  assert.equal(access.content.memberType,'child');assert.equal(access.content.linkedPersonId,person.id)
+  assert.equal((await get('/',child.cookie)).response.status,200)
+  assert.equal((await get('/api/events',child.cookie)).response.status,200)
+  assert.equal((await get('/api/lists',child.cookie)).response.status,403)
+  assert.equal((await get('/api/recipes',child.cookie)).response.status,403)
+  assert.equal((await get('/api/households/member-access',child.cookie)).response.status,404)
+  assert.equal((await get('/api/admin/household-overview',child.cookie)).response.status,404)
+  assert.equal((await get('/api/households/member-access',operator)).response.status,404)
+  const event={title:'Adult household event',date:'2027-02-05'}
+  assert.equal((await post('/api/events',event,child.cookie)).response.status,403)
+  assert.equal((await post('/api/events',event,adult.cookie)).response.status,201)
+  assert.doesNotMatch(JSON.stringify((await get('/api/events',other)).content),/Adult household event/)
+  assert.equal((await change(child,'permission',{action:'events.create',enabled:true})).response.status,200)
+  assert.equal((await post('/api/events',{...event,title:'Granted child event'},child.cookie)).response.status,201)
+  assert.equal((await change(child,'permission',{action:'events.create',enabled:false})).response.status,200)
+  assert.equal((await post('/api/events',event,child.cookie)).response.status,403)
+  assert.equal((await post('/api/households/members/'+child.id+'/remove',{},owner)).response.status,200)
+  assert.notEqual((await get('/api/events',child.cookie)).response.status,200)
  }finally{await runtime.shutdown()}
 })

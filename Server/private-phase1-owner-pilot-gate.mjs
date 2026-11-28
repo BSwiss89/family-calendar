@@ -55,13 +55,22 @@ function canonicalRoute(method, originalUrl) {
  */
 export function classifyPrivatePhase1PilotRoute(method, originalUrl, role, {ownerDashboard=false}={}) {
   const pathname = canonicalRoute(method, originalUrl)
-  if (!pathname || !['owner', 'operator'].includes(role)) return 'denied'
+  if (!pathname || !['owner', 'operator', 'member'].includes(role)) return 'denied'
+  if(role==='member'){
+    if(!ownerDashboard)return 'denied'
+    if((method==='GET'||method==='HEAD')&&['/api/households','/api/households/my-member-access'].includes(pathname))return 'allowed'
+    if(pathname.startsWith('/api/households/')||pathname.startsWith('/api/admin/')||pathname==='/phase1'||pathname==='/my-household'||pathname.startsWith('/system-admin')||pathname.startsWith('/auth/'))return 'denied'
+    // Reuse the reviewed dashboard surface only. The downstream member
+    // permission middleware checks the current grants for EVERY data action.
+    return classifyPrivatePhase1PilotRoute(method,originalUrl,'owner',{ownerDashboard})
+  }
   // Browser shell/static JS is public presentation only. The route must
   // still pass authenticated central sessions and backend tenant selection.
   if (method === 'GET' || method === 'HEAD') {
     if (role === 'operator' && OPERATOR_GET.has(pathname)) return 'allowed'
     if (role === 'owner' && OWNER_GET.has(pathname)) return 'allowed'
     if(role==='owner'&&ownerDashboard){
+      if(['/api/households/members','/api/households/member-invitations','/api/households/member-access','/api/households/my-member-access'].includes(pathname))return 'allowed'
       if(DASHBOARD_GET.has(pathname)||/^\/api\/daily-notes\/[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(pathname))return 'allowed'
       if(/^\/uploads\/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$/i.test(pathname)&&pathname.startsWith('/uploads/'))return 'allowed'
       if(pathname==='/'||DASHBOARD_ASSETS.has(pathname)||/^\/assets\/[A-Za-z0-9._-]+\.(?:js|css|png|jpg|jpeg|webp|svg|woff2?)$/.test(pathname))return 'presentation-only'
@@ -86,6 +95,7 @@ export function classifyPrivatePhase1PilotRoute(method, originalUrl, role, {owne
   }
   if (role !== 'owner') return 'denied'
   if(ownerDashboard){
+    if(method==='POST'&&(pathname==='/api/households/member-invitations'||/^\/api\/households\/member-invitations\/[1-9][0-9]*\/revoke$/.test(pathname)||/^\/api\/households\/members\/[1-9][0-9]*\/(type|person|permission|remove)$/.test(pathname)))return 'allowed'
     if(method==='POST'&&(DASHBOARD_POST.has(pathname)||/^\/api\/lists\/[1-9][0-9]*\/organize$/.test(pathname)||/^\/api\/emoji-markers\/[1-9][0-9]*\/(exceptions|change-occurrence|truncate)$/.test(pathname)))return 'allowed'
     if(method==='PUT'&&(/^\/api\/(?:people|recipes|shopping-stores|emoji-markers)\/[1-9][0-9]*$/.test(pathname)||pathname==='/api/people/reorder'||pathname==='/api/family-daily-note'||/^\/api\/daily-notes\/[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(pathname)||/^\/api\/lists\/[1-9][0-9]*\/(?:reorder|icon|store-sorting)$/.test(pathname)||/^\/api\/meal-plans\/[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(pathname)||/^\/api\/meal-plan-items\/[0-9]{4}-[0-9]{2}-[0-9]{2}\/[a-z]+$/.test(pathname)))return 'allowed'
     if(method==='DELETE'&&(/^\/api\/(?:people|recipes|emoji-markers)\/[1-9][0-9]*$/.test(pathname)||/^\/api\/lists\/[1-9][0-9]*\/completed$/.test(pathname)||/^\/api\/meal-plans\/[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(pathname)||/^\/api\/meal-plan-items\/[0-9]{4}-[0-9]{2}-[0-9]{2}\/[a-z]+$/.test(pathname)))return 'allowed'
@@ -148,6 +158,8 @@ export function installPrivatePhase1OwnerPilotGate(app, {
       ].join(' ')).all(userId)
       if (memberships.length === 1 && memberships[0].role === 'owner') {
         role = 'owner'
+      } else if(ownerDashboard&&memberships.length===1&&memberships[0].role==='member'){
+        role='member'
       }
     }
     const decision = classifyPrivatePhase1PilotRoute(

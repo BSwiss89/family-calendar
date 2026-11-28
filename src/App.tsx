@@ -1795,11 +1795,16 @@ async function prepareCaptureImage(
   }
 }
 
-function App() {
+export type PersonalMemberAccess = {memberType:'adult'|'child';allowedActions:string[];linkedPersonId:number|null;displayName:string}
+
+function App({personalMember}: {personalMember?:PersonalMemberAccess} = {}) {
+  const can = (action:string) => !personalMember || personalMember.allowedActions.includes(action)
+  const canAdd = can('events.create') || can('lists.edit') || can('recipes.edit')
+
   const today = new Date()
   const emojiCalendar = useCalendarEmojiMarkers()
 
-const [page, setPage] =
+const [page, setPageState] =
   useState<
     'home' |
     'calendar' |
@@ -1809,6 +1814,10 @@ const [page, setPage] =
     'householdMembers' |
     'invitations'
   >('home')
+function setPage(next:typeof page){
+  if(personalMember&&((next==='calendar'&&!can('calendar.view'))||(next==='meals'&&!can('recipes.view'))||(next==='lists'&&!can('lists.view'))||(next==='people'&&!can('settings.manage'))||next==='invitations'))return
+  setPageState(next)
+}
 
 const [isEditingHome, setIsEditingHome] =
   useState(false)
@@ -1816,8 +1825,8 @@ const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
 const [familyAuthEnabled, setFamilyAuthEnabled] = useState(false)
 const [profileSwitchRequest, setProfileSwitchRequest] = useState(0)
 const [profilePeopleRevision, setProfilePeopleRevision] = useState(0)
-const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | null>(null)
-const [activeHouseholdPersonId, setActiveHouseholdPersonId] = useState<number | null>(null)
+const [activeHouseholdProfile, setActiveHouseholdProfile] = useState<string | null>(personalMember?.displayName ?? null)
+const [activeHouseholdPersonId, setActiveHouseholdPersonId] = useState<number | null>(personalMember?.linkedPersonId ?? null)
 const [activeHouseholdAccountKey, setActiveHouseholdAccountKey] = useState<string | null>(null)
 const invitationInbox = useInvitationInbox()
 const assignmentInbox = useAssignmentInbox(activeHouseholdPersonId)
@@ -2068,7 +2077,7 @@ const mobileNavItems = [
     id: 'lists',
     label: 'Lists',
   },
-] as const
+].filter(item=>item.id==='meals'?can('recipes.view'):item.id==='lists'?can('lists.view'):item.id==='calendar'||item.id==='schedule'?can('calendar.view'):true) as ReadonlyArray<{id:'today'|'calendar'|'schedule'|'meals'|'lists';label:string}>
 
 type MobileNavId =
   (typeof mobileNavItems)[number]['id']
@@ -5570,29 +5579,25 @@ useEffect(() => {
 }, [])
 
 useEffect(() => {
-  loadEvents()
-  loadPeople()
-  loadLists()
-  void loadShoppingStores()
-  loadMealPlans()
-  loadMealPlanItems()
-  loadRecipes()
+  if(can('calendar.view')){loadEvents();loadPeople()}
+  if(can('lists.view')){loadLists();void loadShoppingStores()}
+  if(can('recipes.view')){loadMealPlans();loadMealPlanItems();loadRecipes()}
 }, [])
 
 
   async function loadEvents() {
     const response = await fetch('/api/events')
+    if(!response.ok){setEvents([]);return}
     const data = await response.json()
-
-    setEvents(data)
+    if(Array.isArray(data))setEvents(data)
   }
 
   async function loadPeople() {
   const response = await fetch('/api/people')
+  if(!response.ok){setPeople([]);return []}
   const data: Person[] = await response.json()
-
+  if(!Array.isArray(data)){setPeople([]);return []}
   setPeople(data)
-
   return data
 }
 
@@ -6462,9 +6467,9 @@ async function analyzeQuickAddPhoto() {
 
 async function loadMealPlans() {
   const response = await fetch('/api/meal-plans')
+  if(!response.ok){setMealPlans([]);return}
   const data = await response.json()
-
-  setMealPlans(data)
+  if(Array.isArray(data))setMealPlans(data)
 }
 
 async function loadMealPlanItems() {
@@ -14123,6 +14128,7 @@ return (
         ? 'active-sidebar-nav'
         : ''
     }`}
+    disabled={!can('calendar.view')}
     onClick={() => setPage('calendar')}
   >
     <span className="sidebar-nav-icon">▣</span>
@@ -14136,6 +14142,7 @@ return (
       ? 'active-sidebar-nav'
       : ''
   }`}
+  disabled={!can('recipes.view')}
   onClick={() => setPage('meals')}
 >
   <span className="sidebar-nav-icon">🍽</span>
@@ -14149,6 +14156,7 @@ return (
         ? 'active-sidebar-nav'
         : ''
     }`}
+    disabled={!can('lists.view')}
     onClick={() => setPage('lists')}
   >
     <span className="sidebar-nav-icon">✓</span>
@@ -14158,6 +14166,7 @@ return (
   <button
     type="button"
     className={`sidebar-nav-button ${page === 'invitations' ? 'active-sidebar-nav' : ''}`}
+    disabled={Boolean(personalMember)}
     onClick={() => setPage('invitations')}
   >
     <span className="sidebar-nav-icon" aria-hidden="true">✉</span>
@@ -14205,6 +14214,7 @@ return (
         ? 'active-sidebar-nav'
         : ''
     }`}
+    disabled={!can('settings.manage')}
     onClick={() => setPage('people')}
   >
     <span className="sidebar-nav-icon">👥</span>
@@ -14338,12 +14348,13 @@ return (
   <button
   type="button"
   className={`mobile-capture-button ${arneyPlusListening ? 'arney-plus-listening' : ''}`}
+  disabled={!canAdd}
   aria-label="Tap for Quick Add; hold to talk to Arney"
   aria-pressed={arneyPlusListening}
   style={{ touchAction: 'none' }}
-  onPointerDown={startCalendarAddHold}
-  onPointerUp={cancelCalendarAddHold}
-  onPointerCancel={abortCalendarAddHold}
+  onPointerDown={personalMember ? undefined : startCalendarAddHold}
+  onPointerUp={personalMember ? undefined : cancelCalendarAddHold}
+  onPointerCancel={personalMember ? undefined : abortCalendarAddHold}
   onContextMenu={(event) => {
     event.preventDefault()
   }}
@@ -16150,7 +16161,7 @@ createPortal(
         </button>
       </div>
       <p>Manage your family calendar preferences.</p>
-      {familyAuthEnabled && (
+      {familyAuthEnabled && !personalMember && (
         <button
           className="mobile-settings-option"
           type="button"
@@ -16217,7 +16228,7 @@ createPortal(
         setMobileSettingsOpen(false)
         setShoppingStoreSettingsOpen(true)
         void loadShoppingStores()
-      }}>Shopping Stores <span aria-hidden="true">›</span></button>
+      }} disabled={!can('lists.view')}>Shopping Stores <span aria-hidden="true">›</span></button>
       <button
         className="mobile-settings-option"
         type="button"
@@ -24308,11 +24319,11 @@ onDrop={(event) => {
           assignmentInbox.notifications.length > 0
         }
       />
-      <HouseholdProfilePicker
+      {!personalMember && <HouseholdProfilePicker
         switchRequest={profileSwitchRequest}
         peopleRevision={profilePeopleRevision} onProfileCreated={handleProfileCreated}
         onProfileChange={handleHouseholdProfileChange}
-      />
+      />}
     </main>
   )
 }
