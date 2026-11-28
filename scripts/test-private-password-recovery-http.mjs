@@ -96,8 +96,8 @@ test('anonymous forgotten username request returns generic response, not an acco
   assert.equal(crossOrigin.status, 403)
 })
 
-test('only an allowlisted, password-verified operator can issue a one-time reset link', async t => {
-  const { db, fetchData, login, memberId } = await site(t)
+test('only an authenticated allowlisted operator with identity confirmation can issue a one-time reset link', async t => {
+  const { db, fetchData, login, memberId, base, adminId } = await site(t)
   const operatorCookie = await login('recoveryoperator')
   const memberCookie = await login('recoverymember')
   const outsiderCookie = await login('recoveryoutsider')
@@ -113,23 +113,29 @@ test('only an allowlisted, password-verified operator can issue a one-time reset
   const issuePath = '/api/admin/recovery/requests/' + requestId + '/issue'
   assert.equal((await fetchData(issuePath, {
     cookie: memberCookie,
-    body: { ownerPassword: oldPassword, verifiedOutOfBand: true },
+    body: { verifiedOutOfBand: true },
   })).response.status, 403)
   assert.equal((await fetchData(issuePath, {
     cookie: operatorCookie,
-    body: { ownerPassword: oldPassword, verifiedOutOfBand: false },
+    body: { verifiedOutOfBand: false },
   })).response.status, 400)
   assert.equal((await fetchData(issuePath, {
     cookie: operatorCookie,
-    body: { ownerPassword: 'bad-password', verifiedOutOfBand: true },
-  })).response.status, 403)
+    body: { ownerPassword: 'unexpected-password', verifiedOutOfBand: true },
+  })).response.status, 400)
   assert.equal((await fetchData(issuePath, {
     cookie: operatorCookie,
-    body: { ownerPassword: oldPassword, verifiedOutOfBand: true, userId: memberId },
+    body: { verifiedOutOfBand: true, userId: memberId },
   })).response.status, 400)
+  assert.equal((await fetchData(issuePath, { body: { verifiedOutOfBand: true } })).response.status, 401)
+  assert.equal((await fetch(base + issuePath, {
+    method: 'POST',
+    headers: { Cookie: operatorCookie, Origin: 'https://malicious.example', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ verifiedOutOfBand: true }),
+  })).status, 403)
   const issued = await fetchData(issuePath, {
     cookie: operatorCookie,
-    body: { ownerPassword: oldPassword, verifiedOutOfBand: true },
+    body: { verifiedOutOfBand: true },
   })
   assert.equal(issued.response.status, 200)
   assert.match(issued.data.resetUrl, /\/reset-password#token=[a-f0-9]{64}$/)
@@ -137,7 +143,7 @@ test('only an allowlisted, password-verified operator can issue a one-time reset
   assert.ok(!JSON.stringify(db.prepare('SELECT * FROM family_recovery_requests').get()).includes(token))
   assert.equal((await fetchData(issuePath, {
     cookie: operatorCookie,
-    body: { ownerPassword: oldPassword, verifiedOutOfBand: true },
+    body: { verifiedOutOfBand: true },
   })).response.status, 409)
   const successful = await fetchData('/api/auth/recovery/complete', {
     body: { token, newPassword },
@@ -152,6 +158,8 @@ test('only an allowlisted, password-verified operator can issue a one-time reset
   const saved = db.prepare('SELECT password_hash FROM family_users WHERE id = ?').get(memberId)
   assert.equal(await verifyFamilyPassword(newPassword, saved.password_hash), true)
   await login('recoverymember', newPassword)
+  db.prepare('UPDATE family_users SET disabled=1 WHERE id=?').run(adminId)
+  assert.equal((await fetchData(issuePath,{cookie:operatorCookie,body:{verifiedOutOfBand:true}})).response.status,401)
 })
 
 test('unverified optional contact is self-owned, password-protected and never used for recovery', async t => {
@@ -178,17 +186,21 @@ test('unverified optional contact is self-owned, password-protected and never us
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM family_recovery_requests').get().n, 0)
 })
 
-test('operator can deny requests without claiming identity verified; password is still mandatory', async t => {
+test('operator can deny requests with explicit confirmation and without another password', async t => {
   const { fetchData, login } = await site(t)
   const admin = await login('recoveryoperator')
   await fetchData('/api/auth/recovery/request', { body: { username: 'recoveryoutsider' } })
   const id = (await fetchData('/api/admin/recovery/requests', { cookie: admin })).data.requests[0].id
   const deny = '/api/admin/recovery/requests/' + id + '/deny'
   assert.equal((await fetchData(deny, {
-    cookie: admin, body: { ownerPassword: oldPassword, verifiedOutOfBand: true },
+    cookie: admin, body: { verifiedOutOfBand: true },
   })).response.status, 400)
+  assert.equal((await fetchData(deny, { cookie: admin, body: { confirmAction: false } })).response.status, 400)
+  assert.equal((await fetchData(deny, { body: { confirmAction: true } })).response.status, 401)
+  const outsider = await login('recoveryoutsider')
+  assert.equal((await fetchData(deny, { cookie: outsider, body: { confirmAction: true } })).response.status, 403)
   assert.equal((await fetchData(deny, {
-    cookie: admin, body: { ownerPassword: oldPassword },
+    cookie: admin, body: { confirmAction: true },
   })).response.status, 200)
   assert.equal((await fetchData('/api/admin/recovery/requests', { cookie: admin })).data.requests.length, 0)
 })

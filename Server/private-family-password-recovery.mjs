@@ -8,6 +8,7 @@ import express from 'express'
 import {
   requestFamilyPasswordRecovery, listPendingFamilyPasswordRecovery,
   issueFamilyPasswordResetLink, denyFamilyPasswordRecovery,
+  listFamilyPasswordRecoveryHistory, reissueFamilyPasswordResetLink, revokeFamilyPasswordResetLink,
   completeFamilyPasswordReset, readOptionalRecoveryContact,
   saveUnverifiedRecoveryContact,
 } from './family-password-recovery.mjs'
@@ -114,7 +115,7 @@ export function installPrivateRecoveryPublic(app, {
     if (!exactObject(req.body, ['token', 'newPassword']) ||
         typeof req.body.token !== 'string' || req.body.token.length !== 64 ||
         typeof req.body.newPassword !== 'string' ||
-        req.body.newPassword.length < 14 || req.body.newPassword.length > 200) {
+        req.body.newPassword.length < 8 || req.body.newPassword.length > 200) {
       return res.status(400).json({ error: TOKEN_ERROR })
     }
     try {
@@ -157,38 +158,24 @@ export function installPrivateRecoveryOperator(app, {
 
   app.get('/api/admin/recovery/requests', safeHeaders, (req, res) => {
     const requests = pending(req, res)
-    if (requests !== null) res.json({ requests })
+    if (requests === null) return
+    try {
+      res.json({ requests, history: listFamilyPasswordRecoveryHistory(identityDatabase, {
+        serverVerifiedAdministratorUserId:req.familyAccount?.user_id, trustedAdministratorUserIds, now:now(),
+      }) })
+    } catch { res.status(503).json({error:'System recovery administration unavailable.'}) }
   })
 
-  async function verifiedAdminAction(req, res, handler, needsIdentityCheck = true) {
+  function verifiedAdminAction(req, res, handler, needsIdentityCheck = true) {
+    if (!sameSecureOrigin(req)) {
+      return res.status(403).json({ error: 'Secure same-origin recovery action required.' })
+    }
     const requests = pending(req, res)
     if (requests === null) return
-    const expected = needsIdentityCheck
-      ? ['ownerPassword', 'verifiedOutOfBand'] : ['ownerPassword']
+    const expected = needsIdentityCheck ? ['verifiedOutOfBand'] : ['confirmAction']
     if (!exactObject(req.body, expected) ||
-        typeof req.body.ownerPassword !== 'string' ||
-        (needsIdentityCheck && req.body.verifiedOutOfBand !== true)) {
-      return res.status(400).json({ error: 'Confirm your administrator password and required identity checks.' })
-    }
-    let status
-    try {
-      status = await passwordStepUp.verify(identityDatabase, {
-        serverVerifiedUserId: req.familyAccount.user_id,
-        password: req.body.ownerPassword,
-      })
-    } catch {
-      return res.status(503).json({ error: 'Administrator verification unavailable.' })
-    }
-    if (status.status === 'limited') {
-      res.set('Retry-After', String(status.retryAfter))
-      return res.status(429).json({ error: 'Too many password attempts. Try later.' })
-    }
-    if (status.status === 'busy') {
-      res.set('Retry-After', '1')
-      return res.status(503).json({ error: 'Administrator verification busy.' })
-    }
-    if (status.status !== 'verified') {
-      return res.status(403).json({ error: 'Administrator password verification failed.' })
+        (needsIdentityCheck ? req.body.verifiedOutOfBand !== true : req.body.confirmAction !== true)) {
+      return res.status(400).json({ error: 'Confirm the required identity check or recovery action.' })
     }
     return handler()
   }
@@ -233,6 +220,33 @@ export function installPrivateRecoveryOperator(app, {
         }
       }, false)
     })
+  app.post('/api/admin/recovery/requests/:id/reissue', safeHeaders, parseBody(), async (req,res)=>{
+    const requestId=idFromParam(req.params.id)
+    if(!requestId)return res.status(400).json({error:'Invalid recovery request.'})
+    return verifiedAdminAction(req,res,()=>{
+      try {
+        const issued=reissueFamilyPasswordResetLink(identityDatabase,{
+          serverVerifiedAdministratorUserId:req.familyAccount.user_id,trustedAdministratorUserIds,
+          recoveryRequestId:requestId,verifiedOutOfBand:true,now:now(),
+        })
+        return res.json({expiresAt:issued.expiresAt,resetUrl:'https://'+req.get('host')+'/reset-password#token='+issued.token})
+      } catch(error) {
+        return res.status(String(error?.message).includes('no longer eligible')?409:503).json({error:'Recovery link could not be reissued. Refresh the dashboard.'})
+      }
+    })
+  })
+  app.post('/api/admin/recovery/requests/:id/revoke',safeHeaders,parseBody(),async(req,res)=>{
+    const requestId=idFromParam(req.params.id)
+    if(!requestId)return res.status(400).json({error:'Invalid recovery request.'})
+    return verifiedAdminAction(req,res,()=>{
+      try{
+        const revoked=revokeFamilyPasswordResetLink(identityDatabase,{
+          serverVerifiedAdministratorUserId:req.familyAccount.user_id,trustedAdministratorUserIds,recoveryRequestId:requestId,now:now(),
+        })
+        return res.status(revoked?200:409).json(revoked?{ok:true}:{error:'Recovery link no longer issued.'})
+      }catch{return res.status(503).json({error:'Recovery revocation unavailable.'})}
+    },false)
+  })
   app.use('/api/admin/recovery/requests', safeParserError)
 
   // Optional email address is NOT a recovery factor until an independent

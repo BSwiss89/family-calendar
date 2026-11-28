@@ -27,20 +27,25 @@ function AsSid([string]$identity){
 $user=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $system='S-1-5-18'
 $admins='S-1-5-32-544'
-$allowed=@(@($user,$system,$admins) | Select-Object -Unique)
+$owner=$user
 $root=[IO.Path]::GetFullPath($Directory).TrimEnd('\')
 $parent=PhysicalFolder ([IO.Path]::GetDirectoryName($root))
 if($Scope -ceq 'windows-inactive-stage'){
- if(-not (SamePath $parent (PhysicalFolder (Join-Path $env:USERPROFILE 'Projects'))) -or
-    -not (SamePath $root (Join-Path $parent 'family-calendar-phase1-test-data'))){Refuse}
+ if([IO.Path]::GetFileName($parent) -ine 'Projects' -or -not (SamePath $root (Join-Path $parent 'family-calendar-phase1-test-data'))){Refuse}
+ $profile=PhysicalFolder ([IO.Path]::GetDirectoryName($parent))
+ $profiles=@(Get-CimInstance Win32_UserProfile | Where-Object {-not $_.Special -and [string]::Equals([string]$_.LocalPath,$profile,[StringComparison]::OrdinalIgnoreCase)})
+ if($profiles.Count -ne 1){Refuse}
+ $owner=AsSid ([string]$profiles[0].SID)
+ if(@($owner,$system) -cnotcontains $user -or ($Mode -ceq 'Create' -and $user -cne $owner)){Refuse}
  $task=@(Get-ScheduledTask -TaskName 'Family Calendar Secure TEST' -TaskPath '\' -ErrorAction Stop)
  if($task.Count -ne 1){Refuse}
  $principal=AsSid ([string]$task[0].Principal.UserId)
- if(@($user,$system) -cnotcontains $principal){Refuse}
+ if($principal -cne $system){Refuse}
 }else{
  $temp=PhysicalFolder ([IO.Path]::GetTempPath())
  if(-not (SamePath $parent $temp) -or [IO.Path]::GetFileName($root) -cnotmatch '^fc-phase1-acl-fixture-[a-f0-9]{32}$'){Refuse}
 }
+$allowed=@(@($owner,$system,$admins) | Select-Object -Unique)
 function InspectAcl([string]$p,[bool]$isRoot,[bool]$isFolder){
  $acl=if($isFolder){[IO.Directory]::GetAccessControl($p)}else{[IO.File]::GetAccessControl($p)}
  if($allowed -cnotcontains $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value){Refuse}

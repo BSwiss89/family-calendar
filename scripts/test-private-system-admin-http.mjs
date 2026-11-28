@@ -82,7 +82,7 @@ test('operator overview shows registration metadata, not private family content 
   assert.deepEqual(overview.households[0], {
     householdId: familyId, displayName: 'Invited Sample Family',
     state: 'pending-activation',
-    memberCount: 3, ownerCount: 1, ownerDisplayName: 'Household Owner',
+    memberCount: 3, ownerCount: 1, ownerDisplayName: 'Household Owner', ownerUsername: 'householdowner',
   })
   assert.match(overview.availabilityNote, /not live health/)
   assert.ok(!JSON.stringify(overview).includes('password_hash'))
@@ -172,7 +172,8 @@ test('dedicated system UI and JS/CSS deny ordinary household Owners and unauthen
   const overview = await (await get('/api/admin/household-overview', operator)).json()
   assert.equal(overview.households[0].memberCount, 3)
   assert.equal(overview.households[0].ownerDisplayName, 'Household Owner')
-  assert.ok(!JSON.stringify(overview).includes('Sensitive household event'))
+  assert.equal(overview.households[0].ownerUsername, 'householdowner')
+  for (const hidden of ['householdadult','householdchild','randomowner','password_hash','token_hash','Sensitive household event']) assert.ok(!JSON.stringify(overview).includes(hidden))
   assert.equal((await get('/api/admin/unreviewed-secret', operator)).status, 404)
 })
 

@@ -3,6 +3,7 @@
 // household Owner role, selected People avatar or request-supplied ID.
 // No household event, recipe, shopping, People photo or device secrets leak.
 import path from 'node:path'
+import express from 'express'
 import { inspectPrivateHouseholdActivationReadiness } from './private-household-activation-readiness.mjs'
 import {
   listIndependentHouseholdAdministration,
@@ -18,7 +19,10 @@ function ownerMetadata(db, householdId) {
     "AND u.disabled = 0 AND u.account_kind = 'person' THEN u.id END) AS ownerCount,",
     "MAX(CASE WHEN m.role = 'owner' AND m.disabled = 0",
     "AND u.disabled = 0 AND u.account_kind = 'person'",
-    'THEN u.display_name END) AS ownerDisplayName',
+    'THEN u.display_name END) AS ownerDisplayName,',
+    "MAX(CASE WHEN m.role = 'owner' AND m.disabled = 0",
+    "AND u.disabled = 0 AND u.account_kind = 'person'",
+    'THEN u.username END) AS ownerUsername',
     'FROM household_registry h',
     'LEFT JOIN household_memberships m ON m.household_id = h.id',
     'LEFT JOIN family_users u ON u.id = m.user_id',
@@ -28,6 +32,7 @@ function ownerMetadata(db, householdId) {
     memberCount: Number(result?.memberCount || 0),
     ownerCount: Number(result?.ownerCount || 0),
     ownerDisplayName: result?.ownerDisplayName || null,
+    ownerUsername: Number(result?.ownerCount)===1 ? result.ownerUsername : null,
   }
 }
 
@@ -72,6 +77,7 @@ export function installPrivateSystemAdministrator(app, {
   routedHouseholdIds = [],
   getRoutedHouseholdIds = () => routedHouseholdIds,
   storageRoot = null,
+  activateReviewedHousehold = null,
 }) {
   if (!app || !identityDatabase ||
       typeof serverDirectory !== 'string' || !path.isAbsolute(serverDirectory) ||
@@ -82,6 +88,7 @@ export function installPrivateSystemAdministrator(app, {
     throw new Error('System dashboard needs private authenticated gateway configuration.')
   }
 
+  if (activateReviewedHousehold !== null && (typeof activateReviewedHousehold !== 'function' || storageRoot===null)) throw Error('Reviewed supervisor activation configuration required.')
   // Register after installFamilyAuth's required session middleware.
   // Even assets are withheld from all ordinary Owners, Adults and Children.
   function operatorOnly(request, response, next) {
@@ -126,8 +133,8 @@ export function installPrivateSystemAdministrator(app, {
     }
   })
 
-  // Optional read-only preflight: no browser endpoint may approve a backend,
-  // start a Node process, modify another tenant or clear a crash hold.
+  // Read-only preflight; the separate trusted supervisor callback is the
+  // only route to an actual backend activation.
   if (storageRoot !== null) {
     app.get('/api/admin/activation-readiness', operatorOnly, (request, response) => {
       try {
@@ -148,7 +155,7 @@ export function installPrivateSystemAdministrator(app, {
         }))
         response.json({
           kind: 'read-only-private-activation-preflight-v1',
-          canActivateFromBrowser: false,
+          canActivateFromBrowser: activateReviewedHousehold !== null,
           checks,
           note: 'Storage review is not backend attestation, a completed backup, activation permission or online status.',
         })
@@ -156,6 +163,36 @@ export function installPrivateSystemAdministrator(app, {
         console.error('Private activation readiness unavailable:', error?.message)
         response.status(503).json({ error: 'Private activation inspection unavailable.' })
       }
+    })
+  }
+  if(activateReviewedHousehold!==null){
+    let inProgress=false
+    app.post('/api/admin/households/:id/activate',operatorOnly,express.json({limit:'4kb',strict:true}),async(request,response)=>{
+      let origin
+      try{origin=new URL(request.get('origin')||'')}catch{}
+      if(!origin||origin.protocol!=='https:'||origin.host.toLowerCase()!==(request.get('host')||'').toLowerCase()||origin.pathname!=='/'||origin.search||origin.hash||origin.username||origin.password)
+        return response.status(403).json({error:'Secure activation request required.'})
+      const id=request.params.id,body=request.body,userId=request.familyAccount.user_id
+      if(!/^family-[a-f0-9]{24}$/.test(id)||!body||Array.isArray(body)||Object.keys(body).length!==1||body.confirmActivation!==true)
+        return response.status(400).json({error:'Confirm household activation.'})
+      if(inProgress)return response.status(409).json({error:'Another activation is in progress.'})
+      const eligible=()=>listPrivateOperatorHouseholdOverview(identityDatabase,{
+        serverVerifiedAdministratorUserId:userId,trustedAdministratorUserIds,routedHouseholdIds:getRoutedHouseholdIds(),
+      }).households.some(home=>home.householdId===id&&home.state==='pending-activation'&&home.ownerCount===1)
+      inProgress=true
+      try{
+        if(!eligible())return response.status(409).json({error:'Household is not eligible for activation.'})
+        const result=await activateReviewedHousehold(id)
+        if(result?.activation!=='active'||result.householdId!==id||!getRoutedHouseholdIds().includes(id))throw Error('Activation not confirmed.')
+        return response.json({householdId:id,activation:'active'})
+      }catch(error){
+        console.error('Private reviewed household activation failed:',error?.message)
+        return response.status(503).json({error:'Activation could not be confirmed. Refresh to check status; supervisor review may be required.'})
+      }finally{inProgress=false}
+    })
+    app.use('/api/admin/households', (error,_request,response,next)=>{
+      if(!error)return next()
+      response.set('Cache-Control','no-store').status(error.type==='entity.too.large'?413:400).json({error:'Invalid activation request.'})
     })
   }
 }

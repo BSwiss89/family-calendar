@@ -57,6 +57,9 @@ export function createPrivateGatewayDevicePersonResolver({
       householdId, serverVerifiedUserId,
     })
     if (!canFamilyMemberAct(actor, 'calendar.view')) return null
+    // For enrolled personal members, the owner's verified People link is
+    // the only personal display identity. Owners retain the existing picker.
+    if(actor.role!=='owner'&&actor.personId!==personId)return null
     const storage = resolveHouseholdStorage({
       serverDirectory, storageRoot, householdId,
     })

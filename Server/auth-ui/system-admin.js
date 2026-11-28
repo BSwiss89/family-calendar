@@ -4,6 +4,7 @@
 const $ = id => document.getElementById(id)
 let busy = false
 let activationChecks = new Map()
+let canActivate = false
 const linkPrefix = location.origin + '/start-family#token='
 const resetPrefix = location.origin + '/reset-password#token='
 
@@ -28,7 +29,7 @@ function validOneTimeUrl(value, prefix) {
   return typeof value === 'string' && value.startsWith(prefix) &&
     /^[a-f0-9]{64}$/.test(value.slice(prefix.length))
 }
-async function requestJson(url, body = undefined) {
+async function requestJson(url, body = undefined, timeout = 15000) {
   const response = await fetch(url, {
     method: body === undefined ? 'GET' : 'POST',
     credentials: 'same-origin',
@@ -36,6 +37,7 @@ async function requestJson(url, body = undefined) {
     headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
     redirect: 'manual',
+    signal: AbortSignal.timeout(timeout),
   })
   const result = await response.json().catch(() => null)
   if (!response.ok) {
@@ -82,7 +84,7 @@ function householdEntry(household) {
   const row = element('div', { className: 'entry' })
   const info = element('div', { className: 'entry-info' })
   appendText(info, 'strong', household.displayName)
-  appendText(info, 'span', 'Owner: ' + (household.ownerDisplayName || 'Unassigned'))
+  appendText(info, 'span', 'Owner: ' + (household.ownerDisplayName || 'Unassigned') + (household.ownerUsername ? ' (@'+household.ownerUsername+')' : ''))
   appendText(info, 'span', household.memberCount + ' enrolled account' +
     (household.memberCount === 1 ? '' : 's'))
   const check = activationChecks.get(household.householdId)
@@ -103,7 +105,16 @@ function householdEntry(household) {
       : household.state === 'approved-unrouted'
         ? 'Approved, not routed' : 'Activation pending',
   })
-  row.append(info, state)
+  const controls=element('div',{className:'entry-actions'})
+  controls.append(state)
+  if(canActivate&&household.state==='pending-activation'&&check?.stage==='storage-reviewed-awaiting-backend-proof'){
+    const approve=element('button',{text:'Approve & activate'})
+    approve.type='button'
+    approve.dataset.adminAction='activate'
+    approve.addEventListener('click',()=>void approveHousehold(household))
+    controls.append(approve)
+  }
+  row.append(info, controls)
   return row
 }
 function inviteEntry(invitation) {
@@ -147,6 +158,29 @@ function recoveryEntry(item) {
   row.append(info, controls)
   return row
 }
+function historyEntry(item) {
+  const row=element('div',{className:'entry'})
+  const info=element('div',{className:'entry-info'})
+  const labels={issued:'Link issued',revoked:'Revoked',redeemed:'Completed',denied:'Denied',expired:'Expired',pending:'Unavailable pending request'}
+  appendText(info,'strong',item.displayName+' (@'+item.username+')')
+  appendText(info,'span',labels[item.status]+' · Request #'+item.id)
+  appendText(info,'span','Requested '+formattedTime(item.createdAt))
+  if(item.decidedAt!==null)appendText(info,'span','Last decision '+formattedTime(item.decidedAt))
+  if(item.linkExpiresAt!==null)appendText(info,'span','Link expiration '+formattedTime(item.linkExpiresAt))
+  if(item.redeemedAt!==null)appendText(info,'span','Completed '+formattedTime(item.redeemedAt))
+  row.append(info)
+  const controls=element('div',{className:'entry-actions'})
+  for(const [action,label,allowed] of [['reissue','Reissue reset link',item.canReissue],['revoke','Revoke link',item.canRevoke]]){
+    if(!allowed)continue
+    const button=element('button',{text:label,className:action==='revoke'?'danger':undefined})
+    button.type='button'
+    button.dataset.adminAction=action
+    button.addEventListener('click',()=>void reviewRecovery(item.id,action))
+    controls.append(button)
+  }
+  if(controls.childElementCount)row.append(controls)
+  return row
+}
 function renderChildren(targetId, items, renderer, emptyText) {
   const target = $(targetId)
   target.replaceChildren(...(items.length
@@ -159,6 +193,7 @@ function validateOverview(value) {
       typeof h.displayName === 'string' &&
       typeof h.memberCount === 'number' &&
       (h.ownerDisplayName === null || typeof h.ownerDisplayName === 'string') &&
+      (h.ownerUsername === null || typeof h.ownerUsername === 'string') &&
       ['pending-activation', 'configured-route', 'approved-unrouted'].includes(h.state)) &&
     value.invitations.every(x =>
       x && Number.isSafeInteger(x.id) && typeof x.expiresAt === 'number')
@@ -167,73 +202,96 @@ function validateRecovery(value) {
   return value && Array.isArray(value.requests) &&
     value.requests.every(r => r && Number.isSafeInteger(r.id) &&
       typeof r.displayName === 'string' && typeof r.username === 'string' &&
-      typeof r.createdAt === 'number' && typeof r.expiresAt === 'number')
+      typeof r.createdAt === 'number' && typeof r.expiresAt === 'number') &&
+    Array.isArray(value.history) && value.history.every(r=>r && Number.isSafeInteger(r.id) &&
+      typeof r.displayName==='string' && typeof r.username==='string' &&
+      Number.isFinite(r.createdAt) && Number.isFinite(r.expiresAt) &&
+      [r.decidedAt,r.linkExpiresAt,r.redeemedAt].every(x=>x===null||Number.isFinite(x)) &&
+      ['issued','revoked','redeemed','denied','expired','pending'].includes(r.status) &&
+      typeof r.canReissue==='boolean' && typeof r.canRevoke==='boolean')
 }
 
 async function refresh() {
   const [overview, pending, readiness] = await Promise.all([
     requestJson('/api/admin/household-overview'),
-    requestJson('/api/admin/recovery/requests'),
+    requestJson('/api/admin/recovery/requests').catch(() => null),
     // The optional preflight does not control registration/activation. If it
     // is unavailable, the existing household overview remains usable.
     requestJson('/api/admin/activation-readiness').catch(() => null),
   ])
-  if (!validateOverview(overview) || !validateRecovery(pending)) {
+  if (!validateOverview(overview)) {
     throw new Error('Unexpected response from administrator service.')
   }
   activationChecks = readiness?.kind === 'read-only-private-activation-preflight-v1' &&
-    readiness.canActivateFromBrowser === false && Array.isArray(readiness.checks)
+    typeof readiness.canActivateFromBrowser === 'boolean' && Array.isArray(readiness.checks)
       ? new Map(readiness.checks.filter(check => check &&
           typeof check.householdId === 'string' &&
           ['blocked-review', 'storage-reviewed-awaiting-backend-proof',
             'approved-awaiting-route', 'approved-route-configured'].includes(check.stage))
         .map(check => [check.householdId, check]))
       : new Map()
+  canActivate=readiness?.kind==='read-only-private-activation-preflight-v1'&&readiness.canActivateFromBrowser===true
+  $('activation-verification').hidden=!(canActivate&&overview.households.some(h=>h.state==='pending-activation'&&activationChecks.get(h.householdId)?.stage==='storage-reviewed-awaiting-backend-proof'))
   $('household-count').textContent = overview.households.length
   $('configured-count').textContent = overview.households
     .filter(x => x.state === 'configured-route').length
   $('pending-invites-count').textContent = overview.invitations.length
-  $('pending-recovery-count').textContent = pending.requests.length
+  $('pending-recovery-count').textContent = validateRecovery(pending) ? pending.requests.length : 'Unavailable'
   renderChildren('household-list', overview.households, householdEntry,
     'No independent households have been registered through your invitations.')
   renderChildren('invitation-list', overview.invitations, inviteEntry,
     'No pending household invitations.')
-  renderChildren('recovery-list', pending.requests, recoveryEntry,
-    'No pending password recovery requests.')
+  if (validateRecovery(pending)) {
+    renderChildren('recovery-list', pending.requests, recoveryEntry, 'No pending password recovery requests.')
+    renderChildren('issued-recovery-list',pending.history.filter(x=>x.canReissue||x.canRevoke),historyEntry,'No issued reset links.')
+    renderChildren('recovery-history-list',pending.history.filter(x=>!x.canReissue&&!x.canRevoke),historyEntry,'No completed or expired recovery requests.')
+  } else {
+    renderChildren('recovery-list', [], recoveryEntry, 'Password recovery could not be loaded. Refresh to retry.')
+    renderChildren('issued-recovery-list',[],historyEntry,'Unavailable. Refresh to retry.')
+    renderChildren('recovery-history-list',[],historyEntry,'Unavailable. Refresh to retry.')
+  }
 }
 
+async function approveHousehold(household){
+  if(busy)return
+  if(!confirm('Approve and activate '+household.displayName+'? This starts its own isolated TEST calendar backend.'))return
+  await operation(async()=>{
+    setStatus('Verifying and activating '+household.displayName+'…')
+    const result=await requestJson('/api/admin/households/'+encodeURIComponent(household.householdId)+'/activate',{confirmActivation:true},120000)
+    if(result?.activation!=='active'||result.householdId!==household.householdId)throw Error('Activation was not confirmed. Refresh to check status.')
+    await refresh()
+    setStatus(household.displayName+' activated. Its Owner can now open their calendar.')
+  })
+}
 async function reviewRecovery(id, action) {
   if (busy) return
-  const password = $('operator-password').value
-  if (!password) {
-    setStatus('Enter your own system-administrator password.', true)
-    return
-  }
-  if (action === 'issue' && !$('verified-identity').checked) {
+  const issuing=action==='issue'||action==='reissue'
+  if (issuing && !$('verified-identity').checked) {
     setStatus('Verify this account holder through a trusted contact method first.', true)
     return
   }
   if (action === 'deny' && !confirm('Deny this recovery request?')) return
+  if (action === 'reissue' && !confirm('Issue a new reset link? All previous reset links for this account will stop working.')) return
+  if (action === 'revoke' && !confirm('Revoke this reset link? It will stop working.')) return
   await operation(async () => {
     $('recovery-link-box').hidden = true
     $('recovery-link').value = ''
-    const body = action === 'issue'
-      ? { ownerPassword: password, verifiedOutOfBand: true }
-      : { ownerPassword: password }
+    const body = issuing
+      ? { verifiedOutOfBand: true }
+      : { confirmAction: true }
     const response = await requestJson(
       '/api/admin/recovery/requests/' + encodeURIComponent(String(id)) +
       '/' + action, body)
-    $('operator-password').value = ''
     $('verified-identity').checked = false
-    if (action === 'issue') {
+    if (issuing) {
       if (!validOneTimeUrl(response?.resetUrl, resetPrefix)) {
         throw new Error('The recovery service returned an invalid reset link.')
       }
       $('recovery-link').value = response.resetUrl
       $('recovery-link-box').hidden = false
-      setStatus('One-time reset link issued. Copy it before leaving the page.')
+      setStatus('One-time reset link '+(action==='reissue'?'reissued':'issued')+'. Copy it before leaving the page.')
     } else {
-      setStatus('Recovery request denied.')
+      setStatus(action==='revoke'?'Recovery link revoked.':'Recovery request denied.')
     }
     await refresh()
   })

@@ -21,19 +21,23 @@ form.addEventListener('submit', async (event) => {
     message.textContent = 'Passwords do not match.'
     return
   }
-  if (newPassword.length < 14 || newPassword.length > 200) {
-    message.textContent = 'Use a password between 14 and 200 characters.'
+  if (newPassword.length < 8 || newPassword.length > 200) {
+    message.textContent = 'Use a password between 8 and 200 characters.'
     return
   }
   button.disabled = true
+  button.textContent = 'Resetting password…'
+  message.textContent = 'Submitting your new password.'
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 20000)
   try {
     const response = await fetch('/api/auth/recovery/complete', {
-      method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.signal, redirect: 'error',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, newPassword }),
     })
     const result = await response.json().catch(() => ({}))
-    if (!response.ok) {
+    if (!response.ok || result.ok !== true) {
       message.textContent = result.error || 'This link could not be used.'
       button.disabled = false
       return
@@ -41,9 +45,12 @@ form.addEventListener('submit', async (event) => {
     form.reset()
     form.hidden = true
     success.hidden = false
-    message.textContent = 'Password updated. All previous trusted-device sessions were signed out.'
-  } catch {
-    message.textContent = 'The reset service could not be reached.'
+    success.prepend(document.createTextNode('Password updated. All previous trusted-device sessions were signed out. '))
+  } catch (error) {
+    message.textContent = error?.name === 'AbortError' ? 'The reset service did not respond. Try signing in once with your new password before retrying; the request may have completed.' : 'The reset service could not be reached. Keep this page open and try again.'
     button.disabled = false
+  } finally {
+    clearTimeout(timeout)
+    button.textContent = 'Reset password'
   }
 })

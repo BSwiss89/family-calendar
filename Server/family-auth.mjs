@@ -39,8 +39,8 @@ function normalizedUsername(value) {
 }
 
 export function hashFamilyPassword(password) {
-  if (typeof password !== 'string' || password.length < 14 || password.length > 200) {
-    throw new Error('Family account passwords must be 14–200 characters long.')
+  if (typeof password !== 'string' || password.length < 8 || password.length > 200) {
+    throw new Error('Family account passwords must be 8–200 characters long.')
   }
   const salt = randomBytes(16)
   const digest = scryptSync(password, salt, 64, SCRYPT_OPTIONS)

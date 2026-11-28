@@ -19,6 +19,7 @@ import { startPrivateHouseholdGateway, verifyPrivateBackendBindings } from './pr
 import { resolvePrivatePhase1GatewayLoopbackPort } from './private-household-gateway.mjs'
 import { captureClosedPhase1SupervisorBackup } from './private-phase1-supervised-backup.mjs'
 import { assertLocalMaintenanceClear } from './private-phase1-local-maintenance-control.mjs'
+import { capturePendingActivationBackup } from './private-phase1-pending-activation-backup.mjs'
 
 const PROTECTED = new Set([443, 8443, 3001, 11434, 13001, 13002, 13003, 13004])
 function refuse(message) {
@@ -189,21 +190,24 @@ export async function launchDisposableReviewedPhase1Gateway({
   fixtureRoot, storageRoot, stateDirectory, identityDatabasePath,
   serverDirectory, primaryHouseholdId, operatorUserIds,
   trustedPhase1GatewayPort = null,
+  ownerDashboard = false,
 }) {
   const paths = verifiedPaths({
     fixtureRoot, storageRoot, stateDirectory, identityDatabasePath,
     serverDirectory,
   })
-  return launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,trustedPhase1GatewayPort,disposable:true})
+  return launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,trustedPhase1GatewayPort,disposable:true,ownerDashboard})
 }
 
 // No public path override or fixture bypass: the persistent wrapper below
 // derives every path from the fixed TEST installation and checks the host.
-async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,trustedPhase1GatewayPort,disposable}) {
+async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,trustedPhase1GatewayPort,disposable,ownerDashboard=false}) {
   if (!Array.isArray(operatorUserIds) || operatorUserIds.length !== 1 ||
       !Number.isSafeInteger(operatorUserIds[0]) || operatorUserIds[0] < 1) {
     refuse('one independently trusted operator ID must be supplied.')
   }
+  if(typeof ownerDashboard!=='boolean')refuse('Invalid Owner dashboard configuration.')
+  if(ownerDashboard&&!fs.existsSync(path.join(paths.checkout,'dist','index.html')))refuse('Original calendar dashboard must be built before startup.')
   const gatewayPort = resolvePrivatePhase1GatewayLoopbackPort({
     port: trustedPhase1GatewayPort, phase1OwnerPilotOnly: true,
   })
@@ -216,7 +220,7 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
       const operator=central.prepare("SELECT id FROM family_users WHERE id=? AND disabled=0 AND account_kind='person'").get(operatorUserIds[0])
       if(!operator||central.prepare('SELECT COUNT(*) AS n FROM household_memberships WHERE user_id=?').get(operator.id).n!==0)refuse('active separate operator required.')
     }
-    const plan = planReviewedPrivateTestStartup({
+    let plan = planReviewedPrivateTestStartup({
       identityDatabase: central,
       serverDirectory: paths.server, storageRoot: paths.storage,
       stateDirectory: paths.state, primaryHouseholdId,
@@ -245,22 +249,65 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
       new Map(Object.entries(backendPorts)),
       new Map(Object.entries(backendTokens)),
     )
+    let shutdownRequested = false
+    let activationInProgress = false
+    // The HTTP layer can request only an issuer-scoped, password-reverified
+    // household ID. Ports, upstream secrets, paths and child ownership are
+    // chosen exclusively here, inside the already reviewed TEST supervisor.
+    async function activateHousehold(householdId) {
+      if(shutdownRequested||activationInProgress||guard.snapshot().phase!=='running'||
+         backends.some(({child})=>child.exitCode!==null||child.signalCode!==null||!child.connected))
+        throw Error('Private household supervisor is busy or held.')
+      assertLocalMaintenanceClear(paths.root)
+      if(plan.householdIds.includes(householdId))throw Error('Household already active.')
+      activationInProgress=true
+      let reserved=false
+      try{
+        // Synchronous preflight/backup: the pending household is unrouted,
+        // has no writer lock, no journals and exactly its empty seed schema.
+        capturePendingActivationBackup({paths,identityDatabase:central,householdId})
+        guard.beginEnrollment(householdId)
+        reserved=true
+        const port=await choosePort(used)
+        const token=randomBytes(32).toString('hex')
+        const backend=await spawnBackend(paths,householdId,port,token,guard).catch(error=>{
+          if(error.capturedBackend)backends.push(error.capturedBackend)
+          throw error
+        })
+        backends.push(backend)
+        if(guard.snapshot().phase!=='enrolling')throw Error('Supervisor held during activation.')
+        await gateway.enrollHouseholdBackend({householdId,port,upstreamToken:token})
+        backendPorts[householdId]=port
+        backendTokens[householdId]=token
+        const householdIds=Object.freeze([primaryHouseholdId,...[...plan.householdIds.slice(1),householdId].sort()])
+        plan=Object.freeze({...plan,householdIds,householdCount:householdIds.length})
+        guard.finishEnrollment(householdId)
+        return {activation:'active',householdId}
+      }catch(error){
+        // Once a child was reserved, never silently restart or discard its
+        // possibly initialized storage. Keep a durable hold for local review.
+        if(reserved)guard.failEnrollment(householdId)
+        throw error
+      }finally{activationInProgress=false}
+    }
     gateway = await startPrivateHouseholdGateway({
       identityDatabase: central, serverDirectory: paths.server,
       storageRoot: paths.storage, backendPorts, backendTokens,
       independentHouseholdAdministratorUserIds: operatorUserIds,
       enforceFamilyMemberPermissions: true,
       phase1OwnerPilotOnly: true,
+      ownerDashboard,
       trustedPhase1GatewayPort,
+      activateReviewedHousehold: activateHousehold,
       supervisorAdmissionCheck: () => guard.snapshot().phase === 'running' &&
         backends.every(({child}) => child.exitCode === null && child.signalCode === null && child.connected === true),
     })
     guard.markHealthy()
-    let shutdownRequested = false
     return Object.freeze({
       base: gateway.base,
       snapshot: () => Object.freeze({
         ...guard.snapshot(),
+        activationInProgress,
         householdIds: Object.freeze([...plan.householdIds]),
         gatewayLocalhostOnly: new URL(gateway.base).hostname === '127.0.0.1',
         gatewayPort: gateway.port,
@@ -301,7 +348,7 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
           ownerInstanceRetained:true, testDeploymentAuthorized:false})
       },
       async shutdownAndCaptureBackup() {
-        if (shutdownRequested) refuse('supervised shutdown already requested.')
+        if (shutdownRequested || activationInProgress) refuse('supervised shutdown already requested or activation in progress.')
         shutdownRequested = true
         guard.beginGracefulShutdown()
         await gateway.closeForOfflineBackup(async () => {
@@ -315,7 +362,7 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
         return Object.freeze({...receipt,allChildrenExited:true,gatewayClosed:true,ownerInstanceReleased:true,testDeploymentAuthorized:false})
       },
       async shutdown() {
-        if (shutdownRequested) refuse('reviewed fixture shutdown already requested.')
+        if (shutdownRequested || activationInProgress) refuse('reviewed fixture shutdown already requested or activation in progress.')
         shutdownRequested = true
         guard.beginGracefulShutdown()
         await gateway.close()
@@ -358,7 +405,10 @@ async function launchReviewedGateway({paths,primaryHouseholdId,operatorUserIds,t
 // deliberately no CLI flag to override either requirement.
 export async function launchReviewedWindowsPhase1TestGateway(){
  if(process.platform!=='win32')refuse('Windows TEST host required.')
- const projects=physicalDirectory(path.join(os.homedir(),'Projects'))
+ // SYSTEM has a different home profile. Use the fixed checkout's physical
+ // sibling layout; the Windows host gate verifies the actual registered user profile.
+ const projects=physicalDirectory(path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..','..'))
+ if(path.basename(projects).toLowerCase()!=='projects')refuse('fixed Projects directory required.')
  const checkout=physicalDirectory(path.join(projects,'family-calendar-phase1-test-code'))
  const server=physicalDirectory(path.join(checkout,'Server'))
  if(server!==physicalDirectory(path.dirname(fileURLToPath(import.meta.url))))refuse('fixed TEST code checkout required.')
@@ -394,5 +444,5 @@ export async function launchReviewedWindowsPhase1TestGateway(){
     fs.existsSync(path.join(root,'ACTIVATION-IN-PROGRESS.json')))refuse('activation review changed during host preflight.')
  assertLocalMaintenanceClear(root)
  return launchReviewedGateway({paths:{root,storage,state,identity,server,checkout},primaryHouseholdId:r.primaryHouseholdId,
-   operatorUserIds:[r.operatorUserId],trustedPhase1GatewayPort:13004,disposable:false})
+   operatorUserIds:[r.operatorUserId],trustedPhase1GatewayPort:13004,disposable:false,ownerDashboard:true})
 }

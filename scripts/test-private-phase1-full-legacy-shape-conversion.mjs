@@ -834,3 +834,37 @@ test('native Windows stage DACL is protected before data copy and refuses a fore
  assert.notEqual(invoke('Verify').status,0)
  assert.equal(fs.readFileSync(file,'utf8'),'fixture')
 })
+
+test('inactive stage activation verifies Owner credential and creates isolated operator without authorizing fixture startup',async t=>{
+ const {activateInactivePhase1TestStage}=await import('./activate-private-phase1-test-stage.mjs')
+ const args=buildVerifiedOfflineFixture(t)
+ const destinationParent=path.dirname(args.recoveryParent),scope='disposable-test-fixture',candidateSha='a'.repeat(40)
+ const root=path.join(destinationParent,'family-calendar-phase1-test-data')
+ prepareInactivePhase1TestMigrationStage(args,{destinationParent,candidateSha,scope})
+ const options={serverDirectory:fileURLToPath(new URL('../Server/',import.meta.url)),destinationParent,scope,expectedCandidateSha:candidateSha,expectedInstalledTestSha:args.expectedInstalledTestSha,expectedLiveSha:'c'.repeat(40),expectedArchiveName:path.basename(args.snapshotRoot),expectedManifestSha256:hash(path.join(args.snapshotRoot,'OFFLINE-LEGACY-REVIEW.json'))}
+ const archiveBefore=hash(path.join(args.snapshotRoot,'calendar.db'))
+ const identity=path.join(root,'data','central','identity.db'),identityBefore=hash(identity)
+ const creds={ownerPassword:'Synthetic Full Shape Example 123!',operatorUsername:'pilotoperator',operatorPassword:'Synthetic Operator Example 456!'}
+ await assert.rejects(()=>activateInactivePhase1TestStage(options,{...creds,ownerPassword:'incorrect password'}))
+ assert.equal(hash(identity),identityBefore)
+ assert.equal(fs.existsSync(path.join(root,'DO-NOT-START.json')),true)
+ const receipt=await activateInactivePhase1TestStage(options,creds)
+ assert.equal(receipt.ownerActivated,true)
+ assert.equal(receipt.testStartupApproved,false)
+ assert.equal(receipt.taskStarted,false)
+ assert.equal(fs.existsSync(path.join(root,'ACTIVE-TEST-REVIEW.json')),false)
+ assert.equal(fs.existsSync(path.join(root,'ACTIVATION-COMPLETED.json')),true)
+ const db=new DatabaseSync(identity,{readOnly:true})
+ try{
+  const users=db.prepare('SELECT id,username,password_hash,disabled FROM family_users ORDER BY id').all()
+  assert.equal(users.length,2)
+  const owner=users.find(x=>x.username==='syntheticowner'),operator=users.find(x=>x.username==='pilotoperator')
+  assert.equal(owner.disabled,0);assert.equal(operator.disabled,0)
+  assert.equal(await verifyFamilyPassword(creds.ownerPassword,owner.password_hash),true)
+  assert.equal(await verifyFamilyPassword(creds.operatorPassword,operator.password_hash),true)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM household_memberships WHERE user_id=?').get(operator.id).n,0)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM family_sessions').get().n,0)
+ }finally{db.close()}
+ assert.equal(hash(path.join(args.snapshotRoot,'calendar.db')),archiveBefore)
+ await assert.rejects(()=>activateInactivePhase1TestStage(options,creds))
+})

@@ -17,6 +17,8 @@ import { installPrivateIndependentHouseholdSignup } from '../Server/private-inde
 import { installFamilyAuth, setFamilyAccount, verifyFamilyPassword } from '../Server/family-auth.mjs'
 import { listGrantedHouseholdsForSessionUser } from '../Server/household-memberships.mjs'
 import { resolveHouseholdStorage } from '../Server/household-storage.mjs'
+import { createFamilyPasswordRecoveryTables, requestFamilyPasswordRecovery, listPendingFamilyPasswordRecovery, issueFamilyPasswordResetLink, completeFamilyPasswordReset } from '../Server/family-password-recovery.mjs'
+import { classifyPrivatePhase1PilotRoute } from '../Server/private-phase1-owner-pilot-gate.mjs'
 
 const serverDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../Server')
 const NOW = Date.UTC(2026, 9, 26, 12)
@@ -113,8 +115,32 @@ test('revoked, expired, disabled administrator and duplicate usernames cannot gr
   assert.throws(() => f.redeem(pending.token, { username: 'ordinaryuser' }), /Username unavailable/)
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM household_registry').get().n, 0)
   assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM independent_household_invitations WHERE redeemed_at IS NOT NULL").get().n, 0)
-  assert.throws(() => f.redeem(pending.token, { password: 'weak' }), /14/)
+  assert.throws(() => f.redeem(pending.token, { password: 'weak' }), /8/)
   assert.throws(() => f.redeem(pending.token, { role: 'hub', householdId: '../../other' , username: 'invalid*' }), /Invalid registration/)
+})
+
+test('eight-character household registration and operator-assisted recovery', async t => {
+  const f = fixture(t)
+  const invite = f.issue()
+  assert.throws(() => f.redeem(invite.token, {password:'Seven77'}), /8/)
+  const registered = f.redeem(invite.token, {password:'Eight888'})
+  assert.equal(await verifyFamilyPassword('Eight888', f.db.prepare('SELECT password_hash FROM family_users WHERE id=?').get(registered.userId).password_hash), true)
+  createFamilyPasswordRecoveryTables(f.db)
+  const authority = {serverVerifiedAdministratorUserId:f.ids.calendaradmin, trustedAdministratorUserIds:f.allowed}
+  for (const username of ['newowner','calendaradmin']) {
+    requestFamilyPasswordRecovery(f.db, {username})
+    const pending = listPendingFamilyPasswordRecovery(f.db, authority).find(r => r.username === username)
+    assert.ok(pending)
+    const {token} = issueFamilyPasswordResetLink(f.db, {...authority,recoveryRequestId:pending.id,verifiedOutOfBand:true})
+    assert.throws(() => completeFamilyPasswordReset(f.db,{token,newPassword:'Seven77'}), /8/)
+    assert.equal(completeFamilyPasswordReset(f.db,{token,newPassword:'Reset888'}).reset,true)
+    assert.equal(await verifyFamilyPassword('Reset888',f.db.prepare('SELECT password_hash FROM family_users WHERE username=?').get(username).password_hash),true)
+  }
+  for (const [method, route] of [['GET','/api/admin/recovery/requests'],['POST','/api/admin/recovery/requests/1/issue'],['POST','/api/admin/recovery/requests/1/deny'],['POST','/api/admin/recovery/requests/1/reissue'],['POST','/api/admin/recovery/requests/1/revoke']]) {
+    assert.equal(classifyPrivatePhase1PilotRoute(method,route,'operator'),'allowed')
+    assert.equal(classifyPrivatePhase1PilotRoute(method,route,'owner'),'denied')
+  }
+  assert.equal(classifyPrivatePhase1PilotRoute('GET','/api/events','operator'),'denied')
 })
 
 test('quota and cross-issuer revocation reject unauthorized administration', t => {

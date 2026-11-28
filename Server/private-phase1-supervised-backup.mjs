@@ -7,6 +7,7 @@ import path from 'node:path'
 import net from 'node:net'
 import {createHash,randomBytes} from 'node:crypto'
 import {DatabaseSync} from 'node:sqlite'
+import {hasVerifiedInvitedOwner,listApprovedPrivateHouseholds} from './private-household-activation-records.mjs'
 import {attestOfflinePrivateRestoreSet,verifyOfflinePrivateRestoreSet} from './private-restore-preflight.mjs'
 
 const refuse=()=>{throw Error('Phase 1 supervised backup refused; manual review required.')}
@@ -52,6 +53,9 @@ function inventory(paths,ids){
  }
  return items.sort((a,b)=>a[0].localeCompare(b[0],'en')).map(([name,source])=>({name,source,sha:hash(source)}))
 }
+export function digestClosedPhase1Source(paths,ids){
+ return createHash('sha256').update(JSON.stringify(inventory(paths,[...ids].sort()).map(({name,sha})=>({name,sha})))).digest('hex')
+}
 async function closed(port){
  need(Number.isSafeInteger(port)&&port>=1024&&port<=65535&&![3001,11434,13001,13002,13003].includes(port))
  await new Promise((resolve,reject)=>{
@@ -63,11 +67,31 @@ async function closed(port){
 function writeNew(p,v){const fd=fs.openSync(p,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(v,null,2)+'\n');fs.fsyncSync(fd)}finally{fs.closeSync(fd)}}
 export async function captureClosedPhase1SupervisorBackup({paths,plan,guard,backends,gatewayPort}){
  need(guard.snapshot().phase==='capturing'&&guard.snapshot().allCapturedChildrenExited&&backends.length===plan.householdCount&&backends.every(x=>x.child.exitCode===0))
- const ids=[...plan.householdIds].sort()
+ // Re-read the closed central registry: invitations can be redeemed after boot.
+ const registryDb=new DatabaseSync(paths.identity,{readOnly:true})
+ let ids
+ try{
+  const rows=registryDb.prepare('SELECT storage_id AS id,disabled FROM household_registry ORDER BY storage_id').all()
+  ids=rows.map(r=>r.id)
+  const approved=listApprovedPrivateHouseholds(registryDb)
+  need(rows.every(r=>r.disabled===0)&&JSON.stringify([plan.primaryHouseholdId,...approved].sort())===JSON.stringify([...plan.householdIds].sort()))
+  need(ids.includes(plan.primaryHouseholdId)&&ids.every(id=>id===plan.primaryHouseholdId||hasVerifiedInvitedOwner(registryDb,id)))
+ }finally{registryDb.close()}
  const ports=[gatewayPort,...backends.map(x=>x.port)]
- need(new Set(ports).size===ports.length)
+ return captureVerifiedClosedPhase1Files({paths,ids,ports,checkExclusive:()=>{
+  need(guard.snapshot().phase==='capturing'&&guard.snapshot().allCapturedChildrenExited)
+ },supervised:true})
+}
+
+// Internal local helper. The caller must establish and repeatedly verify
+// exclusive offline ownership; no browser or service endpoint calls this.
+export async function captureVerifiedClosedPhase1Files({paths,ids,ports,checkExclusive,supervised=false}){
+ need(typeof checkExclusive==='function'&&Array.isArray(ids)&&ids.length>0&&new Set(ids).size===ids.length&&Array.isArray(ports)&&ports.length>0&&new Set(ports).size===ports.length)
+ ids=[...ids].sort()
+ checkExclusive()
  for(const p of ports)await closed(p)
  const before=inventory(paths,ids)
+ const sourceDigest=createHash('sha256').update(JSON.stringify(before.map(({name,sha})=>({name,sha})))).digest('hex')
  const parent=path.join(paths.root,'coordinated-backups')
  try{fs.mkdirSync(parent,{mode:0o700})}catch(e){if(e.code!=='EEXIST')throw e}
  need(path.dirname(folder(parent))===paths.root)
@@ -104,9 +128,9 @@ export async function captureClosedPhase1SupervisorBackup({paths,plan,guard,back
  need(verifyOfflinePrivateRestoreSet({serverDirectory:paths.server,restoreRoot:snapshot},attestation).ok)
  need(JSON.stringify(inventory(paths,ids))===JSON.stringify(before))
  for(const p of ports)await closed(p)
- need(guard.snapshot().phase==='capturing'&&guard.snapshot().allCapturedChildrenExited)
+ checkExclusive()
  writeNew(path.join(bundle,'ATTESTATION.json'),attestation)
- writeNew(path.join(bundle,'BACKUP-REVIEW.json'),{kind:'phase1-supervised-coordinated-backup-v1',households:ids.length,files:attestation.files.length,attestationSha256:attestation.sha256,sessionsRevokedInCopy:sessionsRevoked,sourceSessionsUnchanged:true,sourceFilesUnchanged:true,restoreAuthorized:false,automaticRestartAllowed:false})
+ writeNew(path.join(bundle,'BACKUP-REVIEW.json'),{kind:supervised?'phase1-supervised-coordinated-backup-v1':'phase1-manual-closed-backup-v1',households:ids.length,files:attestation.files.length,attestationSha256:attestation.sha256,sourceDigest,sessionsRevokedInCopy:sessionsRevoked,sourceSessionsUnchanged:true,sourceFilesUnchanged:true,restoreAuthorized:false,automaticRestartAllowed:false})
  fs.unlinkSync(path.join(bundle,'INCOMPLETE.json'))
- return Object.freeze({backupName:name,households:ids.length,files:attestation.files.length,sessionsRevokedInCopy:sessionsRevoked,sourceSessionsUnchanged:true,sourceFilesUnchanged:true,coordinatedBackupVerified:true,supervisorHeldDuringCapture:true,allSystemWritersFenced:false,restoreAuthorized:false,automaticRestartAllowed:false})
+ return Object.freeze({backupName:name,households:ids.length,files:attestation.files.length,sourceDigest,attestationSha256:attestation.sha256,sessionsRevokedInCopy:sessionsRevoked,sourceSessionsUnchanged:true,sourceFilesUnchanged:true,coordinatedBackupVerified:true,supervisorHeldDuringCapture:supervised,allSystemWritersFenced:false,restoreAuthorized:false,automaticRestartAllowed:false})
 }

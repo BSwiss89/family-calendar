@@ -6,7 +6,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { listApprovedPrivateHouseholds } from './private-household-activation-records.mjs'
+import { listApprovedPrivateHouseholds, hasVerifiedInvitedOwner } from './private-household-activation-records.mjs'
 import { resolveHouseholdStorage } from './household-storage.mjs'
 import { inspectPrivateWindowsSupervisorHold } from './private-windows-supervisor-crash-hold.mjs'
 
@@ -143,21 +143,29 @@ export function planReviewedPrivateTestStartup({
   }
   const invited = registered.filter(row => row.householdId !== primary)
     .map(row => row.householdId)
-  if (invited.some(id => !INVITED.test(id) || !approved.includes(id)) ||
+  if (invited.some(id => !INVITED.test(id) || !hasVerifiedInvitedOwner(identityDatabase,id)) ||
       approved.some(id => !invited.includes(id))) {
     refuse('an active friend household lacks explicit trusted activation.')
   }
 
-  const ordered = [primary, ...invited.sort()]
+  const ordered = [primary, ...approved.sort()]
+  const pending = invited.filter(id => !approved.includes(id)).sort()
+  const registeredHouseholdIds = [primary, ...invited.sort()]
   const files = new Set()
-  for (const householdId of ordered) {
+  for (const householdId of registeredHouseholdIds) {
     const storage = validatedStorage(serverDirectory, storageRoot, householdId)
     if (files.has(storage.databasePath.toLowerCase())) {
       refuse('two households resolve to the same SQLite database.')
     }
     files.add(storage.databasePath.toLowerCase())
     const db = new DatabaseSync(storage.databasePath, { readOnly: true })
-    try { assertReadOnlySqliteIntegrity(db) }
+    try {
+      assertReadOnlySqliteIntegrity(db)
+      if (pending.includes(householdId)) {
+        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(x=>x.name)
+        if (JSON.stringify(tables)!==JSON.stringify(['event_people']) || db.prepare('SELECT 1 FROM event_people LIMIT 1').get() || fs.readdirSync(storage.uploadFolder).length!==0) refuse('pending household storage must remain uninitialized and empty.')
+      }
+    }
     finally { db.close() }
   }
   return Object.freeze({
@@ -165,6 +173,8 @@ export function planReviewedPrivateTestStartup({
     primaryHouseholdId: primary,
     householdIds: Object.freeze(ordered),
     householdCount: ordered.length,
+    registeredHouseholdIds: Object.freeze(registeredHouseholdIds),
+    pendingHouseholdIds: Object.freeze(pending),
     planVerifiedReadOnly: true,
     osWideWriterOwnershipVerified: false,
     taskSchedulerInstalled: false,

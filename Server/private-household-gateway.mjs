@@ -45,7 +45,7 @@ import { createIndependentHouseholdInvitationTables, issueIndependentHouseholdIn
 } from './independent-household-invitations.mjs'
 import { listHouseholdMembers } from './household-member-directory.mjs'
 import { createFamilyMemberAccessTables, getFamilyMemberAuthorization, getVerifiedFamilyMemberAuthorization,
-  setFamilyMemberType, setFamilyMemberPersonLink, setFamilyMemberPermission, FAMILY_ACTIONS,
+  setFamilyMemberType, setFamilyMemberPersonLink, setFamilyMemberPermission, FAMILY_ACTIONS, canFamilyMemberAct,
 } from './family-member-access.mjs'
 import { createOwnerPasswordStepUp } from './family-owner-step-up.mjs'
 import { createFamilyPasswordRecoveryTables } from './family-password-recovery.mjs'
@@ -434,6 +434,8 @@ export async function startPrivateHouseholdGateway({
   // Source-only, trusted startup switch for an intentionally NARROW first TEST
   // pilot. It cannot be toggled by login, URL or owner settings.
   phase1OwnerPilotOnly = false,
+  // Restore the original SPA for Owners while retaining the strict pilot gate.
+  ownerDashboard = false,
   // Trusted, opt-in fixed localhost port for future guarded TEST portproxy only.
   // Does not modify routes or allow public listening; default 0 stays ephemeral.
   trustedPhase1GatewayPort = null,
@@ -441,11 +443,14 @@ export async function startPrivateHouseholdGateway({
   allowEmptyGatewayBootstrap = false,
   // Optional trusted supervisor admission; never derived from a request.
   supervisorAdmissionCheck = null,
+  activateReviewedHousehold = null,
 }) {
+  if(typeof ownerDashboard!=='boolean'||(ownerDashboard&&(!phase1OwnerPilotOnly||supervisorAdmissionCheck===null)))throw Error('Original Owner dashboard requires the reviewed supervisor.')
   if (supervisorAdmissionCheck !== null &&
       (!phase1OwnerPilotOnly || typeof supervisorAdmissionCheck !== 'function')) {
     throw new Error('Supervisor admission is restricted to the trusted Phase 1 runtime.')
   }
+  if (activateReviewedHousehold !== null && (!phase1OwnerPilotOnly || supervisorAdmissionCheck === null || typeof activateReviewedHousehold !== 'function')) throw Error('Browser activation requires the reviewed supervisor.')
   function admittedBySupervisor() {
     if (supervisorAdmissionCheck === null) return true
     try { return supervisorAdmissionCheck() === true } catch { return false }
@@ -708,6 +713,7 @@ export async function startPrivateHouseholdGateway({
     installPrivatePhase1OwnerPilotGate(app, {
       identityDatabase,
       trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+      ownerDashboard,
     })
     // Only after the strict phase gate: give configured invited Owners a
     // usable narrow page instead of the full calendar SPA's disabled APIs.
@@ -715,6 +721,7 @@ export async function startPrivateHouseholdGateway({
       identityDatabase,
       trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
       getRoutedHouseholdIds: () => [...portByHousehold.keys()],
+      redirectToPilot: !ownerDashboard,
     })
   }
   // Register the dedicated PIN enrollment/challenge routes BEFORE the Home
@@ -741,6 +748,7 @@ export async function startPrivateHouseholdGateway({
   installPrivateSystemAdministrator(app, {
     identityDatabase, serverDirectory, storageRoot,
     trustedAdministratorUserIds: independentHouseholdAdministratorUserIds,
+    activateReviewedHousehold,
     // Enrollment can add a verified private backend after initial boot.
     // Always derive operator status from the current trusted route map.
     getRoutedHouseholdIds: () => [...portByHousehold.keys()],
@@ -888,9 +896,62 @@ export async function startPrivateHouseholdGateway({
 
   // Private-only owner invitation endpoints. Tenant identity comes strictly
   // from the verified central session, never client-supplied fields.
+  // An unlock is an in-memory capability for one settings visit, bound to
+  // the authenticated session and household. Never persist the password or
+  // accept a token from a URL or browser storage.
+  const settingsVisits = new Map()
+  const settingsIdleMs = 30 * 60 * 1000
+  function settingsVisit(request, householdId, touch=true) {
+    const token=request.get('x-family-settings-visit')
+    const visit=typeof token==='string'&&/^[a-f0-9]{64}$/.test(token)?settingsVisits.get(token):null
+    if(!visit)return false
+    if(visit.expiresAt<=Date.now()){settingsVisits.delete(token);return false}
+    if(visit.sessionId!==request.familyAccount?.id||visit.userId!==request.familyAccount?.user_id||visit.householdId!==householdId)return false
+    const actor=getFamilyMemberAuthorization(identityDatabase,{householdId,serverVerifiedUserId:visit.userId})
+    if(actor?.role!=='owner')return false
+    if(touch)visit.expiresAt=Date.now()+settingsIdleMs
+    return true
+  }
+  function requireSettingsVisit(request,response,householdId){
+    if(!ownerDashboard||settingsVisit(request,householdId))return true
+    response.set('Cache-Control','no-store')
+    response.status(403).json({error:'Unlock Owner settings to continue.',code:'SETTINGS_LOCKED'})
+    return false
+  }
+  app.post('/api/households/settings-unlock',express.json({limit:'4kb',strict:true}),async(request,response)=>{
+    response.set('Cache-Control','no-store')
+    if(!ownerDashboard)return response.status(404).end()
+    const home=trustedHousehold(request,response)
+    if(!home)return
+    const userId=request.familyAccount.user_id,sessionId=request.familyAccount.id
+    const owner=()=>getFamilyMemberAuthorization(identityDatabase,{householdId:home.householdId,serverVerifiedUserId:userId})?.role==='owner'
+    if(!owner())return response.status(403).json({error:'Household Owner required.'})
+    if(typeof request.body?.password!=='string'||request.body.password.length>200)return response.status(400).json({error:'Enter your Owner password.'})
+    let checked
+    try{checked=await ownerPasswordStepUp.verify(identityDatabase,{serverVerifiedUserId:userId,password:request.body.password})}
+    catch{return response.status(503).json({error:'Owner verification unavailable.'})}
+    if(checked.status==='limited'){response.set('Retry-After',String(checked.retryAfter));return response.status(429).json({error:'Too many password attempts. Try later.'})}
+    if(checked.status==='busy')return response.status(503).json({error:'Owner verification is busy.'})
+    if(checked.status!=='verified'||!owner()||!identityDatabase.prepare('SELECT 1 FROM family_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL AND expires_at>?').get(sessionId,userId,Date.now()))return response.status(403).json({error:'Owner password verification failed.'})
+    for(const [key,visit] of settingsVisits)if(visit.expiresAt<=Date.now()||visit.sessionId===sessionId)settingsVisits.delete(key)
+    if(settingsVisits.size>=512)return response.status(503).json({error:'Settings access temporarily unavailable.'})
+    const token=randomBytes(32).toString('hex')
+    settingsVisits.set(token,{sessionId,userId,householdId:home.householdId,expiresAt:Date.now()+settingsIdleMs})
+    return response.json({token,idleMinutes:30})
+  })
+  app.post('/api/households/settings-lock',(request,response)=>{
+    response.set('Cache-Control','no-store')
+    if(!ownerDashboard)return response.status(404).end()
+    const home=trustedHousehold(request,response)
+    if(!home)return
+    if(settingsVisit(request,home.householdId,false))settingsVisits.delete(request.get('x-family-settings-visit'))
+    return response.json({ok:true})
+  })
+
   function ownerOnlyMembershipAction(request, response, action) {
     const selected = trustedHousehold(request, response)
     if (!selected) return
+    if (!requireSettingsVisit(request,response,selected.householdId)) return
     try {
       return action(selected.householdId)
     } catch (error) {
@@ -1068,6 +1129,8 @@ export async function startPrivateHouseholdGateway({
     if (!memberUserId) {
       return response.status(400).json({ error: 'Invalid family member.' })
     }
+    if(!requireSettingsVisit(request,response,household.householdId))return
+    if(!ownerDashboard){
     let reverified
     try {
       reverified = await ownerPasswordStepUp.verify(identityDatabase, {
@@ -1088,6 +1151,7 @@ export async function startPrivateHouseholdGateway({
     }
     if (reverified.status !== 'verified') {
       return response.status(403).json({ error: 'Owner password verification failed.' })
+    }
     }
     // Membership and Owner role are checked AGAIN in the transactional
     // setter after awaiting scrypt; stale/revoked sessions cannot mutate.
@@ -1626,6 +1690,23 @@ export async function startPrivateHouseholdGateway({
     // installFamilyAuth has already validated the central session and CSRF.
     const household = trustedHousehold(request, response)
     if (!household) return
+    // Media is not covered by the API permission classifier. Non-Owners may
+    // retrieve only an image referenced by an allowed household view, not an
+    // arbitrary old upload, capture photo or another household's filename.
+    if(ownerDashboard&&request.path.startsWith('/uploads/')){
+      const actor=getFamilyMemberAuthorization(identityDatabase,{householdId:household.householdId,serverVerifiedUserId:request.familyAccount.user_id})
+      if(actor?.role!=='owner'){
+        const filename=request.path.slice('/uploads/'.length)
+        const storage=resolveHouseholdStorage({serverDirectory,storageRoot,householdId:household.householdId})
+        const db=new DatabaseSync(storage.databasePath,{readOnly:true})
+        let permitted=false
+        try{
+          permitted=(canFamilyMemberAct(actor,'calendar.view')&&Boolean(db.prepare('SELECT 1 FROM people WHERE image=? LIMIT 1').get(filename)))||
+            (canFamilyMemberAct(actor,'recipes.view')&&Boolean(db.prepare('SELECT 1 FROM recipes WHERE image=? LIMIT 1').get(filename)))
+        }finally{db.close()}
+        if(!permitted)return response.status(404).end()
+      }
+    }
     const policy = inspectPrivateGatewayMutation(
       request.method, request.originalUrl,
     )

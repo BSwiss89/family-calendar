@@ -46,7 +46,9 @@ test('scrypt passwords do not expose plaintext and reject wrong values', async (
     assert.equal(await verifyFamilyPassword('wrong-password', saved.password_hash), false)
     assert.equal(await verifyFamilyPassword('wrong-password', null), false)
     assert.throws(() => setFamilyAccount(db, 'x', 'Bad', password), /Username/)
-    assert.throws(() => setFamilyAccount(db, 'valid', 'Bad', 'short'), /14/)
+    assert.throws(() => setFamilyAccount(db, 'valid', 'Bad', 'Seven77'), /8/)
+    setFamilyAccount(db, 'valid', 'Eight', 'Eight888')
+    assert.equal(await verifyFamilyPassword('Eight888', db.prepare("SELECT password_hash FROM family_users WHERE username='valid'").get().password_hash), true)
   } finally {
     db.close()
   }

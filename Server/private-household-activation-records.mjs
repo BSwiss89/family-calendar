@@ -34,6 +34,10 @@ function activeInvitedOwner(db, householdId) {
   ].join(' ')).get(householdId, originalOwner)
 }
 
+export function hasVerifiedInvitedOwner(db, householdId) {
+  return Boolean(activeInvitedOwner(db, householdId))
+}
+
 /** Called only after a separate, verified loopback backend is healthy. */
 export function approvePrivateHouseholdActivation(db, { householdId, now = Date.now() }) {
   if (!Number.isSafeInteger(now) || now < 1) {

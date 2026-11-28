@@ -148,6 +148,73 @@ export function issueFamilyPasswordResetLink(db, {
   return { ...result, token }
 }
 
+// Only an authenticated, allowlisted operator may see this bounded metadata.
+// Never expose hashes, credentials, contact details, or reset bearer tokens.
+export function listFamilyPasswordRecoveryHistory(db, {
+  serverVerifiedAdministratorUserId, trustedAdministratorUserIds, now = Date.now(),
+}) {
+  requireTime(now)
+  assertOperator(db, serverVerifiedAdministratorUserId, trustedAdministratorUserIds)
+  return db.prepare([
+    'SELECT r.id,r.state,r.created_at AS createdAt,r.expires_at AS expiresAt,',
+    'r.decided_at AS decidedAt,r.token_expires_at AS linkExpiresAt,r.redeemed_at AS redeemedAt,',
+    'u.username,u.display_name AS displayName,',
+    "CASE WHEN r.state='issued' AND r.expires_at>? AND u.disabled=0 AND u.account_kind='person'",
+    'AND NOT EXISTS(SELECT 1 FROM family_recovery_requests newer WHERE newer.user_id=r.user_id AND newer.id>r.id)',
+    'THEN 1 ELSE 0 END AS canReissue,',
+    "CASE WHEN r.state='issued' THEN 1 ELSE 0 END AS canRevoke",
+    'FROM family_recovery_requests r JOIN family_users u ON u.id=r.user_id',
+    "WHERE r.state<>'pending' OR r.expires_at<=? OR u.disabled<>0",
+    'ORDER BY canReissue DESC, canRevoke DESC, r.id DESC LIMIT 100',
+  ].join(' ')).all(now,now).map(row=>({
+    ...row, canReissue: Boolean(row.canReissue), canRevoke: Boolean(row.canRevoke),
+    status: (row.state==='pending' && row.expiresAt<=now) ||
+      (row.state==='issued' && (row.expiresAt<=now || row.linkExpiresAt<=now)) ? 'expired' : row.state,
+  }))
+}
+
+// Rotate only the latest previously issued request within its original
+// 24-hour authorization window. Preserve the old row as revoked history.
+// The new row is subject to the unchanged public request cooldown.
+export function reissueFamilyPasswordResetLink(db, {
+  serverVerifiedAdministratorUserId,trustedAdministratorUserIds,
+  recoveryRequestId,verifiedOutOfBand,now=Date.now(),
+}) {
+  requireTime(now)
+  if (!Number.isSafeInteger(recoveryRequestId)||recoveryRequestId<1||verifiedOutOfBand!==true)
+    throw Error('Verified recovery request and independent identity check required.')
+  const token=randomBytes(32).toString('hex')
+  const result=transaction(db,()=>{
+    assertOperator(db,serverVerifiedAdministratorUserId,trustedAdministratorUserIds)
+    const request=db.prepare([
+      'SELECT r.user_id AS userId,r.expires_at AS expiresAt FROM family_recovery_requests r',
+      'JOIN family_users u ON u.id=r.user_id',
+      "WHERE r.id=? AND r.state='issued' AND r.expires_at>? AND u.disabled=0 AND u.account_kind='person'",
+      'AND NOT EXISTS(SELECT 1 FROM family_recovery_requests newer WHERE newer.user_id=r.user_id AND newer.id>r.id)',
+    ].join(' ')).get(recoveryRequestId,now)
+    if(!request)throw Error('Recovery request is no longer eligible for reissue.')
+    const expiresAt=Math.min(now+RECOVERY_LINK_TTL_MS,request.expiresAt)
+    db.prepare("UPDATE family_recovery_requests SET state='revoked',token_hash=NULL,decided_by=?,decided_at=? WHERE user_id=? AND state='issued'").run(serverVerifiedAdministratorUserId,now,request.userId)
+    const added=db.prepare([
+      'INSERT INTO family_recovery_requests(user_id,state,created_at,expires_at,decided_by,decided_at,token_hash,token_expires_at)',
+      "VALUES(?,'issued',?,?,?,?,?,?)",
+    ].join(' ')).run(request.userId,now,request.expiresAt,serverVerifiedAdministratorUserId,now,digest(token),expiresAt)
+    return {requestId:Number(added.lastInsertRowid),expiresAt}
+  })
+  return {...result,token}
+}
+
+export function revokeFamilyPasswordResetLink(db,{
+  serverVerifiedAdministratorUserId,trustedAdministratorUserIds,recoveryRequestId,now=Date.now(),
+}){
+  requireTime(now)
+  if(!Number.isSafeInteger(recoveryRequestId)||recoveryRequestId<1)throw Error('Invalid recovery request.')
+  return transaction(db,()=>{
+    assertOperator(db,serverVerifiedAdministratorUserId,trustedAdministratorUserIds)
+    return db.prepare("UPDATE family_recovery_requests SET state='revoked',token_hash=NULL,decided_by=?,decided_at=? WHERE id=? AND state='issued'").run(serverVerifiedAdministratorUserId,now,recoveryRequestId).changes===1
+  })
+}
+
 export function denyFamilyPasswordRecovery(db, {
   serverVerifiedAdministratorUserId, trustedAdministratorUserIds,
   recoveryRequestId, now = Date.now(),

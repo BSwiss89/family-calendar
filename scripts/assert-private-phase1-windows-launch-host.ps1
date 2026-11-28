@@ -4,15 +4,26 @@
 param(
  [Parameter(Mandatory=$true)][ValidatePattern('^[a-f0-9]{40}$')][string]$ExpectedCandidateSha,
  [Parameter(Mandatory=$true)][ValidatePattern('^[a-f0-9]{40}$')][string]$ExpectedInstalledTestSha,
- [Parameter(Mandatory=$true)][ValidatePattern('^[a-f0-9]{40}$')][string]$ExpectedLiveSha
+ [Parameter(Mandatory=$true)][ValidatePattern('^[a-f0-9]{40}$')][string]$ExpectedLiveSha,
+ [ValidateSet('Launch','MaintenanceResume')][string]$Mode='Launch'
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 function Refuse { throw 'Phase 1 persistent TEST launch host refused.' }
-$projects=Join-Path $env:USERPROFILE 'Projects'
-$code=Join-Path $projects 'family-calendar-phase1-test-code'
+$code=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$projects=[IO.Path]::GetDirectoryName($code)
+if([IO.Path]::GetFileName($code) -cne 'family-calendar-phase1-test-code' -or [IO.Path]::GetFileName($projects) -ine 'Projects'){Refuse}
+$profile=[IO.Path]::GetDirectoryName($projects)
+$profiles=@(Get-CimInstance Win32_UserProfile | Where-Object {-not $_.Special -and [string]::Equals([string]$_.LocalPath,$profile,[StringComparison]::OrdinalIgnoreCase)})
+if($profiles.Count -ne 1){Refuse}
+$caller=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+if(@('S-1-5-18',[string]$profiles[0].SID) -cnotcontains $caller){Refuse}
+if($Mode -ceq 'Launch' -and $caller -cne 'S-1-5-18'){Refuse}
+$git=Join-Path $env:ProgramFiles 'Git\cmd\git.exe'
+$gitItem=Get-Item -LiteralPath $git -Force
+if($gitItem.PSIsContainer -or ($gitItem.Attributes -band [IO.FileAttributes]::ReparsePoint)){Refuse}
 $legacy=Join-Path $projects 'family-calendar-test-security-stage'
-$live=Join-Path $projects 'family-calendar'
+$live=Join-Path $projects 'family-calendar-live-auth-candidate'
 $data=Join-Path $projects 'family-calendar-phase1-test-data'
 $node='C:\ProgramData\FamilyCalendar\Runtime\node-v24.22.1\node.exe'
 $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -21,14 +32,14 @@ function Same([string]$a,[string]$b){return [string]::Equals($a,$b,[StringCompar
 function Pin([string]$dir,[string]$sha){
  $item=Get-Item -LiteralPath $dir -Force
  if(-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)){Refuse}
- $head=((& git -C $dir rev-parse HEAD 2>$null)|Out-String).Trim()
+ $head=((& $git -c ('safe.directory='+$dir.Replace('\','/')) -C $dir rev-parse HEAD 2>$null)|Out-String).Trim()
  if($LASTEXITCODE -ne 0 -or $head -cne $sha){Refuse}
 }
 if(-not (Same ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))) $code)){Refuse}
 Pin $code $ExpectedCandidateSha
 Pin $legacy $ExpectedInstalledTestSha
 Pin $live $ExpectedLiveSha
-$dirty=@(& git -C $code status --porcelain --untracked-files=no)
+$dirty=@(& $git -c ('safe.directory='+$code.Replace('\','/')) -C $code status --porcelain --untracked-files=no)
 if($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0){Refuse}
 foreach($f in @($node,$launcher,(Join-Path $code 'dist\index.html'))){
  $item=Get-Item -LiteralPath $f -Force
@@ -39,7 +50,11 @@ if($LASTEXITCODE -ne 0 -or ($acl -join '') -cne 'PHASE1_WINDOWS_STAGE_ACL=PASS |
 $test=Get-ScheduledTask -TaskName 'Family Calendar Secure TEST' -TaskPath '\'
 $updater=Get-ScheduledTask -TaskName 'Family Calendar Secure TEST Auto Deploy' -TaskPath '\'
 $lt=Get-ScheduledTask -TaskName 'Family Calendar Server' -TaskPath '\'
-if($test.State -cne 'Running' -or $updater.State -cne 'Disabled' -or $lt.State -cne 'Running'){Refuse}
+$expectedTaskState=if($Mode -ceq 'MaintenanceResume'){'Disabled'}else{'Running'}
+if($test.State -cne $expectedTaskState -or $updater.State -cne 'Disabled' -or $lt.State -cne 'Running'){Refuse}
+$principal=[string]$test.Principal.UserId
+if($principal -match '^S-\d-'){$principal=([Security.Principal.SecurityIdentifier]::new($principal)).Value}else{$principal=([Security.Principal.NTAccount]::new($principal)).Translate([Security.Principal.SecurityIdentifier]).Value}
+if($principal -cne 'S-1-5-18'){Refuse}
 $actions=@($test.Actions)
 $expectedArgs='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$launcher+'"'
 if($actions.Count -ne 1 -or -not (Same ([string]$actions[0].Execute) $ps) -or
@@ -69,7 +84,13 @@ if($LASTEXITCODE -ne 0){Refuse}
 $show=@(& netsh interface portproxy show all)
 if($LASTEXITCODE -ne 0){Refuse}
 $matched=0
-foreach($phase in @('legacy-fenced','candidate-review')){
+# Select the possible phase from the captured row; the full decoder still
+# verifies every line of both exports and refuses any unexpected rule.
+# Windows PowerShell 5.1 with ErrorActionPreference=Stop treats native
+# stderr as terminating even when redirected. Never probe a known-wrong phase.
+$hasCandidateRow=@($show | Where-Object {$_ -match '^\s*127\.0\.0\.1\s+13003\s+127\.0\.0\.1\s+13004\s*$'}).Count -eq 1
+$phases=if($Mode -ceq 'MaintenanceResume' -or $hasCandidateRow){@('candidate-review')}else{@('legacy-fenced')}
+foreach($phase in $phases){
  $inputJson=@{dump=($dump -join "`n");showAll=($show -join "`n");installedTestSha=$ExpectedInstalledTestSha;legacyTestAddress='100.124.58.19';phase=$phase}|ConvertTo-Json -Compress
  $out=@($inputJson | & $node (Join-Path $PSScriptRoot 'review-private-phase1-portproxy-all-families.mjs') 2>$null)
  if($LASTEXITCODE -eq 0){$matched++}
@@ -79,4 +100,4 @@ $repeat=@(& netsh interface portproxy show all)
 if($LASTEXITCODE -ne 0 -or ($repeat -join "`n") -cne ($show -join "`n")){Refuse}
 $health=Invoke-WebRequest -Uri 'http://127.0.0.1:3001/api/health' -UseBasicParsing -TimeoutSec 5
 if($health.StatusCode -ne 200 -or (ConvertFrom-Json $health.Content).status -cne 'ok'){Refuse}
-Write-Output 'PHASE1_WINDOWS_LAUNCH_HOST=PASS | TEST_ONLY=YES'
+if($Mode -ceq 'MaintenanceResume'){Write-Output 'PHASE1_WINDOWS_RESUME_HOST=PASS | TEST_ONLY=YES'}else{Write-Output 'PHASE1_WINDOWS_LAUNCH_HOST=PASS | TEST_ONLY=YES'}

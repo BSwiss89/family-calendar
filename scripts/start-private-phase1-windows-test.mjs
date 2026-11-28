@@ -1,9 +1,9 @@
 // Fixed-path existing TEST task entry. No install, activation or routing.
-import os from 'node:os'
+import {fileURLToPath} from 'node:url'
 import path from 'node:path'
 import {launchReviewedWindowsPhase1TestGateway} from '../Server/private-disposable-reviewed-phase1-gateway-runtime.mjs'
 import {readLocalBackupStopRequest,completeLocalBackupStopRequest} from '../Server/private-phase1-local-maintenance-control.mjs'
-const root=path.join(os.homedir(),'Projects','family-calendar-phase1-test-data')
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..','..','family-calendar-phase1-test-data')
 let runtime,closing=false,timer
 async function close(held,request=null){
  if(closing)return
@@ -29,6 +29,7 @@ try{
  timer=setInterval(()=>{
   if(closing)return
   const state=runtime.snapshot()
+  if(state.activationInProgress)return
   if(state.phase==='held'||!state.supervisorAdmissionOpen){void close(true);return}
   if(maintenanceRefused)return
   try{

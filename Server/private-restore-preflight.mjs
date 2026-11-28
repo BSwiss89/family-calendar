@@ -15,6 +15,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { resolveHouseholdStorage } from './household-storage.mjs'
+import { hasVerifiedInvitedOwner } from './private-household-activation-records.mjs'
 
 const STAGE_MARKER = '.family-calendar-restore-review.json'
 const STAGE_KIND = 'private-household-offline-restore-review'
@@ -183,6 +184,20 @@ function inspectSet({ serverDirectory, restoreRoot }) {
       const db = new DatabaseSync(storage.databasePath, { readOnly: true })
       opened.set(household.id, db)
       checkSqlite(db, 'household')
+      // An unactivated invitation owns an empty provisioned database, not
+      // a running calendar. Preserve it without booting or fabricating schema.
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(x=>x.name)
+      if (!tables.includes('events')) {
+        const activationTables = central.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('private_activated_households','independent_household_invitations')").get().n
+        if (activationTables!==2 || household.disabled!==0 || !hasVerifiedInvitedOwner(central,household.slug) ||
+            central.prepare('SELECT 1 FROM private_activated_households WHERE household_id=?').get(household.id) ||
+            JSON.stringify(tables)!==JSON.stringify(['event_people']) || db.prepare('SELECT 1 FROM event_people LIMIT 1').get() ||
+            children(root,'households/'+household.slug+'/uploads').length!==0 ||
+            central.prepare("SELECT 1 FROM event_share_grants WHERE source_household_id=? AND status IN ('pending','accepted')").get(household.id)) {
+          fail('uninitialized household is not a verified empty pending invitation.')
+        }
+        continue
+      }
       requireTables(db, ['events'], 'household')
       // A source-local outbox is transactionally tied to calendar event
       // writes. A restore candidate with undelivered source changes could

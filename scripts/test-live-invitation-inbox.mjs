@@ -70,3 +70,14 @@ test('compact mobile update reminder preserves a real response requirement', () 
   assert.match(app, /suppress=\{page === 'invitations' \|\| showEventModal\}/)
   assert.match(assignment, /setNotifications\(current=>current\.filter\(n=>n\.id!==id\)\)/)
 })
+
+test('cancelled notices use persisted pre-delete details, not the active event ID', () => {
+  assert.match(assignment, /cancelledEvent: row.kind === 'cancelled'/)
+  assert.match(ui, /item.kind === 'cancelled' \? item.cancelledEvent : event/)
+  assert.match(ui, /Location: \{summary.location\}/)
+  assert.match(ui, /Details were not saved for this earlier cancellation/)
+  // A deleted event cannot be opened, and acknowledgement remains explicit.
+  assert.match(ui, /\{event && openEvent && <button/)
+  assert.match(ui, /void acknowledge\?\.\(item.id\)/)
+  assert.match(ui, /Ask Again Later/)
+})
